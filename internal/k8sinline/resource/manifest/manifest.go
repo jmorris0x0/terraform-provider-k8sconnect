@@ -1,5 +1,5 @@
 // internal.k8sinline/resource/manifest/manifest.go
-package k8sinline
+package manifest
 
 import (
 	"context"
