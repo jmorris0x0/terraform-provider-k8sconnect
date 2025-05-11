@@ -1,0 +1,36 @@
+# test/oidc-e2e/dex-config.yaml
+issuer: https://dex:5556/dex
+
+storage:
+  type: memory
+
+web:
+  https: 0.0.0.0:5556
+  tlsCert: /etc/dex/tls.crt
+  tlsKey: /etc/dex/tls.key
+
+oauth2:
+  skipApprovalScreen: true
+  passwordConnector: local
+
+staticClients:
+  - id: kubernetes
+    redirectURIs:
+      - 'http://127.0.0.1:5555/callback'
+    name: 'Example App'
+    secret: ZXhhbXBsZS1hcHAtc2VjcmV0  # base64 "example-app-secret"
+
+connectors:
+  - type: mockCallback
+    id: mock
+    name: Example
+
+enablePasswordDB: true
+
+staticPasswords:
+  - email: "admin@example.com"
+    hash: "$2b$12$vnpE6D.EE0Tf93Riq5xh1OO.YkQIw3.UUryhMM/e5m6QPZeVEe9oS"
+    username: "admin"
+    userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"
+
+
