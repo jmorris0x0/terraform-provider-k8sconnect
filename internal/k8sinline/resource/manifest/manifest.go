@@ -43,7 +43,6 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 		},
 		Blocks: map[string]schema.Block{
 			"cluster_connection": schema.SingleNestedBlock{
-				Required:    true,
 				Description: "Connection settings for the target cluster. Exactly one of inline, kubeconfig_file or kubeconfig_raw must be populated.",
 				Attributes: map[string]schema.Attribute{
 					"host": schema.StringAttribute{
