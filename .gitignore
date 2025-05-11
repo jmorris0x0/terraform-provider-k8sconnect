@@ -1,0 +1,40 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Plugin binary
+terraform-provider-k8sinline
+
+# Coverage profiles
+*.coverprofile
+*.gcda
+*.gcno
+
+# Go modules
+go.sum
+
+# Vendor directory
+/vendor/
+
+# Editor and IDE files
+*.swp
+*~
+.vscode/
+.idea/
+.DS_Store
+
+# Terraform files
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# Log files
+*.log
+
+# OS files
+Thumbs.db
