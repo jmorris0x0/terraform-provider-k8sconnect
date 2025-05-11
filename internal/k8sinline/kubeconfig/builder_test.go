@@ -22,6 +22,9 @@ func TestGenerateKubeconfigFromInline(t *testing.T) {
 		t.Fatalf("GenerateKubeconfigFromInline returned error: %v", err)
 	}
 
+	// Sanity check: output the raw kubeconfig for inspection
+	t.Logf("Generated kubeconfig:\n%s", string(kubeBytes))
+
 	cfg, err := clientcmd.Load(kubeBytes)
 	if err != nil {
 		t.Fatalf("error loading generated kubeconfig: %v", err)
