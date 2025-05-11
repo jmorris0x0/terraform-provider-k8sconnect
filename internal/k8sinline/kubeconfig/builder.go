@@ -6,38 +6,39 @@ import (
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
-// ExecAuth holds exec‑auth configuration for dynamic credentials
-// inline mode (API version, command, args).
+// ExecAuth holds the bits we need for the user.exec block of the kubeconfig.
 type ExecAuth struct {
 	APIVersion string
 	Command    string
 	Args       []string
 }
 
-// GenerateKubeconfigFromInline constructs a kubeconfig that
-// targets the given host, trusts the provided CA data, and
-// uses an exec block for authentication.
+// GenerateKubeconfigFromInline returns a kubeconfig YAML that points at `host`, trusts `caData`,
+// and uses an exec block for credentials, with no 'env' field emitted.
 func GenerateKubeconfigFromInline(host string, caData []byte, exec ExecAuth) ([]byte, error) {
-	config := clientcmdapi.NewConfig()
-
-	config.Clusters["default"] = &clientcmdapi.Cluster{
+	cfg := clientcmdapi.NewConfig()
+	// Define cluster entry
+	cfg.Clusters["default"] = &clientcmdapi.Cluster{
 		Server:                   host,
 		CertificateAuthorityData: caData,
 	}
-
-	config.AuthInfos["default"] = &clientcmdapi.AuthInfo{
+	// Define user auth with exec, explicitly set empty Env to avoid null
+	cfg.AuthInfos["default"] = &clientcmdapi.AuthInfo{
 		Exec: &clientcmdapi.ExecConfig{
-			APIVersion: exec.APIVersion,
-			Command:    exec.Command,
-			Args:       exec.Args,
+			APIVersion:         exec.APIVersion,
+			Command:            exec.Command,
+			Args:               exec.Args,
+			Env:                []clientcmdapi.ExecEnvVar{},
+			ProvideClusterInfo: false,
 		},
 	}
-
-	config.Contexts["default"] = &clientcmdapi.Context{
+	// Define context
+	cfg.Contexts["default"] = &clientcmdapi.Context{
 		Cluster:  "default",
 		AuthInfo: "default",
 	}
-	config.CurrentContext = "default"
+	cfg.CurrentContext = "default"
 
-	return clientcmd.Write(*config)
+	// Serialize to YAML
+	return clientcmd.Write(*cfg)
 }
