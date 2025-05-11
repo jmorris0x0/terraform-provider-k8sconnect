@@ -1,3 +1,4 @@
+// main.go
 package main
 
 import (
@@ -20,7 +21,7 @@ func main() {
 		Debug:   debug,
 	}
 
-	err := providerserver.Serve(context.Background(), provider.New(), opts)
+	err := providerserver.Serve(context.Background(), k8sinline.New, opts)
 
 	if err != nil {
 		log.Fatal(err.Error())

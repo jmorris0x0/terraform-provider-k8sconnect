@@ -6,41 +6,39 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
-	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
-	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-var _ provider.Provider = (*exampleProvider)(nil)
-var _ provider.ProviderWithMetadata = (*exampleProvider)(nil)
+// Ensure we implement the provider interface
+var _ provider.Provider = (*k8sinlineProvider)(nil)
 
-type exampleProvider struct{}
+// k8sinlineProvider is our Terraform provider.
+type k8sinlineProvider struct{}
 
-func New() func() provider.Provider {
-	return func() provider.Provider {
-		return &exampleProvider{}
-	}
+// New returns a factory for k8sinlineProvider
+func New() provider.Provider {
+	return &k8sinlineProvider{}
 }
 
-func (p *exampleProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
-}
-
-func (p *exampleProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
+func (p *k8sinlineProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
 	resp.TypeName = "k8sinline"
 	resp.Version = "0.1.0"
 }
 
-func (p *exampleProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
-	return []func() datasource.DataSource{
-		NewDataSource,
-	}
+func (p *k8sinlineProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
+	// no global configuration for now
 }
 
-func (p *exampleProvider) Resources(ctx context.Context) []func() resource.Resource {
+func (p *k8sinlineProvider) Resources(ctx context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
-		NewResource,
+		NewManifestResource,
 	}
 }
 
-func (p *exampleProvider) Schema(ctx context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
+func (p *k8sinlineProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
+	return nil // or []func() datasource.DataSource{} if you prefer
+}
+
+func (p *k8sinlineProvider) Schema(ctx context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
+	// no provider‑level schema
 }
