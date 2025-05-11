@@ -1,32 +1,46 @@
+// internal/k8sinline/provider.go
 package k8sinline
 
 import (
 	"context"
+
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-type provider struct{}
+var _ provider.Provider = (*exampleProvider)(nil)
+var _ provider.ProviderWithMetadata = (*exampleProvider)(nil)
 
-func New() provider.Provider { return &provider{} }
+type exampleProvider struct{}
 
-func (p *provider) Metadata(_ context.Context, _ provider.MetadataRequest, resp *provider.MetadataResponse) {
+func New() func() provider.Provider {
+	return func() provider.Provider {
+		return &exampleProvider{}
+	}
+}
+
+func (p *exampleProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
+}
+
+func (p *exampleProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
 	resp.TypeName = "k8sinline"
 	resp.Version = "0.1.0"
 }
 
-func (p *provider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
-	resp.Schema = schema.Schema{} // no top‑level config
+func (p *exampleProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
+	return []func() datasource.DataSource{
+		NewDataSource,
+	}
 }
 
-func (p *provider) Configure(context.Context, provider.ConfigureRequest, *provider.ConfigureResponse) {
+func (p *exampleProvider) Resources(ctx context.Context) []func() resource.Resource {
+	return []func() resource.Resource{
+		NewResource,
+	}
 }
 
-func (p *provider) Resources(_ context.Context) []func() resource.Resource {
-	return []func() resource.Resource{NewManifestResource}
-}
-
-func (p *provider) DataSources(_ context.Context) []func() resource.DataSource {
-	return nil
+func (p *exampleProvider) Schema(ctx context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
 }

@@ -1,10 +1,9 @@
-
-
-
-
-
 OIDC_DIR    := test/oidc-e2e
 DEX_SSL_DIR := $(OIDC_DIR)/ssl
+
+
+
+
 
 oidc-setup:
 	@echo "🔐 Generating self‑signed certs"
@@ -45,3 +44,10 @@ oidc-setup:
 	kubectl config view --raw --minify \
 	  > $(TESTBUILD_DIR)/kubeconfig.yaml
 
+
+test-acc:
+    export TF_ACC_K8S_HOST=... \
+           TF_ACC_K8S_CA=... \
+           TF_ACC_K8S_CMD=... \
+           TF_ACC_KUBECONFIG_RAW="$$(cat kubeconfig.yaml)" \
+    go test ./internal/k8sinline/... -timeout 30m -run TestAccManifestResource_Basic

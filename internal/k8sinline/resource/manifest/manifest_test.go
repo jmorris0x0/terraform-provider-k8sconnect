@@ -1,9 +1,7 @@
 // internal.k8sinline/resource/manifest/manifest_test.go
-
 package manifest_test
 
 import (
-	"fmt"
 	"os"
 	"regexp"
 	"testing"
@@ -21,10 +19,8 @@ func TestAccManifestResource_Basic(t *testing.T) {
 	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
 
 	if host == "" || ca == "" || cmd == "" || raw == "" {
-		t.Fatal("Environment variables TF_ACC_K8S_HOST, TF_ACC_K8S_CA, TF_ACC_K8S_CMD, and TF_ACC_KUBECONFIG_RAW must be set for acceptance tests")
+		t.Fatal("TF_ACC_K8S_HOST, TF_ACC_K8S_CA, TF_ACC_K8S_CMD, and TF_ACC_KUBECONFIG_RAW must be set for acceptance tests")
 	}
-
-	config := fmt.Sprintf(testAccManifestConfigBasic, host, ca, cmd, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (provider.Provider, error){
@@ -34,7 +30,13 @@ func TestAccManifestResource_Basic(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				Config:      config,
+				Config: testAccManifestConfigBasic,
+				ConfigVariables: map[string]interface{}{
+					"host": host,
+					"ca":   ca,
+					"cmd":  cmd,
+					"raw":  raw,
+				},
 				ExpectError: regexp.MustCompile(`TODO: implement`),
 			},
 		},
@@ -42,6 +44,19 @@ func TestAccManifestResource_Basic(t *testing.T) {
 }
 
 const testAccManifestConfigBasic = `
+variable "host" {
+  type = string
+}
+variable "ca" {
+  type = string
+}
+variable "cmd" {
+  type = string
+}
+variable "raw" {
+  type = string
+}
+
 provider "k8sinline" {}
 
 resource "k8sinline_manifest" "test_exec" {
@@ -53,14 +68,28 @@ metadata:
 YAML
 
   cluster_connection {
-    host                   = "%s"
-    cluster_ca_certificate = "%s"
+    host                   = var.host
+    cluster_ca_certificate = var.ca
 
     exec = {
       api_version = "client.authentication.k8s.io/v1beta1"
-      command     = "%s"
+      command     = var.cmd
       args        = ["hello"]
     }
+  }
+}
+
+resource "k8sinline_manifest" "test_raw" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: acctest-raw
+YAML
+
+  cluster_connection {
+    kubeconfig_raw = var.raw
+    context        = "default"
   }
 }
 `
