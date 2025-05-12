@@ -26,6 +26,9 @@ oidc-setup:
 	@until curl -sf --insecure https://localhost:5556/dex/.well-known/openid-configuration; do sleep 0.5; done
 	@echo "✅ Dex is up!"
 
+	@echo "🧹 Deleting existing Kind cluster (if any)"
+	- kind delete cluster --name $(KIND_CLUSTER) || true
+
 	@echo "🚀 Creating Kind cluster with OIDC config"
 	kind create cluster --name $(KIND_CLUSTER) --config=$(OIDC_DIR)/kind-oidc.yaml
 
