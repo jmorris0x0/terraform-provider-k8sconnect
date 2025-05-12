@@ -5,8 +5,11 @@ TESTBUILD_DIR    := $(CURDIR)/.testbuild
 DEX_IMAGE        := ghcr.io/dexidp/dex:v2.42.1
 TERRAFORM_VERSION := 1.11.4
 
-.PHONY: oidc-setup test-acc
+.PHONY: oidc-setup test-acc build
 
+build:
+	@echo "🔨 Building provider binary"
+	go build -o bin/terraform-provider-k8sinline .
 
 oidc-setup:
 	@echo "🔐 Generating self‑signed certs"
@@ -50,7 +53,7 @@ oidc-setup:
 	kubectl config view --raw --minify \
 	  > $(TESTBUILD_DIR)/kubeconfig.yaml
 
-test-acc:
+test-acc: oidc-setup
 	@echo "🏃 Running acceptance tests..."; \
 	export \
 	  TF_ACC=1 \
