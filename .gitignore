@@ -39,5 +39,7 @@ go.sum
 # OS files
 Thumbs.db
 
+# Test artifacts
 test/oidc-e2e/ssl/
 .testbuild/
+bin/
