@@ -7,6 +7,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+
+	manifestres "github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/resource/manifest"
 )
 
 // Ensure we implement the provider interface
@@ -31,7 +33,7 @@ func (p *k8sinlineProvider) Configure(ctx context.Context, req provider.Configur
 
 func (p *k8sinlineProvider) Resources(ctx context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
-		NewManifestResource,
+		manifestres.NewManifestResource,
 	}
 }
 

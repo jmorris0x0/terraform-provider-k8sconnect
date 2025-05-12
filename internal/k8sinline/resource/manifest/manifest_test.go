@@ -1,4 +1,4 @@
-// internal.k8sinline/resource/manifest/manifest_test.go
+// internal/k8sinline/resource/manifest/manifest_test.go
 package manifest_test
 
 import (
@@ -6,36 +6,37 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-framework/provider"
+	"github.com/hashicorp/terraform-plugin-framework/providerserver"
+	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
+	"github.com/hashicorp/terraform-plugin-testing/config"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
-
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline"
 )
 
 func TestAccManifestResource_Basic(t *testing.T) {
+	t.Parallel()
+
 	host := os.Getenv("TF_ACC_K8S_HOST")
 	ca := os.Getenv("TF_ACC_K8S_CA")
 	cmd := os.Getenv("TF_ACC_K8S_CMD")
 	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
 
 	if host == "" || ca == "" || cmd == "" || raw == "" {
-		t.Fatal("TF_ACC_K8S_HOST, TF_ACC_K8S_CA, TF_ACC_K8S_CMD, and TF_ACC_KUBECONFIG_RAW must be set for acceptance tests")
+		t.Fatal("TF_ACC_K8S_HOST, TF_ACC_K8S_CA, TF_ACC_K8S_CMD and TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
 	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: map[string]func() (provider.Provider, error){
-			"k8sinline": func() (provider.Provider, error) {
-				return k8sinline.NewProvider(), nil
-			},
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sinline": providerserver.NewProtocol6WithError(k8sinline.New()),
 		},
 		Steps: []resource.TestStep{
 			{
 				Config: testAccManifestConfigBasic,
-				ConfigVariables: map[string]interface{}{
-					"host": host,
-					"ca":   ca,
-					"cmd":  cmd,
-					"raw":  raw,
+				ConfigVariables: config.Variables{
+					"host": config.StringVariable(host),
+					"ca":   config.StringVariable(ca),
+					"cmd":  config.StringVariable(cmd),
+					"raw":  config.StringVariable(raw),
 				},
 				ExpectError: regexp.MustCompile(`TODO: implement`),
 			},

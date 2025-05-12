@@ -4,11 +4,14 @@ package manifest
 import (
 	"context"
 
+	//objectvalidator "github.com/hashicorp/terraform-plugin-framework-validators/objectvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	//"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
@@ -71,26 +74,14 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 						Description: "Context name within the provided kubeconfig (file or raw).",
 					},
 					"exec": schema.ObjectAttribute{
+						Description: "Inline exec‑auth configuration for dynamic credentials. Must include api_version and command; args is optional.",
 						Optional:    true,
 						Sensitive:   true,
-						Description: "Inline exec‑auth configuration for dynamic credentials. Must include `api_version` and `command`, optional `args`.",
-						Attributes: map[string]schema.Attribute{
-							"api_version": schema.StringAttribute{
-								Required:    true,
-								Sensitive:   true,
-								Description: "Exec auth API version (e.g. client.authentication.k8s.io/v1beta1).",
-							},
-							"command": schema.StringAttribute{
-								Required:    true,
-								Sensitive:   true,
-								Description: "Executable command for retrieving credentials (e.g. aws).",
-							},
-							"args": schema.ListAttribute{
-								ElementType: types.StringType,
-								Optional:    true,
-								Sensitive:   true,
-								Description: "Arguments to pass to the exec command.",
-							},
+
+						AttributeTypes: map[string]attr.Type{
+							"api_version": types.StringType,
+							"command":     types.StringType,
+							"args":        types.ListType{ElemType: types.StringType},
 						},
 					},
 				},
