@@ -40,3 +40,4 @@ go.sum
 Thumbs.db
 
 test/oidc-e2e/ssl/
+.testbuild/
