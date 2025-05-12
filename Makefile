@@ -1,6 +1,6 @@
 OIDC_DIR    := test/oidc-e2e
 DEX_SSL_DIR := $(OIDC_DIR)/ssl
-
+KIND_CLUSTER ?= oidc-e2e
 
 
 
@@ -20,12 +20,11 @@ oidc-setup:
 	  -v $(CURDIR)/$(DEX_SSL_DIR)/key.pem:/etc/dex/tls.key \
 	  -p 5556:5556 \
 	  ghcr.io/dexidp/dex:v2.42.1 \
-	  dex serve /etc/dex/config.yaml \
-	    --tls-cert-file=/etc/dex/tls.crt \
-	    --tls-key-file=/etc/dex/tls.key
+	  dex serve /etc/dex/config.yaml
 
 	@echo "🔎 Waiting for Dex to be ready"
-	@until curl -sf https://dex:5556/dex/.well-known/openid-configuration; do sleep 0.5; done
+	@until curl -sf --insecure https://localhost:5556/dex/.well-known/openid-configuration; do sleep 0.5; done
+	@echo "✅ Dex is up!"
 
 	@echo "🚀 Creating Kind cluster with OIDC config"
 	kind create cluster --name $(KIND_CLUSTER) --config=$(OIDC_DIR)/kind-oidc.yaml

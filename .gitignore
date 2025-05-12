@@ -38,3 +38,5 @@ go.sum
 
 # OS files
 Thumbs.db
+
+test/oidc-e2e/ssl/
