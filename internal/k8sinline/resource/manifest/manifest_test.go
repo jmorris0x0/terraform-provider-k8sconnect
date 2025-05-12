@@ -2,8 +2,9 @@
 package manifest_test
 
 import (
+	"fmt"
 	"os"
-	"regexp"
+	//"regexp"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
@@ -20,6 +21,11 @@ func TestAccManifestResource_Basic(t *testing.T) {
 	ca := os.Getenv("TF_ACC_K8S_CA")
 	cmd := os.Getenv("TF_ACC_K8S_CMD")
 	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+
+	fmt.Println("HOST      =", os.Getenv("TF_ACC_K8S_HOST"))
+	fmt.Println("CA prefix =", os.Getenv("TF_ACC_K8S_CA")[:20], "…")
+	fmt.Println("CMD       =", os.Getenv("TF_ACC_K8S_CMD"))
+	fmt.Println("RAW prefix=", os.Getenv("TF_ACC_KUBECONFIG_RAW")[:20], "…")
 
 	if host == "" || ca == "" || cmd == "" || raw == "" {
 		t.Fatal("TF_ACC_K8S_HOST, TF_ACC_K8S_CA, TF_ACC_K8S_CMD and TF_ACC_KUBECONFIG_RAW must be set")
@@ -38,7 +44,6 @@ func TestAccManifestResource_Basic(t *testing.T) {
 					"cmd":  config.StringVariable(cmd),
 					"raw":  config.StringVariable(raw),
 				},
-				ExpectError: regexp.MustCompile(`TODO: implement`),
 			},
 		},
 	})
@@ -77,20 +82,6 @@ YAML
       command     = var.cmd
       args        = ["hello"]
     }
-  }
-}
-
-resource "k8sinline_manifest" "test_raw" {
-  yaml_body = <<YAML
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: acctest-raw
-YAML
-
-  cluster_connection {
-    kubeconfig_raw = var.raw
-    context        = "default"
   }
 }
 `

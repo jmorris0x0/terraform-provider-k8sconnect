@@ -1,4 +1,4 @@
-OIDC_DIR         := test/oidc-e2e
+OIDC_DIR         := $(CURDIR)/test/oidc-e2e
 DEX_SSL_DIR      := $(OIDC_DIR)/ssl
 KIND_CLUSTER     ?= oidc-e2e
 TESTBUILD_DIR    := $(CURDIR)/.testbuild
@@ -52,12 +52,17 @@ oidc-setup:
 
 test-acc:
 	@echo "🏃 Running acceptance tests..."; \
-	TF_ACC=1 \
-	TF_ACC_TERRAFORM_VERSION=$(TERRAFORM_VERSION) \
-	TF_ACC_K8S_HOST="$$(cat $(TESTBUILD_DIR)/cluster-endpoint.txt)" \
-	TF_ACC_K8S_CA="$$(base64 < $(TESTBUILD_DIR)/mock-ca.crt | tr -d '\n')" \
-	TF_ACC_K8S_CMD="./$(OIDC_DIR)/get-token.sh" \
-	TF_ACC_KUBECONFIG_RAW="$$(cat $(TESTBUILD_DIR)/kubeconfig.yaml)" \
+	export \
+	  TF_ACC=1 \
+	  TF_ACC_TERRAFORM_VERSION=$(TERRAFORM_VERSION) \
+	  TF_ACC_K8S_HOST="$$(cat $(TESTBUILD_DIR)/cluster-endpoint.txt)" \
+	  TF_ACC_K8S_CA="$$(base64 < $(TESTBUILD_DIR)/mock-ca.crt | tr -d '\n')" \
+	  TF_ACC_K8S_CMD="$(OIDC_DIR)/get-token.sh" \
+	  TF_ACC_KUBECONFIG_RAW="$$(cat $(TESTBUILD_DIR)/kubeconfig.yaml)"; \
+	echo "TF_ACC_K8S_HOST=$$TF_ACC_K8S_HOST"; \
+	echo "TF_ACC_K8S_CA=$$(echo $$TF_ACC_K8S_CA | cut -c1-20)..."; \
+	echo "TF_ACC_K8S_CMD=$$TF_ACC_K8S_CMD"; \
+	echo "TF_ACC_KUBECONFIG_RAW=$$(echo $$TF_ACC_KUBECONFIG_RAW | cut -c1-20)..."; \
 	go test -v ./internal/k8sinline/... -timeout 30m -run TestAccManifestResource_Basic
 
 clean:
