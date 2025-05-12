@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # grab the access_token from your get-token.sh output
-ACCESS_TOKEN="$(./test/oidc-e2e/get-token.sh | jq -r '.access_token')"
-CLUSTER_ENDPOINT="https://127.0.0.1:54090"
+ACCESS_TOKEN="$(./test/oidc-e2e/get-token.sh | jq -r '.status.token')"
+CLUSTER_ENDPOINT="https://127.0.0.1:56043"
+
+echo $ACCESS_TOKEN
 
 # 1) Using kubectl
 kubectl get namespaces \

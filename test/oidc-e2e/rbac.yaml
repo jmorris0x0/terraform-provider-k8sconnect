@@ -9,6 +9,6 @@ roleRef:
   name: cluster-admin
 subjects:
   - kind: User
-    name: admin
+    name: "https://dex:5556/dex#admin"
     apiGroup: rbac.authorization.k8s.io
 
