@@ -3,7 +3,7 @@
 DEX_URL="https://127.0.0.1:5556/dex"
 CLIENT_ID="kubernetes"
 CLIENT_SECRET="ZXhhbXBsZS1hcHAtc2VjcmV0"
-USERNAME="admin"
+USERNAME="admin@example.com"
 PASSWORD="password"
 
 echo "PLUGIN CALLED at $(date -u +'%Y-%m-%dT%H:%M:%SZ')" >>/tmp/kubectl-exec.log
