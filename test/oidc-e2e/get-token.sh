@@ -20,6 +20,10 @@ RESPONSE="$(curl -s --insecure -X POST "${DEX_URL}/token" \
   -d client_secret="$CLIENT_SECRET" \
   -d scope='openid email profile')"
 
+#echo $RESPONSE | jq
+
+#echo
+
 #for field in access_token id_token; do
 #  TOKEN=$(echo "$RESPONSE" | jq -r --arg f "$field" '.[$f] // empty')
 #  if [ -n "$TOKEN" ]; then
@@ -30,8 +34,8 @@ RESPONSE="$(curl -s --insecure -X POST "${DEX_URL}/token" \
 #    echo "$TOKEN" | cut -d. -f2 | base64 --decode | jq .
 #  fi
 #done
-#
-TOKEN="$(echo "$RESPONSE" | jq -r '.access_token // empty' | tr -d '\n')"
+
+TOKEN="$(echo "$RESPONSE" | jq -r '.id_token // empty' | tr -d '\n')"
 
 if [[ -z $TOKEN || $TOKEN == "null" ]]; then
   echo "❌ Failed to get token" >>/tmp/kubectl-exec.log

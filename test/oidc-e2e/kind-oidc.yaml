@@ -22,3 +22,6 @@ nodes:
       - hostPath:      test/oidc-e2e/ssl/ca.pem
         containerPath: /etc/kubernetes/pki/oidc/ca.pem
 
+# We know that the oidc settings are getting pulled in because api-server yaml
+# We know that Dex is reachable because can reach from a pod.
+# 
