@@ -13,3 +13,15 @@ kubectl auth can-i --list \
   --server="$CLUSTER_ENDPOINT" \
   --token="$ACCESS_TOKEN" \
   --insecure-skip-tls-verify
+
+curl -k \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "apiVersion": "authentication.k8s.io/v1",
+    "kind":       "TokenReview",
+    "spec": {
+      "token": "'"$ACCESS_TOKEN"'"
+    }
+  }' \
+  "$CLUSTER_ENDPOINT"/apis/authentication.k8s.io/v1/tokenreviews | jq .
