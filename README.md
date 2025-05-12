@@ -20,6 +20,79 @@ Traditional providers force cluster configuration into the provider block; **k8s
 
 ---
 
+<!-- README.md – new sections (place below the title and above “Why k8sinline”) -->
+
+## Getting Started
+
+    terraform {
+      required_providers {
+        k8sinline = {
+          source  = "jonathanmorris/k8sinline"
+          version = ">= 0.1.0"
+        }
+      }
+    }
+
+    provider "k8sinline" {}
+
+    resource "k8sinline_manifest" "nginx" {
+      yaml = file("${path.module}/manifests/nginx.yaml")
+
+      # inline connection (all attrs are Sensitive)
+      cluster {
+        server      = var.cluster_endpoint
+        certificate = var.cluster_ca
+        token       = var.cluster_token
+      }
+
+      delete_protection = true
+    }
+
+---
+
+## Security caveats 🔐  
+
+Storing cluster credentials in the resource body means they **land in your Terraform
+state file**. Mitigate by:
+
+* Encrypting remote state (S3 + KMS, Terraform Cloud, etc.).
+* Supplying the sensitive values via Vault/Secrets Manager data sources so they never
+  appear in plaintext HCL.
+* Rotating or redacting historical state snapshots.
+
+All `cluster.*` attributes are flagged **`Sensitive: true`** so they are redacted
+in CLI output and logs, but the bytes still exist in the state blob.
+
+---
+
+## RBAC pre‑flight check ⚙️  
+
+During provider configuration the following probe runs and must return “yes”:
+
+    kubectl auth can-i apply --server-side -f -
+
+If it fails, Terraform aborts early with a clear error message.
+
+---
+
+## Delete protection 🛑  
+
+Add `delete_protection = true` to any `k8sinline_manifest`.  
+Terraform will refuse to destroy the object unless you set the flag to
+`false` first. Use this for databases, CRDs and other critical resources.
+
+---
+
+## Licensing notes 📜  
+
+The provider statically links code from **`k8s.io/kubectl`**.  
+Accordingly, the Kubernetes Apache 2.0 license and notices are reproduced
+verbatim in `LICENSES/NOTICE-kubernetes.txt`.
+
+A full SARIF security scan (Trivy) runs in CI; the badge on this README
+always reflects the latest main‑branch result.
+
+
 ## Requirements
 
 | Component      | Minimum version | Notes                                                                                                                                                                                                                 |
