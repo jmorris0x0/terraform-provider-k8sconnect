@@ -7,6 +7,7 @@ KIND_CLUSTER ?= oidc-e2e
 
 oidc-setup:
 	@echo "🔐 Generating self‑signed certs"
+	@rm -fr $(DEX_SSL_DIR)
 	@mkdir -p $(DEX_SSL_DIR)
 	@cd $(OIDC_DIR) && ./gencert.sh
 
