@@ -6,19 +6,23 @@ mkdir -p ssl
 
 # generate OpenSSL config for SAN
 cat <<EOF >ssl/req.cnf
-[req]
-req_extensions = v3_req
+[ req ]
 distinguished_name = req_distinguished_name
+req_extensions     = v3_req
+prompt             = no
 
-[req_distinguished_name]
+[ req_distinguished_name ]
+CN = dex
 
-[v3_req]
+[ v3_req ]
 basicConstraints = CA:FALSE
-keyUsage = nonRepudiation, digitalSignature, keyEncipherment
-subjectAltName = @alt_names
+keyUsage         = nonRepudiation, digitalSignature, keyEncipherment
+subjectAltName   = @alt_names
 
-[alt_names]
-DNS.1 = dex.example.com
+[ alt_names ]
+DNS.1 = dex
+DNS.2 = localhost
+IP.1  = 127.0.0.1
 EOF
 
 # generate CA key and self‑signed CA cert

@@ -1,25 +1,28 @@
 #!/usr/bin/env bash
-set -euo pipefail
 
 DEX_URL="https://127.0.0.1:5556/dex"
 CLIENT_ID="kubernetes"
-CLIENT_SECRET="client_test_secret"
+CLIENT_SECRET="ZXhhbXBsZS1hcHAtc2VjcmV0"
 USERNAME="admin"
 PASSWORD="password"
 
 echo "PLUGIN CALLED at $(date -u +'%Y-%m-%dT%H:%M:%SZ')" >>/tmp/kubectl-exec.log
 echo "$KUBERNETES_EXEC_INFO" | jq . >/tmp/kubectl-exec.json 2>/dev/null || true
 
+#set -euo pipefail
+
 # Request token using password grant
-RESPONSE="$(curl -s -X POST "${DEX_URL}/token" \
+RESPONSE="$(curl -s --insecure -X POST "${DEX_URL}/token" \
   -d grant_type=password \
   -d username="$USERNAME" \
   -d password="$PASSWORD" \
   -d client_id="$CLIENT_ID" \
   -d client_secret="$CLIENT_SECRET" \
-  -d scope='openid email name')"
+  -d scope='openid email profile')"
 
-TOKEN="$(echo "$RESPONSE" | jq -r '.id_token // empty' | tr -d '\n')"
+echo "RESPONSE: $RESPONSE"
+
+TOKEN="$(echo "$RESPONSE" | jq -r '.access_token // empty' | tr -d '\n')"
 
 if [[ -z $TOKEN || $TOKEN == "null" ]]; then
   echo "❌ Failed to get token" >>/tmp/kubectl-exec.log
