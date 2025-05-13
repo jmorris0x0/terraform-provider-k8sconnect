@@ -5,7 +5,8 @@ TESTBUILD_DIR    := $(CURDIR)/.testbuild
 DEX_IMAGE        := ghcr.io/dexidp/dex:v2.42.1
 TERRAFORM_VERSION := 1.11.4
 
-.PHONY: oidc-setup test-acc build
+.PHONY: oidc-setup test-acc build vet clean
+
 
 build:
 	@echo "🔨 Building provider binary"
@@ -22,9 +23,9 @@ oidc-setup:
 
 	@echo "🚀 Starting Dex (HTTPS)"
 	@docker run -d --name dex --network kind \
-	  -v $(CURDIR)/$(OIDC_DIR)/dex-config.yaml:/etc/dex/config.yaml \
-	  -v $(CURDIR)/$(DEX_SSL_DIR)/cert.pem:/etc/dex/tls.crt \
-	  -v $(CURDIR)/$(DEX_SSL_DIR)/key.pem:/etc/dex/tls.key \
+	  -v $(OIDC_DIR)/dex-config.yaml:/etc/dex/config.yaml \
+	  -v $(DEX_SSL_DIR)/cert.pem:/etc/dex/tls.crt \
+	  -v $(DEX_SSL_DIR)/key.pem:/etc/dex/tls.key \
 	  -p 5556:5556 \
 	  $(DEX_IMAGE) \
 	  dex serve /etc/dex/config.yaml
@@ -72,3 +73,8 @@ clean:
 	-docker rm -f dex
 	-kind delete cluster --name $(KIND_CLUSTER)
 	-rm -rf $(TESTBUILD_DIR) $(DEX_SSL_DIR)
+
+vet:
+	@echo "🔍 Running go vet on all packages"
+	@go vet ./...
+
