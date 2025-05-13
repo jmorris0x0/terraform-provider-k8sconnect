@@ -13,7 +13,8 @@
 3. **Accurate SSA diff** automatically resumes once the cluster is reachable.  
 4. **No silent overwrites** of unmanaged objects (ownership annotation guard).  
 5. **Scalable to field‑level (“structured”) diffs** without redesign.  
-6. **No mass taints when connection values change** (e.g., EKS endpoint rotation).
+6. **No taints when connection attributes are *unknown* during plan**  
+   (e.g., EKS endpoint or token supplied by a data source that isn’t resolved yet).
 
 ---
 
@@ -106,10 +107,14 @@
 
 ---
 
-## 7 Preventing mass taints on connection changes
+## 7 Preventing taints when connection values are unknown (or change)
 
 **Problem**  
-Traditional providers store connection in the *provider* block; any change (endpoint, CA, exec token) taints every resource → delete/recreate.
+In classic providers, if `host`, CA, or exec token is **unknown at plan time**  
+– even just because a `data.*` source hasn’t resolved yet – Terraform marks every  
+resource for replace.
+
+## 7 Preventing mass taints on connection changes
 
 **k8sinline approach**
 
