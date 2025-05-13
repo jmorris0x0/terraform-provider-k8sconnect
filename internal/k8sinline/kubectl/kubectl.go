@@ -5,54 +5,88 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os/exec"
 	"time"
 
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/kubectl/pkg/cmd/apply"
 	"k8s.io/kubectl/pkg/cmd/delete"
 	"k8s.io/kubectl/pkg/cmd/diff"
-	"k8s.io/kubectl/pkg/manifest"
-	"k8s.io/kubectl/pkg/options"
 )
 
-// Kubectl defines operations against kubectl or equivalent engine.
+// Kubectl abstracts operations against Kubernetes resources.
+// It supports both client-side and server-side (apply) semantics
+// and allows chaining of common flags and stdin input.
 type Kubectl interface {
+	// Apply applies the given YAML manifest to the cluster.
+	// If server-side mode is enabled, this uses server-side apply;
+	// otherwise, it falls back to client-side apply.
+	// The YAML bytes are streamed via stdin.
 	Apply(ctx context.Context, yaml []byte) error
+
+	// Diff performs a dry-run diff of the YAML against the live cluster state.
+	// Returns the textual diff output. Side-effects are none.
 	Diff(ctx context.Context, yaml []byte) (string, error)
+
+	// Delete deletes the resources defined in the YAML from the cluster.
+	// The YAML bytes are streamed via stdin.
 	Delete(ctx context.Context, yaml []byte) error
-	SetFieldManager(name string) Kubectl // chainable
-	WithServerSide() Kubectl             // toggle server-side mode
-	WithFlags(flags Flags) Kubectl       // apply common flags
-	WithTimeout(d time.Duration) Kubectl // per-call timeout
-	WithStdin(r io.Reader) Kubectl       // stream manifest via stdin
+
+	// SetFieldManager sets the name of the field manager for server-side apply.
+	// Must be called before Apply when using server-side mode.
+	SetFieldManager(name string) Kubectl
+
+	// WithServerSide toggles server-side apply mode on.
+	// Should be used in conjunction with SetFieldManager.
+	WithServerSide() Kubectl
+
+	// WithFlags replaces the current Flags for this invocation.
+	// Useful to apply a pre-built Flags struct.
+	WithFlags(flags Flags) Kubectl
+
+	// WithTimeout sets a per-call timeout for the operation.
+	// If zero, the default context timeout applies.
+	WithTimeout(d time.Duration) Kubectl
+
+	// WithStdin sets a custom io.Reader as stdin for the command,
+	// allowing streaming of manifests or additional input.
+	WithStdin(r io.Reader) Kubectl
 }
 
 // Flags holds common kubectl CLI flags and options.
 type Flags struct {
-	ServerSide     bool
-	FieldManager   string
-	Namespace      string
+	// ServerSide enables server-side apply when true.
+	ServerSide bool
+	// FieldManager names the manager for server-side apply.
+	FieldManager string
+	// Namespace specifies the target namespace.
+	Namespace string
+	// ForceConflicts adds --force-conflicts to resolve conflicts.
 	ForceConflicts bool
-	KubeconfigPath string   // --kubeconfig
-	Context        string   // --context
-	ExtraArgs      []string // passthrough flags
+	// KubeconfigPath points to an alternative kubeconfig file.
+	KubeconfigPath string
+	// Context specifies the kubectl context to use.
+	Context string
+	// ExtraArgs pass through any additional flags.
+	ExtraArgs []string
 }
 
-// KubectlOption customizes Flags.
+// KubectlOption customizes a Flags instance.
 type KubectlOption func(*Flags)
 
-// WithServerSideFlag toggles server-side apply.
+// WithServerSideFlag sets the ServerSide flag.
 func WithServerSideFlag(on bool) KubectlOption {
 	return func(f *Flags) { f.ServerSide = on }
 }
 
-// WithFieldManager sets the field manager name.
+// WithFieldManager sets the FieldManager flag.
 func WithFieldManager(name string) KubectlOption {
 	return func(f *Flags) { f.FieldManager = name }
 }
 
 // ===================== LibKubectl =====================
-// LibKubectl executes kubectl logic in-process via imported kubectl code.
+// LibKubectl uses the kubectl code in-process to execute commands.
+// Supports Apply, Diff, and Delete without shelling out.
 type LibKubectl struct {
 	flags       Flags
 	timeout     time.Duration
@@ -61,7 +95,7 @@ type LibKubectl struct {
 	configFlags *genericclioptions.ConfigFlags
 }
 
-// NewLibKubectl constructs a LibKubectl.
+// NewLibKubectl constructs a LibKubectl with IO streams and options.
 func NewLibKubectl(streams genericclioptions.IOStreams, opts ...KubectlOption) *LibKubectl {
 	f := Flags{}
 	for _, o := range opts {
@@ -83,7 +117,7 @@ func (l *LibKubectl) WithFlags(f Flags) Kubectl           { l.flags = f; return 
 func (l *LibKubectl) WithTimeout(d time.Duration) Kubectl { l.timeout = d; return l }
 func (l *LibKubectl) WithStdin(r io.Reader) Kubectl       { l.stdin = r; return l }
 
-// Apply runs kubectl apply in-process with server-side apply.
+// Apply applies manifests using kubectl apply logic in-process.
 func (l *LibKubectl) Apply(ctx context.Context, yaml []byte) error {
 	cmd := apply.NewCmdApply(l.configFlags, l.ioStreams)
 	opts := apply.NewApplyOptions(cmd, l.ioStreams)
@@ -96,10 +130,9 @@ func (l *LibKubectl) Apply(ctx context.Context, yaml []byte) error {
 	return opts.Run(ctx)
 }
 
-// Diff runs kubectl diff in-process and returns output.
+// Diff runs kubectl diff logic in-process and returns the diff.
 func (l *LibKubectl) Diff(ctx context.Context, yaml []byte) (string, error) {
 	cmd := diff.NewCmdDiff(l.configFlags, l.ioStreams)
-	// configure flags
 	cmd.Flags().Set("server-side", fmt.Sprintf("%v", l.flags.ServerSide))
 	cmd.Flags().Set("field-manager", l.flags.FieldManager)
 	if l.flags.Namespace != "" {
@@ -115,7 +148,7 @@ func (l *LibKubectl) Diff(ctx context.Context, yaml []byte) (string, error) {
 	return outBuf.String(), nil
 }
 
-// Delete runs kubectl delete in-process on the provided YAML.
+// Delete runs kubectl delete logic in-process for the manifests.
 func (l *LibKubectl) Delete(ctx context.Context, yaml []byte) error {
 	cmd := delete.NewCmdDelete(l.configFlags, l.ioStreams)
 	opts := delete.NewDeleteOptions(cmd, l.ioStreams)
@@ -127,14 +160,14 @@ func (l *LibKubectl) Delete(ctx context.Context, yaml []byte) error {
 }
 
 // ===================== ExecKubectl =====================
-// ExecKubectl shells out to the kubectl binary.
+// ExecKubectl shells out to the kubectl binary for operations.
 type ExecKubectl struct {
 	flags   Flags
 	timeout time.Duration
 	stdin   io.Reader
 }
 
-// NewExecKubectl constructs an ExecKubectl with optional flags.
+// NewExecKubectl constructs an ExecKubectl with options.
 func NewExecKubectl(opts ...KubectlOption) *ExecKubectl {
 	f := Flags{}
 	for _, o := range opts {
@@ -149,6 +182,7 @@ func (e *ExecKubectl) WithFlags(f Flags) Kubectl           { e.flags = f; return
 func (e *ExecKubectl) WithTimeout(d time.Duration) Kubectl { e.timeout = d; return e }
 func (e *ExecKubectl) WithStdin(r io.Reader) Kubectl       { e.stdin = r; return e }
 
+// run executes `kubectl <verb>` with the configured flags and stdin.
 func (e *ExecKubectl) run(ctx context.Context, verb string, yaml []byte) (string, error) {
 	args := []string{verb}
 	if e.flags.ServerSide {
@@ -204,7 +238,7 @@ func (e *ExecKubectl) Delete(ctx context.Context, yaml []byte) error {
 }
 
 // ===================== stubKubectl =====================
-// stubKubectl records commands and stdin for tests.
+// stubKubectl records commands and stdin for unit tests.
 type stubKubectl struct {
 	Commands [][]string
 	Stdin    [][]byte
@@ -212,8 +246,9 @@ type stubKubectl struct {
 	timeout  time.Duration
 }
 
-// NewStub returns a fresh stub.
+// NewStub returns a fresh stubKubectl.
 func NewStub() *stubKubectl { return &stubKubectl{} }
+
 func (s *stubKubectl) record(cmd []string, in []byte) {
 	s.Commands = append(s.Commands, cmd)
 	s.Stdin = append(s.Stdin, in)
@@ -263,7 +298,7 @@ func (s *stubKubectl) Delete(ctx context.Context, y []byte) error {
 	return nil
 }
 
-// Interface assertions
+// Interface assertions ensure concrete types satisfy Kubectl.
 var _ Kubectl = (*LibKubectl)(nil)
 var _ Kubectl = (*ExecKubectl)(nil)
 var _ Kubectl = (*stubKubectl)(nil)
