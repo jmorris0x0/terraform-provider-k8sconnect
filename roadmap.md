@@ -35,7 +35,7 @@
     type Kubectl interface {
         Apply(ctx context.Context, yaml []byte) error
         Diff(ctx context.Context, yaml []byte) (string, error)
-        Delete(ctx context.Context, yaml []byte) error            // new: delete support
+        Delete(ctx context.Context, yaml []byte) error
         SetFieldManager(name string) Kubectl                    // chainable
         WithServerSide() Kubectl       // toggle server‑side mode
         WithFlags(flags Flags) Kubectl // apply common flags
