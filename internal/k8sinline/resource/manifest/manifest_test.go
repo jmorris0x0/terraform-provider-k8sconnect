@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
@@ -102,26 +103,28 @@ func testAccCheckNamespaceExists(client kubernetes.Interface, name string) resou
 func testAccCheckNamespaceDestroy(client kubernetes.Interface, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()
+		for i := 0; i < 10; i++ {
+			_, err := client.CoreV1().Namespaces().Get(ctx, name, metav1.GetOptions{})
+			if err != nil {
+				if strings.Contains(err.Error(), "not found") {
+					fmt.Printf("✅ Verified namespace %q was deleted from Kubernetes\n", name)
+					return nil
+				}
+				return fmt.Errorf("unexpected error checking namespace %q: %v", name, err)
+			}
 
-		_, err := client.CoreV1().Namespaces().Get(ctx, name, metav1.GetOptions{})
-		if err == nil {
-			return fmt.Errorf("namespace %q still exists in Kubernetes after destroy", name)
+			// Namespace still exists, wait a bit
+			time.Sleep(1 * time.Second)
 		}
-
-		// Check if it's a "not found" error (which is what we want)
-		if !strings.Contains(err.Error(), "not found") {
-			return fmt.Errorf("unexpected error checking namespace %q: %v", name, err)
-		}
-
-		fmt.Printf("✅ Verified namespace %q was deleted from Kubernetes\n", name)
-		return nil
+		return fmt.Errorf("namespace %q still exists in Kubernetes after waiting for deletion", name)
 	}
 }
 
 const testNamespaceYAML = `apiVersion: v1
 kind: Namespace
 metadata:
-  name: acctest-exec`
+  name: acctest-exec
+`
 
 const testAccManifestConfigBasic = `
 variable "host" {

@@ -3,7 +3,8 @@ DEX_SSL_DIR      := $(OIDC_DIR)/ssl
 KIND_CLUSTER     ?= oidc-e2e
 TESTBUILD_DIR    := $(CURDIR)/.testbuild
 DEX_IMAGE        := ghcr.io/dexidp/dex:v2.42.1
-TERRAFORM_VERSION := 1.11.4
+TERRAFORM_VERSION := 1.12.1
+# 	  TF_ACC_TERRAFORM_VERSION=$(TERRAFORM_VERSION) \
 
 .PHONY: oidc-setup test-acc build vet clean test
 
@@ -62,7 +63,7 @@ test-acc: oidc-setup
 	@echo "🏃 Running acceptance tests..."; \
 	export \
 	  TF_ACC=1 \
-	  TF_ACC_TERRAFORM_VERSION=$(TERRAFORM_VERSION) \
+	  TF_ACC_TERRAFORM_PATH="$(shell which terraform)" \
 	  TF_ACC_K8S_HOST="$$(cat $(TESTBUILD_DIR)/cluster-endpoint.txt)" \
 	  TF_ACC_K8S_CA="$$(base64 < $(TESTBUILD_DIR)/mock-ca.crt | tr -d '\n')" \
 	  TF_ACC_K8S_CMD="$(OIDC_DIR)/get-token.sh" \
