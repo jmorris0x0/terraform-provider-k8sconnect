@@ -5,12 +5,16 @@ TESTBUILD_DIR    := $(CURDIR)/.testbuild
 DEX_IMAGE        := ghcr.io/dexidp/dex:v2.42.1
 TERRAFORM_VERSION := 1.11.4
 
-.PHONY: oidc-setup test-acc build vet clean
+.PHONY: oidc-setup test-acc build vet clean test
 
 
 build:
 	@echo "🔨 Building provider binary"
 	go build -o bin/terraform-provider-k8sinline .
+
+test:
+	@echo "🧪 Running unit tests"
+	go test -v ./... -run "^Test[^A].*"
 
 oidc-setup:
 	@echo "🔐 Generating self‑signed certs"
