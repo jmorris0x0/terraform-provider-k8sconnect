@@ -1,8 +1,11 @@
-// internal.k8sinline/resource/manifest/manifest.go
+// internal/k8sinline/resource/manifest/manifest.go
 package manifest
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -12,6 +15,13 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/yaml"
+	"k8s.io/client-go/rest"
+
+	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/k8sclient"
+	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/kubeconfig"
 )
 
 var _ resource.Resource = (*manifestResource)(nil)
@@ -20,7 +30,10 @@ func NewManifestResource() resource.Resource {
 	return &manifestResource{}
 }
 
-type manifestResource struct{}
+type manifestResource struct {
+	// K8sClient will be injected during Configure
+	k8sClient k8sclient.K8sClient
+}
 
 func (r *manifestResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_manifest"
@@ -118,11 +131,39 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	// TODO: implement kubectl apply logic using data.YAMLBody and data.ClusterConnection
+	// Parse YAML into unstructured object
+	obj, err := r.parseYAML(data.YAMLBody.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid YAML", fmt.Sprintf("Failed to parse YAML: %s", err))
+		return
+	}
 
-	data.ID = types.StringValue("generated-id") // replace with actual generated ID
+	// Create K8s client from cluster connection
+	client, err := r.createK8sClient(data.ClusterConnection)
+	if err != nil {
+		resp.Diagnostics.AddError("Connection Failed", fmt.Sprintf("Failed to create Kubernetes client: %s", err))
+		return
+	}
+
+	// Apply the manifest using server-side apply
+	err = client.SetFieldManager("k8sinline").Apply(ctx, obj, k8sclient.ApplyOptions{
+		FieldManager: "k8sinline",
+		Force:        false,
+	})
+	if err != nil {
+		resp.Diagnostics.AddError("Apply Failed", fmt.Sprintf("Failed to apply manifest: %s", err))
+		return
+	}
+
+	// Generate resource ID
+	id := r.generateID(obj, data.ClusterConnection)
+	data.ID = types.StringValue(id)
+
 	tflog.Trace(ctx, "applied manifest", map[string]interface{}{
-		"id": data.ID.ValueString(),
+		"id":        data.ID.ValueString(),
+		"kind":      obj.GetKind(),
+		"name":      obj.GetName(),
+		"namespace": obj.GetNamespace(),
 	})
 
 	diags = resp.State.Set(ctx, &data)
@@ -138,8 +179,36 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	// TODO: refresh state from cluster
+	// Parse YAML to get object metadata
+	obj, err := r.parseYAML(data.YAMLBody.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid YAML", fmt.Sprintf("Failed to parse YAML: %s", err))
+		return
+	}
 
+	// Create K8s client from cluster connection
+	client, err := r.createK8sClient(data.ClusterConnection)
+	if err != nil {
+		resp.Diagnostics.AddError("Connection Failed", fmt.Sprintf("Failed to create Kubernetes client: %s", err))
+		return
+	}
+
+	// Get GVR for the object
+	gvr, err := r.getGVR(obj)
+	if err != nil {
+		resp.Diagnostics.AddError("Resource Discovery Failed", fmt.Sprintf("Failed to determine resource type: %s", err))
+		return
+	}
+
+	// Check if object still exists
+	_, err = client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
+	if err != nil {
+		// Object no longer exists - remove from state
+		resp.State.RemoveResource(ctx)
+		return
+	}
+
+	// Object exists - keep current state
 	diags = resp.State.Set(ctx, &data)
 	resp.Diagnostics.Append(diags...)
 }
@@ -153,7 +222,36 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	// TODO: implement server-side diff & apply
+	// Parse YAML into unstructured object
+	obj, err := r.parseYAML(data.YAMLBody.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid YAML", fmt.Sprintf("Failed to parse YAML: %s", err))
+		return
+	}
+
+	// Create K8s client from cluster connection
+	client, err := r.createK8sClient(data.ClusterConnection)
+	if err != nil {
+		resp.Diagnostics.AddError("Connection Failed", fmt.Sprintf("Failed to create Kubernetes client: %s", err))
+		return
+	}
+
+	// Apply the updated manifest (server-side apply is idempotent)
+	err = client.SetFieldManager("k8sinline").Apply(ctx, obj, k8sclient.ApplyOptions{
+		FieldManager: "k8sinline",
+		Force:        false,
+	})
+	if err != nil {
+		resp.Diagnostics.AddError("Apply Failed", fmt.Sprintf("Failed to update manifest: %s", err))
+		return
+	}
+
+	tflog.Trace(ctx, "updated manifest", map[string]interface{}{
+		"id":        data.ID.ValueString(),
+		"kind":      obj.GetKind(),
+		"name":      obj.GetName(),
+		"namespace": obj.GetNamespace(),
+	})
 
 	diags = resp.State.Set(ctx, &data)
 	resp.Diagnostics.Append(diags...)
@@ -168,10 +266,39 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 		return
 	}
 
-	// TODO: implement kubectl delete
+	// Parse YAML to get object metadata
+	obj, err := r.parseYAML(data.YAMLBody.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid YAML", fmt.Sprintf("Failed to parse YAML: %s", err))
+		return
+	}
+
+	// Create K8s client from cluster connection
+	client, err := r.createK8sClient(data.ClusterConnection)
+	if err != nil {
+		resp.Diagnostics.AddError("Connection Failed", fmt.Sprintf("Failed to create Kubernetes client: %s", err))
+		return
+	}
+
+	// Get GVR for the object
+	gvr, err := r.getGVR(obj)
+	if err != nil {
+		resp.Diagnostics.AddError("Resource Discovery Failed", fmt.Sprintf("Failed to determine resource type: %s", err))
+		return
+	}
+
+	// Delete the object
+	err = client.Delete(ctx, gvr, obj.GetNamespace(), obj.GetName(), k8sclient.DeleteOptions{})
+	if err != nil {
+		resp.Diagnostics.AddError("Delete Failed", fmt.Sprintf("Failed to delete manifest: %s", err))
+		return
+	}
 
 	tflog.Trace(ctx, "deleted manifest", map[string]interface{}{
-		"id": data.ID.ValueString(),
+		"id":        data.ID.ValueString(),
+		"kind":      obj.GetKind(),
+		"name":      obj.GetName(),
+		"namespace": obj.GetNamespace(),
 	})
 }
 
@@ -179,4 +306,173 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 	resp.Diagnostics.Append(
 		resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...,
 	)
+}
+
+// parseYAML converts YAML string to unstructured.Unstructured
+func (r *manifestResource) parseYAML(yamlStr string) (*unstructured.Unstructured, error) {
+	obj := &unstructured.Unstructured{}
+	err := yaml.Unmarshal([]byte(yamlStr), obj)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal YAML: %w", err)
+	}
+
+	// Validate required fields
+	if obj.GetAPIVersion() == "" {
+		return nil, fmt.Errorf("apiVersion is required")
+	}
+	if obj.GetKind() == "" {
+		return nil, fmt.Errorf("kind is required")
+	}
+	if obj.GetName() == "" {
+		return nil, fmt.Errorf("metadata.name is required")
+	}
+
+	return obj, nil
+}
+
+// createK8sClient creates a K8sClient from cluster connection configuration
+func (r *manifestResource) createK8sClient(conn clusterConnectionModel) (k8sclient.K8sClient, error) {
+	// Determine connection mode
+	hasInline := !conn.Host.IsNull() || !conn.ClusterCACertificate.IsNull()
+	hasFile := !conn.KubeconfigFile.IsNull()
+	hasRaw := !conn.KubeconfigRaw.IsNull()
+
+	modeCount := 0
+	if hasInline {
+		modeCount++
+	}
+	if hasFile {
+		modeCount++
+	}
+	if hasRaw {
+		modeCount++
+	}
+
+	if modeCount == 0 {
+		return nil, fmt.Errorf("must specify exactly one of: inline connection, kubeconfig_file, or kubeconfig_raw")
+	}
+	if modeCount > 1 {
+		return nil, fmt.Errorf("cannot specify multiple connection modes")
+	}
+
+	switch {
+	case hasInline:
+		return r.createInlineClient(conn)
+	case hasFile:
+		return r.createFileClient(conn)
+	case hasRaw:
+		return r.createRawClient(conn)
+	default:
+		return nil, fmt.Errorf("no valid connection mode specified")
+	}
+}
+
+// createInlineClient creates a client from inline connection settings
+func (r *manifestResource) createInlineClient(conn clusterConnectionModel) (k8sclient.K8sClient, error) {
+	if conn.Host.IsNull() {
+		return nil, fmt.Errorf("host is required for inline connection")
+	}
+	if conn.ClusterCACertificate.IsNull() {
+		return nil, fmt.Errorf("cluster_ca_certificate is required for inline connection")
+	}
+
+	// Convert exec configuration
+	var execAuth kubeconfig.ExecAuth
+	if !conn.Exec.APIVersion.IsNull() {
+		execAuth.APIVersion = conn.Exec.APIVersion.ValueString()
+		execAuth.Command = conn.Exec.Command.ValueString()
+
+		args := make([]string, len(conn.Exec.Args))
+		for i, arg := range conn.Exec.Args {
+			args[i] = arg.ValueString()
+		}
+		execAuth.Args = args
+	}
+
+	// Generate kubeconfig
+	kubeconfigBytes, err := kubeconfig.GenerateKubeconfigFromInline(
+		conn.Host.ValueString(),
+		[]byte(conn.ClusterCACertificate.ValueString()),
+		execAuth,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate kubeconfig: %w", err)
+	}
+
+	return k8sclient.NewDynamicK8sClientFromKubeconfig(kubeconfigBytes, "")
+}
+
+// createFileClient creates a client from kubeconfig file
+func (r *manifestResource) createFileClient(conn clusterConnectionModel) (k8sclient.K8sClient, error) {
+	kubeconfigPath := conn.KubeconfigFile.ValueString()
+	context := ""
+	if !conn.Context.IsNull() {
+		context = conn.Context.ValueString()
+	}
+
+	return k8sclient.NewDynamicK8sClientFromKubeconfigFile(kubeconfigPath, context)
+}
+
+// createRawClient creates a client from raw kubeconfig data
+func (r *manifestResource) createRawClient(conn clusterConnectionModel) (k8sclient.K8sClient, error) {
+	kubeconfigData := []byte(conn.KubeconfigRaw.ValueString())
+	context := ""
+	if !conn.Context.IsNull() {
+		context = conn.Context.ValueString()
+	}
+
+	return k8sclient.NewDynamicK8sClientFromKubeconfig(kubeconfigData, context)
+}
+
+// getGVR determines the GroupVersionResource for an object
+// This is a simplified version - real implementation would use discovery
+func (r *manifestResource) getGVR(obj *unstructured.Unstructured) (schema.GroupVersionResource, error) {
+	gvk := obj.GroupVersionKind()
+
+	// This is a simplified mapping - real implementation would use discovery client
+	// For now, handle common cases
+	switch gvk.Kind {
+	case "Namespace":
+		return schema.GroupVersionResource{Group: "", Version: "v1", Resource: "namespaces"}, nil
+	case "Pod":
+		return schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}, nil
+	case "Service":
+		return schema.GroupVersionResource{Group: "", Version: "v1", Resource: "services"}, nil
+	case "Deployment":
+		return schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}, nil
+	default:
+		return schema.GroupVersionResource{}, fmt.Errorf("unsupported resource kind: %s", gvk.Kind)
+	}
+}
+
+// generateID creates a unique identifier for the resource
+func (r *manifestResource) generateID(obj *unstructured.Unstructured, conn clusterConnectionModel) string {
+	// Create a deterministic ID based on cluster + object identity
+	data := fmt.Sprintf("%s/%s/%s/%s",
+		r.getClusterID(conn),
+		obj.GetNamespace(),
+		obj.GetKind(),
+		obj.GetName(),
+	)
+
+	hash := sha256.Sum256([]byte(data))
+	return hex.EncodeToString(hash[:])
+}
+
+// getClusterID creates a stable identifier for the cluster connection
+func (r *manifestResource) getClusterID(conn clusterConnectionModel) string {
+	// Use host if available, otherwise hash the kubeconfig
+	if !conn.Host.IsNull() {
+		return conn.Host.ValueString()
+	}
+
+	var data string
+	if !conn.KubeconfigFile.IsNull() {
+		data = conn.KubeconfigFile.ValueString()
+	} else if !conn.KubeconfigRaw.IsNull() {
+		data = conn.KubeconfigRaw.ValueString()
+	}
+
+	hash := sha256.Sum256([]byte(data))
+	return hex.EncodeToString(hash[:8]) // Use first 8 bytes for shorter ID
 }
