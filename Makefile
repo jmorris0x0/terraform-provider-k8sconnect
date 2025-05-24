@@ -72,7 +72,7 @@ test-acc: oidc-setup
 	echo "TF_ACC_K8S_CA=$$(echo $$TF_ACC_K8S_CA | cut -c1-20)..."; \
 	echo "TF_ACC_K8S_CMD=$$TF_ACC_K8S_CMD"; \
 	echo "TF_ACC_KUBECONFIG_RAW=$$(echo $$TF_ACC_KUBECONFIG_RAW | cut -c1-20)..."; \
-	go test -v ./internal/k8sinline/... -timeout 30m -run TestAccManifestResource_Basic
+	go test -v ./internal/k8sinline/... -timeout 30m -run "TestAcc"
 
 clean:
 	-docker rm -f dex

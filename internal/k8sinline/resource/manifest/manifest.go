@@ -109,12 +109,12 @@ type manifestResourceModel struct {
 }
 
 type clusterConnectionModel struct {
-	Host                 types.String  `tfsdk:"host"`
-	ClusterCACertificate types.String  `tfsdk:"cluster_ca_certificate"`
-	KubeconfigFile       types.String  `tfsdk:"kubeconfig_file"`
-	KubeconfigRaw        types.String  `tfsdk:"kubeconfig_raw"`
-	Context              types.String  `tfsdk:"context"`
-	Exec                 execAuthModel `tfsdk:"exec"`
+	Host                 types.String   `tfsdk:"host"`
+	ClusterCACertificate types.String   `tfsdk:"cluster_ca_certificate"`
+	KubeconfigFile       types.String   `tfsdk:"kubeconfig_file"`
+	KubeconfigRaw        types.String   `tfsdk:"kubeconfig_raw"`
+	Context              types.String   `tfsdk:"context"`
+	Exec                 *execAuthModel `tfsdk:"exec"`
 }
 
 type execAuthModel struct {
@@ -391,8 +391,8 @@ func (r *manifestResource) createInlineClient(conn clusterConnectionModel) (k8sc
 		},
 	}
 
-	// Add exec provider if specified
-	if !conn.Exec.APIVersion.IsNull() {
+	// Add exec provider if specified - handle pointer now
+	if conn.Exec != nil && !conn.Exec.APIVersion.IsNull() {
 		args := make([]string, len(conn.Exec.Args))
 		for i, arg := range conn.Exec.Args {
 			args[i] = arg.ValueString()

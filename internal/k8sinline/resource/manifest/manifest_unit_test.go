@@ -111,6 +111,7 @@ users:
 		KubeconfigFile:       types.StringNull(),
 		KubeconfigRaw:        types.StringValue(kubeconfig),
 		Context:              types.StringNull(),
+		Exec:                 nil,
 	}
 
 	client, err := r.createK8sClient(conn)
@@ -154,7 +155,7 @@ HZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
 		KubeconfigFile:       types.StringNull(),
 		KubeconfigRaw:        types.StringNull(),
 		Context:              types.StringNull(),
-		Exec: execAuthModel{
+		Exec: &execAuthModel{ // Add & here
 			APIVersion: types.StringValue("client.authentication.k8s.io/v1"),
 			Command:    types.StringValue("aws"),
 			Args: []types.String{
@@ -189,11 +190,7 @@ HZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
 		KubeconfigFile:       types.StringNull(),
 		KubeconfigRaw:        types.StringNull(),
 		Context:              types.StringNull(),
-		Exec: execAuthModel{
-			APIVersion: types.StringNull(),
-			Command:    types.StringNull(),
-			Args:       []types.String{},
-		},
+		Exec:                 nil,
 	}
 
 	client2, err := r.createInlineClient(connNoExec)
@@ -223,6 +220,7 @@ func TestCreateInlineClient_ValidationErrors(t *testing.T) {
 			conn: clusterConnectionModel{
 				Host:                 types.StringNull(),
 				ClusterCACertificate: types.StringValue("dGVzdA=="), // base64 "test"
+				Exec:                 nil,
 			},
 			expect: "host is required for inline connection",
 		},
@@ -231,6 +229,7 @@ func TestCreateInlineClient_ValidationErrors(t *testing.T) {
 			conn: clusterConnectionModel{
 				Host:                 types.StringValue("https://test.com"),
 				ClusterCACertificate: types.StringNull(),
+				Exec:                 nil,
 			},
 			expect: "cluster_ca_certificate is required for inline connection",
 		},
@@ -239,6 +238,7 @@ func TestCreateInlineClient_ValidationErrors(t *testing.T) {
 			conn: clusterConnectionModel{
 				Host:                 types.StringValue("https://test.com"),
 				ClusterCACertificate: types.StringValue("invalid-base64!"),
+				Exec:                 nil,
 			},
 			expect: "failed to decode cluster_ca_certificate",
 		},
@@ -266,6 +266,7 @@ func TestCreateK8sClient_MultipleModesError(t *testing.T) {
 		KubeconfigFile:       types.StringNull(),
 		KubeconfigRaw:        types.StringValue("test-kubeconfig"),
 		Context:              types.StringNull(),
+		Exec:                 nil,
 	}
 
 	_, err := r.createK8sClient(conn)
@@ -288,6 +289,7 @@ func TestCreateK8sClient_NoModeError(t *testing.T) {
 		KubeconfigFile:       types.StringNull(),
 		KubeconfigRaw:        types.StringNull(),
 		Context:              types.StringNull(),
+		Exec:                 nil,
 	}
 
 	_, err := r.createK8sClient(conn)
@@ -374,6 +376,7 @@ func TestGenerateID(t *testing.T) {
 		KubeconfigFile:       types.StringNull(),
 		KubeconfigRaw:        types.StringNull(),
 		Context:              types.StringNull(),
+		Exec:                 nil,
 	}
 
 	id1 := r.generateID(obj, conn)
