@@ -403,7 +403,7 @@ func (r *manifestResource) createInlineClient(conn clusterConnectionModel) (k8sc
 			Command:         conn.Exec.Command.ValueString(),
 			Args:            args,
 			Env:             []clientcmdapi.ExecEnvVar{},
-			InteractiveMode: clientcmdapi.NeverInteractiveMode,
+			InteractiveMode: clientcmdapi.ExecInteractiveModeNever,
 		}
 	}
 
