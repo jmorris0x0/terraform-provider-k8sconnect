@@ -4,6 +4,7 @@ package k8sclient
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -35,6 +36,9 @@ type K8sClient interface {
 
 	// WithForceConflicts enables force conflicts resolution.
 	WithForceConflicts(force bool) K8sClient
+
+	// GetGVR determines the GroupVersionResource for an unstructured object.
+	GetGVR(ctx context.Context, obj *unstructured.Unstructured) (schema.GroupVersionResource, error)
 }
 
 // ApplyOptions holds options for server-side apply operations.
@@ -263,6 +267,10 @@ func (d *DynamicK8sClient) getGVR(obj *unstructured.Unstructured) (schema.GroupV
 	return schema.GroupVersionResource{}, fmt.Errorf("no resource found for %s", gvk)
 }
 
+func (d *DynamicK8sClient) GetGVR(ctx context.Context, obj *unstructured.Unstructured) (schema.GroupVersionResource, error) {
+	return d.getGVR(obj) // Use the existing private method
+}
+
 // ===================== stubK8sClient =====================
 // stubK8sClient records operations for unit tests.
 type stubK8sClient struct {
@@ -355,6 +363,29 @@ func (s *stubK8sClient) DryRunApply(ctx context.Context, obj *unstructured.Unstr
 		Options: options,
 	})
 	return s.DryRunResponse, s.DryRunError
+}
+
+func (s *stubK8sClient) GetGVR(ctx context.Context, obj *unstructured.Unstructured) (schema.GroupVersionResource, error) {
+	// For testing, return predictable GVRs
+	gvk := obj.GroupVersionKind()
+	switch gvk.Kind {
+	case "Namespace":
+		return schema.GroupVersionResource{Group: "", Version: "v1", Resource: "namespaces"}, nil
+	case "Pod":
+		return schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}, nil
+	case "Service":
+		return schema.GroupVersionResource{Group: "", Version: "v1", Resource: "services"}, nil
+	case "Deployment":
+		return schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}, nil
+	case "ConfigMap":
+		return schema.GroupVersionResource{Group: "", Version: "v1", Resource: "configmaps"}, nil
+	case "Secret":
+		return schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}, nil
+	default:
+		// For unknown types in tests, make a reasonable guess
+		resource := strings.ToLower(gvk.Kind) + "s"
+		return schema.GroupVersionResource{Group: gvk.Group, Version: gvk.Version, Resource: resource}, nil
+	}
 }
 
 // Interface assertions ensure concrete types satisfy K8sClient.

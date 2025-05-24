@@ -2,12 +2,15 @@
 package manifest
 
 import (
+	"context"
 	"encoding/base64"
 	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/k8sclient"
 )
 
 func TestParseYAML(t *testing.T) {
@@ -337,7 +340,11 @@ func TestGetGVR(t *testing.T) {
 			obj.SetAPIVersion(tt.apiVersion)
 			obj.SetKind(tt.kind)
 
-			gvr, err := r.getGVR(obj)
+			// Create a stub client for testing
+			stubClient := k8sclient.NewStubK8sClient()
+			ctx := context.Background()
+
+			gvr, err := r.getGVR(ctx, stubClient, obj)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

@@ -195,7 +195,7 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 	}
 
 	// Get GVR for the object
-	gvr, err := r.getGVR(obj)
+	gvr, err := r.getGVR(ctx, client, obj)
 	if err != nil {
 		resp.Diagnostics.AddError("Resource Discovery Failed", fmt.Sprintf("Failed to determine resource type: %s", err))
 		return
@@ -282,7 +282,7 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 	}
 
 	// Get GVR for the object
-	gvr, err := r.getGVR(obj)
+	gvr, err := r.getGVR(ctx, client, obj)
 	if err != nil {
 		resp.Diagnostics.AddError("Resource Discovery Failed", fmt.Sprintf("Failed to determine resource type: %s", err))
 		return
@@ -433,24 +433,8 @@ func (r *manifestResource) createRawClient(conn clusterConnectionModel) (k8sclie
 }
 
 // getGVR determines the GroupVersionResource for an object
-// This is a simplified version - real implementation would use discovery
-func (r *manifestResource) getGVR(obj *unstructured.Unstructured) (k8sschema.GroupVersionResource, error) {
-	gvk := obj.GroupVersionKind()
-
-	// This is a simplified mapping - real implementation would use discovery client
-	// For now, handle common cases
-	switch gvk.Kind {
-	case "Namespace":
-		return k8sschema.GroupVersionResource{Group: "", Version: "v1", Resource: "namespaces"}, nil
-	case "Pod":
-		return k8sschema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}, nil
-	case "Service":
-		return k8sschema.GroupVersionResource{Group: "", Version: "v1", Resource: "services"}, nil
-	case "Deployment":
-		return k8sschema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}, nil
-	default:
-		return k8sschema.GroupVersionResource{}, fmt.Errorf("unsupported resource kind: %s", gvk.Kind)
-	}
+func (r *manifestResource) getGVR(ctx context.Context, client k8sclient.K8sClient, obj *unstructured.Unstructured) (k8sschema.GroupVersionResource, error) {
+	return client.GetGVR(ctx, obj)
 }
 
 // generateID creates a unique identifier for the resource

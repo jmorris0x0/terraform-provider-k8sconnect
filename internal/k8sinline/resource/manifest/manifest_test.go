@@ -162,3 +162,236 @@ YAML
   }
 }
 `
+
+// Add these test functions to internal/k8sinline/resource/manifest/manifest_test.go
+
+func TestAccManifestResource_KubeconfigRaw(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+	}
+
+	k8sClient := createK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sinline": providerserver.NewProtocol6WithError(k8sinline.New()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testAccManifestConfigKubeconfigRaw,
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("k8sinline_manifest.test_raw", "yaml_body", testNamespaceYAMLRaw),
+					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_raw", "id"),
+					testAccCheckNamespaceExists(k8sClient, "acctest-raw"),
+				),
+			},
+		},
+		CheckDestroy: testAccCheckNamespaceDestroy(k8sClient, "acctest-raw"),
+	})
+}
+
+func TestAccManifestResource_KubeconfigFile(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+	}
+
+	// Write kubeconfig to temp file
+	tmpfile, err := os.CreateTemp("", "kubeconfig*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+
+	if _, err := tmpfile.Write([]byte(raw)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmpfile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	k8sClient := createK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sinline": providerserver.NewProtocol6WithError(k8sinline.New()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testAccManifestConfigKubeconfigFile,
+				ConfigVariables: config.Variables{
+					"kubeconfig_path": config.StringVariable(tmpfile.Name()),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("k8sinline_manifest.test_file", "yaml_body", testNamespaceYAMLFile),
+					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_file", "id"),
+					testAccCheckNamespaceExists(k8sClient, "acctest-file"),
+				),
+			},
+		},
+		CheckDestroy: testAccCheckNamespaceDestroy(k8sClient, "acctest-file"),
+	})
+}
+
+// Test different resource types
+func TestAccManifestResource_Pod(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+	}
+
+	k8sClient := createK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sinline": providerserver.NewProtocol6WithError(k8sinline.New()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testAccManifestConfigPod,
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("k8sinline_manifest.test_pod", "yaml_body", testPodYAML),
+					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_pod", "id"),
+					testAccCheckPodExists(k8sClient, "default", "acctest-pod"),
+				),
+			},
+		},
+		CheckDestroy: testAccCheckPodDestroy(k8sClient, "default", "acctest-pod"),
+	})
+}
+
+// Helper functions
+func testAccCheckPodExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		_, err := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("pod %s/%s does not exist: %v", namespace, name, err)
+		}
+		fmt.Printf("✅ Verified pod %s/%s exists in Kubernetes\n", namespace, name)
+		return nil
+	}
+}
+
+func testAccCheckPodDestroy(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		for i := 0; i < 10; i++ {
+			_, err := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+			if err != nil {
+				if strings.Contains(err.Error(), "not found") {
+					fmt.Printf("✅ Verified pod %s/%s was deleted\n", namespace, name)
+					return nil
+				}
+				return fmt.Errorf("unexpected error checking pod: %v", err)
+			}
+			time.Sleep(1 * time.Second)
+		}
+		return fmt.Errorf("pod %s/%s still exists after deletion", namespace, name)
+	}
+}
+
+// Test configurations
+const testNamespaceYAMLRaw = `apiVersion: v1
+kind: Namespace
+metadata:
+  name: acctest-raw
+`
+
+const testAccManifestConfigKubeconfigRaw = `
+variable "raw" {
+  type = string
+}
+
+provider "k8sinline" {}
+
+resource "k8sinline_manifest" "test_raw" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: acctest-raw
+YAML
+
+  cluster_connection {
+    kubeconfig_raw = var.raw
+  }
+}
+`
+
+const testNamespaceYAMLFile = `apiVersion: v1
+kind: Namespace
+metadata:
+  name: acctest-file
+`
+
+const testAccManifestConfigKubeconfigFile = `
+variable "kubeconfig_path" {
+  type = string
+}
+
+provider "k8sinline" {}
+
+resource "k8sinline_manifest" "test_file" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: acctest-file
+YAML
+
+  cluster_connection {
+    kubeconfig_file = var.kubeconfig_path
+  }
+}
+`
+
+const testPodYAML = `apiVersion: v1
+kind: Pod
+metadata:
+  name: acctest-pod
+spec:
+  containers:
+  - name: test
+    image: busybox:1.35
+    command: ["sleep", "3600"]
+`
+
+const testAccManifestConfigPod = `
+variable "raw" {
+  type = string
+}
+
+provider "k8sinline" {}
+
+resource "k8sinline_manifest" "test_pod" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Pod
+metadata:
+  name: acctest-pod
+spec:
+  containers:
+  - name: test
+    image: busybox:1.35
+    command: ["sleep", "3600"]
+YAML
+
+  cluster_connection {
+    kubeconfig_raw = var.raw
+  }
+}
+`
