@@ -4,12 +4,10 @@ package k8sclient
 import (
 	"context"
 	"fmt"
-	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
@@ -148,11 +146,6 @@ func (d *DynamicK8sClient) Apply(ctx context.Context, obj *unstructured.Unstruct
 		return fmt.Errorf("failed to determine GVR: %w", err)
 	}
 
-	resource := d.client.Resource(gvr)
-	if obj.GetNamespace() != "" {
-		resource = resource.Namespace(obj.GetNamespace())
-	}
-
 	fieldManager := options.FieldManager
 	if fieldManager == "" {
 		fieldManager = d.fieldManager
@@ -169,6 +162,14 @@ func (d *DynamicK8sClient) Apply(ctx context.Context, obj *unstructured.Unstruct
 		applyOpts.DryRun = options.DryRun
 	}
 
+	// Handle namespaced vs cluster-scoped resources
+	var resource dynamic.ResourceInterface
+	if obj.GetNamespace() != "" {
+		resource = d.client.Resource(gvr).Namespace(obj.GetNamespace())
+	} else {
+		resource = d.client.Resource(gvr)
+	}
+
 	_, err = resource.Apply(ctx, obj.GetName(), obj, applyOpts)
 	return err
 }
@@ -178,11 +179,6 @@ func (d *DynamicK8sClient) DryRunApply(ctx context.Context, obj *unstructured.Un
 	gvr, err := d.getGVR(obj)
 	if err != nil {
 		return nil, fmt.Errorf("failed to determine GVR: %w", err)
-	}
-
-	resource := d.client.Resource(gvr)
-	if obj.GetNamespace() != "" {
-		resource = resource.Namespace(obj.GetNamespace())
 	}
 
 	fieldManager := options.FieldManager
@@ -198,14 +194,24 @@ func (d *DynamicK8sClient) DryRunApply(ctx context.Context, obj *unstructured.Un
 		DryRun:       []string{metav1.DryRunAll},
 	}
 
+	// Handle namespaced vs cluster-scoped resources
+	var resource dynamic.ResourceInterface
+	if obj.GetNamespace() != "" {
+		resource = d.client.Resource(gvr).Namespace(obj.GetNamespace())
+	} else {
+		resource = d.client.Resource(gvr)
+	}
+
 	return resource.Apply(ctx, obj.GetName(), obj, applyOpts)
 }
 
 // Get retrieves an object from the cluster.
 func (d *DynamicK8sClient) Get(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string) (*unstructured.Unstructured, error) {
-	resource := d.client.Resource(gvr)
+	var resource dynamic.ResourceInterface
 	if namespace != "" {
-		resource = resource.Namespace(namespace)
+		resource = d.client.Resource(gvr).Namespace(namespace)
+	} else {
+		resource = d.client.Resource(gvr)
 	}
 
 	return resource.Get(ctx, name, metav1.GetOptions{})
@@ -213,17 +219,19 @@ func (d *DynamicK8sClient) Get(ctx context.Context, gvr schema.GroupVersionResou
 
 // Delete removes an object from the cluster.
 func (d *DynamicK8sClient) Delete(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string, options DeleteOptions) error {
-	resource := d.client.Resource(gvr)
-	if namespace != "" {
-		resource = resource.Namespace(namespace)
-	}
-
 	deleteOpts := metav1.DeleteOptions{}
 	if options.GracePeriodSeconds != nil {
 		deleteOpts.GracePeriodSeconds = options.GracePeriodSeconds
 	}
 	if options.PropagationPolicy != nil {
 		deleteOpts.PropagationPolicy = options.PropagationPolicy
+	}
+
+	var resource dynamic.ResourceInterface
+	if namespace != "" {
+		resource = d.client.Resource(gvr).Namespace(namespace)
+	} else {
+		resource = d.client.Resource(gvr)
 	}
 
 	return resource.Delete(ctx, name, deleteOpts)
