@@ -10,17 +10,15 @@ Traditional providers force cluster configuration into the provider block; **k8s
 
 | Pain point                            | Conventional providers                                                      | **`k8sinline`**                                                             |
 | ------------------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| Multi‑phase apply requirement         | ❌ Requires staging: infra apply, then manifest apply                        | ✅ All resources in one plan — no phase split                                |
+| Multi‑phase apply requirement         | ❌ Requires staging: infra apply, then manifest apply                        | ✅ All resources in one plan — no phase split                                |
 | Cluster‑first dependency hell         | ❌ Providers require the cluster to exist at plan time                       | ✅ Connections defer auth resolution to apply time                           |
 | Multi‑cluster support                 | ❌ Requires provider aliases or separate states per cluster                  | ✅ Inline connection per resource — all clusters in one plan                 |
 | Plan-time unknown inputs cause taints | ❌ Provider taints resources when connection values are unknown at plan time | ✅ No tainting — deferred diffing skips live reads and lets the plan proceed |
 
-> **In short:** if you’ve ever copy‑pasted the same manifest into five workspaces just to hit five clusters, this provider removes that overhead.
+> **In short:** if you've ever copy‑pasted the same manifest into five workspaces just to hit five clusters, this provider removes that overhead.
 > `k8sinline` ends the chicken‑and‑egg problem. Clusters and manifests live in a **single plan** — no staged applies, no token hacks, no wrappers.
 
 ---
-
-<!-- README.md – new sections (place below the title and above “Why k8sinline”) -->
 
 ## Getting Started
 
@@ -50,32 +48,30 @@ Traditional providers force cluster configuration into the provider block; **k8s
 
 ---
 
-## Security caveats 🔐  
+## Security caveats 🔐  
 
 Storing cluster credentials in the resource body means they **land in your Terraform
 state file**. Mitigate by:
 
-* Encrypting remote state (S3 + KMS, Terraform Cloud, etc.).
+* Encrypting remote state (S3 + KMS, Terraform Cloud, etc.).
 * Supplying the sensitive values via Vault/Secrets Manager data sources so they never
   appear in plaintext HCL.
 * Rotating or redacting historical state snapshots.
 
 All `cluster.*` attributes are flagged **`Sensitive: true`** so they are redacted
-in CLI output and logs, but the bytes still exist in the state blob.
+in CLI output and logs, but the bytes still exist in the state blob.
 
 ---
 
-## RBAC pre‑flight check ⚙️  
+## RBAC pre‑flight check ⚙️  
 
-During provider configuration the following probe runs and must return “yes”:
+During resource operations, the provider validates that the configured credentials have sufficient permissions for server-side apply operations against the target resources.
 
-    kubectl auth can-i apply --server-side -f -
-
-If it fails, Terraform aborts early with a clear error message.
+If permissions are insufficient, Terraform aborts with a clear error message indicating the missing RBAC permissions.
 
 ---
 
-## Delete protection 🛑  
+## Delete protection 🛑  
 
 Add `delete_protection = true` to any `k8sinline_manifest`.  
 Terraform will refuse to destroy the object unless you set the flag to
@@ -83,29 +79,18 @@ Terraform will refuse to destroy the object unless you set the flag to
 
 ---
 
-## Licensing notes 📜  
-
-The provider statically links code from **`k8s.io/kubectl`**.  
-Accordingly, the Kubernetes Apache 2.0 license and notices are reproduced
-verbatim in `LICENSES/NOTICE-kubernetes.txt`.
-
-A full SARIF security scan (Trivy) runs in CI; the badge on this README
-always reflects the latest main‑branch result.
-
-
 ## Requirements
 
 | Component      | Minimum version | Notes                                                                                                                                                                                                                 |
 | -------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Terraform      | 1.6+            | Tested on Terraform 1.6 and 1.7                                                                                                                                                                                       |
-| Kubectl        | 1.27            | Must be in `$PATH` on the machine running `terraform apply`                                                                                                                                                           |
-| Execution host | N/A             | Must be a self-hosted runner or CI agent **with `kubectl` installed**.<br/>Compatible with GitHub Actions and other runners **if** `kubectl` is available or installed. Not compatible with Terraform Cloud (hosted). |
+| Execution host | N/A             | Compatible with any environment that can run Terraform, including Terraform Cloud, GitHub Actions, and other CI/CD platforms                                                                                          |
 
 ---
 
 ## Limitations & Caveats
 
-* **CRD ordering** – `kubectl apply` fails if a resource refers to a CRD that is not yet registered. Use `depends_on` or split your plan to avoid race conditions.
+* **CRD ordering** – Server-side apply fails if a resource refers to a CRD that is not yet registered. Use `depends_on` or split your plan to avoid race conditions.
 * **Parallelism safety** – The provider serializes operations on `(cluster,namespace,kind,name)` to prevent races **within a single plan**. However, concurrent `terraform apply` runs may still overwrite each other. Use state locking or serialized workflows for cross-run safety.
 * **Policy engines** – Because connection settings live inside the resource, Sentinel or OPA rules that introspect *provider blocks* will not see them.
 * **Hash-based diff** – Plan output shows full manifest replacement when `yaml_body` changes; Terraform does not show line-by-line diffs (yet).
@@ -143,7 +128,7 @@ When any `cluster_connection` field is *unknown* on the first run, `k8sinline` w
 When any `cluster_connection` field is **unknown** at plan time the resource is shown as `create`.
 During **apply** the provider:
 
-1. Resolves the final connection and runs `kubectl get <kind>/<name> -n <namespace> -o json`.
+1. Resolves the final connection and queries the Kubernetes API for `<kind>/<name>` in `<namespace>`.
 2. **If the object exists *and* contains&#x20;
    `metadata.annotations["k8sinline.hashicorp.com/id"]` that matches the&#x20;
    Terraform resource ID,** the provider *adopts* the object instead of&#x20;
@@ -152,9 +137,9 @@ During **apply** the provider:
 3. **If the object exists without the annotation** the provider aborts with&#x20;
    an error, explaining that the object is unmanaged and would have been&#x20;
    overwritten.
-4. **If the object is missing** the provider proceeds with `kubectl apply`.
+4. **If the object is missing** the provider proceeds with server-side apply.
 
-This behavior prevents “accidental taint” while still blocking silent
+This behavior prevents "accidental taint" while still blocking silent
 overwrites.  Users will see `Creating… adopted existing object` in the
 CLI output the first time the resource runs.
 
@@ -381,18 +366,18 @@ module "frontend" {
 ### Decisions made
 
 * **Boot once, diff forever:** the provider must deliver server-side drift detection **without** forcing multi-phase pipelines. If any `cluster_connection` value is unknown on the first plan, the resource defers its live diff (no graph taint) and stores the final connection in state; subsequent plans perform normal server-side diffs.
-* **Leverages `kubectl` internally** — rather than reimplementing 10+ years of edge-case logic, the provider delegates diffing and apply operations to `kubectl`, which is installed in most CI/CD environments and guarantees compatibility with CRDs and Kubernetes server behavior.
-* **Diff strategy:** `kubectl apply --dry-run=server -o json` is used to perform accurate, server-side diffs without implementing merge-patch logic.
+* **Uses client-go Dynamic Client** — leverages the stable client-go APIs for server-side apply operations with ApplyPatchType, ensuring compatibility with all Kubernetes versions and reducing binary size.
+* **Diff strategy:** Server-side apply dry-run is used to perform accurate, server-side diffs without implementing merge-patch logic.
 * **Concurrency:** Resources are serialized by `(cluster,namespace,name,kind)` to prevent apply-time race conditions. Parallelism may be user-configurable in future.
 * **Destroy bug (data-source → connection):** Solved via **deferred diff**. If any `cluster_connection` field is unknown, diff is skipped and the final connection is persisted in state. No need for a split connection model.
 * **Field naming** follows K8s REST / exec‑auth spec verbatim.
 * **Namespace handling** stays in `yaml_body`; provider does not add implicit namespaces.
 * **TLS verification** must pass; skip‑verify will not be supported.
-* **Implement `lifecycle { replace_triggered_by = [yaml_body] }` (requires Terraform ≥ 1.6).**
+* **Implement `lifecycle { replace_triggered_by = [yaml_body] }` (requires Terraform ≥ 1.6).**
 * **Sensitive defaults** for `exec.args`, `kubeconfig_raw`.
 * **Validation**: UTF‑8, single‑doc; parsed during `Validate()`.
 * **Checksum tag**: provider stores last‑applied SHA‑256, *not* the original `kubectl` annotation.
-* **Comparison table** added to “Why” section for quick salesmanship.
+* **Comparison table** added to "Why" section for quick salesmanship.
 * **Single-process concurrency safety** is built in. The provider serializes resource operations by `(cluster,namespace,kind,name)` to prevent apply-time collisions from multiple resources targeting the same object within a single plan.
 * **Cross-process locking is not supported**. Users must avoid running concurrent `terraform apply` operations that target the same cluster and object set.
 
@@ -405,12 +390,10 @@ module "frontend" {
 | **Waiters / readiness**     | Expose `wait_for = ["condition:Available", "generationObserved"]` for CRDs                                                | Med  |
 | **Import support**          | Syntax: `<cluster-hash>/<namespace>/<kind>/<name>`                                                                        | Med  |
 | **Delete protection**       | Skip destroy if already missing; useful for GitOps parity                                                                 | Low  |
-| **Preferred API version**   | Allow user to pin preferred `apiVersion` or rely on kubectl discovery                                                     | Low  |
 | **Drift‑detection opt‑out** | Support `lifecycle.ignore_changes = ["yaml_body"]`                                                                        | Low  |
 | **Multi-doc YAML support**  | Use sigs.k8s.io/kustomize/kyaml to loop over yaml\_body                                                                   | High |
-| **Structured diff output**  | Replace current hash-only behavior with field-level diffing via `kubectl apply --dry-run=server -o json` and `json-patch` | Med  |
+| **Structured diff output**  | Replace current hash-only behavior with field-level diffing via server-side apply dry-run and structured-merge-diff      | Med  |
 | **Testing matrix**          | Cover ≥ 4 K8s versions and ≥ 4 auth flows                                                                                 | Low  |
-| **Kubectl version check**   | Add a fail-fast check in `Configure()` to ensure required `kubectl` version is available at runtime                       | Low  |
 
 ---
 
