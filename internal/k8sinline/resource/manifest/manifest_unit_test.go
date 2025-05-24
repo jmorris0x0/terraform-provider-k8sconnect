@@ -2,6 +2,7 @@
 package manifest
 
 import (
+	"encoding/base64"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -115,6 +116,111 @@ users:
 
 	if client == nil {
 		t.Fatal("expected client but got nil")
+	}
+}
+
+func TestCreateInlineClient_DirectRestConfig(t *testing.T) {
+	r := &manifestResource{}
+
+	// Create test CA data (base64 encoded)
+	testCA := "test-ca-certificate-data"
+	encodedCA := base64.StdEncoding.EncodeToString([]byte(testCA))
+
+	conn := clusterConnectionModel{
+		Host:                 types.StringValue("https://test.example.com"),
+		ClusterCACertificate: types.StringValue(encodedCA),
+		KubeconfigFile:       types.StringNull(),
+		KubeconfigRaw:        types.StringNull(),
+		Context:              types.StringNull(),
+		Exec: execAuthModel{
+			APIVersion: types.StringValue("client.authentication.k8s.io/v1"),
+			Command:    types.StringValue("aws"),
+			Args: []types.String{
+				types.StringValue("eks"),
+				types.StringValue("get-token"),
+				types.StringValue("--cluster-name"),
+				types.StringValue("test-cluster"),
+			},
+		},
+	}
+
+	client, err := r.createInlineClient(conn)
+	if err != nil {
+		t.Fatalf("Failed to create inline client: %v", err)
+	}
+
+	if client == nil {
+		t.Fatal("Expected client but got nil")
+	}
+
+	// Test successful creation without exec
+	connNoExec := clusterConnectionModel{
+		Host:                 types.StringValue("https://test.example.com"),
+		ClusterCACertificate: types.StringValue(encodedCA),
+		KubeconfigFile:       types.StringNull(),
+		KubeconfigRaw:        types.StringNull(),
+		Context:              types.StringNull(),
+		Exec: execAuthModel{
+			APIVersion: types.StringNull(),
+			Command:    types.StringNull(),
+			Args:       []types.String{},
+		},
+	}
+
+	client2, err := r.createInlineClient(connNoExec)
+	if err != nil {
+		t.Fatalf("Failed to create inline client without exec: %v", err)
+	}
+
+	if client2 == nil {
+		t.Fatal("Expected client but got nil (no exec case)")
+	}
+}
+
+func TestCreateInlineClient_ValidationErrors(t *testing.T) {
+	r := &manifestResource{}
+
+	tests := []struct {
+		name   string
+		conn   clusterConnectionModel
+		expect string
+	}{
+		{
+			name: "missing host",
+			conn: clusterConnectionModel{
+				Host:                 types.StringNull(),
+				ClusterCACertificate: types.StringValue("dGVzdA=="), // base64 "test"
+			},
+			expect: "host is required for inline connection",
+		},
+		{
+			name: "missing CA certificate",
+			conn: clusterConnectionModel{
+				Host:                 types.StringValue("https://test.com"),
+				ClusterCACertificate: types.StringNull(),
+			},
+			expect: "cluster_ca_certificate is required for inline connection",
+		},
+		{
+			name: "invalid base64 CA",
+			conn: clusterConnectionModel{
+				Host:                 types.StringValue("https://test.com"),
+				ClusterCACertificate: types.StringValue("invalid-base64!"),
+			},
+			expect: "failed to decode cluster_ca_certificate",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := r.createInlineClient(tt.conn)
+			if err == nil {
+				t.Fatalf("Expected error but got none")
+			}
+			if err.Error() != tt.expect && !contains(err.Error(), tt.expect) {
+				t.Errorf("Expected error containing %q, got %q", tt.expect, err.Error())
+			}
+		})
 	}
 }
 
@@ -256,4 +362,9 @@ func TestGenerateID(t *testing.T) {
 	if id1 == id3 {
 		t.Error("expected different IDs for different objects")
 	}
+}
+
+// Helper function for substring checking
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && s[:len(substr)] == substr
 }

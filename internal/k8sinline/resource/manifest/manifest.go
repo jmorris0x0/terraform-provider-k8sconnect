@@ -19,9 +19,10 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8sschema "k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/yaml"
+	"k8s.io/client-go/rest"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/k8sclient"
-	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/kubeconfig"
 )
 
 var _ resource.Resource = (*manifestResource)(nil)
@@ -367,7 +368,7 @@ func (r *manifestResource) createK8sClient(conn clusterConnectionModel) (k8sclie
 	}
 }
 
-// createInlineClient creates a client from inline connection settings
+// createInlineClient creates a client from inline connection settings - directly builds REST config
 func (r *manifestResource) createInlineClient(conn clusterConnectionModel) (k8sclient.K8sClient, error) {
 	if conn.Host.IsNull() {
 		return nil, fmt.Errorf("host is required for inline connection")
@@ -382,30 +383,31 @@ func (r *manifestResource) createInlineClient(conn clusterConnectionModel) (k8sc
 		return nil, fmt.Errorf("failed to decode cluster_ca_certificate: %w", err)
 	}
 
-	// Convert exec configuration
-	var execAuth kubeconfig.ExecAuth
-	if !conn.Exec.APIVersion.IsNull() {
-		execAuth.APIVersion = conn.Exec.APIVersion.ValueString()
-		execAuth.Command = conn.Exec.Command.ValueString()
+	// Build REST config directly
+	config := &rest.Config{
+		Host: conn.Host.ValueString(),
+		TLSClientConfig: rest.TLSClientConfig{
+			CAData: caData,
+		},
+	}
 
+	// Add exec provider if specified
+	if !conn.Exec.APIVersion.IsNull() {
 		args := make([]string, len(conn.Exec.Args))
 		for i, arg := range conn.Exec.Args {
 			args[i] = arg.ValueString()
 		}
-		execAuth.Args = args
+
+		config.ExecProvider = &clientcmdapi.ExecConfig{
+			APIVersion:      conn.Exec.APIVersion.ValueString(),
+			Command:         conn.Exec.Command.ValueString(),
+			Args:            args,
+			Env:             []clientcmdapi.ExecEnvVar{},
+			InteractiveMode: clientcmdapi.NeverInteractiveMode,
+		}
 	}
 
-	// Generate kubeconfig
-	kubeconfigBytes, err := kubeconfig.GenerateKubeconfigFromInline(
-		conn.Host.ValueString(),
-		caData, // Now properly decoded
-		execAuth,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate kubeconfig: %w", err)
-	}
-
-	return k8sclient.NewDynamicK8sClientFromKubeconfig(kubeconfigBytes, "")
+	return k8sclient.NewDynamicK8sClient(config)
 }
 
 // createFileClient creates a client from kubeconfig file
