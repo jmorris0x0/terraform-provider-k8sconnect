@@ -4,6 +4,8 @@ package manifest
 import (
 	"context"
 	"encoding/base64"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
