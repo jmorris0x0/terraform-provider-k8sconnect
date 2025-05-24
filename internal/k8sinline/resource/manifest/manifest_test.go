@@ -397,3 +397,99 @@ YAML
   }
 }
 `
+
+// Alternative: Test namespace inference with ConfigMap (simpler than Pod)
+func TestAccManifestResource_DefaultNamespaceInference(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	if raw == "" {
+		t.Skip("TF_ACC_KUBECONFIG_RAW not set, skipping")
+	}
+
+	k8sClient := createK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sinline": providerserver.NewProtocol6WithError(k8sinline.New()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testAccManifestConfigDefaultNamespace,
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("k8sinline_manifest.test_default_ns", "yaml_body", testConfigMapYAMLNoNamespace),
+					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_default_ns", "id"),
+					// Key test: ConfigMap with no namespace should end up in default
+					testAccCheckConfigMapExists(k8sClient, "default", "acctest-config"),
+				),
+			},
+		},
+		CheckDestroy: testAccCheckConfigMapDestroy(k8sClient, "default", "acctest-config"),
+	})
+}
+
+// Helper functions for ConfigMap verification
+func testAccCheckConfigMapExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		_, err := client.CoreV1().ConfigMaps(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("configmap %s/%s does not exist: %v", namespace, name, err)
+		}
+		fmt.Printf("✅ Verified configmap %s/%s exists (inferred namespace)\n", namespace, name)
+		return nil
+	}
+}
+
+func testAccCheckConfigMapDestroy(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		for i := 0; i < 10; i++ {
+			_, err := client.CoreV1().ConfigMaps(namespace).Get(ctx, name, metav1.GetOptions{})
+			if err != nil {
+				if strings.Contains(err.Error(), "not found") {
+					fmt.Printf("✅ Verified configmap %s/%s was deleted\n", namespace, name)
+					return nil
+				}
+				return fmt.Errorf("unexpected error checking configmap: %v", err)
+			}
+			time.Sleep(1 * time.Second)
+		}
+		return fmt.Errorf("configmap %s/%s still exists after deletion", namespace, name)
+	}
+}
+
+// Test constants
+const testConfigMapYAMLNoNamespace = `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: acctest-config
+data:
+  key1: value1
+`
+
+const testAccManifestConfigDefaultNamespace = `
+variable "raw" {
+  type = string
+}
+
+provider "k8sinline" {}
+
+resource "k8sinline_manifest" "test_default_ns" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: acctest-config
+data:
+  key1: value1
+YAML
+
+  cluster_connection {
+    kubeconfig_raw = var.raw
+  }
+}
+`
