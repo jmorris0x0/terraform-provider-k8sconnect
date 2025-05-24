@@ -363,6 +363,7 @@ const testPodYAML = `apiVersion: v1
 kind: Pod
 metadata:
   name: acctest-pod
+  namespace: default
 spec:
   containers:
   - name: test
@@ -383,6 +384,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: acctest-pod
+  namespace: default
 spec:
   containers:
   - name: test
