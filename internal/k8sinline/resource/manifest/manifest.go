@@ -16,9 +16,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
+	k8sschema "k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/yaml"
-	"k8s.io/client-go/rest"
 
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/k8sclient"
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/kubeconfig"
@@ -426,22 +425,22 @@ func (r *manifestResource) createRawClient(conn clusterConnectionModel) (k8sclie
 
 // getGVR determines the GroupVersionResource for an object
 // This is a simplified version - real implementation would use discovery
-func (r *manifestResource) getGVR(obj *unstructured.Unstructured) (schema.GroupVersionResource, error) {
+func (r *manifestResource) getGVR(obj *unstructured.Unstructured) (k8sschema.GroupVersionResource, error) {
 	gvk := obj.GroupVersionKind()
 
 	// This is a simplified mapping - real implementation would use discovery client
 	// For now, handle common cases
 	switch gvk.Kind {
 	case "Namespace":
-		return schema.GroupVersionResource{Group: "", Version: "v1", Resource: "namespaces"}, nil
+		return k8sschema.GroupVersionResource{Group: "", Version: "v1", Resource: "namespaces"}, nil
 	case "Pod":
-		return schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}, nil
+		return k8sschema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}, nil
 	case "Service":
-		return schema.GroupVersionResource{Group: "", Version: "v1", Resource: "services"}, nil
+		return k8sschema.GroupVersionResource{Group: "", Version: "v1", Resource: "services"}, nil
 	case "Deployment":
-		return schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}, nil
+		return k8sschema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}, nil
 	default:
-		return schema.GroupVersionResource{}, fmt.Errorf("unsupported resource kind: %s", gvk.Kind)
+		return k8sschema.GroupVersionResource{}, fmt.Errorf("unsupported resource kind: %s", gvk.Kind)
 	}
 }
 
