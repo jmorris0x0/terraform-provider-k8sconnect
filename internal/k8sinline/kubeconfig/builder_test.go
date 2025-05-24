@@ -12,7 +12,7 @@ func TestGenerateKubeconfigFromInline(t *testing.T) {
 	host := "https://example.com"
 	caData := []byte("myCAData")
 	execCfg := ExecAuth{
-		APIVersion: "client.authentication.k8s.io/v1beta1",
+		APIVersion: "client.authentication.k8s.io/v1",
 		Command:    "echo",
 		Args:       []string{"foo", "bar"},
 	}

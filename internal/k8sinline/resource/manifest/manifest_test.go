@@ -78,7 +78,7 @@ YAML
     cluster_ca_certificate = var.ca
 
     exec = {
-      api_version = "client.authentication.k8s.io/v1beta1"
+      api_version = "client.authentication.k8s.io/v1"
       command     = var.cmd
       args        = ["hello"]
     }

@@ -4,6 +4,7 @@ package manifest
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 
@@ -375,6 +376,12 @@ func (r *manifestResource) createInlineClient(conn clusterConnectionModel) (k8sc
 		return nil, fmt.Errorf("cluster_ca_certificate is required for inline connection")
 	}
 
+	// Decode base64-encoded CA certificate
+	caData, err := base64.StdEncoding.DecodeString(conn.ClusterCACertificate.ValueString())
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode cluster_ca_certificate: %w", err)
+	}
+
 	// Convert exec configuration
 	var execAuth kubeconfig.ExecAuth
 	if !conn.Exec.APIVersion.IsNull() {
@@ -391,7 +398,7 @@ func (r *manifestResource) createInlineClient(conn clusterConnectionModel) (k8sc
 	// Generate kubeconfig
 	kubeconfigBytes, err := kubeconfig.GenerateKubeconfigFromInline(
 		conn.Host.ValueString(),
-		[]byte(conn.ClusterCACertificate.ValueString()),
+		caData, // Now properly decoded
 		execAuth,
 	)
 	if err != nil {

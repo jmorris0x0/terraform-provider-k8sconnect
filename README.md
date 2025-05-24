@@ -200,7 +200,7 @@ The `exec` block is a typed object, not an open map — only the following field
 
 | Field         | Type         | Required | Notes                                         |
 | ------------- | ------------ | -------- | --------------------------------------------- |
-| `api_version` | string       | Yes      | e.g. `client.authentication.k8s.io/v1beta1`   |
+| `api_version` | string       | Yes      | e.g. `client.authentication.k8s.io/v1`        |
 | `command`     | string       | Yes      | e.g. `aws`                                    |
 | `args`        | list(string) | Optional | Marked sensitive; passed as command-line args |
 
@@ -256,7 +256,7 @@ resource "k8sinline_manifest" "eks" {
     cluster_ca_certificate = base64decode(data.aws_eks_cluster.this.certificate_authority[0].data)
 
     exec = {
-      api_version = "client.authentication.k8s.io/v1beta1"
+      api_version = "client.authentication.k8s.io/v1"
       command     = "aws"
       args        = ["eks", "get-token", "--cluster-name", var.cluster_name]
     }
@@ -338,7 +338,7 @@ module "frontend" {
         cluster_ca_certificate = base64decode(data.aws_eks_cluster.prod.certificate_authority[0].data)
 
         exec = {
-          api_version = "client.authentication.k8s.io/v1beta1"
+          api_version = "client.authentication.k8s.io/v1"
           command     = "aws"
           args        = [
             "eks",
