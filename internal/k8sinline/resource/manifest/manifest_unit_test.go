@@ -408,3 +408,67 @@ func TestGenerateID(t *testing.T) {
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && s[:len(substr)] == substr
 }
+
+func TestClassifyK8sError(t *testing.T) {
+	r := &manifestResource{}
+
+	tests := []struct {
+		name             string
+		err              error
+		operation        string
+		expectedSeverity string
+		expectedTitle    string
+		shouldContain    string
+	}{
+		{
+			name:             "not found error",
+			err:              errors.NewNotFound(schema.GroupResource{Resource: "pods"}, "test-pod"),
+			operation:        "Read",
+			expectedSeverity: "warning",
+			expectedTitle:    "Read: Resource Not Found",
+			shouldContain:    "was not found",
+		},
+		{
+			name:             "forbidden error",
+			err:              errors.NewForbidden(schema.GroupResource{Resource: "pods"}, "test-pod", fmt.Errorf("access denied")),
+			operation:        "Create",
+			expectedSeverity: "error",
+			expectedTitle:    "Create: Insufficient Permissions",
+			shouldContain:    "RBAC permissions insufficient",
+		},
+		{
+			name:             "conflict error",
+			err:              errors.NewConflict(schema.GroupResource{Resource: "pods"}, "test-pod", fmt.Errorf("field manager conflict")),
+			operation:        "Apply",
+			expectedSeverity: "error",
+			expectedTitle:    "Apply: Field Manager Conflict",
+			shouldContain:    "Server-side apply conflict",
+		},
+		{
+			name:             "timeout error",
+			err:              errors.NewTimeoutError("operation timed out", 30),
+			operation:        "Create",
+			expectedSeverity: "error",
+			expectedTitle:    "Create: Kubernetes API Timeout",
+			shouldContain:    "Timeout while performing",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			severity, title, detail := r.classifyK8sError(tt.err, tt.operation, "Pod test-pod")
+
+			if severity != tt.expectedSeverity {
+				t.Errorf("expected severity %q, got %q", tt.expectedSeverity, severity)
+			}
+
+			if title != tt.expectedTitle {
+				t.Errorf("expected title %q, got %q", tt.expectedTitle, title)
+			}
+
+			if !strings.Contains(detail, tt.shouldContain) {
+				t.Errorf("expected detail to contain %q, got: %s", tt.shouldContain, detail)
+			}
+		})
+	}
+}
