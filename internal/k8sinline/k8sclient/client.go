@@ -143,6 +143,58 @@ func (d *DynamicK8sClient) WithForceConflicts(force bool) K8sClient {
 	return d
 }
 
+// getResourceInterface returns the appropriate ResourceInterface, handling default namespace inference
+func (d *DynamicK8sClient) getResourceInterface(ctx context.Context, gvr schema.GroupVersionResource, obj *unstructured.Unstructured) (dynamic.ResourceInterface, error) {
+	// Use discovery to check if this resource type is namespaced
+	resourceList, err := d.discovery.ServerResourcesForGroupVersion(gvr.GroupVersion().String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get resource info: %w", err)
+	}
+
+	var isNamespaced bool
+	for _, apiResource := range resourceList.APIResources {
+		if apiResource.Name == gvr.Resource {
+			isNamespaced = apiResource.Namespaced
+			break
+		}
+	}
+
+	if isNamespaced {
+		namespace := obj.GetNamespace()
+		if namespace == "" {
+			namespace = "default" // Default namespace inference
+		}
+		return d.client.Resource(gvr).Namespace(namespace), nil
+	} else {
+		// Truly cluster-scoped (like Namespaces)
+		return d.client.Resource(gvr), nil
+	}
+}
+
+// getResourceInterfaceByNamespace handles Get/Delete operations that take namespace as parameter
+func (d *DynamicK8sClient) getResourceInterfaceByNamespace(ctx context.Context, gvr schema.GroupVersionResource, namespace string) (dynamic.ResourceInterface, error) {
+	// If namespace is empty, check if the resource is namespaced and use default
+	if namespace == "" {
+		resourceList, err := d.discovery.ServerResourcesForGroupVersion(gvr.GroupVersion().String())
+		if err != nil {
+			return nil, fmt.Errorf("failed to get resource info: %w", err)
+		}
+
+		for _, apiResource := range resourceList.APIResources {
+			if apiResource.Name == gvr.Resource && apiResource.Namespaced {
+				namespace = "default"
+				break
+			}
+		}
+	}
+
+	if namespace != "" {
+		return d.client.Resource(gvr).Namespace(namespace), nil
+	} else {
+		return d.client.Resource(gvr), nil
+	}
+}
+
 // Apply performs server-side apply on the given object.
 func (d *DynamicK8sClient) Apply(ctx context.Context, obj *unstructured.Unstructured, options ApplyOptions) error {
 	gvr, err := d.getGVR(obj)
@@ -166,12 +218,9 @@ func (d *DynamicK8sClient) Apply(ctx context.Context, obj *unstructured.Unstruct
 		applyOpts.DryRun = options.DryRun
 	}
 
-	// Handle namespaced vs cluster-scoped resources
-	var resource dynamic.ResourceInterface
-	if obj.GetNamespace() != "" {
-		resource = d.client.Resource(gvr).Namespace(obj.GetNamespace())
-	} else {
-		resource = d.client.Resource(gvr)
+	resource, err := d.getResourceInterface(ctx, gvr, obj)
+	if err != nil {
+		return err
 	}
 
 	_, err = resource.Apply(ctx, obj.GetName(), obj, applyOpts)
@@ -198,12 +247,9 @@ func (d *DynamicK8sClient) DryRunApply(ctx context.Context, obj *unstructured.Un
 		DryRun:       []string{metav1.DryRunAll},
 	}
 
-	// Handle namespaced vs cluster-scoped resources
-	var resource dynamic.ResourceInterface
-	if obj.GetNamespace() != "" {
-		resource = d.client.Resource(gvr).Namespace(obj.GetNamespace())
-	} else {
-		resource = d.client.Resource(gvr)
+	resource, err := d.getResourceInterface(ctx, gvr, obj)
+	if err != nil {
+		return nil, err
 	}
 
 	return resource.Apply(ctx, obj.GetName(), obj, applyOpts)
@@ -211,11 +257,9 @@ func (d *DynamicK8sClient) DryRunApply(ctx context.Context, obj *unstructured.Un
 
 // Get retrieves an object from the cluster.
 func (d *DynamicK8sClient) Get(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string) (*unstructured.Unstructured, error) {
-	var resource dynamic.ResourceInterface
-	if namespace != "" {
-		resource = d.client.Resource(gvr).Namespace(namespace)
-	} else {
-		resource = d.client.Resource(gvr)
+	resource, err := d.getResourceInterfaceByNamespace(ctx, gvr, namespace)
+	if err != nil {
+		return nil, err
 	}
 
 	return resource.Get(ctx, name, metav1.GetOptions{})
@@ -231,17 +275,20 @@ func (d *DynamicK8sClient) Delete(ctx context.Context, gvr schema.GroupVersionRe
 		deleteOpts.PropagationPolicy = options.PropagationPolicy
 	}
 
-	var resource dynamic.ResourceInterface
-	if namespace != "" {
-		resource = d.client.Resource(gvr).Namespace(namespace)
-	} else {
-		resource = d.client.Resource(gvr)
+	resource, err := d.getResourceInterfaceByNamespace(ctx, gvr, namespace)
+	if err != nil {
+		return err
 	}
 
 	return resource.Delete(ctx, name, deleteOpts)
 }
 
-// getGVR determines the GroupVersionResource for an unstructured object.
+// GetGVR determines the GroupVersionResource for an unstructured object.
+func (d *DynamicK8sClient) GetGVR(ctx context.Context, obj *unstructured.Unstructured) (schema.GroupVersionResource, error) {
+	return d.getGVR(obj) // Use existing private method
+}
+
+// getGVR determines the GroupVersionResource for an unstructured object (private method)
 func (d *DynamicK8sClient) getGVR(obj *unstructured.Unstructured) (schema.GroupVersionResource, error) {
 	gvk := obj.GroupVersionKind()
 	if gvk.Empty() {
@@ -265,10 +312,6 @@ func (d *DynamicK8sClient) getGVR(obj *unstructured.Unstructured) (schema.GroupV
 	}
 
 	return schema.GroupVersionResource{}, fmt.Errorf("no resource found for %s", gvk)
-}
-
-func (d *DynamicK8sClient) GetGVR(ctx context.Context, obj *unstructured.Unstructured) (schema.GroupVersionResource, error) {
-	return d.getGVR(obj) // Use the existing private method
 }
 
 // ===================== stubK8sClient =====================
