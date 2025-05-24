@@ -22,6 +22,7 @@ Traditional providers force cluster configuration into the provider block; **k8s
 
 ## Getting Started
 
+```hcl
     terraform {
       required_providers {
         k8sinline = {
@@ -45,7 +46,7 @@ Traditional providers force cluster configuration into the provider block; **k8s
 
       delete_protection = true
     }
-
+```
 ---
 
 ## Security caveats 🔐  
@@ -240,7 +241,7 @@ provider "k8sinline" {}
 
 ### 1. Inline `cluster_connection` with `exec` (AWS EKS)
 
-```
+```hcl
 provider "k8sinline" {}
 
 data "aws_eks_cluster" "this" {
@@ -265,7 +266,7 @@ resource "k8sinline_manifest" "eks" {
 
 ### 2. Load kubeconfig from file
 
-```
+```hcl
 provider "k8sinline" {}
 
 resource "k8sinline_manifest" "filecfg" {
@@ -280,7 +281,7 @@ resource "k8sinline_manifest" "filecfg" {
 
 ### 3. Load kubeconfig as raw bytes
 
-```
+```hcl
 provider "k8sinline" {}
 
 resource "k8sinline_manifest" "rawcfg" {
@@ -322,7 +323,7 @@ On the next plan (when all fields are known), full server-side drift detection i
 
 ## Example: Module usage
 
-```
+```hcl
 provider "k8sinline" {}
 
 module "frontend" {
