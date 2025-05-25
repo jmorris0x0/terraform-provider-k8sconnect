@@ -42,12 +42,6 @@ type K8sClient interface {
 	GetGVR(ctx context.Context, obj *unstructured.Unstructured) (schema.GroupVersionResource, error)
 }
 
-// CacheInvalidator provides methods to invalidate caches for handling stale discovery
-type CacheInvalidator interface {
-	// InvalidateDiscoveryCache clears cached discovery information to handle new CRDs
-	InvalidateDiscoveryCache(ctx context.Context) error
-}
-
 // ApplyOptions holds options for server-side apply operations.
 type ApplyOptions struct {
 	FieldManager string
@@ -150,18 +144,6 @@ func (d *DynamicK8sClient) WithForceConflicts(force bool) K8sClient {
 	return d
 }
 
-// InvalidateDiscoveryCache implements CacheInvalidator interface
-func (d *DynamicK8sClient) InvalidateDiscoveryCache(ctx context.Context) error {
-	if cachedDiscovery, ok := d.discovery.(discovery.CachedDiscoveryInterface); ok {
-		tflog.Debug(ctx, "Invalidating discovery cache to handle potential new CRDs")
-		cachedDiscovery.Invalidate()
-		return nil
-	}
-	// If discovery client doesn't support caching, that's fine - no-op
-	tflog.Debug(ctx, "Discovery client doesn't support caching, skipping invalidation")
-	return nil
-}
-
 // getResourceInterface returns the appropriate ResourceInterface, handling default namespace inference
 func (d *DynamicK8sClient) getResourceInterface(ctx context.Context, gvr schema.GroupVersionResource, obj *unstructured.Unstructured) (dynamic.ResourceInterface, error) {
 	// Use discovery to check if this resource type is namespaced
@@ -216,7 +198,7 @@ func (d *DynamicK8sClient) getResourceInterfaceByNamespace(ctx context.Context, 
 
 // Apply performs server-side apply on the given object.
 func (d *DynamicK8sClient) Apply(ctx context.Context, obj *unstructured.Unstructured, options ApplyOptions) error {
-	gvr, err := d.getGVR(obj)
+	gvr, err := d.getGVR(ctx, obj)
 	if err != nil {
 		return fmt.Errorf("failed to determine GVR: %w", err)
 	}
@@ -248,7 +230,7 @@ func (d *DynamicK8sClient) Apply(ctx context.Context, obj *unstructured.Unstruct
 
 // DryRunApply performs a dry-run server-side apply.
 func (d *DynamicK8sClient) DryRunApply(ctx context.Context, obj *unstructured.Unstructured, options ApplyOptions) (*unstructured.Unstructured, error) {
-	gvr, err := d.getGVR(obj)
+	gvr, err := d.getGVR(ctx, obj)
 	if err != nil {
 		return nil, fmt.Errorf("failed to determine GVR: %w", err)
 	}
@@ -304,160 +286,104 @@ func (d *DynamicK8sClient) Delete(ctx context.Context, gvr schema.GroupVersionRe
 
 // GetGVR determines the GroupVersionResource for an unstructured object.
 func (d *DynamicK8sClient) GetGVR(ctx context.Context, obj *unstructured.Unstructured) (schema.GroupVersionResource, error) {
-	return d.getGVR(obj) // Use existing private method
+	return d.getGVR(ctx, obj)
 }
 
-// getGVR determines the GroupVersionResource for an unstructured object (private method)
-func (d *DynamicK8sClient) getGVR(obj *unstructured.Unstructured) (schema.GroupVersionResource, error) {
+// getGVR determines the GroupVersionResource for an unstructured object with helpful error messages
+func (d *DynamicK8sClient) getGVR(ctx context.Context, obj *unstructured.Unstructured) (schema.GroupVersionResource, error) {
 	gvk := obj.GroupVersionKind()
 	if gvk.Empty() {
 		return schema.GroupVersionResource{}, fmt.Errorf("object has no GroupVersionKind")
 	}
 
-	// Use discovery to map GVK to GVR
+	tflog.Debug(ctx, "Discovering GVR", map[string]interface{}{
+		"gvk": gvk.String(),
+	})
+
+	// Use discovery to map GVK to GVR - fresh call each time, simple and predictable
 	resources, err := d.discovery.ServerResourcesForGroupVersion(gvk.GroupVersion().String())
 	if err != nil {
+		// Provide helpful error message for common scenarios
+		if d.isDiscoveryError(err) {
+			return schema.GroupVersionResource{}, fmt.Errorf(
+				"failed to discover resources for %s: %w\n\nThis usually means:\n"+
+					"1. The API group/version doesn't exist in the cluster\n"+
+					"2. A CRD needs to be installed first (try: depends_on = [k8sinline_manifest.your_crd])\n"+
+					"3. Your cluster connection has insufficient permissions\n"+
+					"4. The cluster is unreachable",
+				gvk.GroupVersion(), err)
+		}
 		return schema.GroupVersionResource{}, fmt.Errorf("failed to discover resources for %s: %w", gvk.GroupVersion(), err)
 	}
 
 	for _, resource := range resources.APIResources {
 		if resource.Kind == gvk.Kind {
-			return schema.GroupVersionResource{
+			gvr := schema.GroupVersionResource{
 				Group:    gvk.Group,
 				Version:  gvk.Version,
 				Resource: resource.Name,
-			}, nil
+			}
+			tflog.Debug(ctx, "Discovered GVR", map[string]interface{}{
+				"gvk": gvk.String(),
+				"gvr": gvr.String(),
+			})
+			return gvr, nil
 		}
 	}
 
-	return schema.GroupVersionResource{}, fmt.Errorf("no resource found for %s", gvk)
+	return schema.GroupVersionResource{}, fmt.Errorf(
+		"no resource found for %s\n\nAvailable kinds in %s: %s\n\n"+
+			"This usually means:\n"+
+			"1. The resource kind doesn't exist (check spelling)\n"+
+			"2. A CRD needs to be installed first (try: depends_on = [k8sinline_manifest.your_crd])\n"+
+			"3. The API version is incorrect",
+		gvk, gvk.GroupVersion(), d.listAvailableKinds(resources))
 }
 
-// ===================== stubK8sClient =====================
-// stubK8sClient records operations for unit tests.
-type stubK8sClient struct {
-	ApplyCalls     []ApplyCall
-	GetCalls       []GetCall
-	DeleteCalls    []DeleteCall
-	DryRunCalls    []DryRunCall
-	fieldManager   string
-	forceConflicts bool
-
-	// Configurable responses
-	GetResponse    *unstructured.Unstructured
-	GetError       error
-	ApplyError     error
-	DeleteError    error
-	DryRunResponse *unstructured.Unstructured
-	DryRunError    error
-}
-
-type ApplyCall struct {
-	Object  *unstructured.Unstructured
-	Options ApplyOptions
-}
-
-type GetCall struct {
-	GVR       schema.GroupVersionResource
-	Namespace string
-	Name      string
-}
-
-type DeleteCall struct {
-	GVR       schema.GroupVersionResource
-	Namespace string
-	Name      string
-	Options   DeleteOptions
-}
-
-type DryRunCall struct {
-	Object  *unstructured.Unstructured
-	Options ApplyOptions
-}
-
-// NewStubK8sClient creates a new stubK8sClient for testing.
-func NewStubK8sClient() *stubK8sClient {
-	return &stubK8sClient{
-		fieldManager: "k8sinline",
+// isDiscoveryError checks if the error is related to discovery
+func (d *DynamicK8sClient) isDiscoveryError(err error) bool {
+	if err == nil {
+		return false
 	}
-}
-
-func (s *stubK8sClient) SetFieldManager(name string) K8sClient {
-	s.fieldManager = name
-	return s
-}
-
-func (s *stubK8sClient) WithForceConflicts(force bool) K8sClient {
-	s.forceConflicts = force
-	return s
-}
-
-// InvalidateDiscoveryCache implements CacheInvalidator interface for testing
-func (s *stubK8sClient) InvalidateDiscoveryCache(ctx context.Context) error {
-	// No-op for stub client
-	return nil
-}
-
-func (s *stubK8sClient) Apply(ctx context.Context, obj *unstructured.Unstructured, options ApplyOptions) error {
-	s.ApplyCalls = append(s.ApplyCalls, ApplyCall{
-		Object:  obj.DeepCopy(),
-		Options: options,
-	})
-	return s.ApplyError
-}
-
-func (s *stubK8sClient) Get(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string) (*unstructured.Unstructured, error) {
-	s.GetCalls = append(s.GetCalls, GetCall{
-		GVR:       gvr,
-		Namespace: namespace,
-		Name:      name,
-	})
-	return s.GetResponse, s.GetError
-}
-
-func (s *stubK8sClient) Delete(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string, options DeleteOptions) error {
-	s.DeleteCalls = append(s.DeleteCalls, DeleteCall{
-		GVR:       gvr,
-		Namespace: namespace,
-		Name:      name,
-		Options:   options,
-	})
-	return s.DeleteError
-}
-
-func (s *stubK8sClient) DryRunApply(ctx context.Context, obj *unstructured.Unstructured, options ApplyOptions) (*unstructured.Unstructured, error) {
-	s.DryRunCalls = append(s.DryRunCalls, DryRunCall{
-		Object:  obj.DeepCopy(),
-		Options: options,
-	})
-	return s.DryRunResponse, s.DryRunError
-}
-
-func (s *stubK8sClient) GetGVR(ctx context.Context, obj *unstructured.Unstructured) (schema.GroupVersionResource, error) {
-	// For testing, return predictable GVRs
-	gvk := obj.GroupVersionKind()
-	switch gvk.Kind {
-	case "Namespace":
-		return schema.GroupVersionResource{Group: "", Version: "v1", Resource: "namespaces"}, nil
-	case "Pod":
-		return schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}, nil
-	case "Service":
-		return schema.GroupVersionResource{Group: "", Version: "v1", Resource: "services"}, nil
-	case "Deployment":
-		return schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}, nil
-	case "ConfigMap":
-		return schema.GroupVersionResource{Group: "", Version: "v1", Resource: "configmaps"}, nil
-	case "Secret":
-		return schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}, nil
-	default:
-		// For unknown types in tests, make a reasonable guess
-		resource := strings.ToLower(gvk.Kind) + "s"
-		return schema.GroupVersionResource{Group: gvk.Group, Version: gvk.Version, Resource: resource}, nil
+	errStr := strings.ToLower(err.Error())
+	discoveryErrorPatterns := []string{
+		"could not find the requested resource",
+		"unable to retrieve the complete list of server apis",
+		"the server could not find the requested resource",
+		"no resources found",
 	}
+
+	for _, pattern := range discoveryErrorPatterns {
+		if strings.Contains(errStr, pattern) {
+			return true
+		}
+	}
+	return false
 }
 
-// Interface assertions ensure concrete types satisfy K8sClient and CacheInvalidator.
+// listAvailableKinds helps with error messages
+func (d *DynamicK8sClient) listAvailableKinds(resources *metav1.APIResourceList) string {
+	if resources == nil || len(resources.APIResources) == 0 {
+		return "none"
+	}
+
+	kinds := make([]string, 0, len(resources.APIResources))
+	for _, resource := range resources.APIResources {
+		if resource.Kind != "" {
+			kinds = append(kinds, resource.Kind)
+		}
+	}
+
+	if len(kinds) == 0 {
+		return "none"
+	}
+
+	// Limit to first 10 to avoid overwhelming error messages
+	if len(kinds) > 10 {
+		return strings.Join(kinds[:10], ", ") + ", ..."
+	}
+	return strings.Join(kinds, ", ")
+}
+
+// Interface assertion to ensure DynamicK8sClient satisfies K8sClient
 var _ K8sClient = (*DynamicK8sClient)(nil)
-var _ K8sClient = (*stubK8sClient)(nil)
-var _ CacheInvalidator = (*DynamicK8sClient)(nil)
-var _ CacheInvalidator = (*stubK8sClient)(nil)

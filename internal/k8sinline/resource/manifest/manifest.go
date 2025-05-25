@@ -21,6 +21,7 @@ import (
 	k8sschema "k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/k8sclient"
@@ -28,13 +29,53 @@ import (
 
 var _ resource.Resource = (*manifestResource)(nil)
 
-func NewManifestResource() resource.Resource {
-	return &manifestResource{}
+// ClientGetter function type for dependency injection
+type ClientGetter func(ClusterConnectionModel) (k8sclient.K8sClient, error)
+
+// ClusterConnectionModel is exported for use in provider
+type ClusterConnectionModel struct {
+	Host                 types.String   `tfsdk:"host"`
+	ClusterCACertificate types.String   `tfsdk:"cluster_ca_certificate"`
+	KubeconfigFile       types.String   `tfsdk:"kubeconfig_file"`
+	KubeconfigRaw        types.String   `tfsdk:"kubeconfig_raw"`
+	Context              types.String   `tfsdk:"context"`
+	Exec                 *execAuthModel `tfsdk:"exec"`
+}
+
+type execAuthModel struct {
+	APIVersion types.String   `tfsdk:"api_version"`
+	Command    types.String   `tfsdk:"command"`
+	Args       []types.String `tfsdk:"args"`
 }
 
 type manifestResource struct {
-	// K8sClient will be injected during Configure
-	k8sClient k8sclient.K8sClient
+	clientGetter ClientGetter
+}
+
+type manifestResourceModel struct {
+	ID                types.String           `tfsdk:"id"`
+	YAMLBody          types.String           `tfsdk:"yaml_body"`
+	ClusterConnection ClusterConnectionModel `tfsdk:"cluster_connection"`
+}
+
+// NewManifestResource creates a new manifest resource (backward compatibility)
+func NewManifestResource() resource.Resource {
+	return &manifestResource{
+		clientGetter: CreateK8sClientFromConnection,
+	}
+}
+
+// NewManifestResourceWithClientGetter creates a manifest resource with custom client getter
+func NewManifestResourceWithClientGetter(getter ClientGetter) resource.Resource {
+	return &manifestResource{
+		clientGetter: getter,
+	}
+}
+
+// CreateK8sClientFromConnection creates a K8sClient from connection model (exported for provider use)
+func CreateK8sClientFromConnection(conn ClusterConnectionModel) (k8sclient.K8sClient, error) {
+	r := &manifestResource{}
+	return r.createK8sClient(conn)
 }
 
 func (r *manifestResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -103,27 +144,6 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 	}
 }
 
-type manifestResourceModel struct {
-	ID                types.String           `tfsdk:"id"`
-	YAMLBody          types.String           `tfsdk:"yaml_body"`
-	ClusterConnection clusterConnectionModel `tfsdk:"cluster_connection"`
-}
-
-type clusterConnectionModel struct {
-	Host                 types.String   `tfsdk:"host"`
-	ClusterCACertificate types.String   `tfsdk:"cluster_ca_certificate"`
-	KubeconfigFile       types.String   `tfsdk:"kubeconfig_file"`
-	KubeconfigRaw        types.String   `tfsdk:"kubeconfig_raw"`
-	Context              types.String   `tfsdk:"context"`
-	Exec                 *execAuthModel `tfsdk:"exec"`
-}
-
-type execAuthModel struct {
-	APIVersion types.String   `tfsdk:"api_version"`
-	Command    types.String   `tfsdk:"command"`
-	Args       []types.String `tfsdk:"args"`
-}
-
 func (r *manifestResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var data manifestResourceModel
 
@@ -140,8 +160,8 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	// Create K8s client from cluster connection
-	client, err := r.createK8sClient(data.ClusterConnection)
+	// Create K8s client from cluster connection (now with caching)
+	client, err := r.clientGetter(data.ClusterConnection)
 	if err != nil {
 		resp.Diagnostics.AddError("Connection Failed", fmt.Sprintf("Failed to create Kubernetes client: %s", err))
 		return
@@ -194,8 +214,8 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	// Create K8s client from cluster connection
-	client, err := r.createK8sClient(data.ClusterConnection)
+	// Create K8s client from cluster connection (cached)
+	client, err := r.clientGetter(data.ClusterConnection)
 	if err != nil {
 		resp.Diagnostics.AddError("Connection Failed", fmt.Sprintf("Failed to create Kubernetes client: %s", err))
 		return
@@ -248,8 +268,8 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	// Create K8s client from cluster connection
-	client, err := r.createK8sClient(data.ClusterConnection)
+	// Create K8s client from cluster connection (cached)
+	client, err := r.clientGetter(data.ClusterConnection)
 	if err != nil {
 		resp.Diagnostics.AddError("Connection Failed", fmt.Sprintf("Failed to create Kubernetes client: %s", err))
 		return
@@ -298,8 +318,8 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 		return
 	}
 
-	// Create K8s client from cluster connection
-	client, err := r.createK8sClient(data.ClusterConnection)
+	// Create K8s client from cluster connection (cached)
+	client, err := r.clientGetter(data.ClusterConnection)
 	if err != nil {
 		resp.Diagnostics.AddError("Connection Failed", fmt.Sprintf("Failed to create Kubernetes client: %s", err))
 		return
@@ -373,7 +393,7 @@ func (r *manifestResource) parseYAML(yamlStr string) (*unstructured.Unstructured
 }
 
 // createK8sClient creates a K8sClient from cluster connection configuration
-func (r *manifestResource) createK8sClient(conn clusterConnectionModel) (k8sclient.K8sClient, error) {
+func (r *manifestResource) createK8sClient(conn ClusterConnectionModel) (k8sclient.K8sClient, error) {
 	// Determine connection mode
 	hasInline := !conn.Host.IsNull() || !conn.ClusterCACertificate.IsNull()
 	hasFile := !conn.KubeconfigFile.IsNull()
@@ -397,20 +417,31 @@ func (r *manifestResource) createK8sClient(conn clusterConnectionModel) (k8sclie
 		return nil, fmt.Errorf("cannot specify multiple connection modes")
 	}
 
+	// Create REST config
+	var config *rest.Config
+	var err error
+
 	switch {
 	case hasInline:
-		return r.createInlineClient(conn)
+		config, err = r.createInlineConfig(conn)
 	case hasFile:
-		return r.createFileClient(conn)
+		config, err = r.createFileConfig(conn)
 	case hasRaw:
-		return r.createRawClient(conn)
+		config, err = r.createRawConfig(conn)
 	default:
 		return nil, fmt.Errorf("no valid connection mode specified")
 	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Use simple dynamic client
+	return k8sclient.NewDynamicK8sClient(config)
 }
 
-// createInlineClient creates a client from inline connection settings - directly builds REST config
-func (r *manifestResource) createInlineClient(conn clusterConnectionModel) (k8sclient.K8sClient, error) {
+// createInlineConfig creates a REST config from inline connection settings
+func (r *manifestResource) createInlineConfig(conn ClusterConnectionModel) (*rest.Config, error) {
 	if conn.Host.IsNull() {
 		return nil, fmt.Errorf("host is required for inline connection")
 	}
@@ -432,7 +463,7 @@ func (r *manifestResource) createInlineClient(conn clusterConnectionModel) (k8sc
 		},
 	}
 
-	// Add exec provider if specified - handle pointer now
+	// Add exec provider if specified
 	if conn.Exec != nil && !conn.Exec.APIVersion.IsNull() {
 		args := make([]string, len(conn.Exec.Args))
 		for i, arg := range conn.Exec.Args {
@@ -448,29 +479,55 @@ func (r *manifestResource) createInlineClient(conn clusterConnectionModel) (k8sc
 		}
 	}
 
-	return k8sclient.NewDynamicK8sClient(config)
+	return config, nil
 }
 
-// createFileClient creates a client from kubeconfig file
-func (r *manifestResource) createFileClient(conn clusterConnectionModel) (k8sclient.K8sClient, error) {
+// createFileConfig creates a REST config from kubeconfig file
+func (r *manifestResource) createFileConfig(conn ClusterConnectionModel) (*rest.Config, error) {
 	kubeconfigPath := conn.KubeconfigFile.ValueString()
 	context := ""
 	if !conn.Context.IsNull() {
 		context = conn.Context.ValueString()
 	}
 
-	return k8sclient.NewDynamicK8sClientFromKubeconfigFile(kubeconfigPath, context)
-}
-
-// createRawClient creates a client from raw kubeconfig data
-func (r *manifestResource) createRawClient(conn clusterConnectionModel) (k8sclient.K8sClient, error) {
-	kubeconfigData := []byte(conn.KubeconfigRaw.ValueString())
-	context := ""
-	if !conn.Context.IsNull() {
-		context = conn.Context.ValueString()
+	if context != "" {
+		// Load kubeconfig file and set context
+		clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+			&clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfigPath},
+			&clientcmd.ConfigOverrides{CurrentContext: context},
+		)
+		return clientConfig.ClientConfig()
 	}
 
-	return k8sclient.NewDynamicK8sClientFromKubeconfig(kubeconfigData, context)
+	return clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+}
+
+// createRawConfig creates a REST config from raw kubeconfig data
+func (r *manifestResource) createRawConfig(conn ClusterConnectionModel) (*rest.Config, error) {
+	kubeconfigData := []byte(conn.KubeconfigRaw.ValueString())
+
+	config, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse kubeconfig: %w", err)
+	}
+
+	if !conn.Context.IsNull() {
+		context := conn.Context.ValueString()
+		// Load kubeconfig and set context
+		clientConfig, err := clientcmd.Load(kubeconfigData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load kubeconfig: %w", err)
+		}
+
+		if _, exists := clientConfig.Contexts[context]; !exists {
+			return nil, fmt.Errorf("context %q not found in kubeconfig", context)
+		}
+
+		clientConfig.CurrentContext = context
+		return clientcmd.NewDefaultClientConfig(*clientConfig, &clientcmd.ConfigOverrides{}).ClientConfig()
+	}
+
+	return config, nil
 }
 
 // getGVR determines the GroupVersionResource for an object
@@ -479,7 +536,7 @@ func (r *manifestResource) getGVR(ctx context.Context, client k8sclient.K8sClien
 }
 
 // generateID creates a unique identifier for the resource
-func (r *manifestResource) generateID(obj *unstructured.Unstructured, conn clusterConnectionModel) string {
+func (r *manifestResource) generateID(obj *unstructured.Unstructured, conn ClusterConnectionModel) string {
 	// Create a deterministic ID based on cluster + object identity
 	data := fmt.Sprintf("%s/%s/%s/%s",
 		r.getClusterID(conn),
@@ -493,7 +550,7 @@ func (r *manifestResource) generateID(obj *unstructured.Unstructured, conn clust
 }
 
 // getClusterID creates a stable identifier for the cluster connection
-func (r *manifestResource) getClusterID(conn clusterConnectionModel) string {
+func (r *manifestResource) getClusterID(conn ClusterConnectionModel) string {
 	// Use host if available, otherwise hash the kubeconfig
 	if !conn.Host.IsNull() {
 		return conn.Host.ValueString()
