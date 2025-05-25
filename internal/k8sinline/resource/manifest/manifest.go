@@ -56,6 +56,7 @@ type manifestResourceModel struct {
 	ID                types.String           `tfsdk:"id"`
 	YAMLBody          types.String           `tfsdk:"yaml_body"`
 	ClusterConnection ClusterConnectionModel `tfsdk:"cluster_connection"`
+	DeleteProtection  types.Bool             `tfsdk:"delete_protection"`
 }
 
 // NewManifestResource creates a new manifest resource (backward compatibility)
@@ -96,6 +97,10 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 			"yaml_body": schema.StringAttribute{
 				Required:    true,
 				Description: "UTF‑8 encoded, single‑document Kubernetes YAML. Multi‑doc files will fail validation.",
+			},
+			"delete_protection": schema.BoolAttribute{
+				Optional:    true,
+				Description: "When enabled, prevents Terraform from deleting this resource. Must be disabled before destruction. Defaults to false.",
 			},
 		},
 		Blocks: map[string]schema.Block{
@@ -308,6 +313,15 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 	diags := req.State.Get(ctx, &data)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Check delete protection
+	if !data.DeleteProtection.IsNull() && data.DeleteProtection.ValueBool() {
+		resp.Diagnostics.AddError(
+			"Resource Protected from Deletion",
+			"This resource has delete_protection enabled. To delete this resource, first set delete_protection = false in your configuration, run terraform apply, then run terraform destroy.",
+		)
 		return
 	}
 

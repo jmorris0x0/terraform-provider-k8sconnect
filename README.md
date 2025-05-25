@@ -174,10 +174,11 @@ The `context` field may optionally be set when using `kubeconfig_file` or `kubec
 
 ### Arguments
 
-| Name                 | Type   | Required | Notes                                                      |
-| -------------------- | ------ | -------- | ---------------------------------------------------------- |
-| `yaml_body`          | string | Yes      | UTF‑8, single YAML document. Multi‑doc files will fail.    |
-| `cluster_connection` | block  | Yes      | Contains connection info. Exactly one mode must be chosen. |
+| Name                 | Type    | Required | Notes                                                      |
+| -------------------- | ------- | -------- | ---------------------------------------------------------- |
+| `yaml_body`          | string  | Yes      | UTF‑8, single YAML document. Multi‑doc files will fail.    |
+| `cluster_connection` | block   | Yes      | Contains connection info. Exactly one mode must be chosen. |
+| `delete_protection`  | boolean | No       | When enabled, prevents Terraform from deleting this resource. Must be disabled before destruction. Defaults to false. |
 
 ---
 

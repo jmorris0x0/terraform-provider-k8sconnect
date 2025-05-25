@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -120,51 +121,6 @@ func testAccCheckNamespaceDestroy(client kubernetes.Interface, name string) reso
 	}
 }
 
-const testNamespaceYAML = `apiVersion: v1
-kind: Namespace
-metadata:
-  name: acctest-exec
-`
-
-const testAccManifestConfigBasic = `
-variable "host" {
-  type = string
-}
-variable "ca" {
-  type = string
-}
-variable "cmd" {
-  type = string
-}
-variable "raw" {
-  type = string
-}
-
-provider "k8sinline" {}
-
-resource "k8sinline_manifest" "test_exec" {
-  yaml_body = <<YAML
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: acctest-exec
-YAML
-
-  cluster_connection {
-    host                   = var.host
-    cluster_ca_certificate = var.ca
-
-    exec = {
-      api_version = "client.authentication.k8s.io/v1"
-      command     = var.cmd
-      args        = ["hello"]
-    }
-  }
-}
-`
-
-// Add these test functions to internal/k8sinline/resource/manifest/manifest_test.go
-
 func TestAccManifestResource_KubeconfigRaw(t *testing.T) {
 	t.Parallel()
 
@@ -273,6 +229,93 @@ func TestAccManifestResource_Pod(t *testing.T) {
 	})
 }
 
+// Test delete protection functionality
+func TestAccManifestResource_DeleteProtection(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+	}
+
+	k8sClient := createK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sinline": providerserver.NewProtocol6WithError(k8sinline.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create resource with delete protection enabled
+			{
+				Config: testAccManifestConfigDeleteProtectionEnabled,
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("k8sinline_manifest.test_protected", "delete_protection", "true"),
+					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_protected", "id"),
+					testAccCheckNamespaceExists(k8sClient, "acctest-protected"),
+				),
+			},
+			// Step 2: Try to destroy - should fail due to protection
+			{
+				Config: testAccManifestConfigDeleteProtectionEnabled,
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Destroy:     true,
+				ExpectError: regexp.MustCompile("Resource Protected from Deletion"),
+			},
+			// Step 3: Disable protection
+			{
+				Config: testAccManifestConfigDeleteProtectionDisabled,
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("k8sinline_manifest.test_protected", "delete_protection", "false"),
+					testAccCheckNamespaceExists(k8sClient, "acctest-protected"),
+				),
+			},
+			// Step 4: Now destroy should succeed
+		},
+		CheckDestroy: testAccCheckNamespaceDestroy(k8sClient, "acctest-protected"),
+	})
+}
+
+// Alternative: Test namespace inference with ConfigMap (simpler than Pod)
+func TestAccManifestResource_DefaultNamespaceInference(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	if raw == "" {
+		t.Skip("TF_ACC_KUBECONFIG_RAW not set, skipping")
+	}
+
+	k8sClient := createK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sinline": providerserver.NewProtocol6WithError(k8sinline.New()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testAccManifestConfigDefaultNamespace,
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("k8sinline_manifest.test_default_ns", "yaml_body", testConfigMapYAMLNoNamespace),
+					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_default_ns", "id"),
+					// Key test: ConfigMap with no namespace should end up in default
+					testAccCheckConfigMapExists(k8sClient, "default", "acctest-config"),
+				),
+			},
+		},
+		CheckDestroy: testAccCheckConfigMapDestroy(k8sClient, "default", "acctest-config"),
+	})
+}
+
 // Helper functions
 func testAccCheckPodExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
@@ -304,7 +347,81 @@ func testAccCheckPodDestroy(client kubernetes.Interface, namespace, name string)
 	}
 }
 
-// Test configurations
+// Helper functions for ConfigMap verification
+func testAccCheckConfigMapExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		_, err := client.CoreV1().ConfigMaps(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("configmap %s/%s does not exist: %v", namespace, name, err)
+		}
+		fmt.Printf("✅ Verified configmap %s/%s exists (inferred namespace)\n", namespace, name)
+		return nil
+	}
+}
+
+func testAccCheckConfigMapDestroy(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		for i := 0; i < 10; i++ {
+			_, err := client.CoreV1().ConfigMaps(namespace).Get(ctx, name, metav1.GetOptions{})
+			if err != nil {
+				if strings.Contains(err.Error(), "not found") {
+					fmt.Printf("✅ Verified configmap %s/%s was deleted\n", namespace, name)
+					return nil
+				}
+				return fmt.Errorf("unexpected error checking configmap: %v", err)
+			}
+			time.Sleep(1 * time.Second)
+		}
+		return fmt.Errorf("configmap %s/%s still exists after deletion", namespace, name)
+	}
+}
+
+// Test constants
+const testNamespaceYAML = `apiVersion: v1
+kind: Namespace
+metadata:
+  name: acctest-exec
+`
+
+const testAccManifestConfigBasic = `
+variable "host" {
+  type = string
+}
+variable "ca" {
+  type = string
+}
+variable "cmd" {
+  type = string
+}
+variable "raw" {
+  type = string
+}
+
+provider "k8sinline" {}
+
+resource "k8sinline_manifest" "test_exec" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: acctest-exec
+YAML
+
+  cluster_connection {
+    host                   = var.host
+    cluster_ca_certificate = var.ca
+
+    exec = {
+      api_version = "client.authentication.k8s.io/v1"
+      command     = var.cmd
+      args        = ["hello"]
+    }
+  }
+}
+`
+
 const testNamespaceYAMLRaw = `apiVersion: v1
 kind: Namespace
 metadata:
@@ -398,71 +515,6 @@ YAML
 }
 `
 
-// Alternative: Test namespace inference with ConfigMap (simpler than Pod)
-func TestAccManifestResource_DefaultNamespaceInference(t *testing.T) {
-	t.Parallel()
-
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
-	if raw == "" {
-		t.Skip("TF_ACC_KUBECONFIG_RAW not set, skipping")
-	}
-
-	k8sClient := createK8sClient(t, raw)
-
-	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
-			"k8sinline": providerserver.NewProtocol6WithError(k8sinline.New()),
-		},
-		Steps: []resource.TestStep{
-			{
-				Config: testAccManifestConfigDefaultNamespace,
-				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
-				},
-				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("k8sinline_manifest.test_default_ns", "yaml_body", testConfigMapYAMLNoNamespace),
-					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_default_ns", "id"),
-					// Key test: ConfigMap with no namespace should end up in default
-					testAccCheckConfigMapExists(k8sClient, "default", "acctest-config"),
-				),
-			},
-		},
-		CheckDestroy: testAccCheckConfigMapDestroy(k8sClient, "default", "acctest-config"),
-	})
-}
-
-// Helper functions for ConfigMap verification
-func testAccCheckConfigMapExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		ctx := context.Background()
-		_, err := client.CoreV1().ConfigMaps(namespace).Get(ctx, name, metav1.GetOptions{})
-		if err != nil {
-			return fmt.Errorf("configmap %s/%s does not exist: %v", namespace, name, err)
-		}
-		fmt.Printf("✅ Verified configmap %s/%s exists (inferred namespace)\n", namespace, name)
-		return nil
-	}
-}
-
-func testAccCheckConfigMapDestroy(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		ctx := context.Background()
-		for i := 0; i < 10; i++ {
-			_, err := client.CoreV1().ConfigMaps(namespace).Get(ctx, name, metav1.GetOptions{})
-			if err != nil {
-				if strings.Contains(err.Error(), "not found") {
-					fmt.Printf("✅ Verified configmap %s/%s was deleted\n", namespace, name)
-					return nil
-				}
-				return fmt.Errorf("unexpected error checking configmap: %v", err)
-			}
-			time.Sleep(1 * time.Second)
-		}
-		return fmt.Errorf("configmap %s/%s still exists after deletion", namespace, name)
-	}
-}
-
-// Test constants
 const testConfigMapYAMLNoNamespace = `apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -487,6 +539,52 @@ metadata:
 data:
   key1: value1
 YAML
+
+  cluster_connection {
+    kubeconfig_raw = var.raw
+  }
+}
+`
+
+const testAccManifestConfigDeleteProtectionEnabled = `
+variable "raw" {
+  type = string
+}
+
+provider "k8sinline" {}
+
+resource "k8sinline_manifest" "test_protected" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: acctest-protected
+YAML
+
+  delete_protection = true
+
+  cluster_connection {
+    kubeconfig_raw = var.raw
+  }
+}
+`
+
+const testAccManifestConfigDeleteProtectionDisabled = `
+variable "raw" {
+  type = string
+}
+
+provider "k8sinline" {}
+
+resource "k8sinline_manifest" "test_protected" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: acctest-protected
+YAML
+
+  delete_protection = false
 
   cluster_connection {
     kubeconfig_raw = var.raw

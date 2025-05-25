@@ -412,6 +412,41 @@ func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
 }
 
+func TestDeleteProtection_Logic(t *testing.T) {
+	tests := []struct {
+		name             string
+		deleteProtection types.Bool
+		expectBlocked    bool
+	}{
+		{
+			name:             "delete protection enabled",
+			deleteProtection: types.BoolValue(true),
+			expectBlocked:    true,
+		},
+		{
+			name:             "delete protection disabled",
+			deleteProtection: types.BoolValue(false),
+			expectBlocked:    false,
+		},
+		{
+			name:             "delete protection null",
+			deleteProtection: types.BoolNull(),
+			expectBlocked:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Test the delete protection logic directly
+			isProtected := !tt.deleteProtection.IsNull() && tt.deleteProtection.ValueBool()
+
+			if isProtected != tt.expectBlocked {
+				t.Errorf("expected protection %v, got %v", tt.expectBlocked, isProtected)
+			}
+		})
+	}
+}
+
 func TestClassifyK8sError(t *testing.T) {
 	r := &manifestResource{}
 
