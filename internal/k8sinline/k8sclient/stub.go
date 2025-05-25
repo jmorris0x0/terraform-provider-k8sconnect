@@ -3,7 +3,6 @@ package k8sclient
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
