@@ -23,6 +23,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
+	"sigs.k8s.io/yaml"
 
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/k8sclient"
 )
@@ -378,10 +379,161 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 	})
 }
 
+// ImportState method
 func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resp.Diagnostics.Append(
-		resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...,
-	)
+	// Parse import ID: "namespace/kind/name" or "/kind/name" for cluster-scoped
+	namespace, kind, name, err := r.parseImportID(req.ID)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Invalid Import ID",
+			fmt.Sprintf("Expected format: <namespace>/<kind>/<name> (use empty string for cluster-scoped: \"/<kind>/<name>\")\n\nExamples:\n"+
+				"  default/Pod/nginx\n"+
+				"  kube-system/Service/coredns\n"+
+				"  \"/Namespace/my-namespace\"\n\nError: %s", err.Error()),
+		)
+		return
+	}
+
+	// Get connection from existing configuration (required for config-first import)
+	var data manifestResourceModel
+	diags := req.Config.Get(ctx, &data)
+	if diags.HasError() {
+		resp.Diagnostics.AddError(
+			"Import Failed: Missing Resource Configuration",
+			"k8sinline uses a config-first import strategy. You must write the resource configuration block with cluster_connection before importing.\n\n"+
+				"Example:\n"+
+				"  resource \"k8sinline_manifest\" \"example\" {\n"+
+				"    yaml_body = \"# Will be replaced during import\"\n"+
+				"    \n"+
+				"    cluster_connection {\n"+
+				"      kubeconfig_raw = file(\"~/.kube/config\")\n"+
+				"      context        = \"production\"\n"+
+				"    }\n"+
+				"  }\n\n"+
+				"Then run: terraform import k8sinline_manifest.example \"default/Pod/nginx\"",
+		)
+		return
+	}
+
+	// Validate that cluster connection is configured
+	if r.isEmptyConnection(data.ClusterConnection) {
+		resp.Diagnostics.AddError(
+			"Import Failed: Missing Cluster Connection",
+			"The resource configuration must include a cluster_connection block to specify how to connect to the Kubernetes cluster.\n\n"+
+				"Add one of these connection modes:\n"+
+				"  cluster_connection {\n"+
+				"    # Option 1: Kubeconfig file\n"+
+				"    kubeconfig_file = \"~/.kube/config\"\n"+
+				"    context         = \"my-context\"\n"+
+				"  }\n"+
+				"  # OR\n"+
+				"  cluster_connection {\n"+
+				"    # Option 2: Inline kubeconfig\n"+
+				"    kubeconfig_raw = file(\"~/.kube/config\")\n"+
+				"  }\n"+
+				"  # OR\n"+
+				"  cluster_connection {\n"+
+				"    # Option 3: Direct connection\n"+
+				"    host                   = \"https://api.cluster.com\"\n"+
+				"    cluster_ca_certificate = var.cluster_ca\n"+
+				"    exec {\n"+
+				"      api_version = \"client.authentication.k8s.io/v1\"\n"+
+				"      command     = \"aws\"\n"+
+				"      args        = [\"eks\", \"get-token\", \"--cluster-name\", \"prod\"]\n"+
+				"    }\n"+
+				"  }",
+		)
+		return
+	}
+
+	// Create K8s client from connection (with caching)
+	client, err := r.clientGetter(data.ClusterConnection)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Import Failed: Connection Error",
+			fmt.Sprintf("Failed to create Kubernetes client from cluster_connection configuration.\n\n"+
+				"This usually means:\n"+
+				"1. Invalid kubeconfig or connection parameters\n"+
+				"2. Cluster is unreachable\n"+
+				"3. Authentication failed\n\n"+
+				"Details: %s", err.Error()),
+		)
+		return
+	}
+
+	// Discover GVR and fetch the live object in one step
+	// This handles the case where we only know the kind but not the API version
+	gvr, liveObj, err := client.GetGVRFromKind(ctx, kind, namespace, name)
+	if err != nil {
+		if strings.Contains(err.Error(), "no API resource found for kind") {
+			resp.Diagnostics.AddError(
+				"Import Failed: Unknown Resource Kind",
+				fmt.Sprintf("The resource kind \"%s\" was not found in the cluster.\n\n"+
+					"This usually means:\n"+
+					"1. The kind name is misspelled (check capitalization)\n"+
+					"2. A CRD needs to be installed first\n"+
+					"3. The resource type doesn't exist in this Kubernetes version\n\n"+
+					"Try: kubectl api-resources | grep -i %s", kind, strings.ToLower(kind)),
+			)
+		} else if strings.Contains(err.Error(), "not found") {
+			resp.Diagnostics.AddError(
+				"Import Failed: Resource Not Found",
+				fmt.Sprintf("The %s \"%s\" was not found.\n\n"+
+					"Verify the resource exists:\n"+
+					"  kubectl get %s %s %s\n\n"+
+					"Details: %s",
+					kind, name, strings.ToLower(kind), name,
+					func() string {
+						if namespace != "" {
+							return fmt.Sprintf("-n %s", namespace)
+						}
+						return ""
+					}(), err.Error()),
+			)
+		} else {
+			resp.Diagnostics.AddError(
+				"Import Failed: Discovery/Fetch Error",
+				fmt.Sprintf("Failed to discover or fetch the %s \"%s\".\n\nDetails: %s", kind, name, err.Error()),
+			)
+		}
+		return
+	}
+
+	// Convert live object back to YAML
+	yamlBytes, err := r.objectToYAML(liveObj)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Import Failed: YAML Conversion Error",
+			fmt.Sprintf("Failed to convert the imported object to YAML: %s", err.Error()),
+		)
+		return
+	}
+
+	// Generate resource ID (same logic as Create)
+	resourceID := r.generateID(liveObj, data.ClusterConnection)
+
+	// Populate state with imported data
+	importedData := manifestResourceModel{
+		ID:                types.StringValue(resourceID),
+		YAMLBody:          types.StringValue(string(yamlBytes)),
+		ClusterConnection: data.ClusterConnection, // Keep the connection from config
+		DeleteProtection:  data.DeleteProtection,  // Keep existing delete protection setting
+	}
+
+	// Set the imported state
+	diags = resp.State.Set(ctx, &importedData)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	tflog.Info(ctx, "successfully imported resource", map[string]interface{}{
+		"import_id":   req.ID,
+		"resource_id": resourceID,
+		"kind":        liveObj.GetKind(),
+		"name":        liveObj.GetName(),
+		"namespace":   liveObj.GetNamespace(),
+	})
 }
 
 // parseYAML converts YAML string to unstructured.Unstructured
@@ -623,4 +775,97 @@ func (r *manifestResource) classifyK8sError(err error, operation, resourceDesc s
 			fmt.Sprintf("An unexpected error occurred while performing %s on %s. Details: %v",
 				operation, resourceDesc, err)
 	}
+}
+
+// parseImportID parses the import ID format "namespace/kind/name"
+// Empty namespace for cluster-scoped resources: "/kind/name"
+func (r *manifestResource) parseImportID(importID string) (namespace, kind, name string, err error) {
+	parts := strings.Split(importID, "/")
+
+	if len(parts) != 3 {
+		return "", "", "", fmt.Errorf("expected 3 parts separated by '/', got %d parts", len(parts))
+	}
+
+	namespace = parts[0] // Can be empty for cluster-scoped resources
+	kind = parts[1]
+	name = parts[2]
+
+	// Validate required parts
+	if kind == "" {
+		return "", "", "", fmt.Errorf("kind cannot be empty")
+	}
+	if name == "" {
+		return "", "", "", fmt.Errorf("name cannot be empty")
+	}
+
+	// Namespace can be empty for cluster-scoped resources like Namespaces, ClusterRoles, etc.
+	return namespace, kind, name, nil
+}
+
+// isEmptyConnection checks if the cluster connection is empty/unconfigured
+func (r *manifestResource) isEmptyConnection(conn ClusterConnectionModel) bool {
+	hasInline := !conn.Host.IsNull() || !conn.ClusterCACertificate.IsNull()
+	hasFile := !conn.KubeconfigFile.IsNull()
+	hasRaw := !conn.KubeconfigRaw.IsNull()
+
+	return !hasInline && !hasFile && !hasRaw
+}
+
+// objectToYAML converts an unstructured object back to clean YAML
+func (r *manifestResource) objectToYAML(obj *unstructured.Unstructured) ([]byte, error) {
+	// Create a clean copy without managed fields and other cluster-added metadata
+	cleanObj := r.cleanObjectForExport(obj)
+
+	// Convert to YAML
+	yamlBytes, err := yaml.Marshal(cleanObj.Object)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal object to YAML: %w", err)
+	}
+
+	return yamlBytes, nil
+}
+
+// cleanObjectForExport removes server-generated fields that would cause apply failures
+func (r *manifestResource) cleanObjectForExport(obj *unstructured.Unstructured) *unstructured.Unstructured {
+	// Create a deep copy
+	cleaned := obj.DeepCopy()
+
+	// Remove only the fields that will definitely cause problems on re-apply
+	metadata := cleaned.Object["metadata"].(map[string]interface{})
+
+	// These fields MUST be removed or kubectl apply fails
+	delete(metadata, "uid")
+	delete(metadata, "resourceVersion")
+	delete(metadata, "generation")
+	delete(metadata, "creationTimestamp")
+	delete(metadata, "managedFields")
+
+	// Remove status field entirely (never needed for apply)
+	delete(cleaned.Object, "status")
+
+	// Leave everything else - let the user clean up if they want
+	// This is safer than trying to guess what's system-generated
+
+	return cleaned
+}
+
+// isSystemAnnotation returns true if the annotation key is system-generated
+func (r *manifestResource) isSystemAnnotation(key string) bool {
+	// Be conservative - only remove the most obviously system-generated annotations
+	// Instead of maintaining a huge list, focus on the most common ones
+	wellKnownSystemPrefixes := []string{
+		"kubectl.kubernetes.io/",
+		"deployment.kubernetes.io/",
+		"kubernetes.io/managed-by",
+	}
+
+	for _, prefix := range wellKnownSystemPrefixes {
+		if strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+
+	// Alternative: let users decide what to keep vs remove
+	// Could add a provider-level setting for annotation filtering
+	return false
 }

@@ -146,5 +146,73 @@ func (s *stubK8sClient) GetGVR(ctx context.Context, obj *unstructured.Unstructur
 	}, nil
 }
 
+func (s *stubK8sClient) GetGVRFromKind(ctx context.Context, kind, namespace, name string) (schema.GroupVersionResource, *unstructured.Unstructured, error) {
+	// For testing, use the same simple mapping as GetGVR
+	gvk := schema.GroupVersionKind{Kind: kind}
+
+	// Infer group/version from kind for common resources
+	switch kind {
+	case "Pod", "Service", "ConfigMap", "Secret", "Namespace":
+		gvk.Version = "v1"
+	case "Deployment", "ReplicaSet", "DaemonSet", "StatefulSet":
+		gvk.Group = "apps"
+		gvk.Version = "v1"
+	case "Ingress":
+		gvk.Group = "networking.k8s.io"
+		gvk.Version = "v1"
+	default:
+		gvk.Version = "v1" // Default for testing
+	}
+
+	// Simple mapping for common Kubernetes resources
+	var resource string
+	switch kind {
+	case "Namespace":
+		resource = "namespaces"
+	case "Pod":
+		resource = "pods"
+	case "Service":
+		resource = "services"
+	case "Deployment":
+		resource = "deployments"
+	case "ConfigMap":
+		resource = "configmaps"
+	case "Secret":
+		resource = "secrets"
+	default:
+		resource = strings.ToLower(kind) + "s"
+	}
+
+	gvr := schema.GroupVersionResource{
+		Group:    gvk.Group,
+		Version:  gvk.Version,
+		Resource: resource,
+	}
+
+	// Return the GVR and a mock object if GetResponse is set
+	if s.GetResponse != nil {
+		return gvr, s.GetResponse, s.GetError
+	}
+
+	// If no response configured, return an error
+	if s.GetError != nil {
+		return gvr, nil, s.GetError
+	}
+
+	// Default: return a minimal object for testing
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": gvk.GroupVersion().String(),
+			"kind":       kind,
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": namespace,
+			},
+		},
+	}
+
+	return gvr, obj, nil
+}
+
 // Interface assertion to ensure stubK8sClient satisfies K8sClient
 var _ K8sClient = (*stubK8sClient)(nil)

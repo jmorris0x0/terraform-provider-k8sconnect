@@ -510,3 +510,316 @@ func TestClassifyK8sError(t *testing.T) {
 		})
 	}
 }
+
+func TestParseImportID(t *testing.T) {
+	r := &manifestResource{}
+
+	tests := []struct {
+		name              string
+		importID          string
+		expectedNamespace string
+		expectedKind      string
+		expectedName      string
+		expectError       bool
+		errorContains     string
+	}{
+		{
+			name:              "valid namespaced resource",
+			importID:          "default/Pod/nginx",
+			expectedNamespace: "default",
+			expectedKind:      "Pod",
+			expectedName:      "nginx",
+			expectError:       false,
+		},
+		{
+			name:              "valid cluster-scoped resource",
+			importID:          "/Namespace/my-namespace",
+			expectedNamespace: "",
+			expectedKind:      "Namespace",
+			expectedName:      "my-namespace",
+			expectError:       false,
+		},
+		{
+			name:              "valid kube-system resource",
+			importID:          "kube-system/Service/coredns",
+			expectedNamespace: "kube-system",
+			expectedKind:      "Service",
+			expectedName:      "coredns",
+			expectError:       false,
+		},
+		{
+			name:          "invalid - too few parts",
+			importID:      "default/Pod",
+			expectError:   true,
+			errorContains: "expected 3 parts",
+		},
+		{
+			name:          "invalid - too many parts",
+			importID:      "default/Pod/nginx/extra",
+			expectError:   true,
+			errorContains: "expected 3 parts",
+		},
+		{
+			name:          "invalid - empty kind",
+			importID:      "default//nginx",
+			expectError:   true,
+			errorContains: "kind cannot be empty",
+		},
+		{
+			name:          "invalid - empty name",
+			importID:      "default/Pod/",
+			expectError:   true,
+			errorContains: "name cannot be empty",
+		},
+		{
+			name:          "invalid - completely empty",
+			importID:      "",
+			expectError:   true,
+			errorContains: "expected 3 parts",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			namespace, kind, name, err := r.parseImportID(tt.importID)
+
+			if tt.expectError {
+				if err == nil {
+					t.Fatalf("expected error but got none")
+				}
+				if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
+					t.Errorf("expected error to contain %q, got %q", tt.errorContains, err.Error())
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if namespace != tt.expectedNamespace {
+				t.Errorf("expected namespace %q, got %q", tt.expectedNamespace, namespace)
+			}
+			if kind != tt.expectedKind {
+				t.Errorf("expected kind %q, got %q", tt.expectedKind, kind)
+			}
+			if name != tt.expectedName {
+				t.Errorf("expected name %q, got %q", tt.expectedName, name)
+			}
+		})
+	}
+}
+
+func TestIsEmptyConnection(t *testing.T) {
+	r := &manifestResource{}
+
+	tests := []struct {
+		name     string
+		conn     ClusterConnectionModel
+		expected bool
+	}{
+		{
+			name: "empty connection",
+			conn: ClusterConnectionModel{
+				Host:                 types.StringNull(),
+				ClusterCACertificate: types.StringNull(),
+				KubeconfigFile:       types.StringNull(),
+				KubeconfigRaw:        types.StringNull(),
+			},
+			expected: true,
+		},
+		{
+			name: "inline connection",
+			conn: ClusterConnectionModel{
+				Host:                 types.StringValue("https://api.cluster.com"),
+				ClusterCACertificate: types.StringValue("ca-cert"),
+				KubeconfigFile:       types.StringNull(),
+				KubeconfigRaw:        types.StringNull(),
+			},
+			expected: false,
+		},
+		{
+			name: "kubeconfig file connection",
+			conn: ClusterConnectionModel{
+				Host:                 types.StringNull(),
+				ClusterCACertificate: types.StringNull(),
+				KubeconfigFile:       types.StringValue("~/.kube/config"),
+				KubeconfigRaw:        types.StringNull(),
+			},
+			expected: false,
+		},
+		{
+			name: "kubeconfig raw connection",
+			conn: ClusterConnectionModel{
+				Host:                 types.StringNull(),
+				ClusterCACertificate: types.StringNull(),
+				KubeconfigFile:       types.StringNull(),
+				KubeconfigRaw:        types.StringValue("apiVersion: v1\nkind: Config"),
+			},
+			expected: false,
+		},
+		{
+			name: "partial inline connection (host only)",
+			conn: ClusterConnectionModel{
+				Host:                 types.StringValue("https://api.cluster.com"),
+				ClusterCACertificate: types.StringNull(),
+				KubeconfigFile:       types.StringNull(),
+				KubeconfigRaw:        types.StringNull(),
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := r.isEmptyConnection(tt.conn)
+			if result != tt.expected {
+				t.Errorf("expected %v, got %v", tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestObjectToYAML(t *testing.T) {
+	r := &manifestResource{}
+
+	// Create a sample object with server-generated fields
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata": map[string]interface{}{
+				"name":              "test-pod",
+				"namespace":         "default",
+				"uid":               "12345-67890",          // should be removed
+				"resourceVersion":   "12345",                // should be removed
+				"creationTimestamp": "2024-01-01T00:00:00Z", // should be removed
+				"labels": map[string]interface{}{
+					"app": "test",
+				},
+				"annotations": map[string]interface{}{
+					"user-annotation":                    "keep-this",
+					"kubectl.kubernetes.io/last-applied": "keep-this-too", // now preserved
+				},
+			},
+			"spec": map[string]interface{}{
+				"containers": []interface{}{
+					map[string]interface{}{
+						"name":  "nginx",
+						"image": "nginx:1.20",
+					},
+				},
+			},
+			"status": map[string]interface{}{ // should be removed entirely
+				"phase": "Running",
+			},
+		},
+	}
+
+	yamlBytes, err := r.objectToYAML(obj)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	yamlStr := string(yamlBytes)
+
+	// Check that server-generated fields are removed
+	if strings.Contains(yamlStr, "uid:") {
+		t.Error("expected uid to be removed from YAML")
+	}
+	if strings.Contains(yamlStr, "resourceVersion:") {
+		t.Error("expected resourceVersion to be removed from YAML")
+	}
+	if strings.Contains(yamlStr, "creationTimestamp:") {
+		t.Error("expected creationTimestamp to be removed from YAML")
+	}
+	if strings.Contains(yamlStr, "status:") {
+		t.Error("expected status to be removed from YAML")
+	}
+
+	// Check that user fields are preserved (including annotations now)
+	if !strings.Contains(yamlStr, "user-annotation") {
+		t.Error("expected user annotations to be preserved in YAML")
+	}
+	if !strings.Contains(yamlStr, "kubectl.kubernetes.io") {
+		t.Error("expected all annotations to be preserved in YAML (conservative approach)")
+	}
+	if !strings.Contains(yamlStr, "app: test") {
+		t.Error("expected user labels to be preserved in YAML")
+	}
+	if !strings.Contains(yamlStr, "nginx:1.20") {
+		t.Error("expected spec to be preserved in YAML")
+	}
+}
+
+func TestStubK8sClient_GetGVRFromKind(t *testing.T) {
+	stubClient := NewStubK8sClient()
+	ctx := context.Background()
+
+	tests := []struct {
+		name             string
+		kind             string
+		namespace        string
+		resourceName     string
+		expectedGroup    string
+		expectedVersion  string
+		expectedResource string
+	}{
+		{
+			name:             "pod",
+			kind:             "Pod",
+			namespace:        "default",
+			resourceName:     "test-pod",
+			expectedGroup:    "",
+			expectedVersion:  "v1",
+			expectedResource: "pods",
+		},
+		{
+			name:             "deployment",
+			kind:             "Deployment",
+			namespace:        "default",
+			resourceName:     "test-deployment",
+			expectedGroup:    "apps",
+			expectedVersion:  "v1",
+			expectedResource: "deployments",
+		},
+		{
+			name:             "namespace (cluster-scoped)",
+			kind:             "Namespace",
+			namespace:        "",
+			resourceName:     "test-namespace",
+			expectedGroup:    "",
+			expectedVersion:  "v1",
+			expectedResource: "namespaces",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gvr, obj, err := stubClient.GetGVRFromKind(ctx, tt.kind, tt.namespace, tt.resourceName)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if gvr.Group != tt.expectedGroup {
+				t.Errorf("expected group %q, got %q", tt.expectedGroup, gvr.Group)
+			}
+			if gvr.Version != tt.expectedVersion {
+				t.Errorf("expected version %q, got %q", tt.expectedVersion, gvr.Version)
+			}
+			if gvr.Resource != tt.expectedResource {
+				t.Errorf("expected resource %q, got %q", tt.expectedResource, gvr.Resource)
+			}
+
+			if obj == nil {
+				t.Fatal("expected object but got nil")
+			}
+			if obj.GetKind() != tt.kind {
+				t.Errorf("expected kind %q, got %q", tt.kind, obj.GetKind())
+			}
+			if obj.GetName() != tt.resourceName {
+				t.Errorf("expected name %q, got %q", tt.resourceName, obj.GetName())
+			}
+		})
+	}
+}
