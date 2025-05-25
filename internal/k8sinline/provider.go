@@ -11,8 +11,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
-	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-log/tflog"
 
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/k8sclient"
 	manifestres "github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/resource/manifest"
