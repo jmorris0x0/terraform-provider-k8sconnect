@@ -1,4 +1,4 @@
-// internal/k8sinline/resource/manifest/manifest_test.go (enhanced version)
+// internal/k8sinline/resource/manifest/manifest_test.go
 package manifest_test
 
 import (

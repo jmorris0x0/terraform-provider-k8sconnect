@@ -108,7 +108,7 @@ users:
   user:
     token: test-token`
 
-	conn := clusterConnectionModel{
+	conn := ClusterConnectionModel{
 		Host:                 types.StringNull(),
 		ClusterCACertificate: types.StringNull(),
 		KubeconfigFile:       types.StringNull(),
@@ -127,7 +127,7 @@ users:
 	}
 }
 
-func TestCreateInlineClient_DirectRestConfig(t *testing.T) {
+func TestCreateInlineConfig_DirectRestConfig(t *testing.T) {
 	r := &manifestResource{}
 
 	// Use the same certificate that our integration tests generate
@@ -152,13 +152,13 @@ HZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
 	// For unit testing, we'll test our logic but may need to skip if cert validation is too strict
 	encodedCA := base64.StdEncoding.EncodeToString([]byte(testCAPEM))
 
-	conn := clusterConnectionModel{
+	conn := ClusterConnectionModel{
 		Host:                 types.StringValue("https://test.example.com"),
 		ClusterCACertificate: types.StringValue(encodedCA),
 		KubeconfigFile:       types.StringNull(),
 		KubeconfigRaw:        types.StringNull(),
 		Context:              types.StringNull(),
-		Exec: &execAuthModel{ // Add & here
+		Exec: &execAuthModel{
 			APIVersion: types.StringValue("client.authentication.k8s.io/v1"),
 			Command:    types.StringValue("aws"),
 			Args: []types.String{
@@ -170,8 +170,8 @@ HZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
 		},
 	}
 
-	// Try to create the client - if cert validation fails, that's okay for a unit test
-	client, err := r.createInlineClient(conn)
+	// Try to create the config - if cert validation fails, that's okay for a unit test
+	config, err := r.createInlineConfig(conn)
 	if err != nil {
 		// For unit testing, we mainly care that the configuration logic works
 		// Certificate validation errors are acceptable
@@ -179,15 +179,15 @@ HZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
 			t.Logf("Certificate validation failed as expected in unit test: %v", err)
 			return // Test passes - we validated our config logic
 		}
-		t.Fatalf("Unexpected error creating inline client: %v", err)
+		t.Fatalf("Unexpected error creating inline config: %v", err)
 	}
 
-	if client == nil {
-		t.Fatal("Expected client but got nil")
+	if config == nil {
+		t.Fatal("Expected config but got nil")
 	}
 
 	// Test successful creation without exec
-	connNoExec := clusterConnectionModel{
+	connNoExec := ClusterConnectionModel{
 		Host:                 types.StringValue("https://test.example.com"),
 		ClusterCACertificate: types.StringValue(encodedCA),
 		KubeconfigFile:       types.StringNull(),
@@ -196,31 +196,31 @@ HZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
 		Exec:                 nil,
 	}
 
-	client2, err := r.createInlineClient(connNoExec)
+	config2, err := r.createInlineConfig(connNoExec)
 	if err != nil {
 		if strings.Contains(err.Error(), "certificate") || strings.Contains(err.Error(), "PEM") {
 			t.Logf("Certificate validation failed as expected in unit test: %v", err)
 			return
 		}
-		t.Fatalf("Unexpected error creating inline client without exec: %v", err)
+		t.Fatalf("Unexpected error creating inline config without exec: %v", err)
 	}
 
-	if client2 == nil {
-		t.Fatal("Expected client but got nil (no exec case)")
+	if config2 == nil {
+		t.Fatal("Expected config but got nil (no exec case)")
 	}
 }
 
-func TestCreateInlineClient_ValidationErrors(t *testing.T) {
+func TestCreateInlineConfig_ValidationErrors(t *testing.T) {
 	r := &manifestResource{}
 
 	tests := []struct {
 		name   string
-		conn   clusterConnectionModel
+		conn   ClusterConnectionModel
 		expect string
 	}{
 		{
 			name: "missing host",
-			conn: clusterConnectionModel{
+			conn: ClusterConnectionModel{
 				Host:                 types.StringNull(),
 				ClusterCACertificate: types.StringValue("dGVzdA=="), // base64 "test"
 				Exec:                 nil,
@@ -229,7 +229,7 @@ func TestCreateInlineClient_ValidationErrors(t *testing.T) {
 		},
 		{
 			name: "missing CA certificate",
-			conn: clusterConnectionModel{
+			conn: ClusterConnectionModel{
 				Host:                 types.StringValue("https://test.com"),
 				ClusterCACertificate: types.StringNull(),
 				Exec:                 nil,
@@ -238,7 +238,7 @@ func TestCreateInlineClient_ValidationErrors(t *testing.T) {
 		},
 		{
 			name: "invalid base64 CA",
-			conn: clusterConnectionModel{
+			conn: ClusterConnectionModel{
 				Host:                 types.StringValue("https://test.com"),
 				ClusterCACertificate: types.StringValue("invalid-base64!"),
 				Exec:                 nil,
@@ -249,7 +249,7 @@ func TestCreateInlineClient_ValidationErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := r.createInlineClient(tt.conn)
+			_, err := r.createInlineConfig(tt.conn)
 			if err == nil {
 				t.Fatalf("Expected error but got none")
 			}
@@ -263,7 +263,7 @@ func TestCreateInlineClient_ValidationErrors(t *testing.T) {
 func TestCreateK8sClient_MultipleModesError(t *testing.T) {
 	r := &manifestResource{}
 
-	conn := clusterConnectionModel{
+	conn := ClusterConnectionModel{
 		Host:                 types.StringValue("https://example.com"),
 		ClusterCACertificate: types.StringValue("test-ca"),
 		KubeconfigFile:       types.StringNull(),
@@ -286,7 +286,7 @@ func TestCreateK8sClient_MultipleModesError(t *testing.T) {
 func TestCreateK8sClient_NoModeError(t *testing.T) {
 	r := &manifestResource{}
 
-	conn := clusterConnectionModel{
+	conn := ClusterConnectionModel{
 		Host:                 types.StringNull(),
 		ClusterCACertificate: types.StringNull(),
 		KubeconfigFile:       types.StringNull(),
@@ -373,7 +373,7 @@ func TestGenerateID(t *testing.T) {
 	obj.SetKind("Namespace")
 	obj.SetName("test-namespace")
 
-	conn := clusterConnectionModel{
+	conn := ClusterConnectionModel{
 		Host:                 types.StringValue("https://example.com"),
 		ClusterCACertificate: types.StringValue("test-ca"),
 		KubeconfigFile:       types.StringNull(),
@@ -409,7 +409,7 @@ func TestGenerateID(t *testing.T) {
 
 // Helper function for substring checking
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && s[:len(substr)] == substr
+	return strings.Contains(s, substr)
 }
 
 func TestClassifyK8sError(t *testing.T) {
