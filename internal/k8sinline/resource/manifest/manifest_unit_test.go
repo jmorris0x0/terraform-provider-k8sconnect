@@ -753,7 +753,7 @@ func TestObjectToYAML(t *testing.T) {
 }
 
 func TestStubK8sClient_GetGVRFromKind(t *testing.T) {
-	stubClient := NewStubK8sClient()
+	stubClient := k8sclient.NewStubK8sClient()
 	ctx := context.Background()
 
 	tests := []struct {

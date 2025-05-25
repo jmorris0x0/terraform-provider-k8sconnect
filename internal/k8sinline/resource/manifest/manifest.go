@@ -404,11 +404,25 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 			"The provider cannot automatically retrieve the resource configuration during import.",
 	)
 
-	// Create a minimal state with just the ID set
-	// The user will need to provide cluster_connection and yaml_body in their config
+	// Create a minimal state with valid placeholder YAML
+	// The user will need to provide cluster_connection and update yaml_body in their config
+	placeholderYAML := fmt.Sprintf(`apiVersion: v1
+kind: %s
+metadata:
+  name: %s`, kind, name)
+
+	// Add namespace if it's not cluster-scoped
+	if namespace != "" {
+		placeholderYAML = fmt.Sprintf(`apiVersion: v1
+kind: %s
+metadata:
+  name: %s
+  namespace: %s`, kind, name, namespace)
+	}
+
 	state := manifestResourceModel{
 		ID:       types.StringValue(importID),
-		YAMLBody: types.StringValue("# TODO: Replace with actual YAML from your cluster"),
+		YAMLBody: types.StringValue(placeholderYAML),
 		ClusterConnection: ClusterConnectionModel{
 			Host:                 types.StringNull(),
 			ClusterCACertificate: types.StringNull(),
