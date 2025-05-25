@@ -378,7 +378,7 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 	})
 }
 
-// ImportState method - simplified version that requires manual configuration
+// ImportState method - implements config-first import strategy
 func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Parse import ID: "namespace/kind/name" or "/kind/name" for cluster-scoped
 	namespace, kind, name, err := r.parseImportID(req.ID)
@@ -393,56 +393,145 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		return
 	}
 
-	// Generate a temporary ID for the import
-	// User will need to manually configure the cluster_connection and yaml_body after import
-	importID := fmt.Sprintf("import-%s-%s-%s", namespace, kind, name)
-
-	// Set basic state - user must update configuration manually
-	resp.Diagnostics.AddWarning(
-		"Manual Configuration Required",
-		"Import succeeded, but you must manually configure the cluster_connection and yaml_body fields in your Terraform configuration to match the imported resource. "+
-			"The provider cannot automatically retrieve the resource configuration during import.",
-	)
-
-	// Create a minimal state with valid placeholder YAML
-	// The user will need to provide cluster_connection and update yaml_body in their config
-	placeholderYAML := fmt.Sprintf(`apiVersion: v1
-kind: %s
-metadata:
-  name: %s`, kind, name)
-
-	// Add namespace if it's not cluster-scoped
-	if namespace != "" {
-		placeholderYAML = fmt.Sprintf(`apiVersion: v1
-kind: %s
-metadata:
-  name: %s
-  namespace: %s`, kind, name, namespace)
+	// Get connection from existing configuration (required for config-first import)
+	var data manifestResourceModel
+	diags := req.Config.Get(ctx, &data)
+	if diags.HasError() {
+		resp.Diagnostics.AddError(
+			"Import Failed: Missing Resource Configuration",
+			"k8sinline uses a config-first import strategy. You must write the resource configuration block with cluster_connection before importing.\n\n"+
+				"Example:\n"+
+				"  resource \"k8sinline_manifest\" \"example\" {\n"+
+				"    yaml_body = \"# Will be replaced during import\"\n"+
+				"    \n"+
+				"    cluster_connection {\n"+
+				"      kubeconfig_raw = file(\"~/.kube/config\")\n"+
+				"      context        = \"production\"\n"+
+				"    }\n"+
+				"  }\n\n"+
+				"Then run: terraform import k8sinline_manifest.example \"default/Pod/nginx\"",
+		)
+		return
 	}
 
-	state := manifestResourceModel{
-		ID:       types.StringValue(importID),
-		YAMLBody: types.StringValue(placeholderYAML),
-		ClusterConnection: ClusterConnectionModel{
-			Host:                 types.StringNull(),
-			ClusterCACertificate: types.StringNull(),
-			KubeconfigFile:       types.StringNull(),
-			KubeconfigRaw:        types.StringNull(),
-			Context:              types.StringNull(),
-			Exec:                 nil,
-		},
-		DeleteProtection: types.BoolNull(),
+	// Validate that cluster connection is configured
+	if r.isEmptyConnection(data.ClusterConnection) {
+		resp.Diagnostics.AddError(
+			"Import Failed: Missing Cluster Connection",
+			"The resource configuration must include a cluster_connection block to specify how to connect to the Kubernetes cluster.\n\n"+
+				"Add one of these connection modes:\n"+
+				"  cluster_connection {\n"+
+				"    # Option 1: Kubeconfig file\n"+
+				"    kubeconfig_file = \"~/.kube/config\"\n"+
+				"    context         = \"my-context\"\n"+
+				"  }\n"+
+				"  # OR\n"+
+				"  cluster_connection {\n"+
+				"    # Option 2: Inline kubeconfig\n"+
+				"    kubeconfig_raw = file(\"~/.kube/config\")\n"+
+				"  }\n"+
+				"  # OR\n"+
+				"  cluster_connection {\n"+
+				"    # Option 3: Direct connection\n"+
+				"    host                   = \"https://api.cluster.com\"\n"+
+				"    cluster_ca_certificate = var.cluster_ca\n"+
+				"    exec {\n"+
+				"      api_version = \"client.authentication.k8s.io/v1\"\n"+
+				"      command     = \"aws\"\n"+
+				"      args        = [\"eks\", \"get-token\", \"--cluster-name\", \"prod\"]\n"+
+				"    }\n"+
+				"  }",
+		)
+		return
+	}
+
+	// Create K8s client from connection (with caching)
+	client, err := r.clientGetter(data.ClusterConnection)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Import Failed: Connection Error",
+			fmt.Sprintf("Failed to create Kubernetes client from cluster_connection configuration.\n\n"+
+				"This usually means:\n"+
+				"1. Invalid kubeconfig or connection parameters\n"+
+				"2. Cluster is unreachable\n"+
+				"3. Authentication failed\n\n"+
+				"Details: %s", err.Error()),
+		)
+		return
+	}
+
+	// Discover GVR and fetch the live object in one step
+	// This handles the case where we only know the kind but not the API version
+	gvr, liveObj, err := client.GetGVRFromKind(ctx, kind, namespace, name)
+	if err != nil {
+		if strings.Contains(err.Error(), "no API resource found for kind") {
+			resp.Diagnostics.AddError(
+				"Import Failed: Unknown Resource Kind",
+				fmt.Sprintf("The resource kind \"%s\" was not found in the cluster.\n\n"+
+					"This usually means:\n"+
+					"1. The kind name is misspelled (check capitalization)\n"+
+					"2. A CRD needs to be installed first\n"+
+					"3. The resource type doesn't exist in this Kubernetes version\n\n"+
+					"Try: kubectl api-resources | grep -i %s", kind, strings.ToLower(kind)),
+			)
+		} else if strings.Contains(err.Error(), "not found") {
+			resp.Diagnostics.AddError(
+				"Import Failed: Resource Not Found",
+				fmt.Sprintf("The %s \"%s\" was not found.\n\n"+
+					"Verify the resource exists:\n"+
+					"  kubectl get %s %s %s\n\n"+
+					"Details: %s",
+					kind, name, strings.ToLower(kind), name,
+					func() string {
+						if namespace != "" {
+							return fmt.Sprintf("-n %s", namespace)
+						}
+						return ""
+					}(), err.Error()),
+			)
+		} else {
+			resp.Diagnostics.AddError(
+				"Import Failed: Discovery/Fetch Error",
+				fmt.Sprintf("Failed to discover or fetch the %s \"%s\".\n\nDetails: %s", kind, name, err.Error()),
+			)
+		}
+		return
+	}
+
+	// Convert live object back to YAML
+	yamlBytes, err := r.objectToYAML(liveObj)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Import Failed: YAML Conversion Error",
+			fmt.Sprintf("Failed to convert the imported object to YAML: %s", err.Error()),
+		)
+		return
+	}
+
+	// Generate resource ID (same logic as Create)
+	resourceID := r.generateID(liveObj, data.ClusterConnection)
+
+	// Populate state with imported data
+	importedData := manifestResourceModel{
+		ID:                types.StringValue(resourceID),
+		YAMLBody:          types.StringValue(string(yamlBytes)),
+		ClusterConnection: data.ClusterConnection, // Keep the connection from config
+		DeleteProtection:  data.DeleteProtection,  // Keep existing delete protection setting
 	}
 
 	// Set the imported state
-	diags := resp.State.Set(ctx, &state)
+	diags = resp.State.Set(ctx, &importedData)
 	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
-	tflog.Info(ctx, "imported resource with manual config required", map[string]interface{}{
-		"import_id": req.ID,
-		"namespace": namespace,
-		"kind":      kind,
-		"name":      name,
+	tflog.Info(ctx, "successfully imported resource", map[string]interface{}{
+		"import_id":   req.ID,
+		"resource_id": resourceID,
+		"kind":        liveObj.GetKind(),
+		"name":        liveObj.GetName(),
+		"namespace":   liveObj.GetNamespace(),
 	})
 }
 
