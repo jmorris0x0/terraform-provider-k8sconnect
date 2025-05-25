@@ -231,6 +231,7 @@
 | **ADR‑005** | `delete_protection` attribute | Safeguard for production objects. |
 | **ADR‑006** | Connection pooling by cluster endpoint | Efficient resource usage and connection reuse. |
 | **ADR‑007** | **🆕 Structured error classification** | Map client-go errors to actionable Terraform diagnostics for better UX. |
+| **ADR‑008** | **🆕 Config-First Import Strategy** | Import requires resource configuration first; uses inline connection for cluster access. |
 
 ---
 
