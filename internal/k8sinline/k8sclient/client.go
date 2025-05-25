@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -39,6 +40,12 @@ type K8sClient interface {
 
 	// GetGVR determines the GroupVersionResource for an unstructured object.
 	GetGVR(ctx context.Context, obj *unstructured.Unstructured) (schema.GroupVersionResource, error)
+}
+
+// CacheInvalidator provides methods to invalidate caches for handling stale discovery
+type CacheInvalidator interface {
+	// InvalidateDiscoveryCache clears cached discovery information to handle new CRDs
+	InvalidateDiscoveryCache(ctx context.Context) error
 }
 
 // ApplyOptions holds options for server-side apply operations.
@@ -141,6 +148,18 @@ func (d *DynamicK8sClient) SetFieldManager(name string) K8sClient {
 func (d *DynamicK8sClient) WithForceConflicts(force bool) K8sClient {
 	d.forceConflicts = force
 	return d
+}
+
+// InvalidateDiscoveryCache implements CacheInvalidator interface
+func (d *DynamicK8sClient) InvalidateDiscoveryCache(ctx context.Context) error {
+	if cachedDiscovery, ok := d.discovery.(discovery.CachedDiscoveryInterface); ok {
+		tflog.Debug(ctx, "Invalidating discovery cache to handle potential new CRDs")
+		cachedDiscovery.Invalidate()
+		return nil
+	}
+	// If discovery client doesn't support caching, that's fine - no-op
+	tflog.Debug(ctx, "Discovery client doesn't support caching, skipping invalidation")
+	return nil
 }
 
 // getResourceInterface returns the appropriate ResourceInterface, handling default namespace inference
@@ -373,6 +392,12 @@ func (s *stubK8sClient) WithForceConflicts(force bool) K8sClient {
 	return s
 }
 
+// InvalidateDiscoveryCache implements CacheInvalidator interface for testing
+func (s *stubK8sClient) InvalidateDiscoveryCache(ctx context.Context) error {
+	// No-op for stub client
+	return nil
+}
+
 func (s *stubK8sClient) Apply(ctx context.Context, obj *unstructured.Unstructured, options ApplyOptions) error {
 	s.ApplyCalls = append(s.ApplyCalls, ApplyCall{
 		Object:  obj.DeepCopy(),
@@ -431,6 +456,8 @@ func (s *stubK8sClient) GetGVR(ctx context.Context, obj *unstructured.Unstructur
 	}
 }
 
-// Interface assertions ensure concrete types satisfy K8sClient.
+// Interface assertions ensure concrete types satisfy K8sClient and CacheInvalidator.
 var _ K8sClient = (*DynamicK8sClient)(nil)
 var _ K8sClient = (*stubK8sClient)(nil)
+var _ CacheInvalidator = (*DynamicK8sClient)(nil)
+var _ CacheInvalidator = (*stubK8sClient)(nil)
