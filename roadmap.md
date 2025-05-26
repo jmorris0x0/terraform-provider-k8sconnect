@@ -12,8 +12,11 @@
 - ✅ **Core CRUD Operations**: All Create/Read/Update/Delete methods working with proper error handling
 - ✅ **Comprehensive Testing**: Unit tests + acceptance tests with OIDC e2e setup
 - ✅ **Multi-mode connections**: Inline, kubeconfig-file, and kubeconfig-raw all working
+- ✅ **Delete Protection**: Complete with `delete_protection` attribute and comprehensive testing
+- ✅ **Import Support**: Full ADR-008 implementation with environment variable strategy and context parsing
+- ✅ **Connection Pooling**: Provider-level client caching with deterministic cache keys and connection reuse
 
-**Current status: 8/15 MVP features complete** 🎯
+**Current status: 11/15 MVP features complete** 🎯
 
 ---
 
@@ -31,143 +34,18 @@
 | 8   | Deferred Diff & Live Diff                    | 📝     | Server-side apply dry-run in plan if reachable; defer to local diff/hash if unreachable.       |
 | 9   | Sensitive Attributes & Schema                | ✅     | ✅ All `cluster.*` fields marked sensitive; schema validation for connection modes.                          |
 | 10  | RBAC Pre-flight                              | 📝     | Use SelfSubjectAccessReview API to check apply permissions in `Configure()`.                   |
-| 11  | Delete Protection                            | 📝     | `delete_protection` attr; abort destroy unless disabled.                                        |
-| 12  | Import Support                               | 🛠     | Basic `ImportState` method exists; need full `<ns>/<kind>/<n>` parsing and live object fetch.   |
-| 13  | Concurrency Safety & Connection Management   | 📝     | One REST client per cluster; connection pooling; `max_parallel` limit.                         |
+| 11  | Delete Protection                            | ✅     | ✅ `delete_protection` attr blocks destroy; comprehensive acceptance tests with enable/disable flow.                                        |
+| 12  | Import Support                               | ✅     | ✅ ADR-008 implementation: `<context>/<namespace>/<kind>/<name>` parsing, KUBECONFIG env strategy, excellent error messages.   |
+| 13  | Concurrency Safety & Connection Management   | ✅     | ✅ Provider-level client caching with SHA-256 cache keys; connection pooling; dependency injection via ClientGetter.                         |
 | 14  | CI, Security & Licensing                     | 🛠     | OIDC e2e test setup working; need GitHub Actions matrix, checksums/SBOM, security scanning.                    |
 | 15  | Acceptance Tests                             | 🛠     | Basic tests working; need `TestAcc*_DeleteProtection`, `*_Import`, multi-cluster scenarios.             |
 
 ---
-
-## Detailed MVP work breakdown
-
-### 1. Client-go Dynamic Client engine (server‑side apply) ✅
-* Define `K8sClient` interface:
-```go    
-    type K8sClient interface {
-        Apply(ctx context.Context, obj *unstructured.Unstructured, options ApplyOptions) error
-        Get(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string) (*unstructured.Unstructured, error)
-        Delete(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string, options DeleteOptions) error
-        DryRunApply(ctx context.Context, obj *unstructured.Unstructured, options ApplyOptions) (*unstructured.Unstructured, error)
-        SetFieldManager(name string) K8sClient                    // chainable
-        WithServerSide() K8sClient       // toggle server‑side mode
-        WithForceConflicts(force bool) K8sClient // handle conflicts
-    }
-```
-* Create `ApplyOptions` and `DeleteOptions` structs:
-```go
-    type ApplyOptions struct {
-        FieldManager   string
-        Force          bool
-        DryRun         []string
-    }
-    
-    type DeleteOptions struct {
-        GracePeriodSeconds *int64
-        PropagationPolicy  *metav1.DeletionPropagation
-    }
-```
-* Implement stubs (`stubK8sClient`) that record operations for assertions.
-* Unit‑test interface satisfaction:
-```go
-    var _ K8sClient = (*DynamicK8sClient)(nil)
-    var _ K8sClient = (*stubK8sClient)(nil)
-```
-### 2. Implement real DynamicK8sClient ✅
-* Provide constructor with REST config:
-```go
-    func NewDynamicK8sClient(config *rest.Config) (*DynamicK8sClient, error)
-```
-* Build REST config from cluster connection:
-    - Inline: construct rest.Config from host, CA, exec auth
-    - Kubeconfig: use clientcmd to load and build config
-    - Support context switching and exec credential plugins
-* Early validation in builder:
-    - Reject unsupported `Exec.APIVersion`
-    - Validate TLS settings and reachability
-* Connection management:
-    - Cache REST clients by cluster endpoint
-    - Reuse dynamic clients across resources
-
-### 3. `Create` method implementation in `manifest.go` ✅
-* **Dependency injection**: accept a `K8sClient` instance via resource constructor.
-* **Extract & validate** `cluster_connection`:
-    1. Inline (`host` + `cluster_ca_certificate` + `exec`)
-    2. Kubeconfig file (`kubeconfig_file`)
-    3. Raw kubeconfig (`kubeconfig_raw`)
-    - Guard against invalid PEM blocks in `cluster_ca_certificate`.
-    - Wrap configuration errors with field context.
-* **Parse YAML** into `unstructured.Unstructured`:
-    - Single document validation
-    - Extract GVK for Dynamic Client operations
-    - Validate required fields (apiVersion, kind, metadata.name)
-* **Server-side apply**:
-```go
-    client := k8sClient.
-        WithServerSide().
-        SetFieldManager("k8sinline")
-
-    err := client.Apply(ctx, obj, ApplyOptions{
-        FieldManager: "k8sinline",
-        Force: false,
-    })
-    if err != nil {
-        resp.Diagnostics.AddError("apply failed", err.Error())
-        return
-    }
-```
-* **ID generation**: compute SHA‑256 of normalized `{cluster,namespace,kind,name}`:
-```go
-    id := fmt.Sprintf("%s/%s/%s/%s", 
-        clusterHash, obj.GetNamespace(), 
-        obj.GetKind(), obj.GetName())
-```
-* **Set state**:
-```go
-    model.ID = types.StringValue(id)
-    model.YAMLBody = data.YAMLBody
-    resp.State.Set(ctx, &model)
-```
-### 4. Write Create‑level tests ✅
-* **Fake K8sClient**: `stubK8sClient` records operations, returns controlled responses.
-* **Table‑driven tests** for inline vs file vs raw modes.
-* **Assertions**:
-    - Correct GVR extracted from YAML
-    - Server-side apply called with proper options
-    - Field manager set correctly
-    - Error handling for malformed YAML
-    - Correct ID generation
-* **EnvTest e2e** under `TF_ACC=1` with real Kubernetes API server.
-
-### 5. Future‑proofing & additional notes ✅
-* Reuse `Create` logic in `Update` (server-side apply is idempotent).
-* Implement `Delete` via Dynamic Client `Delete()`.
-* Consider adding conflict resolution strategies.
-* Keep apply defaults centralized in `ApplyOptions`.
-* Document how to evolve `K8sClient` interface.
-
-### 6. Read & Refresh State ✅
-1. Use Dynamic Client `Get()` to fetch current object state.
-2. Handle 404 as "absent" and clear Terraform state.
-3. Compare server state with desired state for drift detection.
-4. Update Terraform state from live object.
-5. Unit‑test edge‑cases (missing fields, unknown GVK).
-
-### 7. Delete ✅
-1. Call Dynamic Client `Delete()` with proper options.
-2. Support `force = true` → set grace period to 0.
-3. Handle 404 during delete (already gone).
-4. Table‑driven tests including force deletion.
-
 ### 8. Deferred Diff & Live Diff (plan‑time enhancement) 📝
 1. In `Plan`, attempt dry-run server-side apply.  
    - If reachable → compare dry-run result with current state.  
    - If unreachable → emit "(diff deferred, cluster unreachable)" and store hash.
 2. Use structured-merge-diff for accurate field-level comparison.
-
-### 9. Sensitive Attributes & Schema ✅
-1. Mark all `cluster.*` fields `Sensitive: true`.
-2. Schema validation for required fields per connection mode.
 
 ### 10. RBAC Pre‑flight (in `Configure()`) 📝
 1. Use `SelfSubjectAccessReview` API to check permissions:
@@ -182,19 +60,6 @@
         },
     }
 ```
-### 11. Delete Protection 📝
-1. Add resource attr `delete_protection = true` (default `false`).
-2. In `Delete`, abort if protection is enabled.
-
-### 12. Import Support 🛠
-1. `Importer` accepts ID format `<namespace>/<kind>/<name>`.
-2. Use Dynamic Client to fetch live object → populate state.
-
-### 13. Concurrency Safety & Connection Management 📝
-1. Create REST client pool keyed by cluster endpoint.
-2. Serialize operations per `(cluster,namespace,kind,name)`.
-3. Optional provider attr `max_parallel = 8`.
-
 ### 14. CI, Security & Licensing 🛠
 1. GitHub Actions matrix for multiple platforms.
 2. Build/upload checksums + SBOM.
@@ -231,7 +96,7 @@
 | **ADR‑005** | `delete_protection` attribute | Safeguard for production objects. |
 | **ADR‑006** | Connection pooling by cluster endpoint | Efficient resource usage and connection reuse. |
 | **ADR‑007** | **🆕 Structured error classification** | Map client-go errors to actionable Terraform diagnostics for better UX. |
-| **ADR‑008** | **🆕 Config-First Import Strategy** | Import requires resource configuration first; uses inline connection for cluster access. |
+| **ADR‑008** | **🆕 Environment Variable Import Strategy** | Import uses KUBECONFIG env var with `<context>/<namespace>/<kind>/<name>` format for standard Terraform UX. |
 
 ---
 
@@ -273,9 +138,9 @@
 
 ## 🎯 Recommended Next Steps
 
-Based on current progress (8/15 features complete), the highest-value next priorities are:
+Based on current progress (11/15 features complete), the highest-value next priorities are:
 
-1. **Delete Protection** (📝 → 🛠) - 1-2 days, high safety value
-2. **Enhanced Import Support** (🛠 → ✅) - 2-3 days, critical for adoption
-3. **Deferred Diff & Live Diff** (📝 → 🛠) - 1-2 weeks, enables single-phase pipelines
+1. **Deferred Diff & Live Diff** (📝 → 🛠) - 1-2 weeks, enables single-phase pipelines  
+2. **RBAC Pre-flight** (📝 → 🛠) - 3-4 days, improves error experience
+3. **CI, Security & Licensing** (🛠 → ✅) - 1 week, production readiness
 
