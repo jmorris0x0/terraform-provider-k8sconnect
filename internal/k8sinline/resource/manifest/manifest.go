@@ -378,90 +378,113 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 	})
 }
 
-// ImportState method - implements config-first import strategy
+// ImportState method implementing kubeconfig strategy
 func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Parse import ID: "namespace/kind/name" or "/kind/name" for cluster-scoped
-	namespace, kind, name, err := r.parseImportID(req.ID)
+	// Parse import ID: "context/namespace/kind/name" or "context/kind/name" for cluster-scoped
+	kubeContext, namespace, kind, name, err := r.parseImportID(req.ID)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Invalid Import ID",
-			fmt.Sprintf("Expected format: <namespace>/<kind>/<name> (use empty string for cluster-scoped: \"/<kind>/<name>\")\n\nExamples:\n"+
-				"  default/Pod/nginx\n"+
-				"  kube-system/Service/coredns\n"+
-				"  \"/Namespace/my-namespace\"\n\nError: %s", err.Error()),
+			fmt.Sprintf("Expected format: <context>/<namespace>/<kind>/<name> or <context>/<kind>/<name>\n\nExamples:\n"+
+				"  prod/default/Pod/nginx\n"+
+				"  staging/kube-system/Service/coredns\n"+
+				"  prod/Namespace/my-namespace\n"+
+				"  dev/ClusterRole/admin\n\nError: %s", err.Error()),
 		)
 		return
 	}
 
-	// Get connection from existing configuration (required for config-first import)
-	var data manifestResourceModel
-	diags := req.Config.Get(ctx, &data)
-	if diags.HasError() {
+	// Validate required parts
+	if kubeContext == "" {
 		resp.Diagnostics.AddError(
-			"Import Failed: Missing Resource Configuration",
-			"k8sinline uses a config-first import strategy. You must write the resource configuration block with cluster_connection before importing.\n\n"+
-				"Example:\n"+
-				"  resource \"k8sinline_manifest\" \"example\" {\n"+
-				"    yaml_body = \"# Will be replaced during import\"\n"+
-				"    \n"+
-				"    cluster_connection {\n"+
-				"      kubeconfig_raw = file(\"~/.kube/config\")\n"+
-				"      context        = \"production\"\n"+
-				"    }\n"+
-				"  }\n\n"+
-				"Then run: terraform import k8sinline_manifest.example \"default/Pod/nginx\"",
+			"Import Failed: Missing Context",
+			"The import ID must include a kubeconfig context as the first part.\n\n"+
+				"Format: <context>/<namespace>/<kind>/<name> or <context>/<kind>/<name>\n\n"+
+				"Available contexts can be found with: kubectl config get-contexts",
 		)
 		return
 	}
-
-	// Validate that cluster connection is configured
-	if r.isEmptyConnection(data.ClusterConnection) {
+	if kind == "" {
 		resp.Diagnostics.AddError(
-			"Import Failed: Missing Cluster Connection",
-			"The resource configuration must include a cluster_connection block to specify how to connect to the Kubernetes cluster.\n\n"+
-				"Add one of these connection modes:\n"+
-				"  cluster_connection {\n"+
-				"    # Option 1: Kubeconfig file\n"+
-				"    kubeconfig_file = \"~/.kube/config\"\n"+
-				"    context         = \"my-context\"\n"+
-				"  }\n"+
-				"  # OR\n"+
-				"  cluster_connection {\n"+
-				"    # Option 2: Inline kubeconfig\n"+
-				"    kubeconfig_raw = file(\"~/.kube/config\")\n"+
-				"  }\n"+
-				"  # OR\n"+
-				"  cluster_connection {\n"+
-				"    # Option 3: Direct connection\n"+
-				"    host                   = \"https://api.cluster.com\"\n"+
-				"    cluster_ca_certificate = var.cluster_ca\n"+
-				"    exec {\n"+
-				"      api_version = \"client.authentication.k8s.io/v1\"\n"+
-				"      command     = \"aws\"\n"+
-				"      args        = [\"eks\", \"get-token\", \"--cluster-name\", \"prod\"]\n"+
-				"    }\n"+
-				"  }",
+			"Import Failed: Missing Kind",
+			"The resource kind cannot be empty in the import ID.",
+		)
+		return
+	}
+	if name == "" {
+		resp.Diagnostics.AddError(
+			"Import Failed: Missing Name",
+			"The resource name cannot be empty in the import ID.",
 		)
 		return
 	}
 
-	// Create K8s client from connection (with caching)
-	client, err := r.clientGetter(data.ClusterConnection)
+	// Read kubeconfig from KUBECONFIG env var or default location
+	kubeconfigPath := os.Getenv("KUBECONFIG")
+	if kubeconfigPath == "" {
+		homeDir := os.Getenv("HOME")
+		if homeDir == "" {
+			resp.Diagnostics.AddError(
+				"Import Failed: KUBECONFIG Not Found",
+				"KUBECONFIG environment variable is not set and HOME directory could not be determined.\n\n"+
+					"Set KUBECONFIG environment variable:\n"+
+					"  export KUBECONFIG=~/.kube/config\n"+
+					"  terraform import k8sinline_manifest.example \"prod/default/Pod/nginx\"",
+			)
+			return
+		}
+		kubeconfigPath = filepath.Join(homeDir, ".kube", "config")
+	}
+
+	// Check if kubeconfig file exists
+	if _, err := os.Stat(kubeconfigPath); os.IsNotExist(err) {
+		resp.Diagnostics.AddError(
+			"Import Failed: Kubeconfig File Not Found",
+			fmt.Sprintf("Kubeconfig file not found at: %s\n\n"+
+				"Ensure your kubeconfig file exists or set KUBECONFIG environment variable:\n"+
+				"  export KUBECONFIG=/path/to/your/kubeconfig\n"+
+				"  terraform import k8sinline_manifest.example \"prod/default/Pod/nginx\"", kubeconfigPath),
+		)
+		return
+	}
+
+	// Create K8s client using kubeconfig file and context
+	client, err := k8sclient.NewDynamicK8sClientFromKubeconfigFile(kubeconfigPath, kubeContext)
 	if err != nil {
-		resp.Diagnostics.AddError(
-			"Import Failed: Connection Error",
-			fmt.Sprintf("Failed to create Kubernetes client from cluster_connection configuration.\n\n"+
-				"This usually means:\n"+
-				"1. Invalid kubeconfig or connection parameters\n"+
-				"2. Cluster is unreachable\n"+
-				"3. Authentication failed\n\n"+
-				"Details: %s", err.Error()),
-		)
+		// Provide context-specific error messages
+		if strings.Contains(err.Error(), "context") && strings.Contains(err.Error(), "not found") {
+			resp.Diagnostics.AddError(
+				"Import Failed: Context Not Found",
+				fmt.Sprintf("Context \"%s\" not found in kubeconfig.\n\n"+
+					"Available contexts:\n"+
+					"  kubectl config get-contexts\n\n"+
+					"Details: %s", kubeContext, err.Error()),
+			)
+		} else if strings.Contains(err.Error(), "kubeconfig") {
+			resp.Diagnostics.AddError(
+				"Import Failed: Invalid Kubeconfig",
+				fmt.Sprintf("Failed to parse kubeconfig file at %s.\n\n"+
+					"Ensure your kubeconfig is valid:\n"+
+					"  kubectl config view\n\n"+
+					"Details: %s", kubeconfigPath, err.Error()),
+			)
+		} else {
+			resp.Diagnostics.AddError(
+				"Import Failed: Connection Error",
+				fmt.Sprintf("Failed to create Kubernetes client from kubeconfig.\n\n"+
+					"This usually means:\n"+
+					"1. Invalid kubeconfig file\n"+
+					"2. Cluster is unreachable\n"+
+					"3. Authentication failed\n\n"+
+					"Kubeconfig: %s\n"+
+					"Context: %s\n"+
+					"Details: %s", kubeconfigPath, kubeContext, err.Error()),
+			)
+		}
 		return
 	}
 
 	// Discover GVR and fetch the live object in one step
-	// This handles the case where we only know the kind but not the API version
 	gvr, liveObj, err := client.GetGVRFromKind(ctx, kind, namespace, name)
 	if err != nil {
 		if strings.Contains(err.Error(), "no API resource found for kind") {
@@ -472,14 +495,16 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 					"1. The kind name is misspelled (check capitalization)\n"+
 					"2. A CRD needs to be installed first\n"+
 					"3. The resource type doesn't exist in this Kubernetes version\n\n"+
-					"Try: kubectl api-resources | grep -i %s", kind, strings.ToLower(kind)),
+					"Check available resource types:\n"+
+					"  kubectl api-resources | grep -i %s", kind, strings.ToLower(kind)),
 			)
 		} else if strings.Contains(err.Error(), "not found") {
 			resp.Diagnostics.AddError(
 				"Import Failed: Resource Not Found",
-				fmt.Sprintf("The %s \"%s\" was not found.\n\n"+
+				fmt.Sprintf("The %s \"%s\" was not found in the cluster.\n\n"+
 					"Verify the resource exists:\n"+
 					"  kubectl get %s %s %s\n\n"+
+					"Context: %s\n"+
 					"Details: %s",
 					kind, name, strings.ToLower(kind), name,
 					func() string {
@@ -487,18 +512,20 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 							return fmt.Sprintf("-n %s", namespace)
 						}
 						return ""
-					}(), err.Error()),
+					}(), kubeContext, err.Error()),
 			)
 		} else {
 			resp.Diagnostics.AddError(
 				"Import Failed: Discovery/Fetch Error",
-				fmt.Sprintf("Failed to discover or fetch the %s \"%s\".\n\nDetails: %s", kind, name, err.Error()),
+				fmt.Sprintf("Failed to discover or fetch the %s \"%s\".\n\n"+
+					"Context: %s\n"+
+					"Details: %s", kind, name, kubeContext, err.Error()),
 			)
 		}
 		return
 	}
 
-	// Convert live object back to YAML
+	// Convert live object back to clean YAML
 	yamlBytes, err := r.objectToYAML(liveObj)
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -508,19 +535,20 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		return
 	}
 
-	// Generate resource ID (same logic as Create)
-	resourceID := r.generateID(liveObj, data.ClusterConnection)
+	// Generate resource ID using a special import-based approach
+	// Since we don't have the final cluster connection yet, we'll use the context
+	resourceID := r.generateIDFromImport(liveObj, kubeContext)
 
-	// Populate state with imported data
+	// Populate state with imported data - cluster_connection will be configured by user
 	importedData := manifestResourceModel{
-		ID:                types.StringValue(resourceID),
-		YAMLBody:          types.StringValue(string(yamlBytes)),
-		ClusterConnection: data.ClusterConnection, // Keep the connection from config
-		DeleteProtection:  data.DeleteProtection,  // Keep existing delete protection setting
+		ID:       types.StringValue(resourceID),
+		YAMLBody: types.StringValue(string(yamlBytes)),
+		// Note: cluster_connection is left empty - user must configure it
+		DeleteProtection: types.BoolValue(false), // default
 	}
 
 	// Set the imported state
-	diags = resp.State.Set(ctx, &importedData)
+	diags := resp.State.Set(ctx, &importedData)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -532,7 +560,26 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		"kind":        liveObj.GetKind(),
 		"name":        liveObj.GetName(),
 		"namespace":   liveObj.GetNamespace(),
+		"context":     kubeContext,
+		"kubeconfig":  kubeconfigPath,
 	})
+
+	// Add informational message about next steps
+	resp.Diagnostics.AddWarning(
+		"Import Successful - Configuration Required",
+		"The resource has been imported successfully. You must now configure the cluster_connection block in your Terraform configuration to match your desired connection method.\n\n"+
+			"Example configuration:\n"+
+			"  resource \"k8sinline_manifest\" \"example\" {\n"+
+			"    yaml_body = \"# Populated by import\"\n"+
+			"    \n"+
+			"    cluster_connection {\n"+
+			"      # Choose your preferred connection method:\n"+
+			"      kubeconfig_file = \"~/.kube/config\"\n"+
+			"      context         = \""+kubeContext+"\"\n"+
+			"    }\n"+
+			"  }\n\n"+
+			"Run 'terraform plan' to see if your configuration matches the imported resource.",
+	)
 }
 
 // parseYAML converts YAML string to unstructured.Unstructured

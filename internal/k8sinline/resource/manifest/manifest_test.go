@@ -626,6 +626,21 @@ func TestAccManifestResource_Import(t *testing.T) {
 		k8sClient.CoreV1().Namespaces().Delete(ctx, namespaceName, metav1.DeleteOptions{})
 	}()
 
+	// Write the kubeconfig to a temporary file for import to use
+	kubeconfigFile := writeKubeconfigToTempFile(t, raw)
+	defer os.Remove(kubeconfigFile)
+
+	// Set KUBECONFIG environment variable for the import
+	oldKubeconfig := os.Getenv("KUBECONFIG")
+	os.Setenv("KUBECONFIG", kubeconfigFile)
+	defer func() {
+		if oldKubeconfig != "" {
+			os.Setenv("KUBECONFIG", oldKubeconfig)
+		} else {
+			os.Unsetenv("KUBECONFIG")
+		}
+	}()
+
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
 			"k8sinline": providerserver.NewProtocol6WithError(k8sinline.New()),
@@ -637,9 +652,10 @@ func TestAccManifestResource_Import(t *testing.T) {
 					"raw":            config.StringVariable(raw),
 					"namespace_name": config.StringVariable(namespaceName),
 				},
-				ResourceName:  "k8sinline_manifest.test_import",
-				ImportState:   true,
-				ImportStateId: fmt.Sprintf("/%s/%s", "Namespace", namespaceName),
+				ResourceName: "k8sinline_manifest.test_import",
+				ImportState:  true,
+				// Use new format: context/kind/name (cluster-scoped resource)
+				ImportStateId: fmt.Sprintf("kind-oidc-e2e/%s/%s", "Namespace", namespaceName),
 				ImportStateCheck: func(states []*terraform.InstanceState) error {
 					if len(states) != 1 {
 						return fmt.Errorf("expected 1 state, got %d", len(states))
@@ -676,18 +692,45 @@ func TestAccManifestResource_Import(t *testing.T) {
 						return fmt.Errorf("resource ID should be set after import")
 					}
 
+					// Verify cluster_connection is empty (user must configure it)
+					if state.Attributes["cluster_connection.#"] != "0" {
+						return fmt.Errorf("cluster_connection should be empty after import - user must configure it")
+					}
+
 					fmt.Printf("✅ Import successful - yaml_body populated with clean YAML\n")
 					return nil
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_import", "id"),
 					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_import", "yaml_body"),
+					// Verify the namespace still exists after import
 					testAccCheckNamespaceExists(k8sClient, namespaceName),
 				),
 			},
 		},
 		CheckDestroy: testAccCheckNamespaceDestroy(k8sClient, namespaceName),
 	})
+}
+
+// Helper function to write kubeconfig to a temporary file
+func writeKubeconfigToTempFile(t *testing.T, kubeconfigContent string) string {
+	tmpfile, err := os.CreateTemp("", "kubeconfig-import-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+
+	if _, err := tmpfile.Write([]byte(kubeconfigContent)); err != nil {
+		tmpfile.Close()
+		os.Remove(tmpfile.Name())
+		t.Fatalf("Failed to write kubeconfig: %v", err)
+	}
+
+	if err := tmpfile.Close(); err != nil {
+		os.Remove(tmpfile.Name())
+		t.Fatalf("Failed to close temp file: %v", err)
+	}
+
+	return tmpfile.Name()
 }
 
 const testAccManifestConfigImport = `
@@ -701,7 +744,7 @@ variable "namespace_name" {
 provider "k8sinline" {}
 
 resource "k8sinline_manifest" "test_import" {
-  yaml_body = "# Will be replaced during import"
+  yaml_body = "# Will be populated during import"
   
   cluster_connection {
     kubeconfig_raw = var.raw

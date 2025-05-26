@@ -49,6 +49,123 @@ Traditional providers force cluster configuration into the provider block; **k8s
 ```
 ---
 
+## Importing Existing Resources
+
+The k8sinline provider supports importing existing Kubernetes resources using standard Terraform import commands. The import process uses your **KUBECONFIG environment variable** and requires specifying the kubeconfig context in the import ID.
+
+### Import ID Format
+
+**Namespaced resources:** `<context>/<namespace>/<kind>/<name>`  
+**Cluster-scoped resources:** `<context>/<kind>/<name>`
+
+### Examples
+
+```bash
+# Set your kubeconfig (if not already set)
+export KUBECONFIG=~/.kube/config
+
+# Import a namespaced resource (Pod)
+terraform import k8sinline_manifest.nginx "prod/default/Pod/nginx-deployment-abc123"
+
+# Import a cluster-scoped resource (Namespace)  
+terraform import k8sinline_manifest.my_ns "prod/Namespace/my-namespace"
+
+# Import from different contexts
+terraform import k8sinline_manifest.staging_app "staging/kube-system/Service/coredns"
+terraform import k8sinline_manifest.dev_role "dev/ClusterRole/admin"
+```
+
+### Import Process
+
+1. **Set KUBECONFIG**: Ensure your `KUBECONFIG` environment variable points to a valid kubeconfig file
+2. **Find your context**: Use `kubectl config get-contexts` to see available contexts
+3. **Import the resource**: Use the format `<context>/<namespace>/<kind>/<name>`
+4. **Configure connection**: After import, add a `cluster_connection` block to your resource configuration
+
+### Post-Import Configuration
+
+After importing, you **must** configure the `cluster_connection` block in your Terraform configuration:
+
+```hcl
+resource "k8sinline_manifest" "nginx" {
+  yaml_body = "# Populated by import"
+  
+  # Choose your preferred connection method for normal operations
+  cluster_connection {
+    # Option 1: Use the same kubeconfig
+    kubeconfig_file = "~/.kube/config"
+    context         = "prod"
+  }
+  
+  # OR Option 2: Use inline connection for dynamic credentials
+  # cluster_connection {
+  #   host                   = var.cluster_endpoint
+  #   cluster_ca_certificate = var.cluster_ca
+  #   exec = {
+  #     api_version = "client.authentication.k8s.io/v1"
+  #     command     = "aws"
+  #     args        = ["eks", "get-token", "--cluster-name", "prod"]
+  #   }
+  # }
+}
+```
+
+### Import with Terraform Import Blocks
+
+The new Terraform import blocks also work seamlessly:
+
+```hcl
+# Define your resource configuration first
+resource "k8sinline_manifest" "nginx" {
+  yaml_body = "# Will be populated during import"
+  
+  cluster_connection {
+    kubeconfig_file = "~/.kube/config"
+    context         = "prod"
+  }
+}
+
+# Declare the import
+import {
+  to = k8sinline_manifest.nginx  
+  id = "prod/default/Pod/nginx-deployment-abc123"
+}
+```
+
+### Requirements for Import
+
+- **KUBECONFIG**: Environment variable must be set or `~/.kube/config` must exist
+- **Valid Context**: The context specified in the import ID must exist in your kubeconfig
+- **Cluster Access**: You must have read permissions for the resource you're importing
+- **Resource Exists**: The Kubernetes resource must exist in the specified cluster/namespace
+
+### Troubleshooting Import
+
+**Context not found:**
+```bash
+kubectl config get-contexts
+```
+
+**Resource not found:**
+```bash
+kubectl get <kind> <name> -n <namespace> --context <context>
+```
+
+**Permission issues:**
+```bash
+kubectl auth can-i get <resource> --context <context>
+```
+
+### Import vs Runtime Connections
+
+- **Import**: Uses KUBECONFIG environment variable (one-time operation)
+- **Runtime**: Uses the `cluster_connection` block in your Terraform configuration
+- **Flexibility**: After import, you can configure any connection method for normal Terraform operations
+
+
+
+
+
 ## Security caveats 🔐  
 
 Storing cluster credentials in the resource body means they **land in your Terraform
