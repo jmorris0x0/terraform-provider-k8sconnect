@@ -763,6 +763,7 @@ func (r *manifestResource) generateID(obj *unstructured.Unstructured, conn Clust
 	return hex.EncodeToString(hash[:])
 }
 
+// Helper function to generateID after import:
 func (r *manifestResource) generateIDFromImport(obj *unstructured.Unstructured, context string) string {
 	data := fmt.Sprintf("%s/%s/%s/%s",
 		context, // Use context as cluster identifier for imports
@@ -919,18 +920,4 @@ func (r *manifestResource) isSystemAnnotation(key string) bool {
 	// Alternative: let users decide what to keep vs remove
 	// Could add a provider-level setting for annotation filtering
 	return false
-}
-
-// Helper function to generate ID for imported resources
-func (r *manifestResource) generateIDFromImport(obj *unstructured.Unstructured, kubeContext string) string {
-	// Create a deterministic ID based on context + object identity
-	data := fmt.Sprintf("import:%s/%s/%s/%s",
-		kubeContext,
-		obj.GetNamespace(),
-		obj.GetKind(),
-		obj.GetName(),
-	)
-
-	hash := sha256.Sum256([]byte(data))
-	return hex.EncodeToString(hash[:])
 }
