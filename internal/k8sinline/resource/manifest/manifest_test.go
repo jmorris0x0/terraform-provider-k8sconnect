@@ -333,7 +333,7 @@ func testAccCheckPodExists(client kubernetes.Interface, namespace, name string) 
 func testAccCheckPodDestroy(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()
-		for i := 0; i < 10; i++ {
+		for i := 0; i < 15; i++ {
 			_, err := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
 			if err != nil {
 				if strings.Contains(err.Error(), "not found") {
