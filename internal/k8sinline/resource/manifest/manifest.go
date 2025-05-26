@@ -763,6 +763,18 @@ func (r *manifestResource) generateID(obj *unstructured.Unstructured, conn Clust
 	return hex.EncodeToString(hash[:])
 }
 
+func (r *manifestResource) generateIDFromImport(obj *unstructured.Unstructured, context string) string {
+	data := fmt.Sprintf("%s/%s/%s/%s",
+		context, // Use context as cluster identifier for imports
+		obj.GetNamespace(),
+		obj.GetKind(),
+		obj.GetName(),
+	)
+
+	hash := sha256.Sum256([]byte(data))
+	return hex.EncodeToString(hash[:])
+}
+
 // getClusterID creates a stable identifier for the cluster connection
 func (r *manifestResource) getClusterID(conn ClusterConnectionModel) string {
 	// Use host if available, otherwise hash the kubeconfig

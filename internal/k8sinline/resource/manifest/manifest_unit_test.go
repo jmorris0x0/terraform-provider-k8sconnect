@@ -581,7 +581,7 @@ func TestParseImportID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			namespace, kind, name, err := r.parseImportID(tt.importID)
+			context, namespace, kind, name, err := r.parseImportID(tt.importID)
 
 			if tt.expectError {
 				if err == nil {
