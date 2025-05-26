@@ -487,7 +487,7 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 	}
 
 	// Discover GVR and fetch the live object in one step
-	gvr, liveObj, err := client.GetGVRFromKind(ctx, kind, namespace, name)
+	_, liveObj, err := client.GetGVRFromKind(ctx, kind, namespace, name)
 	if err != nil {
 		if strings.Contains(err.Error(), "no API resource found for kind") {
 			resp.Diagnostics.AddError(
