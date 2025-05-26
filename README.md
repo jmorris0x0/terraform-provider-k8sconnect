@@ -1,6 +1,6 @@
 # terraform-provider-k8sinline
 
-A Terraform provider for applying Kubernetes manifests **with inline, per‑resource connection settings**.
+A Terraform provider for applying Kubernetes YAML manifests **with inline, per‑resource connection settings**.
 
 Traditional providers force cluster configuration into the provider block; **k8sinline** pushes it down into each resource, freeing you to target *any* cluster from *any* module without aliases, workspaces, or wrapper hacks.
 
@@ -26,7 +26,7 @@ Traditional providers force cluster configuration into the provider block; **k8s
     terraform {
       required_providers {
         k8sinline = {
-          source  = "jonathanmorris/k8sinline"
+          source  = "jmorris0x0/k8sinline"
           version = ">= 0.1.0"
         }
       }
@@ -162,10 +162,6 @@ kubectl auth can-i get <resource> --context <context>
 - **Runtime**: Uses the `cluster_connection` block in your Terraform configuration
 - **Flexibility**: After import, you can configure any connection method for normal Terraform operations
 
-
-
-
-
 ## Security caveats 🔐  
 
 Storing cluster credentials in the resource body means they **land in your Terraform
@@ -202,6 +198,7 @@ Terraform will refuse to destroy the object unless you set the flag to
 | Component      | Minimum version | Notes                                                                                                                                                                                                                 |
 | -------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Terraform      | 1.6+            | Tested on Terraform 1.6 and 1.7                                                                                                                                                                                       |
+| Kubernetes     | 1.17            | This resource uses Server-side Apply to carry out apply operations.|
 | Execution host | N/A             | Compatible with any environment that can run Terraform, including Terraform Cloud, GitHub Actions, and other CI/CD platforms                                                                                          |
 
 ---
