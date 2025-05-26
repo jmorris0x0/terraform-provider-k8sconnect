@@ -9,7 +9,7 @@ PROVIDER_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || 
 # 	  TF_ACC_TERRAFORM_VERSION=$(TERRAFORM_VERSION) \
 
 
-.PHONY: oidc-setup test-acc build vet clean test install
+.PHONY: oidc-setup test-acc build vet clean test install docs
 
 build:
 	@echo "🔨 Building provider binary"
@@ -141,4 +141,7 @@ clean:
 vet:
 	@echo "🔍 Running go vet on all packages"
 	@go vet ./...
+
+docs:
+	tfplugindocs
 

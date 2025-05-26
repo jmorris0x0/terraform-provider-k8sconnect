@@ -13,7 +13,6 @@ Traditional providers force cluster configuration into the provider block; **k8s
 | Multi‑phase apply requirement         | ❌ Requires staging: infra apply, then manifest apply                        | ✅ All resources in one plan — no phase split                                |
 | Cluster‑first dependency hell         | ❌ Providers require the cluster to exist at plan time                       | ✅ Connections defer auth resolution to apply time                           |
 | Multi‑cluster support                 | ❌ Requires provider aliases or separate states per cluster                  | ✅ Inline connection per resource — all clusters in one plan                 |
-| Plan-time unknown inputs cause taints | ❌ Provider taints resources when connection values are unknown at plan time | ✅ No tainting — deferred diffing skips live reads and lets the plan proceed |
 
 > **In short:** if you've ever copy‑pasted the same manifest into five workspaces just to hit five clusters, this provider removes that overhead.
 > `k8sinline` ends the chicken‑and‑egg problem. Clusters and manifests live in a **single plan** — no staged applies, no token hacks, no wrappers.
