@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -174,6 +175,18 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
+	// Generate resource ID (moved up to use in annotation)
+	id := r.generateID(obj, data.ClusterConnection)
+	data.ID = types.StringValue(id)
+
+	// Set ownership annotation before applying
+	annotations := obj.GetAnnotations()
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
+	annotations["k8sinline.terraform.io/id"] = data.ID.ValueString()
+	obj.SetAnnotations(annotations)
+
 	// Apply the manifest using server-side apply
 	err = client.SetFieldManager("k8sinline").Apply(ctx, obj, k8sclient.ApplyOptions{
 		FieldManager: "k8sinline",
@@ -189,10 +202,6 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		}
 		return
 	}
-
-	// Generate resource ID
-	id := r.generateID(obj, data.ClusterConnection)
-	data.ID = types.StringValue(id)
 
 	tflog.Trace(ctx, "applied manifest", map[string]interface{}{
 		"id":        data.ID.ValueString(),
@@ -261,11 +270,28 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 
 func (r *manifestResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var data manifestResourceModel
-
 	diags := req.Plan.Get(ctx, &data)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
+	}
+
+	// Get prior state to check for connection changes
+	var priorState manifestResourceModel
+	diags = req.State.Get(ctx, &priorState)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Check if connection changed and validate if so
+	if r.anyConnectionFieldChanged(data.ClusterConnection, priorState.ClusterConnection) {
+		if err := r.validateOwnership(ctx, data); err != nil {
+			resp.Diagnostics.AddError("Connection Change Blocked", err.Error())
+			return
+		}
+		resp.Diagnostics.AddWarning("Connection Changed",
+			"Connection details changed. Verified target cluster via ownership annotation.")
 	}
 
 	// Parse YAML into unstructured object
@@ -281,6 +307,14 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 		resp.Diagnostics.AddError("Connection Failed", fmt.Sprintf("Failed to create Kubernetes client: %s", err))
 		return
 	}
+
+	// Set ownership annotation before applying
+	annotations := obj.GetAnnotations()
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
+	annotations["k8sinline.terraform.io/id"] = data.ID.ValueString()
+	obj.SetAnnotations(annotations)
 
 	// Apply the updated manifest (server-side apply is idempotent)
 	err = client.SetFieldManager("k8sinline").Apply(ctx, obj, k8sclient.ApplyOptions{
@@ -929,4 +963,54 @@ func (r *manifestResource) isSystemAnnotation(key string) bool {
 	// Alternative: let users decide what to keep vs remove
 	// Could add a provider-level setting for annotation filtering
 	return false
+}
+
+func (r *manifestResource) validateOwnership(ctx context.Context, data manifestResourceModel) error {
+	obj, err := r.parseYAML(data.YAMLBody.ValueString())
+	if err != nil {
+		return fmt.Errorf("failed to parse YAML: %w", err)
+	}
+
+	client, err := r.clientGetter(data.ClusterConnection)
+	if err != nil {
+		return fmt.Errorf("failed to create client: %w", err)
+	}
+
+	gvr, err := r.getGVR(ctx, client, obj)
+	if err != nil {
+		return fmt.Errorf("failed to determine GVR: %w", err)
+	}
+
+	liveObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return nil // Object doesn't exist - safe
+		}
+		return fmt.Errorf("failed to check existing resource: %w", err)
+	}
+
+	// Check ownership annotation
+	annotations := liveObj.GetAnnotations()
+	if annotations == nil {
+		return fmt.Errorf("resource exists but has no ownership annotation - may be unmanaged")
+	}
+
+	actualID := annotations["k8sinline.terraform.io/id"] // FIXED!
+	expectedID := data.ID.ValueString()
+
+	if actualID != expectedID {
+		return fmt.Errorf("connection targets different cluster - resource %s %q exists but is not managed by this Terraform resource (different ID: %s vs %s)",
+			obj.GetKind(), obj.GetName(), actualID, expectedID)
+	}
+
+	return nil // Same resource, safe to proceed
+}
+
+func (r *manifestResource) anyConnectionFieldChanged(plan, state ClusterConnectionModel) bool {
+	return !plan.Host.Equal(state.Host) ||
+		!plan.ClusterCACertificate.Equal(state.ClusterCACertificate) ||
+		!plan.KubeconfigFile.Equal(state.KubeconfigFile) ||
+		!plan.KubeconfigRaw.Equal(state.KubeconfigRaw) ||
+		!plan.Context.Equal(state.Context) ||
+		!reflect.DeepEqual(plan.Exec, state.Exec)
 }
