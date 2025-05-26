@@ -31,21 +31,15 @@
 | 5   | Future-proofing & additional notes           | ✅     | ✅ `Update` reuses `Create` logic; interface designed for evolution; field manager support.        |
 | 6   | Read & Refresh State                         | ✅     | ✅ Dynamic Client `Get()` with 404→absent handling; structured error classification. |
 | 7   | Delete                                       | ✅     | ✅ Dynamic Client `Delete()` with 404 tolerance; proper cleanup and error handling.               |
-| 8   | Deferred Diff & Live Diff                    | 📝     | Server-side apply dry-run in plan if reachable; defer to local diff/hash if unreachable.       |
-| 9   | Sensitive Attributes & Schema                | ✅     | ✅ All `cluster.*` fields marked sensitive; schema validation for connection modes.                          |
-| 10  | RBAC Pre-flight                              | 📝     | Use SelfSubjectAccessReview API to check apply permissions in `Configure()`.                   |
-| 11  | Delete Protection                            | ✅     | ✅ `delete_protection` attr blocks destroy; comprehensive acceptance tests with enable/disable flow.                                        |
-| 12  | Import Support                               | ✅     | ✅ ADR-008 implementation: `<context>/<namespace>/<kind>/<name>` parsing, KUBECONFIG env strategy, excellent error messages.   |
-| 13  | Concurrency Safety & Connection Management   | ✅     | ✅ Provider-level client caching with SHA-256 cache keys; connection pooling; dependency injection via ClientGetter.                         |
-| 14  | CI, Security & Licensing                     | 🛠     | OIDC e2e test setup working; need GitHub Actions matrix, checksums/SBOM, security scanning.                    |
-| 15  | Acceptance Tests                             | 🛠     | Basic tests working; need `TestAcc*_DeleteProtection`, `*_Import`, multi-cluster scenarios.             |
+| 8   | Sensitive Attributes & Schema                | ✅     | ✅ All `cluster.*` fields marked sensitive; schema validation for connection modes.                          |
+| 9   | RBAC Pre-flight                              | 📝     | Use SelfSubjectAccessReview API to check apply permissions in `Configure()`.                   |
+| 10  | Delete Protection                            | ✅     | ✅ `delete_protection` attr blocks destroy; comprehensive acceptance tests with enable/disable flow.                                        |
+| 11  | Import Support                               | ✅     | ✅ ADR-008 implementation: `<context>/<namespace>/<kind>/<name>` parsing, KUBECONFIG env strategy, excellent error messages.   |
+| 12  | Concurrency Safety & Connection Management   | ✅     | ✅ Provider-level client caching with SHA-256 cache keys; connection pooling; dependency injection via ClientGetter.                         |
+| 13  | CI, Security & Licensing                     | 🛠     | OIDC e2e test setup working; need GitHub Actions matrix, checksums/SBOM, security scanning.                    |
+| 14  | Acceptance Tests                             | 🛠     | Basic tests working; need `TestAcc*_DeleteProtection`, `*_Import`, multi-cluster scenarios.             |
 
 ---
-### 8. Deferred Diff & Live Diff (plan‑time enhancement) 📝
-1. In `Plan`, attempt dry-run server-side apply.  
-   - If reachable → compare dry-run result with current state.  
-   - If unreachable → emit "(diff deferred, cluster unreachable)" and store hash.
-2. Use structured-merge-diff for accurate field-level comparison.
 
 ### 10. RBAC Pre‑flight (in `Configure()`) 📝
 1. Use `SelfSubjectAccessReview` API to check permissions:
