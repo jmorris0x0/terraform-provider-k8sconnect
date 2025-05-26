@@ -60,6 +60,8 @@ type manifestResourceModel struct {
 	YAMLBody          types.String           `tfsdk:"yaml_body"`
 	ClusterConnection ClusterConnectionModel `tfsdk:"cluster_connection"`
 	DeleteProtection  types.Bool             `tfsdk:"delete_protection"`
+	DeleteTimeout     types.String           `tfsdk:"delete_timeout"`
+	ForceDestroy      types.Bool             `tfsdk:"force_destroy"`
 }
 
 // NewManifestResource creates a new manifest resource (backward compatibility)
@@ -86,6 +88,7 @@ func (r *manifestResource) Metadata(ctx context.Context, req resource.MetadataRe
 	resp.TypeName = req.ProviderTypeName + "_manifest"
 }
 
+// Enhanced Schema method with timeout configuration
 func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Applies a single‑document Kubernetes YAML manifest to a cluster, with per‑resource inline or kubeconfig‑based connection settings.",
@@ -104,6 +107,15 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 			"delete_protection": schema.BoolAttribute{
 				Optional:    true,
 				Description: "When enabled, prevents Terraform from deleting this resource. Must be disabled before destruction. Defaults to false.",
+			},
+			"delete_timeout": schema.StringAttribute{
+				Optional:    true,
+				Description: "Maximum time to wait for resource deletion. Defaults to '5m' for most resources, '10m' for Namespaces/PVs. Examples: '1m', '10m', '1h'. Set '0' to skip waiting (not recommended).",
+			},
+
+			"force_destroy": schema.BoolAttribute{
+				Optional:    true,
+				Description: "When enabled, removes finalizers to force deletion if normal deletion times out. ⚠️ WARNING: May cause data loss. Use only when you understand the implications. Defaults to false.",
 			},
 		},
 		Blocks: map[string]schema.Block{
@@ -139,7 +151,6 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 						Description: "Inline exec‑auth configuration for dynamic credentials. Must include api_version and command; args is optional.",
 						Optional:    true,
 						Sensitive:   true,
-
 						AttributeTypes: map[string]attr.Type{
 							"api_version": types.StringType,
 							"command":     types.StringType,
@@ -382,8 +393,8 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 		return
 	}
 
-	// Delete the object
-	err = client.Delete(ctx, gvr, obj.GetNamespace(), obj.GetName(), k8sclient.DeleteOptions{})
+	// Check if resource exists before attempting deletion
+	liveObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
 	if err != nil {
 		if errors.IsNotFound(err) {
 			// Object already gone - that's fine
@@ -406,7 +417,63 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 		return
 	}
 
-	tflog.Trace(ctx, "deleted manifest", map[string]interface{}{
+	// Initiate deletion
+	err = client.Delete(ctx, gvr, obj.GetNamespace(), obj.GetName(), k8sclient.DeleteOptions{})
+	if err != nil && !errors.IsNotFound(err) {
+		resourceDesc := fmt.Sprintf("%s %s", obj.GetKind(), obj.GetName())
+		severity, title, detail := r.classifyK8sError(err, "Delete", resourceDesc)
+		if severity == "warning" {
+			resp.Diagnostics.AddWarning(title, detail)
+		} else {
+			resp.Diagnostics.AddError(title, detail)
+		}
+		return
+	}
+
+	// Wait for normal deletion to complete
+	timeout := r.getDeleteTimeout(data)
+	forceDestroy := !data.ForceDestroy.IsNull() && data.ForceDestroy.ValueBool()
+
+	tflog.Debug(ctx, "Starting deletion wait", map[string]interface{}{
+		"timeout":       timeout.String(),
+		"force_destroy": forceDestroy,
+	})
+
+	err = r.waitForDeletion(ctx, client, gvr, obj, timeout)
+	if err == nil {
+		// Successful normal deletion
+		tflog.Trace(ctx, "deleted manifest normally", map[string]interface{}{
+			"id":        data.ID.ValueString(),
+			"kind":      obj.GetKind(),
+			"name":      obj.GetName(),
+			"namespace": obj.GetNamespace(),
+		})
+		return
+	}
+
+	// Normal deletion failed/timed out - check if we should force destroy
+	if !forceDestroy {
+		// Not forcing, so report the timeout error with helpful guidance
+		r.handleDeletionTimeout(resp, client, gvr, obj, timeout, err)
+		return
+	}
+
+	// Force destroy enabled - remove finalizers and delete
+	tflog.Warn(ctx, "Normal deletion failed, attempting force destroy", map[string]interface{}{
+		"resource": fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName()),
+		"timeout":  timeout.String(),
+	})
+
+	if err := r.forceDestroy(ctx, client, gvr, obj, resp); err != nil {
+		resp.Diagnostics.AddError(
+			"Force Destroy Failed",
+			fmt.Sprintf("Failed to force destroy %s %s: %s", obj.GetKind(), obj.GetName(), err.Error()),
+		)
+		return
+	}
+
+	// Log successful force destroy
+	tflog.Info(ctx, "Force destroyed manifest", map[string]interface{}{
 		"id":        data.ID.ValueString(),
 		"kind":      obj.GetKind(),
 		"name":      obj.GetName(),
@@ -1013,4 +1080,138 @@ func (r *manifestResource) anyConnectionFieldChanged(plan, state ClusterConnecti
 		!plan.KubeconfigRaw.Equal(state.KubeconfigRaw) ||
 		!plan.Context.Equal(state.Context) ||
 		!reflect.DeepEqual(plan.Exec, state.Exec)
+}
+
+// forceDestroy removes finalizers and forces deletion
+func (r *manifestResource) forceDestroy(ctx context.Context, client k8sclient.K8sClient, gvr k8sschema.GroupVersionResource, obj *unstructured.Unstructured, resp *resource.DeleteResponse) error {
+	// Get the current state of the object
+	liveObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Object disappeared on its own - that's fine
+			return nil
+		}
+		return fmt.Errorf("failed to get object for force destroy: %w", err)
+	}
+
+	// Check if object has finalizers
+	finalizers := liveObj.GetFinalizers()
+	if len(finalizers) == 0 {
+		// No finalizers, but still stuck - this is unusual
+		tflog.Warn(ctx, "Object has no finalizers but deletion timed out", map[string]interface{}{
+			"resource": fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName()),
+		})
+
+		// Try deleting again in case it was a timing issue
+		err = client.Delete(ctx, gvr, obj.GetNamespace(), obj.GetName(), k8sclient.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+			return fmt.Errorf("failed to re-delete object without finalizers: %w", err)
+		}
+
+		// Wait a bit more for the deletion
+		return r.waitForDeletion(ctx, client, gvr, obj, 30*time.Second)
+	}
+
+	// Log what finalizers we're about to remove
+	resp.Diagnostics.AddWarning(
+		"Force Destroying Resource with Finalizers",
+		fmt.Sprintf("Removing finalizers from %s %s to force deletion: %v\n\n"+
+			"⚠️  WARNING: This bypasses Kubernetes safety mechanisms and may cause:\n"+
+			"• Data loss or corruption\n"+
+			"• Orphaned dependent resources\n"+
+			"• Incomplete cleanup operations\n\n"+
+			"Only use force_destroy when you understand the implications for your specific resource.",
+			obj.GetKind(), obj.GetName(), finalizers),
+	)
+
+	// Remove all finalizers
+	liveObj.SetFinalizers([]string{})
+
+	// Apply the change (remove finalizers)
+	err = client.Apply(ctx, liveObj, k8sclient.ApplyOptions{
+		FieldManager: "k8sinline-force-destroy",
+		Force:        true,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to remove finalizers: %w", err)
+	}
+
+	// Wait for deletion to complete (should be quick now)
+	return r.waitForDeletion(ctx, client, gvr, obj, 60*time.Second)
+}
+
+// handleDeletionTimeout provides helpful guidance when normal deletion times out
+func (r *manifestResource) handleDeletionTimeout(resp *resource.DeleteResponse, client k8sclient.K8sClient, gvr k8sschema.GroupVersionResource, obj *unstructured.Unstructured, timeout time.Duration, timeoutErr error) {
+	ctx := context.Background()
+
+	// Try to get current state to see what's preventing deletion
+	liveObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Object disappeared between timeout and this check
+			tflog.Info(ctx, "Object deleted after timeout check")
+			return
+		}
+
+		// Can't get object state, provide generic timeout error
+		resp.Diagnostics.AddError(
+			"Deletion Timeout",
+			fmt.Sprintf("Resource %s %s could not be deleted within %v.\n\n"+
+				"The resource may still be terminating in the background. "+
+				"Check its status with: kubectl get %s %s %s\n\n"+
+				"To force deletion (⚠️ may cause data loss), set force_destroy = true",
+				obj.GetKind(), obj.GetName(), timeout,
+				strings.ToLower(obj.GetKind()), obj.GetName(), r.namespaceFlag(obj)),
+		)
+		return
+	}
+
+	// Check if finalizers are preventing deletion
+	finalizers := liveObj.GetFinalizers()
+	deletionTimestamp := liveObj.GetDeletionTimestamp()
+
+	if deletionTimestamp != nil && len(finalizers) > 0 {
+		// Object is terminating but blocked by finalizers
+		resp.Diagnostics.AddError(
+			"Deletion Blocked by Finalizers",
+			fmt.Sprintf("Resource %s %s has been marked for deletion but is blocked by finalizers: %v\n\n"+
+				"Finalizers prevent deletion until cleanup operations complete. Options:\n\n"+
+				"1. **Wait longer** - increase delete_timeout (some operations take time):\n"+
+				"   delete_timeout = \"20m\"\n\n"+
+				"2. **Force deletion** - bypass finalizers (⚠️ may cause data loss):\n"+
+				"   force_destroy = true\n\n"+
+				"3. **Manual intervention** - check what's preventing cleanup:\n"+
+				"   kubectl describe %s %s %s\n"+
+				"   kubectl get events --field-selector involvedObject.name=%s\n\n"+
+				"4. **Remove finalizers manually** (⚠️ dangerous):\n"+
+				"   kubectl patch %s %s %s --type='merge' -p '{\"metadata\":{\"finalizers\":null}}'",
+				obj.GetKind(), obj.GetName(), finalizers,
+				strings.ToLower(obj.GetKind()), obj.GetName(), r.namespaceFlag(obj), obj.GetName(),
+				strings.ToLower(obj.GetKind()), obj.GetName(), r.namespaceFlag(obj)),
+		)
+	} else if deletionTimestamp != nil {
+		// Object is terminating but no finalizers - something else is wrong
+		resp.Diagnostics.AddError(
+			"Deletion Stuck Without Finalizers",
+			fmt.Sprintf("Resource %s %s has been marked for deletion but is not terminating normally.\n\n"+
+				"This may indicate a cluster issue. Check:\n"+
+				"• kubectl describe %s %s %s\n"+
+				"• kubectl get events --field-selector involvedObject.name=%s\n"+
+				"• Cluster controller logs\n\n"+
+				"To force deletion anyway: set force_destroy = true",
+				obj.GetKind(), obj.GetName(),
+				strings.ToLower(obj.GetKind()), obj.GetName(), r.namespaceFlag(obj), obj.GetName()),
+		)
+	} else {
+		// Object exists but no deletion timestamp - delete call may have failed silently
+		resp.Diagnostics.AddError(
+			"Deletion Not Initiated",
+			fmt.Sprintf("Resource %s %s still exists and has not been marked for deletion.\n\n"+
+				"This may indicate insufficient permissions or a cluster issue.\n"+
+				"Check: kubectl describe %s %s %s\n\n"+
+				"To force deletion: set force_destroy = true",
+				obj.GetKind(), obj.GetName(),
+				strings.ToLower(obj.GetKind()), obj.GetName(), r.namespaceFlag(obj)),
+		)
+	}
 }
