@@ -656,6 +656,8 @@ func TestAccManifestResource_Import(t *testing.T) {
 				ImportState:  true,
 				// Use new format: context/kind/name (cluster-scoped resource)
 				ImportStateId: fmt.Sprintf("kind-oidc-e2e/%s/%s", "Namespace", namespaceName),
+
+				// Fixed ImportStateCheck with correct state attribute structure
 				ImportStateCheck: func(states []*terraform.InstanceState) error {
 					if len(states) != 1 {
 						return fmt.Errorf("expected 1 state, got %d", len(states))
@@ -692,38 +694,39 @@ func TestAccManifestResource_Import(t *testing.T) {
 						return fmt.Errorf("resource ID should be set after import")
 					}
 
-					// NEW: Verify cluster_connection is populated with import details
-					// Check that cluster_connection block exists and has the expected structure
-					if state.Attributes["cluster_connection.#"] != "1" {
-						return fmt.Errorf("cluster_connection should be populated after import, got %s blocks", state.Attributes["cluster_connection.#"])
+					// Verify cluster_connection is populated with import details
+					// Check that cluster_connection object exists (% shows attribute count)
+					if state.Attributes["cluster_connection.%"] == "" {
+						return fmt.Errorf("cluster_connection should be populated after import")
 					}
 
 					// Verify kubeconfig_file is set (should be the temp file we created)
-					kubeconfigFile := state.Attributes["cluster_connection.0.kubeconfig_file"]
+					kubeconfigFile := state.Attributes["cluster_connection.kubeconfig_file"]
 					if kubeconfigFile == "" {
 						return fmt.Errorf("cluster_connection.kubeconfig_file should be populated after import")
 					}
 
 					// Verify context is set to the expected value from import ID
-					context := state.Attributes["cluster_connection.0.context"]
+					context := state.Attributes["cluster_connection.context"]
 					if context != "kind-oidc-e2e" {
 						return fmt.Errorf("cluster_connection.context should be 'kind-oidc-e2e', got %q", context)
 					}
 
 					// Verify other connection fields are empty/null (not used during import)
-					if state.Attributes["cluster_connection.0.host"] != "" {
-						return fmt.Errorf("cluster_connection.host should be empty after import")
+					if state.Attributes["cluster_connection.host"] != "" {
+						return fmt.Errorf("cluster_connection.host should be empty after import, got %q", state.Attributes["cluster_connection.host"])
 					}
-					if state.Attributes["cluster_connection.0.cluster_ca_certificate"] != "" {
-						return fmt.Errorf("cluster_connection.cluster_ca_certificate should be empty after import")
+					if state.Attributes["cluster_connection.cluster_ca_certificate"] != "" {
+						return fmt.Errorf("cluster_connection.cluster_ca_certificate should be empty after import, got %q", state.Attributes["cluster_connection.cluster_ca_certificate"])
 					}
-					if state.Attributes["cluster_connection.0.kubeconfig_raw"] != "" {
-						return fmt.Errorf("cluster_connection.kubeconfig_raw should be empty after import")
+					if state.Attributes["cluster_connection.kubeconfig_raw"] != "" {
+						return fmt.Errorf("cluster_connection.kubeconfig_raw should be empty after import, got %q", state.Attributes["cluster_connection.kubeconfig_raw"])
 					}
 
 					fmt.Printf("✅ Import successful - cluster_connection populated with import details\n")
 					return nil
 				},
+
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_import", "id"),
 					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_import", "yaml_body"),
