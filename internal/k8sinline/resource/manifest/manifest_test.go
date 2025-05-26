@@ -777,3 +777,85 @@ resource "k8sinline_manifest" "test_import" {
     kubeconfig_raw = var.raw
   }
 }`
+
+func TestAccManifestResource_ConnectionChange(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+	}
+
+	k8sClient := createK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sinline": providerserver.NewProtocol6WithError(k8sinline.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create with kubeconfig_raw
+			{
+				Config: testAccManifestConfigConnectionChange1,
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_conn_change", "id"),
+					testAccCheckNamespaceExists(k8sClient, "acctest-conn-change"),
+					// TODO: Add check that ownership annotation exists on the K8s resource
+				),
+			},
+			// Step 2: Change connection method (same cluster)
+			{
+				Config: testAccManifestConfigConnectionChange2,
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_conn_change", "id"),
+					testAccCheckNamespaceExists(k8sClient, "acctest-conn-change"),
+				),
+				// Should show warning about connection change but not error
+				ExpectNonEmptyPlan: false,
+			},
+		},
+		CheckDestroy: testAccCheckNamespaceDestroy(k8sClient, "acctest-conn-change"),
+	})
+}
+
+const testAccManifestConfigConnectionChange1 = `
+variable "raw" { type = string }
+provider "k8sinline" {}
+
+resource "k8sinline_manifest" "test_conn_change" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: acctest-conn-change
+YAML
+
+  cluster_connection {
+    kubeconfig_raw = var.raw
+  }
+}
+`
+
+const testAccManifestConfigConnectionChange2 = `
+variable "raw" { type = string }
+provider "k8sinline" {}
+
+resource "k8sinline_manifest" "test_conn_change" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: acctest-conn-change
+YAML
+
+  cluster_connection {
+    kubeconfig_raw = var.raw
+    context        = "kind-oidc-e2e"  # Explicit context (connection change)
+  }
+}
+`

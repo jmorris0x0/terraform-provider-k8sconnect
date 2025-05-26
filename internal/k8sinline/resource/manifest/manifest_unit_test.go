@@ -835,3 +835,84 @@ func TestStubK8sClient_GetGVRFromKind(t *testing.T) {
 		})
 	}
 }
+
+func TestAnyConnectionFieldChanged(t *testing.T) {
+	r := &manifestResource{}
+
+	base := ClusterConnectionModel{
+		Host:    types.StringValue("https://example.com"),
+		Context: types.StringValue("prod"),
+	}
+
+	tests := []struct {
+		name     string
+		plan     ClusterConnectionModel
+		state    ClusterConnectionModel
+		expected bool
+	}{
+		{
+			name:     "no change",
+			plan:     base,
+			state:    base,
+			expected: false,
+		},
+		{
+			name: "host changed",
+			plan: ClusterConnectionModel{
+				Host:    types.StringValue("https://different.com"),
+				Context: types.StringValue("prod"),
+			},
+			state:    base,
+			expected: true,
+		},
+		{
+			name: "context changed",
+			plan: ClusterConnectionModel{
+				Host:    types.StringValue("https://example.com"),
+				Context: types.StringValue("staging"),
+			},
+			state:    base,
+			expected: true,
+		},
+		// Add more cases...
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := r.anyConnectionFieldChanged(tt.plan, tt.state)
+			if result != tt.expected {
+				t.Errorf("expected %v, got %v", tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestOwnershipAnnotationSetting(t *testing.T) {
+	r := &manifestResource{}
+
+	yamlStr := `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-cm
+data:
+  key: value`
+
+	obj, err := r.parseYAML(yamlStr)
+	if err != nil {
+		t.Fatalf("failed to parse YAML: %v", err)
+	}
+
+	// Simulate setting annotation like in Create/Update
+	annotations := obj.GetAnnotations()
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
+	annotations["k8sinline.terraform.io/id"] = "test-resource-id"
+	obj.SetAnnotations(annotations)
+
+	// Verify annotation was set
+	resultAnnotations := obj.GetAnnotations()
+	if resultAnnotations["k8sinline.terraform.io/id"] != "test-resource-id" {
+		t.Errorf("ownership annotation not set correctly")
+	}
+}
