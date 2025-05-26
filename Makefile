@@ -4,10 +4,12 @@ KIND_CLUSTER     ?= oidc-e2e
 TESTBUILD_DIR    := $(CURDIR)/.testbuild
 DEX_IMAGE        := ghcr.io/dexidp/dex:v2.42.1
 TERRAFORM_VERSION := 1.12.1
+PROVIDER_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.1.0")
+
 # 	  TF_ACC_TERRAFORM_VERSION=$(TERRAFORM_VERSION) \
 
-.PHONY: oidc-setup test-acc build vet clean test
 
+.PHONY: oidc-setup test-acc build vet clean test install
 
 build:
 	@echo "🔨 Building provider binary"
@@ -16,6 +18,62 @@ build:
 test:
 	@echo "🧪 Running unit tests"
 	go test -v ./... -run "^Test[^A].*"
+
+install:
+	@echo "🔧 Detecting system and building provider for installation..."
+	@# Detect OS and architecture
+	@OS=$$(uname -s | tr '[:upper:]' '[:lower:]'); \
+	ARCH=$$(uname -m); \
+	case $$ARCH in \
+		x86_64|amd64) GOARCH=amd64 ;; \
+		arm64|aarch64) GOARCH=arm64 ;; \
+		armv7l) GOARCH=arm ;; \
+		i386|i686) GOARCH=386 ;; \
+		*) echo "❌ Unsupported architecture: $$ARCH"; exit 1 ;; \
+	esac; \
+	case $$OS in \
+		darwin) GOOS=darwin ;; \
+		linux) GOOS=linux ;; \
+		mingw*|msys*|cygwin*) GOOS=windows ;; \
+		*) echo "❌ Unsupported OS: $$OS"; exit 1 ;; \
+	esac; \
+	PROVIDER_NAME=terraform-provider-k8sinline; \
+	VERSION=$(PROVIDER_VERSION); \
+	BINARY_NAME=$${PROVIDER_NAME}_$${VERSION}_$${GOOS}_$${GOARCH}; \
+	if [ "$$GOOS" = "windows" ]; then \
+		BINARY_NAME=$${BINARY_NAME}.exe; \
+		FINAL_BINARY=$${PROVIDER_NAME}.exe; \
+	else \
+		FINAL_BINARY=$$PROVIDER_NAME; \
+	fi; \
+	INSTALL_DIR=$$HOME/.terraform.d/plugins/registry.terraform.io/local/k8sinline/$$VERSION/$${GOOS}_$${GOARCH}; \
+	echo "🏗️  Building $$BINARY_NAME for $$GOOS/$$GOARCH (version $$VERSION)..."; \
+	mkdir -p bin; \
+	GOOS=$$GOOS GOARCH=$$GOARCH CGO_ENABLED=0 go build -ldflags="-w -s" -o bin/$$BINARY_NAME .; \
+	echo "📦 Installing to $$INSTALL_DIR..."; \
+	mkdir -p $$INSTALL_DIR; \
+	cp bin/$$BINARY_NAME $$INSTALL_DIR/$$FINAL_BINARY; \
+	chmod +x $$INSTALL_DIR/$$FINAL_BINARY; \
+	echo "✅ Provider installed successfully!"; \
+	echo ""; \
+	echo "📍 Installed at: $$INSTALL_DIR/$$FINAL_BINARY"; \
+	echo "🏷️  Version: $$VERSION"; \
+	echo "💻 Platform: $$GOOS/$$GOARCH"; \
+	echo ""; \
+	echo "📝 To use this provider, add to your Terraform configuration:"; \
+	echo ""; \
+	echo "terraform {"; \
+	echo "  required_providers {"; \
+	echo "    k8sinline = {"; \
+	echo "      source  = \"local/k8sinline\""; \
+	echo "      version = \"$$VERSION\""; \
+	echo "    }"; \
+	echo "  }"; \
+	echo "}"; \
+	echo ""; \
+	echo "provider \"k8sinline\" {}"; \
+	echo ""; \
+	echo "Then run: terraform init"
 
 oidc-setup:
 	@echo "🔐 Generating self‑signed certs"
@@ -78,6 +136,7 @@ clean:
 	-docker rm -f dex
 	-kind delete cluster --name $(KIND_CLUSTER)
 	-rm -rf $(TESTBUILD_DIR) $(DEX_SSL_DIR)
+	-rm -rf bin/
 
 vet:
 	@echo "🔍 Running go vet on all packages"
