@@ -395,7 +395,7 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 	}
 
 	// Check if resource exists before attempting deletion
-	liveObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
+	_, err = client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
 	if err != nil {
 		if errors.IsNotFound(err) {
 			// Object already gone - that's fine
@@ -1215,4 +1215,87 @@ func (r *manifestResource) handleDeletionTimeout(resp *resource.DeleteResponse, 
 				strings.ToLower(obj.GetKind()), obj.GetName(), r.namespaceFlag(obj)),
 		)
 	}
+}
+
+// getDeleteTimeout determines the appropriate timeout for resource deletion
+func (r *manifestResource) getDeleteTimeout(data manifestResourceModel) time.Duration {
+	// If user specified a timeout, use it
+	if !data.DeleteTimeout.IsNull() {
+		if timeout, err := time.ParseDuration(data.DeleteTimeout.ValueString()); err == nil {
+			return timeout
+		}
+	}
+
+	// Parse YAML to determine resource type for default timeout
+	if obj, err := r.parseYAML(data.YAMLBody.ValueString()); err == nil {
+		kind := obj.GetKind()
+
+		// Set default timeouts based on resource type
+		switch kind {
+		case "Namespace", "PersistentVolume", "PersistentVolumeClaim":
+			return 10 * time.Minute // Resources that often have finalizers
+		case "CustomResourceDefinition":
+			return 15 * time.Minute // CRDs need extra time for controller cleanup
+		case "StatefulSet", "Job", "CronJob":
+			return 8 * time.Minute // Ordered deletion or foreground deletion
+		default:
+			return 5 * time.Minute // Default for most resources
+		}
+	}
+
+	// Fallback if YAML parsing fails
+	return 5 * time.Minute
+}
+
+// waitForDeletion waits for a resource to be deleted from the cluster
+func (r *manifestResource) waitForDeletion(ctx context.Context, client k8sclient.K8sClient, gvr k8sschema.GroupVersionResource, obj *unstructured.Unstructured, timeout time.Duration, ignoreFinalizers ...bool) error {
+	// If timeout is 0, skip waiting
+	if timeout == 0 {
+		return nil
+	}
+
+	ignoreFinalizersFlag := false
+	if len(ignoreFinalizers) > 0 {
+		ignoreFinalizersFlag = ignoreFinalizers[0]
+	}
+
+	// Use a ticker to poll periodically instead of tight loop
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	deadline := time.Now().Add(timeout)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			// Check if object still exists
+			_, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
+			if err != nil {
+				if errors.IsNotFound(err) {
+					// Successfully deleted
+					return nil
+				}
+				// Other errors are not deletion success, continue waiting
+			}
+
+			// Check if we've exceeded the timeout
+			if time.Now().After(deadline) {
+				if ignoreFinalizersFlag {
+					// When ignoring finalizers, don't treat timeout as error
+					return nil
+				}
+				return fmt.Errorf("timeout after %v waiting for deletion", timeout)
+			}
+		}
+	}
+}
+
+// namespaceFlag returns the kubectl namespace flag for the given object
+func (r *manifestResource) namespaceFlag(obj *unstructured.Unstructured) string {
+	if namespace := obj.GetNamespace(); namespace != "" {
+		return fmt.Sprintf("-n %s", namespace)
+	}
+	return ""
 }
