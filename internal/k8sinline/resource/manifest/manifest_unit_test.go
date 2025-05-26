@@ -517,6 +517,7 @@ func TestParseImportID(t *testing.T) {
 	tests := []struct {
 		name              string
 		importID          string
+		expectedContext   string
 		expectedNamespace string
 		expectedKind      string
 		expectedName      string
@@ -525,23 +526,25 @@ func TestParseImportID(t *testing.T) {
 	}{
 		{
 			name:              "valid namespaced resource",
-			importID:          "default/Pod/nginx",
+			importID:          "prod/default/Pod/nginx",
+			expectedContext:   "prod",
 			expectedNamespace: "default",
 			expectedKind:      "Pod",
 			expectedName:      "nginx",
 			expectError:       false,
 		},
 		{
-			name:              "valid cluster-scoped resource",
-			importID:          "/Namespace/my-namespace",
-			expectedNamespace: "",
-			expectedKind:      "Namespace",
-			expectedName:      "my-namespace",
-			expectError:       false,
+			name:            "valid cluster-scoped resource",
+			importID:        "prod/Namespace/my-namespace",
+			expectedContext: "prod",
+			expectedKind:    "Namespace",
+			expectedName:    "my-namespace",
+			expectError:     false,
 		},
 		{
 			name:              "valid kube-system resource",
-			importID:          "kube-system/Service/coredns",
+			importID:          "prod/kube-system/Service/coredns",
+			expectedContext:   "prod",
 			expectedNamespace: "kube-system",
 			expectedKind:      "Service",
 			expectedName:      "coredns",
@@ -551,37 +554,43 @@ func TestParseImportID(t *testing.T) {
 			name:          "invalid - too few parts",
 			importID:      "default/Pod",
 			expectError:   true,
-			errorContains: "expected 3 parts",
+			errorContains: "expected 3 or 4 parts",
 		},
 		{
 			name:          "invalid - too many parts",
-			importID:      "default/Pod/nginx/extra",
+			importID:      "prod/default/Pod/nginx/extra",
 			expectError:   true,
-			errorContains: "expected 3 parts",
+			errorContains: "expected 3 or 4 parts",
 		},
 		{
-			name:          "invalid - empty kind",
-			importID:      "default//nginx",
-			expectError:   true,
-			errorContains: "kind cannot be empty",
+			name:              "empty kind (parseImportID allows, validation happens in ImportState)",
+			importID:          "prod/default//nginx",
+			expectedContext:   "prod",
+			expectedNamespace: "default",
+			expectedKind:      "",
+			expectedName:      "nginx",
+			expectError:       false,
 		},
 		{
-			name:          "invalid - empty name",
-			importID:      "default/Pod/",
-			expectError:   true,
-			errorContains: "name cannot be empty",
+			name:              "empty name (parseImportID allows, validation happens in ImportState)",
+			importID:          "prod/default/Pod/",
+			expectedContext:   "prod",
+			expectedNamespace: "default",
+			expectedKind:      "Pod",
+			expectedName:      "",
+			expectError:       false,
 		},
 		{
 			name:          "invalid - completely empty",
 			importID:      "",
 			expectError:   true,
-			errorContains: "expected 3 parts",
+			errorContains: "expected 3 or 4 parts",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			context, namespace, kind, name, err := r.parseImportID(tt.importID)
+			kubeContext, namespace, kind, name, err := r.parseImportID(tt.importID)
 
 			if tt.expectError {
 				if err == nil {
@@ -597,6 +606,9 @@ func TestParseImportID(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
+			if kubeContext != tt.expectedContext {
+				t.Errorf("expected context %q, got %q", tt.expectedContext, kubeContext)
+			}
 			if namespace != tt.expectedNamespace {
 				t.Errorf("expected namespace %q, got %q", tt.expectedNamespace, namespace)
 			}
