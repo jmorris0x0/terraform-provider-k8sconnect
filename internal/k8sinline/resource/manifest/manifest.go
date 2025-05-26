@@ -541,11 +541,20 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 	// Since we don't have the final cluster connection yet, we'll use the context
 	resourceID := r.generateIDFromImport(liveObj, kubeContext)
 
-	// Populate state with imported data - cluster_connection will be configured by user
+	// Populate state with imported data
+	// We need to populate cluster_connection with the details we used for import
+	// so that subsequent Read operations can succeed
 	importedData := manifestResourceModel{
 		ID:       types.StringValue(resourceID),
 		YAMLBody: types.StringValue(string(yamlBytes)),
-		// Note: cluster_connection is left empty - user must configure it
+		ClusterConnection: ClusterConnectionModel{
+			Host:                 types.StringNull(),
+			ClusterCACertificate: types.StringNull(),
+			KubeconfigFile:       types.StringValue(kubeconfigPath),
+			KubeconfigRaw:        types.StringNull(),
+			Context:              types.StringValue(kubeContext),
+			Exec:                 nil,
+		},
 		DeleteProtection: types.BoolValue(false), // default
 	}
 
