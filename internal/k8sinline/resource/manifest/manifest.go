@@ -7,6 +7,8 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -823,29 +825,20 @@ func (r *manifestResource) classifyK8sError(err error, operation, resourceDesc s
 	}
 }
 
-// parseImportID parses the import ID format "namespace/kind/name"
-// Empty namespace for cluster-scoped resources: "/kind/name"
-func (r *manifestResource) parseImportID(importID string) (namespace, kind, name string, err error) {
+// Updated parseImportID function to handle new format with context
+func (r *manifestResource) parseImportID(importID string) (context, namespace, kind, name string, err error) {
 	parts := strings.Split(importID, "/")
 
-	if len(parts) != 3 {
-		return "", "", "", fmt.Errorf("expected 3 parts separated by '/', got %d parts", len(parts))
+	switch len(parts) {
+	case 3:
+		// Cluster-scoped: "context/kind/name"
+		return parts[0], "", parts[1], parts[2], nil
+	case 4:
+		// Namespaced: "context/namespace/kind/name"
+		return parts[0], parts[1], parts[2], parts[3], nil
+	default:
+		return "", "", "", "", fmt.Errorf("expected 3 or 4 parts separated by '/', got %d parts", len(parts))
 	}
-
-	namespace = parts[0] // Can be empty for cluster-scoped resources
-	kind = parts[1]
-	name = parts[2]
-
-	// Validate required parts
-	if kind == "" {
-		return "", "", "", fmt.Errorf("kind cannot be empty")
-	}
-	if name == "" {
-		return "", "", "", fmt.Errorf("name cannot be empty")
-	}
-
-	// Namespace can be empty for cluster-scoped resources like Namespaces, ClusterRoles, etc.
-	return namespace, kind, name, nil
 }
 
 // isEmptyConnection checks if the cluster connection is empty/unconfigured
@@ -914,4 +907,18 @@ func (r *manifestResource) isSystemAnnotation(key string) bool {
 	// Alternative: let users decide what to keep vs remove
 	// Could add a provider-level setting for annotation filtering
 	return false
+}
+
+// Helper function to generate ID for imported resources
+func (r *manifestResource) generateIDFromImport(obj *unstructured.Unstructured, kubeContext string) string {
+	// Create a deterministic ID based on context + object identity
+	data := fmt.Sprintf("import:%s/%s/%s/%s",
+		kubeContext,
+		obj.GetNamespace(),
+		obj.GetKind(),
+		obj.GetName(),
+	)
+
+	hash := sha256.Sum256([]byte(data))
+	return hex.EncodeToString(hash[:])
 }
