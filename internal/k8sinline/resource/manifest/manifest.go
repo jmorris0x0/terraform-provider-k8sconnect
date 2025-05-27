@@ -1012,27 +1012,6 @@ func (r *manifestResource) cleanObjectForExport(obj *unstructured.Unstructured) 
 	return cleaned
 }
 
-// isSystemAnnotation returns true if the annotation key is system-generated
-func (r *manifestResource) isSystemAnnotation(key string) bool {
-	// Be conservative - only remove the most obviously system-generated annotations
-	// Instead of maintaining a huge list, focus on the most common ones
-	wellKnownSystemPrefixes := []string{
-		"kubectl.kubernetes.io/",
-		"deployment.kubernetes.io/",
-		"kubernetes.io/managed-by",
-	}
-
-	for _, prefix := range wellKnownSystemPrefixes {
-		if strings.HasPrefix(key, prefix) {
-			return true
-		}
-	}
-
-	// Alternative: let users decide what to keep vs remove
-	// Could add a provider-level setting for annotation filtering
-	return false
-}
-
 func (r *manifestResource) validateOwnership(ctx context.Context, data manifestResourceModel) error {
 	obj, err := r.parseYAML(data.YAMLBody.ValueString())
 	if err != nil {
