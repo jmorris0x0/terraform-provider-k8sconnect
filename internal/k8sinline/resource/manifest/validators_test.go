@@ -123,11 +123,10 @@ func TestClusterConnectionValidator(t *testing.T) {
 			if tt.expectError && tt.errorContains != "" {
 				found := false
 				for _, diag := range resp.Diagnostics {
-					if diag.Summary() != nil && strings.Contains(*diag.Summary(), tt.errorContains) {
-						found = true
-						break
-					}
-					if diag.Detail() != nil && strings.Contains(*diag.Detail(), tt.errorContains) {
+					summary := diag.Summary()
+					detail := diag.Detail()
+
+					if strings.Contains(summary, tt.errorContains) || strings.Contains(detail, tt.errorContains) {
 						found = true
 						break
 					}
@@ -262,11 +261,10 @@ func TestExecAuthValidator(t *testing.T) {
 			if tt.expectError && tt.errorContains != "" {
 				found := false
 				for _, diag := range resp.Diagnostics {
-					if diag.Summary() != nil && strings.Contains(*diag.Summary(), tt.errorContains) {
-						found = true
-						break
-					}
-					if diag.Detail() != nil && strings.Contains(*diag.Detail(), tt.errorContains) {
+					summary := diag.Summary()
+					detail := diag.Detail()
+
+					if strings.Contains(summary, tt.errorContains) || strings.Contains(detail, tt.errorContains) {
 						found = true
 						break
 					}
@@ -375,11 +373,10 @@ func TestConflictingAttributesValidator(t *testing.T) {
 			if tt.expectError && tt.errorContains != "" {
 				found := false
 				for _, diag := range resp.Diagnostics {
-					if diag.Summary() != nil && strings.Contains(*diag.Summary(), tt.errorContains) {
-						found = true
-						break
-					}
-					if diag.Detail() != nil && strings.Contains(*diag.Detail(), tt.errorContains) {
+					summary := diag.Summary()
+					detail := diag.Detail()
+
+					if strings.Contains(summary, tt.errorContains) || strings.Contains(detail, tt.errorContains) {
 						found = true
 						break
 					}
@@ -468,11 +465,10 @@ func TestRequiredFieldsValidator(t *testing.T) {
 			if tt.expectError && tt.errorContains != "" {
 				found := false
 				for _, diag := range resp.Diagnostics {
-					if diag.Summary() != nil && strings.Contains(*diag.Summary(), tt.errorContains) {
-						found = true
-						break
-					}
-					if diag.Detail() != nil && strings.Contains(*diag.Detail(), tt.errorContains) {
+					summary := diag.Summary()
+					detail := diag.Detail()
+
+					if strings.Contains(summary, tt.errorContains) || strings.Contains(detail, tt.errorContains) {
 						found = true
 						break
 					}
@@ -775,14 +771,8 @@ metadata:
 				for _, expectedError := range tt.errorContains {
 					found := false
 					for _, diag := range resp.Diagnostics {
-						summary := ""
-						detail := ""
-						if diag.Summary() != nil {
-							summary = *diag.Summary()
-						}
-						if diag.Detail() != nil {
-							detail = *diag.Detail()
-						}
+						summary := diag.Summary()
+						detail := diag.Detail()
 
 						if strings.Contains(summary, expectedError) || strings.Contains(detail, expectedError) {
 							found = true
