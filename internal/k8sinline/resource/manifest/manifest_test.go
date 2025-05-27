@@ -859,3 +859,150 @@ YAML
   }
 }
 `
+
+func TestAccManifestResource_ForceDestroy(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+	}
+
+	k8sClient := createK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sinline": providerserver.NewProtocol6WithError(k8sinline.New()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testAccManifestConfigForceDestroy,
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("k8sinline_manifest.test_force", "force_destroy", "true"),
+					resource.TestCheckResourceAttr("k8sinline_manifest.test_force", "delete_timeout", "30s"),
+					testAccCheckPVCExists(k8sClient, "default", "test-pvc-force"),
+				),
+			},
+		},
+		CheckDestroy: testAccCheckPVCDestroy(k8sClient, "default", "test-pvc-force"),
+	})
+}
+
+func TestAccManifestResource_DeleteTimeout(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+	}
+
+	k8sClient := createK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sinline": providerserver.NewProtocol6WithError(k8sinline.New()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testAccManifestConfigDeleteTimeout,
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("k8sinline_manifest.test_timeout", "delete_timeout", "2m"),
+					testAccCheckNamespaceExists(k8sClient, "acctest-timeout"),
+				),
+			},
+		},
+		CheckDestroy: testAccCheckNamespaceDestroy(k8sClient, "acctest-timeout"),
+	})
+}
+
+// Helper functions for PVC testing (since PVCs commonly have finalizers)
+func testAccCheckPVCExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		_, err := client.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("pvc %s/%s does not exist: %v", namespace, name, err)
+		}
+		fmt.Printf("✅ Verified PVC %s/%s exists in Kubernetes\n", namespace, name)
+		return nil
+	}
+}
+
+func testAccCheckPVCDestroy(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		for i := 0; i < 20; i++ { // Longer wait for PVCs
+			_, err := client.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, name, metav1.GetOptions{})
+			if err != nil {
+				if strings.Contains(err.Error(), "not found") {
+					fmt.Printf("✅ Verified PVC %s/%s was deleted\n", namespace, name)
+					return nil
+				}
+				return fmt.Errorf("unexpected error checking PVC: %v", err)
+			}
+			time.Sleep(2 * time.Second)
+		}
+		return fmt.Errorf("PVC %s/%s still exists after deletion", namespace, name)
+	}
+}
+
+// Test configurations
+const testAccManifestConfigForceDestroy = `
+variable "raw" {
+  type = string
+}
+
+provider "k8sinline" {}
+
+resource "k8sinline_manifest" "test_force" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: test-pvc-force
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+YAML
+
+  delete_timeout = "30s"
+  force_destroy = true
+
+  cluster_connection {
+    kubeconfig_raw = var.raw
+  }
+}
+`
+
+const testAccManifestConfigDeleteTimeout = `
+variable "raw" {
+  type = string
+}
+
+provider "k8sinline" {}
+
+resource "k8sinline_manifest" "test_timeout" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: acctest-timeout
+YAML
+
+  delete_timeout = "2m"
+
+  cluster_connection {
+    kubeconfig_raw = var.raw
+  }
+}
+`
