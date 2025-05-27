@@ -695,7 +695,7 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 			"  resource \"k8sinline_manifest\" \"example\" {\n"+
 			"    yaml_body = \"# Populated by import\"\n"+
 			"    \n"+
-			"    cluster_connection {\n"+
+			"    cluster_connection = {\n"+
 			"      # Choose your preferred connection method:\n"+
 			"      kubeconfig_file = \"~/.kube/config\"\n"+
 			"      context         = \""+kubeContext+"\"\n"+

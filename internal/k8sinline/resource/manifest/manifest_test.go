@@ -410,7 +410,7 @@ metadata:
   name: acctest-exec
 YAML
 
-  cluster_connection {
+  cluster_connection = {
     host                   = var.host
     cluster_ca_certificate = var.ca
 
@@ -444,7 +444,7 @@ metadata:
   name: acctest-raw
 YAML
 
-  cluster_connection {
+  cluster_connection = {
     kubeconfig_raw = var.raw
   }
 }
@@ -471,7 +471,7 @@ metadata:
   name: acctest-file
 YAML
 
-  cluster_connection {
+  cluster_connection = {
     kubeconfig_file = var.kubeconfig_path
   }
 }
@@ -510,7 +510,7 @@ spec:
     command: ["sleep", "3600"]
 YAML
 
-  cluster_connection {
+  cluster_connection = {
     kubeconfig_raw = var.raw
   }
 }
@@ -541,7 +541,7 @@ data:
   key1: value1
 YAML
 
-  cluster_connection {
+  cluster_connection = {
     kubeconfig_raw = var.raw
   }
 }
@@ -564,7 +564,7 @@ YAML
 
   delete_protection = true
 
-  cluster_connection {
+  cluster_connection = {
     kubeconfig_raw = var.raw
   }
 }
@@ -587,7 +587,7 @@ YAML
 
   delete_protection = false
 
-  cluster_connection {
+  cluster_connection = {
     kubeconfig_raw = var.raw
   }
 }
@@ -773,7 +773,7 @@ provider "k8sinline" {}
 resource "k8sinline_manifest" "test_import" {
   yaml_body = "# Will be populated during import"
   
-  cluster_connection {
+  cluster_connection = {
     kubeconfig_raw = var.raw
   }
 }`
@@ -835,7 +835,7 @@ metadata:
   name: acctest-conn-change
 YAML
 
-  cluster_connection {
+  cluster_connection = {
     kubeconfig_raw = var.raw
   }
 }
@@ -853,7 +853,7 @@ metadata:
   name: acctest-conn-change
 YAML
 
-  cluster_connection {
+  cluster_connection = {
     kubeconfig_raw = var.raw
     context        = "kind-oidc-e2e"  # Explicit context (connection change)
   }
@@ -978,7 +978,7 @@ YAML
   delete_timeout = "30s"
   force_destroy = true
 
-  cluster_connection {
+  cluster_connection = {
     kubeconfig_raw = var.raw
   }
 }
@@ -1001,7 +1001,7 @@ YAML
 
   delete_timeout = "2m"
 
-  cluster_connection {
+  cluster_connection = {
     kubeconfig_raw = var.raw
   }
 }

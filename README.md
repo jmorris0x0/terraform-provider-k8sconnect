@@ -33,7 +33,7 @@ provider "k8sinline" {}
 resource "k8sinline_manifest" "nginx" {
   yaml_body = file("${path.module}/manifests/nginx.yaml")
 
-  cluster_connection {
+  cluster_connection = {
     host                   = data.aws_eks_cluster.prod.endpoint
     cluster_ca_certificate = data.aws_eks_cluster.prod.certificate_authority[0].data
     
@@ -49,7 +49,7 @@ resource "k8sinline_manifest" "nginx" {
 resource "k8sinline_manifest" "staging_app" {
   yaml_body = file("${path.module}/manifests/app.yaml")
 
-  cluster_connection {
+  cluster_connection = {
     kubeconfig_raw = aws_ssm_parameter.staging_kubeconfig.value
     context        = "staging"
   }
@@ -66,7 +66,7 @@ The provider supports three ways to connect to clusters:
 
 **Inline with exec auth** (AWS EKS, GKE, etc.)
 ```hcl
-cluster_connection {
+cluster_connection = {
   host                   = "https://k8s.example.com"
   cluster_ca_certificate = base64encode(file("ca.pem"))
   exec = {
@@ -79,7 +79,7 @@ cluster_connection {
 
 **Kubeconfig file**
 ```hcl
-cluster_connection {
+cluster_connection = {
   kubeconfig_file = "~/.kube/config"
   context         = "production"
 }
@@ -87,7 +87,7 @@ cluster_connection {
 
 **Raw kubeconfig** (CI-friendly)
 ```hcl
-cluster_connection {
+cluster_connection = {
   kubeconfig_raw = var.kubeconfig_content
 }
 ```
