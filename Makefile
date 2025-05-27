@@ -79,6 +79,9 @@ oidc-setup:
 	@mkdir -p $(DEX_SSL_DIR)
 	@cd $(OIDC_DIR) && ./gencert.sh
 
+	@echo "🌐 Ensuring 'kind' Docker network exists"
+	- docker network inspect kind >/dev/null 2>&1 || docker network create kind
+
 	@echo "🧹 Cleaning old Dex container"
 	- docker rm -f dex || true
 
