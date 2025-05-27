@@ -224,48 +224,6 @@ make install
 
 ---
 
-## How Deferred Diffing Works
-
-> `k8sinline` supports live diffing *only when every field in `cluster_connection` is known at plan time.*
-> If any field is `unknown`, the provider skips live reads to avoid destroying unrelated resources.
-
-When any `cluster_connection` field is *unknown* on the first run, `k8sinline` will:
-
-1. Plan the manifest for **create** (no live diff yet)
-2. Leave every other manifest alone
-3. Store the final connection in state so **future** plans get full server‑side diffing
-4. Require no extra pipeline stages
-5. Protect existing cluster objects via the **ownership annotation guard** described above — if the target object already exists and is not annotated as managed by this Terraform state, the provider aborts.
-
-#### First‑apply adoption of existing objects
-
-When any `cluster_connection` field is **unknown** at plan time the resource is shown as `create`.
-During **apply** the provider:
-
-1. Resolves the final connection and queries the Kubernetes API for `<kind>/<name>` in `<namespace>`.
-2. **If the object exists *and* contains&#x20;
-   `metadata.annotations["k8sinline.hashicorp.com/id"]` that matches the&#x20;
-   Terraform resource ID,** the provider *adopts* the object instead of&#x20;
-   re‑applying it. State is populated from the live object and the plan&#x20;
-   becomes clean on the next run.
-3. **If the object exists without the annotation** the provider aborts with&#x20;
-   an error, explaining that the object is unmanaged and would have been&#x20;
-   overwritten.
-4. **If the object is missing** the provider proceeds with server-side apply.
-
-This behavior prevents "accidental taint" while still blocking silent
-overwrites.  Users will see `Creating… adopted existing object` in the
-CLI output the first time the resource runs.
-
-### Destroy‑cascade blocker
-
-* Skip live diff if `cluster_connection` is unknown (first plan)
-* Affect **only** the manifest being created — siblings stay untouched
-* Enable drift detection on the very next plan once cluster outputs are known
-* Abort before modification if the object is un‑annotated and therefore unmanaged
-
----
-
 ## Resource: `k8sinline_manifest`
 
 The resource applies **one** Kubernetes YAML document to a target cluster.
