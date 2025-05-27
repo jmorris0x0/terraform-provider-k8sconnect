@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hashicorp/terraform-plugin-framework/attr"
+	//"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -91,7 +91,7 @@ func (r *manifestResource) Metadata(ctx context.Context, req resource.MetadataRe
 	resp.TypeName = req.ProviderTypeName + "_manifest"
 }
 
-// Enhanced Schema method with timeout configuration
+// Enhanced Schema method with single nested attribute instead of block
 func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Applies a single‑document Kubernetes YAML manifest to a cluster, with per‑resource inline or kubeconfig‑based connection settings.",
@@ -115,14 +115,12 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 				Optional:    true,
 				Description: "Maximum time to wait for resource deletion. Defaults to '5m' for most resources, '10m' for Namespaces/PVs. Examples: '1m', '10m', '1h'. Set '0' to skip waiting (not recommended).",
 			},
-
 			"force_destroy": schema.BoolAttribute{
 				Optional:    true,
 				Description: "When enabled, removes finalizers to force deletion if normal deletion times out. ⚠️ WARNING: May cause data loss. Use only when you understand the implications. Defaults to false.",
 			},
-		},
-		Blocks: map[string]schema.Block{
-			"cluster_connection": schema.SingleNestedBlock{
+			"cluster_connection": schema.SingleNestedAttribute{
+				Required:    true,
 				Description: "Connection settings for the target cluster. Exactly one of inline, kubeconfig_file or kubeconfig_raw must be populated.",
 				Attributes: map[string]schema.Attribute{
 					"host": schema.StringAttribute{
@@ -150,14 +148,24 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 						Sensitive:   true,
 						Description: "Context name within the provided kubeconfig (file or raw).",
 					},
-					"exec": schema.ObjectAttribute{
+					"exec": schema.SingleNestedAttribute{
 						Description: "Inline exec‑auth configuration for dynamic credentials. Must include api_version and command; args is optional.",
 						Optional:    true,
 						Sensitive:   true,
-						AttributeTypes: map[string]attr.Type{
-							"api_version": types.StringType,
-							"command":     types.StringType,
-							"args":        types.ListType{ElemType: types.StringType},
+						Attributes: map[string]schema.Attribute{
+							"api_version": schema.StringAttribute{
+								Optional:    true,
+								Description: "Authentication API version (e.g., 'client.authentication.k8s.io/v1').",
+							},
+							"command": schema.StringAttribute{
+								Optional:    true,
+								Description: "Executable command (e.g., 'aws', 'gcloud').",
+							},
+							"args": schema.ListAttribute{
+								ElementType: types.StringType,
+								Optional:    true,
+								Description: "Command arguments (e.g., ['eks', 'get-token', '--cluster-name', 'my-cluster']).",
+							},
 						},
 					},
 				},
