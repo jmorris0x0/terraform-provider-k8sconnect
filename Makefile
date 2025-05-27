@@ -4,7 +4,7 @@ KIND_CLUSTER     ?= oidc-e2e
 TESTBUILD_DIR    := $(CURDIR)/.testbuild
 DEX_IMAGE        := ghcr.io/dexidp/dex:v2.42.1
 TERRAFORM_VERSION := 1.12.1
-PROVIDER_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.1.0")
+PROVIDER_VERSION ?= 0.1.0
 
 # 	  TF_ACC_TERRAFORM_VERSION=$(TERRAFORM_VERSION) \
 
