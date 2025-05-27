@@ -36,7 +36,7 @@ resource "k8sinline_manifest" "nginx" {
 
   cluster_connection {
     host                   = data.aws_eks_cluster.prod.endpoint
-    cluster_ca_certificate = base64decode(data.aws_eks_cluster.prod.certificate_authority[0].data)
+    cluster_ca_certificate = data.aws_eks_cluster.prod.certificate_authority[0].data
     
     exec = {
       api_version = "client.authentication.k8s.io/v1"
