@@ -5,8 +5,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
-	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 )
 
 // ConfigValidators implements resource-level validation for the manifest resource
@@ -64,10 +64,7 @@ func (v *clusterConnectionValidator) ValidateResource(ctx context.Context, req r
 		if (conn.Host.IsNull() || conn.Host.IsUnknown()) &&
 			(!conn.ClusterCACertificate.IsNull() && !conn.ClusterCACertificate.IsUnknown()) {
 			resp.Diagnostics.AddAttributeError(
-				req.Config.PathMatches(ctx, tfsdk.PathExpression{Steps: []tfsdk.PathStep{
-					tfsdk.AttributeNameStep("cluster_connection"),
-					tfsdk.AttributeNameStep("host"),
-				}})[0],
+				path.Root("cluster_connection").AtName("host"),
 				"Missing Required Field for Inline Connection",
 				"When using inline connection mode, both 'host' and 'cluster_ca_certificate' are required.",
 			)
@@ -76,10 +73,7 @@ func (v *clusterConnectionValidator) ValidateResource(ctx context.Context, req r
 		if (conn.ClusterCACertificate.IsNull() || conn.ClusterCACertificate.IsUnknown()) &&
 			(!conn.Host.IsNull() && !conn.Host.IsUnknown()) {
 			resp.Diagnostics.AddAttributeError(
-				req.Config.PathMatches(ctx, tfsdk.PathExpression{Steps: []tfsdk.PathStep{
-					tfsdk.AttributeNameStep("cluster_connection"),
-					tfsdk.AttributeNameStep("cluster_ca_certificate"),
-				}})[0],
+				path.Root("cluster_connection").AtName("cluster_ca_certificate"),
 				"Missing Required Field for Inline Connection",
 				"When using inline connection mode, both 'host' and 'cluster_ca_certificate' are required.",
 			)
@@ -99,9 +93,7 @@ func (v *clusterConnectionValidator) ValidateResource(ctx context.Context, req r
 	// Validate exactly one mode is specified
 	if modeCount == 0 {
 		resp.Diagnostics.AddAttributeError(
-			req.Config.PathMatches(ctx, tfsdk.PathExpression{Steps: []tfsdk.PathStep{
-				tfsdk.AttributeNameStep("cluster_connection"),
-			}})[0],
+			path.Root("cluster_connection"),
 			"Missing Cluster Connection Configuration",
 			"Exactly one cluster connection mode must be specified:\n\n"+
 				"• **Inline mode**: Set both 'host' and 'cluster_ca_certificate'\n"+
@@ -110,9 +102,7 @@ func (v *clusterConnectionValidator) ValidateResource(ctx context.Context, req r
 		)
 	} else if modeCount > 1 {
 		resp.Diagnostics.AddAttributeError(
-			req.Config.PathMatches(ctx, tfsdk.PathExpression{Steps: []tfsdk.PathStep{
-				tfsdk.AttributeNameStep("cluster_connection"),
-			}})[0],
+			path.Root("cluster_connection"),
 			"Multiple Cluster Connection Modes Specified",
 			fmt.Sprintf("Only one cluster connection mode can be specified, but found %d: %v\n\n"+
 				"Choose exactly one:\n"+
@@ -169,10 +159,7 @@ func (v *execAuthValidator) ValidateResource(ctx context.Context, req resource.V
 
 	if len(missingFields) > 0 {
 		resp.Diagnostics.AddAttributeError(
-			req.Config.PathMatches(ctx, tfsdk.PathExpression{Steps: []tfsdk.PathStep{
-				tfsdk.AttributeNameStep("cluster_connection"),
-				tfsdk.AttributeNameStep("exec"),
-			}})[0],
+			path.Root("cluster_connection").AtName("exec"),
 			"Incomplete Exec Authentication Configuration",
 			fmt.Sprintf("When using exec authentication, all fields are required. Missing: %v\n\n"+
 				"Complete exec configuration requires:\n"+
@@ -213,9 +200,7 @@ func (v *conflictingAttributesValidator) ValidateResource(ctx context.Context, r
 
 	if deleteProtection && forceDestroy {
 		resp.Diagnostics.AddAttributeError(
-			req.Config.PathMatches(ctx, tfsdk.PathExpression{Steps: []tfsdk.PathStep{
-				tfsdk.AttributeNameStep("delete_protection"),
-			}})[0],
+			path.Root("delete_protection"),
 			"Conflicting Deletion Settings",
 			"'delete_protection = true' and 'force_destroy = true' cannot be set together.\n\n"+
 				"These options serve opposite purposes:\n"+
@@ -255,17 +240,13 @@ func (v *requiredFieldsValidator) ValidateResource(ctx context.Context, req reso
 	// Check yaml_body is present and not empty
 	if data.YAMLBody.IsNull() || data.YAMLBody.IsUnknown() {
 		resp.Diagnostics.AddAttributeError(
-			req.Config.PathMatches(ctx, tfsdk.PathExpression{Steps: []tfsdk.PathStep{
-				tfsdk.AttributeNameStep("yaml_body"),
-			}})[0],
+			path.Root("yaml_body"),
 			"Missing Required Field",
 			"'yaml_body' is required and must contain valid Kubernetes YAML manifest content.",
 		)
 	} else if data.YAMLBody.ValueString() == "" {
 		resp.Diagnostics.AddAttributeError(
-			req.Config.PathMatches(ctx, tfsdk.PathExpression{Steps: []tfsdk.PathStep{
-				tfsdk.AttributeNameStep("yaml_body"),
-			}})[0],
+			path.Root("yaml_body"),
 			"Empty YAML Content",
 			"'yaml_body' cannot be empty. It must contain a valid single-document Kubernetes YAML manifest.",
 		)
@@ -275,9 +256,7 @@ func (v *requiredFieldsValidator) ValidateResource(ctx context.Context, req reso
 	// We just check that the block exists at all
 	if isClusterConnectionEmpty(data.ClusterConnection) {
 		resp.Diagnostics.AddAttributeError(
-			req.Config.PathMatches(ctx, tfsdk.PathExpression{Steps: []tfsdk.PathStep{
-				tfsdk.AttributeNameStep("cluster_connection"),
-			}})[0],
+			path.Root("cluster_connection"),
 			"Missing Required Configuration Block",
 			"'cluster_connection' block is required. It must specify how to connect to your Kubernetes cluster.",
 		)
