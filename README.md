@@ -407,22 +407,6 @@ resource "k8sinline_manifest" "rawcfg" {
   }
 }
 ```
-
----
-
-## Plan vs Apply Matrix
-
-Live diffing is supported only when **all** connection fields are known at plan time. If any field is `unknown`, the provider defers the diff, plans a create, and skips the live read.
-
-| Input Type            | Live Diff at Plan?          | Required at Apply? |
-| --------------------- | --------------------------- | ------------------ |
-| `inline` fields       | ✅ If all values are known   | ✅                  |
-| `kubeconfig_file`     | ✅ Always                    | ✅                  |
-| `kubeconfig_raw`      | ✅ If value is known         | ✅                  |
-| **Any unknown field** | ❌ Defers diff, plans create | ✅                  |
-
-On the next plan (when all fields are known), full server-side drift detection is re-enabled automatically.
-
 ---
 
 ## Security Considerations
@@ -480,11 +464,9 @@ module "frontend" {
 
 ### Decisions made
 
-* **Boot once, diff forever:** the provider must deliver server-side drift detection **without** forcing multi-phase pipelines. If any `cluster_connection` value is unknown on the first plan, the resource defers its live diff (no graph taint) and stores the final connection in state; subsequent plans perform normal server-side diffs.
 * **Uses client-go Dynamic Client** — leverages the stable client-go APIs for server-side apply operations with ApplyPatchType, ensuring compatibility with all Kubernetes versions and reducing binary size.
 * **Diff strategy:** Server-side apply dry-run is used to perform accurate, server-side diffs without implementing merge-patch logic.
 * **Concurrency:** Resources are serialized by `(cluster,namespace,name,kind)` to prevent apply-time race conditions. Parallelism may be user-configurable in future.
-* **Destroy bug (data-source → connection):** Solved via **deferred diff**. If any `cluster_connection` field is unknown, diff is skipped and the final connection is persisted in state. No need for a split connection model.
 * **Field naming** follows K8s REST / exec‑auth spec verbatim.
 * **Namespace handling** stays in `yaml_body`; provider does not add implicit namespaces.
 * **TLS verification** must pass; skip‑verify will not be supported.
