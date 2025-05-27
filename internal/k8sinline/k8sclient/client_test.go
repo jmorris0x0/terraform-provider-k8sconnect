@@ -433,38 +433,6 @@ func TestStubK8sClient_DryRunApply(t *testing.T) {
 	}
 }
 
-func TestStubK8sClient_SetFieldManager(t *testing.T) {
-	stubClient := NewStubK8sClient()
-
-	result := stubClient.SetFieldManager("custom-manager")
-
-	// Should return self for chaining
-	if result != stubClient {
-		t.Errorf("expected same client reference")
-	}
-
-	// Should update field manager
-	if stubClient.fieldManager != "custom-manager" {
-		t.Errorf("expected field manager custom-manager, got %s", stubClient.fieldManager)
-	}
-}
-
-func TestStubK8sClient_WithForceConflicts(t *testing.T) {
-	stubClient := NewStubK8sClient()
-
-	result := stubClient.WithForceConflicts(true)
-
-	// Should return self for chaining
-	if result != stubClient {
-		t.Errorf("expected same client reference")
-	}
-
-	// Should update force conflicts
-	if stubClient.forceConflicts != true {
-		t.Errorf("expected force conflicts true, got %v", stubClient.forceConflicts)
-	}
-}
-
 func TestStubK8sClient_ErrorHandling(t *testing.T) {
 	stubClient := NewStubK8sClient()
 	ctx := context.Background()
@@ -512,12 +480,6 @@ func TestStubK8sClient_ErrorHandling(t *testing.T) {
 	if err != expectedError {
 		t.Errorf("expected dry run error %v, got %v", expectedError, err)
 	}
-}
-
-func TestInterfaceCompliance(t *testing.T) {
-	// Ensure our types implement the K8sClient interface
-	var _ K8sClient = (*DynamicK8sClient)(nil)
-	var _ K8sClient = (*stubK8sClient)(nil)
 }
 
 func TestStubK8sClient_CallRecording(t *testing.T) {

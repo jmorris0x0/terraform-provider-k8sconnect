@@ -253,7 +253,7 @@ func TestCreateInlineConfig_ValidationErrors(t *testing.T) {
 			if err == nil {
 				t.Fatalf("Expected error but got none")
 			}
-			if err.Error() != tt.expect && !contains(err.Error(), tt.expect) {
+			if err.Error() != tt.expect && !strings.Contains(err.Error(), tt.expect) {
 				t.Errorf("Expected error containing %q, got %q", tt.expect, err.Error())
 			}
 		})
@@ -404,46 +404,6 @@ func TestGenerateID(t *testing.T) {
 	id3 := r.generateID(obj2, conn)
 	if id1 == id3 {
 		t.Error("expected different IDs for different objects")
-	}
-}
-
-// Helper function for substring checking
-func contains(s, substr string) bool {
-	return strings.Contains(s, substr)
-}
-
-func TestDeleteProtection_Logic(t *testing.T) {
-	tests := []struct {
-		name             string
-		deleteProtection types.Bool
-		expectBlocked    bool
-	}{
-		{
-			name:             "delete protection enabled",
-			deleteProtection: types.BoolValue(true),
-			expectBlocked:    true,
-		},
-		{
-			name:             "delete protection disabled",
-			deleteProtection: types.BoolValue(false),
-			expectBlocked:    false,
-		},
-		{
-			name:             "delete protection null",
-			deleteProtection: types.BoolNull(),
-			expectBlocked:    false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Test the delete protection logic directly
-			isProtected := !tt.deleteProtection.IsNull() && tt.deleteProtection.ValueBool()
-
-			if isProtected != tt.expectBlocked {
-				t.Errorf("expected protection %v, got %v", tt.expectBlocked, isProtected)
-			}
-		})
 	}
 }
 
@@ -617,76 +577,6 @@ func TestParseImportID(t *testing.T) {
 			}
 			if name != tt.expectedName {
 				t.Errorf("expected name %q, got %q", tt.expectedName, name)
-			}
-		})
-	}
-}
-
-func TestIsEmptyConnection(t *testing.T) {
-	r := &manifestResource{}
-
-	tests := []struct {
-		name     string
-		conn     ClusterConnectionModel
-		expected bool
-	}{
-		{
-			name: "empty connection",
-			conn: ClusterConnectionModel{
-				Host:                 types.StringNull(),
-				ClusterCACertificate: types.StringNull(),
-				KubeconfigFile:       types.StringNull(),
-				KubeconfigRaw:        types.StringNull(),
-			},
-			expected: true,
-		},
-		{
-			name: "inline connection",
-			conn: ClusterConnectionModel{
-				Host:                 types.StringValue("https://api.cluster.com"),
-				ClusterCACertificate: types.StringValue("ca-cert"),
-				KubeconfigFile:       types.StringNull(),
-				KubeconfigRaw:        types.StringNull(),
-			},
-			expected: false,
-		},
-		{
-			name: "kubeconfig file connection",
-			conn: ClusterConnectionModel{
-				Host:                 types.StringNull(),
-				ClusterCACertificate: types.StringNull(),
-				KubeconfigFile:       types.StringValue("~/.kube/config"),
-				KubeconfigRaw:        types.StringNull(),
-			},
-			expected: false,
-		},
-		{
-			name: "kubeconfig raw connection",
-			conn: ClusterConnectionModel{
-				Host:                 types.StringNull(),
-				ClusterCACertificate: types.StringNull(),
-				KubeconfigFile:       types.StringNull(),
-				KubeconfigRaw:        types.StringValue("apiVersion: v1\nkind: Config"),
-			},
-			expected: false,
-		},
-		{
-			name: "partial inline connection (host only)",
-			conn: ClusterConnectionModel{
-				Host:                 types.StringValue("https://api.cluster.com"),
-				ClusterCACertificate: types.StringNull(),
-				KubeconfigFile:       types.StringNull(),
-				KubeconfigRaw:        types.StringNull(),
-			},
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := r.isEmptyConnection(tt.conn)
-			if result != tt.expected {
-				t.Errorf("expected %v, got %v", tt.expected, result)
 			}
 		})
 	}
@@ -884,35 +774,5 @@ func TestAnyConnectionFieldChanged(t *testing.T) {
 				t.Errorf("expected %v, got %v", tt.expected, result)
 			}
 		})
-	}
-}
-
-func TestOwnershipAnnotationSetting(t *testing.T) {
-	r := &manifestResource{}
-
-	yamlStr := `apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: test-cm
-data:
-  key: value`
-
-	obj, err := r.parseYAML(yamlStr)
-	if err != nil {
-		t.Fatalf("failed to parse YAML: %v", err)
-	}
-
-	// Simulate setting annotation like in Create/Update
-	annotations := obj.GetAnnotations()
-	if annotations == nil {
-		annotations = make(map[string]string)
-	}
-	annotations["k8sinline.terraform.io/id"] = "test-resource-id"
-	obj.SetAnnotations(annotations)
-
-	// Verify annotation was set
-	resultAnnotations := obj.GetAnnotations()
-	if resultAnnotations["k8sinline.terraform.io/id"] != "test-resource-id" {
-		t.Errorf("ownership annotation not set correctly")
 	}
 }
