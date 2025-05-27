@@ -45,12 +45,12 @@ func (v *clusterConnectionValidator) ValidateResource(ctx context.Context, req r
 	conn := data.ClusterConnection
 
 	// Check for inline mode (host + cluster_ca_certificate)
-	hasInline := (!conn.Host.IsNull() && !conn.Host.IsUnknown()) ||
-		(!conn.ClusterCACertificate.IsNull() && !conn.ClusterCACertificate.IsUnknown())
+	// A field is "specified" if it's not null (even if unknown during planning)
+	hasInline := !conn.Host.IsNull() || !conn.ClusterCACertificate.IsNull()
 
 	// Check for kubeconfig modes
-	hasFile := !conn.KubeconfigFile.IsNull() && !conn.KubeconfigFile.IsUnknown()
-	hasRaw := !conn.KubeconfigRaw.IsNull() && !conn.KubeconfigRaw.IsUnknown()
+	hasFile := !conn.KubeconfigFile.IsNull()
+	hasRaw := !conn.KubeconfigRaw.IsNull()
 
 	// Count active modes
 	modeCount := 0
@@ -61,22 +61,23 @@ func (v *clusterConnectionValidator) ValidateResource(ctx context.Context, req r
 		activeModes = append(activeModes, "inline")
 
 		// For inline mode, both host AND cluster_ca_certificate are required
-		if (conn.Host.IsNull() || conn.Host.IsUnknown()) &&
-			(!conn.ClusterCACertificate.IsNull() && !conn.ClusterCACertificate.IsUnknown()) {
-			resp.Diagnostics.AddAttributeError(
-				path.Root("cluster_connection").AtName("host"),
-				"Missing Required Field for Inline Connection",
-				"When using inline connection mode, both 'host' and 'cluster_ca_certificate' are required.",
-			)
-		}
+		// Only validate this if we can actually check the values (not unknown)
+		if !conn.Host.IsUnknown() && !conn.ClusterCACertificate.IsUnknown() {
+			if conn.Host.IsNull() && !conn.ClusterCACertificate.IsNull() {
+				resp.Diagnostics.AddAttributeError(
+					path.Root("cluster_connection").AtName("host"),
+					"Missing Required Field for Inline Connection",
+					"When using inline connection mode, both 'host' and 'cluster_ca_certificate' are required.",
+				)
+			}
 
-		if (conn.ClusterCACertificate.IsNull() || conn.ClusterCACertificate.IsUnknown()) &&
-			(!conn.Host.IsNull() && !conn.Host.IsUnknown()) {
-			resp.Diagnostics.AddAttributeError(
-				path.Root("cluster_connection").AtName("cluster_ca_certificate"),
-				"Missing Required Field for Inline Connection",
-				"When using inline connection mode, both 'host' and 'cluster_ca_certificate' are required.",
-			)
+			if conn.ClusterCACertificate.IsNull() && !conn.Host.IsNull() {
+				resp.Diagnostics.AddAttributeError(
+					path.Root("cluster_connection").AtName("cluster_ca_certificate"),
+					"Missing Required Field for Inline Connection",
+					"When using inline connection mode, both 'host' and 'cluster_ca_certificate' are required.",
+				)
+			}
 		}
 	}
 
@@ -142,14 +143,20 @@ func (v *execAuthValidator) ValidateResource(ctx context.Context, req resource.V
 		return // No exec config, nothing to validate
 	}
 
+	// Only validate exec fields if they're not unknown (during planning they might be)
+	// We can't meaningfully validate unknown values
+	if exec.APIVersion.IsUnknown() || exec.Command.IsUnknown() {
+		return // Skip validation during planning when values are unknown
+	}
+
 	// Check that all required exec fields are present
 	missingFields := []string{}
 
-	if exec.APIVersion.IsNull() || exec.APIVersion.IsUnknown() {
+	if exec.APIVersion.IsNull() {
 		missingFields = append(missingFields, "api_version")
 	}
 
-	if exec.Command.IsNull() || exec.Command.IsUnknown() {
+	if exec.Command.IsNull() {
 		missingFields = append(missingFields, "command")
 	}
 
@@ -194,9 +201,14 @@ func (v *conflictingAttributesValidator) ValidateResource(ctx context.Context, r
 		return
 	}
 
+	// Skip validation if values are unknown (during planning)
+	if data.DeleteProtection.IsUnknown() || data.ForceDestroy.IsUnknown() {
+		return
+	}
+
 	// Check delete_protection and force_destroy conflict
-	deleteProtection := !data.DeleteProtection.IsNull() && !data.DeleteProtection.IsUnknown() && data.DeleteProtection.ValueBool()
-	forceDestroy := !data.ForceDestroy.IsNull() && !data.ForceDestroy.IsUnknown() && data.ForceDestroy.ValueBool()
+	deleteProtection := !data.DeleteProtection.IsNull() && data.DeleteProtection.ValueBool()
+	forceDestroy := !data.ForceDestroy.IsNull() && data.ForceDestroy.ValueBool()
 
 	if deleteProtection && forceDestroy {
 		resp.Diagnostics.AddAttributeError(
@@ -237,14 +249,15 @@ func (v *requiredFieldsValidator) ValidateResource(ctx context.Context, req reso
 		return
 	}
 
-	// Check yaml_body is present and not empty
-	if data.YAMLBody.IsNull() || data.YAMLBody.IsUnknown() {
+	// Check yaml_body is present and not empty (only if not unknown)
+	if data.YAMLBody.IsNull() {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("yaml_body"),
 			"Missing Required Field",
 			"'yaml_body' is required and must contain valid Kubernetes YAML manifest content.",
 		)
-	} else if data.YAMLBody.ValueString() == "" {
+	} else if !data.YAMLBody.IsUnknown() && data.YAMLBody.ValueString() == "" {
+		// Only check for empty string if the value is known
 		resp.Diagnostics.AddAttributeError(
 			path.Root("yaml_body"),
 			"Empty YAML Content",
@@ -265,9 +278,9 @@ func (v *requiredFieldsValidator) ValidateResource(ctx context.Context, req reso
 
 // Helper function to check if cluster connection is completely empty
 func isClusterConnectionEmpty(conn ClusterConnectionModel) bool {
-	return (conn.Host.IsNull() || conn.Host.IsUnknown()) &&
-		(conn.ClusterCACertificate.IsNull() || conn.ClusterCACertificate.IsUnknown()) &&
-		(conn.KubeconfigFile.IsNull() || conn.KubeconfigFile.IsUnknown()) &&
-		(conn.KubeconfigRaw.IsNull() || conn.KubeconfigRaw.IsUnknown()) &&
+	return conn.Host.IsNull() &&
+		conn.ClusterCACertificate.IsNull() &&
+		conn.KubeconfigFile.IsNull() &&
+		conn.KubeconfigRaw.IsNull() &&
 		conn.Exec == nil
 }
