@@ -23,6 +23,8 @@ Applies a single‑document Kubernetes YAML manifest to a cluster, with per‑re
 
 - `cluster_connection` (Block, Optional) Connection settings for the target cluster. Exactly one of inline, kubeconfig_file or kubeconfig_raw must be populated. (see [below for nested schema](#nestedblock--cluster_connection))
 - `delete_protection` (Boolean) When enabled, prevents Terraform from deleting this resource. Must be disabled before destruction. Defaults to false.
+- `delete_timeout` (String) Maximum time to wait for resource deletion. Defaults to '5m' for most resources, '10m' for Namespaces/PVs. Examples: '1m', '10m', '1h'. Set '0' to skip waiting (not recommended).
+- `force_destroy` (Boolean) When enabled, removes finalizers to force deletion if normal deletion times out. ⚠️ WARNING: May cause data loss. Use only when you understand the implications. Defaults to false.
 
 ### Read-Only
 
