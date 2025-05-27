@@ -20,36 +20,39 @@ test:
 	go test -v ./... -run "^Test[^A].*"
 
 install:
-	@echo "🔧 Detecting system and building provider for installation..."
-	@# Detect OS and architecture
+	@echo "🔧 Building and installing provider..."
+	@echo "📦 Ensuring dependencies are up to date..."
+	@go mod tidy
+	@# Detect platform
 	@OS=$$(uname -s | tr '[:upper:]' '[:lower:]'); \
 	ARCH=$$(uname -m); \
 	case $$ARCH in \
-		x86_64|amd64) GOARCH=amd64 ;; \
-		arm64|aarch64) GOARCH=arm64 ;; \
-		armv7l) GOARCH=arm ;; \
-		i386|i686) GOARCH=386 ;; \
+		x86_64|amd64) TARGET_ARCH=amd64 ;; \
+		arm64|aarch64) TARGET_ARCH=arm64 ;; \
+		armv7l) TARGET_ARCH=arm ;; \
+		i386|i686) TARGET_ARCH=386 ;; \
 		*) echo "❌ Unsupported architecture: $$ARCH"; exit 1 ;; \
 	esac; \
 	case $$OS in \
-		darwin) GOOS=darwin ;; \
-		linux) GOOS=linux ;; \
-		mingw*|msys*|cygwin*) GOOS=windows ;; \
+		darwin) TARGET_OS=darwin ;; \
+		linux) TARGET_OS=linux ;; \
+		mingw*|msys*|cygwin*) TARGET_OS=windows ;; \
 		*) echo "❌ Unsupported OS: $$OS"; exit 1 ;; \
 	esac; \
-	PROVIDER_NAME=terraform-provider-k8sinline; \
-	VERSION=$(PROVIDER_VERSION); \
-	BINARY_NAME=$${PROVIDER_NAME}_$${VERSION}_$${GOOS}_$${GOARCH}; \
-	if [ "$$GOOS" = "windows" ]; then \
+	BINARY_NAME=terraform-provider-k8sinline_$(PROVIDER_VERSION)_$${TARGET_OS}_$${TARGET_ARCH}; \
+	if [ "$$TARGET_OS" = "windows" ]; then \
 		BINARY_NAME=$${BINARY_NAME}.exe; \
-		FINAL_BINARY=$${PROVIDER_NAME}.exe; \
+		FINAL_BINARY=terraform-provider-k8sinline.exe; \
 	else \
-		FINAL_BINARY=$$PROVIDER_NAME; \
+		FINAL_BINARY=terraform-provider-k8sinline; \
 	fi; \
-	INSTALL_DIR=$$HOME/.terraform.d/plugins/registry.terraform.io/local/k8sinline/$$VERSION/$${GOOS}_$${GOARCH}; \
-	echo "🏗️  Building $$BINARY_NAME for $$GOOS/$$GOARCH (version $$VERSION)..."; \
+	INSTALL_DIR=$$HOME/.terraform.d/plugins/registry.terraform.io/local/k8sinline/$(PROVIDER_VERSION)/$${TARGET_OS}_$${TARGET_ARCH}; \
+	echo "🏗️  Building for $${TARGET_OS}/$${TARGET_ARCH}..."; \
 	mkdir -p bin; \
-	GOOS=$$GOOS GOARCH=$$GOARCH CGO_ENABLED=0 go build -ldflags="-w -s" -o bin/$$BINARY_NAME .; \
+	if ! GOOS=$$TARGET_OS GOARCH=$$TARGET_ARCH CGO_ENABLED=0 go build -ldflags="-w -s" -o bin/$$BINARY_NAME .; then \
+		echo "❌ Build failed!"; \
+		exit 1; \
+	fi; \
 	echo "📦 Installing to $$INSTALL_DIR..."; \
 	mkdir -p $$INSTALL_DIR; \
 	cp bin/$$BINARY_NAME $$INSTALL_DIR/$$FINAL_BINARY; \
@@ -57,23 +60,18 @@ install:
 	echo "✅ Provider installed successfully!"; \
 	echo ""; \
 	echo "📍 Installed at: $$INSTALL_DIR/$$FINAL_BINARY"; \
-	echo "🏷️  Version: $$VERSION"; \
-	echo "💻 Platform: $$GOOS/$$GOARCH"; \
+	echo "🏷️  Version: $(PROVIDER_VERSION)"; \
+	echo "💻 Platform: $${TARGET_OS}/$${TARGET_ARCH}"; \
 	echo ""; \
-	echo "📝 To use this provider, add to your Terraform configuration:"; \
-	echo ""; \
-	echo "terraform {"; \
-	echo "  required_providers {"; \
-	echo "    k8sinline = {"; \
-	echo "      source  = \"local/k8sinline\""; \
-	echo "      version = \"$$VERSION\""; \
+	echo "Usage:"; \
+	echo "  terraform {"; \
+	echo "    required_providers {"; \
+	echo "      k8sinline = {"; \
+	echo "        source  = \"local/k8sinline\""; \
+	echo "        version = \"$(PROVIDER_VERSION)\""; \
+	echo "      }"; \
 	echo "    }"; \
-	echo "  }"; \
-	echo "}"; \
-	echo ""; \
-	echo "provider \"k8sinline\" {}"; \
-	echo ""; \
-	echo "Then run: terraform init"
+	echo "  }"
 
 oidc-setup:
 	@echo "🔐 Generating self‑signed certs"
