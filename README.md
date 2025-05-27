@@ -22,29 +22,34 @@ Traditional providers force cluster configuration into the provider block; **k8s
 ## Getting Started
 
 ```hcl
-    terraform {
-      required_providers {
-        k8sinline = {
-          source  = "jmorris0x0/k8sinline"
-          version = ">= 0.1.0"
-        }
-      }
+terraform {
+  required_providers {
+    k8sinline = {
+      source  = "jmorris0x0/k8sinline"
+      version = ">= 0.1.0"
     }
+  }
+}
 
-    provider "k8sinline" {}
+provider "k8sinline" {}
 
-    resource "k8sinline_manifest" "nginx" {
-      yaml = file("${path.module}/manifests/nginx.yaml")
+resource "k8sinline_manifest" "nginx" {
+  yaml_body = file("${path.module}/manifests/nginx.yaml")
 
-      # inline connection (all attrs are Sensitive)
-      cluster {
-        server      = var.cluster_endpoint
-        certificate = var.cluster_ca
-        token       = var.cluster_token
-      }
-
-      delete_protection = true
+  # inline connection (all attrs are Sensitive)
+  cluster_connection {
+    host                   = var.cluster_endpoint
+    cluster_ca_certificate = var.cluster_ca
+    
+    exec = {
+      api_version = "client.authentication.k8s.io/v1"
+      command     = "aws"
+      args        = ["eks", "get-token", "--cluster-name", var.cluster_name]
     }
+  }
+
+  delete_protection = true
+}
 ```
 ---
 
@@ -171,7 +176,7 @@ state file**. Mitigate by:
   appear in plaintext HCL.
 * Rotating or redacting historical state snapshots.
 
-All `cluster.*` attributes are flagged **`Sensitive: true`** so they are redacted
+All `cluster_connection.*` attributes are flagged **`Sensitive: true`** so they are redacted
 in CLI output and logs, but the bytes still exist in the state blob.
 
 ---
@@ -208,7 +213,7 @@ Terraform will refuse to destroy the object unless you set the flag to
 * **Parallelism safety** – The provider serializes operations on `(cluster,namespace,kind,name)` to prevent races **within a single plan**. However, concurrent `terraform apply` runs may still overwrite each other. Use state locking or serialized workflows for cross-run safety.
 * **Policy engines** – Because connection settings live inside the resource, Sentinel or OPA rules that introspect *provider blocks* will not see them.
 * **Hash-based diff** – Plan output shows full manifest replacement when `yaml_body` changes; Terraform does not show line-by-line diffs (yet).
-* **Ownership annotation guard** – Every object applied by `k8sinline` receives `metadata.annotations["k8sinline.hashicorp.com/id"]` set to the Terraform resource ID. If an object **already exists** without that annotation, the provider aborts the operation to avoid unintentionally overwriting resources it does not own. This guard works even when connection attributes are unknown at plan time, eliminating the silent‑overwrite risk while preserving single‑phase pipelines.
+* **Ownership annotation guard** – Every object applied by `k8sinline` receives `metadata.annotations["k8sinline.terraform.io/id"]` set to the Terraform resource ID. If an object **already exists** without that annotation, the provider aborts the operation to avoid unintentionally overwriting resources it does not own. This guard works even when connection attributes are unknown at plan time, eliminating the silent‑overwrite risk while preserving single‑phase pipelines.
 
 ## Installation
 
@@ -235,7 +240,7 @@ All cluster credentials are provided via a **required** `cluster_connection {}` 
 
 | Mode              | Required fields                               | Notes                                                |
 | ----------------- | --------------------------------------------- | ---------------------------------------------------- |
-| `inline`          | `host`, `cluster_ca_certificate`, and  `exec` | Direct connection info; best for dynamic credentials |
+| `inline`          | `host`, `cluster_ca_certificate`             | Direct connection info; `exec` is optional for dynamic credentials |
 | `kubeconfig_file` | `kubeconfig_file`                             | Loads config from file at plan time                  |
 | `kubeconfig_raw`  | `kubeconfig_raw`                              | Loads config from string (CI‑friendly)               |
 
@@ -250,6 +255,8 @@ The `context` field may optionally be set when using `kubeconfig_file` or `kubec
 | `yaml_body`          | string  | Yes      | UTF‑8, single YAML document. Multi‑doc files will fail.    |
 | `cluster_connection` | block   | Yes      | Contains connection info. Exactly one mode must be chosen. |
 | `delete_protection`  | boolean | No       | When enabled, prevents Terraform from deleting this resource. Must be disabled before destruction. Defaults to false. |
+| `delete_timeout`     | string  | No       | Maximum time to wait for resource deletion. Defaults to '5m' for most resources, '10m' for Namespaces/PVs. Examples: '1m', '10m', '1h'. Set '0' to skip waiting (not recommended). |
+| `force_destroy`      | boolean | No       | When enabled, removes finalizers to force deletion if normal deletion times out. ⚠️ WARNING: May cause data loss. Use only when you understand the implications. Defaults to false. |
 
 ---
 
@@ -365,6 +372,24 @@ resource "k8sinline_manifest" "rawcfg" {
   }
 }
 ```
+
+### 4. Delete timeout and force destroy
+
+```hcl
+provider "k8sinline" {}
+
+resource "k8sinline_manifest" "persistent_volume" {
+  yaml_body = file("pv.yaml")
+
+  cluster_connection {
+    kubeconfig_raw = var.kubeconfig
+  }
+
+  delete_timeout = "10m"  # Wait longer for PV deletion
+  force_destroy  = true   # Remove finalizers if stuck
+}
+```
+
 ---
 
 ## Security Considerations
@@ -377,42 +402,53 @@ resource "k8sinline_manifest" "rawcfg" {
 
 ---
 
-## Example: Module usage
+## Example: Multiple Resources
 
 ```hcl
 provider "k8sinline" {}
 
-module "frontend" {
-  source = "./modules/k8s_manifest"
+# Create namespace first
+resource "k8sinline_manifest" "frontend_namespace" {
+  yaml_body = file("${path.module}/manifests/namespace.yaml")
 
-  manifests = [
-    {
-      yaml_body = file("ns-frontend.yaml")
+  cluster_connection {
+    host                   = data.aws_eks_cluster.prod.endpoint
+    cluster_ca_certificate = base64decode(data.aws_eks_cluster.prod.certificate_authority[0].data)
 
-      cluster_connection = {
-        host                   = data.aws_eks_cluster.prod.endpoint
-        cluster_ca_certificate = base64decode(data.aws_eks_cluster.prod.certificate_authority[0].data)
-
-        exec = {
-          api_version = "client.authentication.k8s.io/v1"
-          command     = "aws"
-          args        = [
-            "eks",
-            "get-token",
-            "--cluster-name", "prod"
-          ]
-        }
-      }
-    },
-    {
-      yaml_body = file("ingress.yaml")
-
-      cluster_connection = {
-        kubeconfig_raw = aws_ssm_parameter.prod_kubeconfig.value
-        context        = "prod"
-      }
+    exec = {
+      api_version = "client.authentication.k8s.io/v1"
+      command     = "aws"
+      args        = ["eks", "get-token", "--cluster-name", "prod"]
     }
-  ]
+  }
+}
+
+# Deploy application
+resource "k8sinline_manifest" "frontend_deployment" {
+  yaml_body = file("${path.module}/manifests/deployment.yaml")
+
+  cluster_connection {
+    host                   = data.aws_eks_cluster.prod.endpoint
+    cluster_ca_certificate = base64decode(data.aws_eks_cluster.prod.certificate_authority[0].data)
+
+    exec = {
+      api_version = "client.authentication.k8s.io/v1"
+      command     = "aws"
+      args        = ["eks", "get-token", "--cluster-name", "prod"]
+    }
+  }
+
+  depends_on = [k8sinline_manifest.frontend_namespace]
+}
+
+# Ingress for different cluster
+resource "k8sinline_manifest" "staging_ingress" {
+  yaml_body = file("${path.module}/manifests/ingress.yaml")
+
+  cluster_connection {
+    kubeconfig_raw = aws_ssm_parameter.staging_kubeconfig.value
+    context        = "staging"
+  }
 }
 ```
 
@@ -435,6 +471,7 @@ module "frontend" {
 * **Comparison table** added to "Why" section for quick salesmanship.
 * **Single-process concurrency safety** is built in. The provider serializes resource operations by `(cluster,namespace,kind,name)` to prevent apply-time collisions from multiple resources targeting the same object within a single plan.
 * **Cross-process locking is not supported**. Users must avoid running concurrent `terraform apply` operations that target the same cluster and object set.
+* **Connection caching** is implemented at the provider level to reuse Kubernetes clients across resources with identical connection parameters.
 
 ---
 
@@ -443,7 +480,6 @@ module "frontend" {
 | Topic                       | Notes / Options                                                                                                           | LOE  |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ---- |
 | **Waiters / readiness**     | Expose `wait_for = ["condition:Available", "generationObserved"]` for CRDs                                                | Med  |
-| **Import support**          | Syntax: `<cluster-hash>/<namespace>/<kind>/<name>`                                                                        | Med  |
 | **Delete protection**       | Skip destroy if already missing; useful for GitOps parity                                                                 | Low  |
 | **Drift‑detection opt‑out** | Support `lifecycle.ignore_changes = ["yaml_body"]`                                                                        | Low  |
 | **Multi-doc YAML support**  | Use sigs.k8s.io/kustomize/kyaml to loop over yaml\_body                                                                   | High |
