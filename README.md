@@ -8,10 +8,13 @@ Traditional providers force cluster configuration into the provider block; **k8s
 
 ## Why `k8sinline`
 
+
+Pain point
+Conventional providersk8sinlineCluster‑first dependency hell❌ Two-phase workflow: deploy cluster, then configure provider, then deploy apps✅ Single apply handles cluster creation and workloads togetherMulti‑cluster support❌ Requires provider aliases or separate states per cluster✅ Inline connection per resource — all clusters in one plan
+
 | Pain point                            | Conventional providers                                                      | **`k8sinline`**                                                             |
 | ------------------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| Multi‑phase apply requirement         | ❌ Requires staging: infra apply, then manifest apply                        | ✅ All resources in one plan — no phase split                                |
-| Cluster‑first dependency hell         | ❌ Providers require the cluster to exist at plan time                       | ✅ Connections defer auth resolution to apply time                           |
+| Cluster‑first dependency hell         | ❌ Two-phase workflow: deploy cluster, then configure provider, then deploy apps | ✅ Single apply handles cluster creation and workloads together |
 | Multi‑cluster support                 | ❌ Requires provider aliases or separate states per cluster                  | ✅ Inline connection per resource — all clusters in one plan                 |
 
 ---
