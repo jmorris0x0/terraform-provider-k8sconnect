@@ -102,10 +102,29 @@ cluster_connection {
 
 - ✅ **Server-side apply** - Uses Kubernetes' native apply mechanism, not kubectl
 - ✅ **Connection caching** - Reuses clients across resources for performance  
-- ✅ **Import existing resources** - `terraform import k8sinline_manifest.example "context/namespace/Kind/name"`
+- ✅ **Import existing resources** - Supports standard Terraform import workflow
 - ✅ **Delete protection** - Set `delete_protection = true` for critical resources
 - ✅ **Force destroy** - Remove stuck finalizers with `force_destroy = true`
 - ✅ **Ownership tracking** - Prevents accidental overwrites of unmanaged resources
+
+---
+
+## Importing Resources
+
+Import existing Kubernetes resources into Terraform management:
+
+```bash
+# Set your kubeconfig
+export KUBECONFIG=~/.kube/config
+
+# Namespaced resources: context/namespace/Kind/name  
+terraform import k8sinline_manifest.nginx "prod/default/Pod/nginx-abc123"
+
+# Cluster-scoped resources: context/Kind/name
+terraform import k8sinline_manifest.namespace "prod/Namespace/my-namespace"
+```
+
+After import, add the `cluster_connection` block to your configuration to match how you want to connect during normal operations.
 
 ---
 
