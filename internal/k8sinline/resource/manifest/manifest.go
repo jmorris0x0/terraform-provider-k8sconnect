@@ -33,6 +33,8 @@ import (
 
 var _ resource.Resource = (*manifestResource)(nil)
 
+var _ resource.ResourceWithConfigValidators = (*manifestResource)(nil)
+
 // ClientGetter function type for dependency injection
 type ClientGetter func(ClusterConnectionModel) (k8sclient.K8sClient, error)
 
@@ -1042,7 +1044,7 @@ func (r *manifestResource) validateOwnership(ctx context.Context, data manifestR
 		return fmt.Errorf("resource exists but has no ownership annotation - may be unmanaged")
 	}
 
-	actualID := annotations["k8sinline.terraform.io/id"] // FIXED!
+	actualID := annotations["k8sinline.terraform.io/id"]
 	expectedID := data.ID.ValueString()
 
 	if actualID != expectedID {
