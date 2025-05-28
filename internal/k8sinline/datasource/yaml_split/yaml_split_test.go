@@ -25,7 +25,7 @@ metadata:
   name: test1
 ---
 apiVersion: v1
-kind: Namespace  
+kind: Namespace
 metadata:
   name: test2`,
 			expected: []string{
