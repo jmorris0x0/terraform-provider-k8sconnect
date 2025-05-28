@@ -23,3 +23,5 @@ CICD release process with artifacts and dependabot. Automated releases?
 Warning for kind install
 
 Add go mod tidy to make build step
+
+Handle if attempting to write a new resource that's already managed by the provider.
