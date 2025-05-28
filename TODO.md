@@ -21,3 +21,5 @@ Reasses trivial tests
 CICD release process with artifacts and dependabot. Automated releases?
 
 Warning for kind install
+
+Add go mod tidy to make build step
