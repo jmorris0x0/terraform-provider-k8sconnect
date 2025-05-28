@@ -12,6 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 
+	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/datasource/yaml_split"
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/k8sclient"
 	manifestres "github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/resource/manifest"
 )
@@ -57,7 +58,9 @@ func (p *k8sinlineProvider) Resources(ctx context.Context) []func() resource.Res
 }
 
 func (p *k8sinlineProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
-	return nil // or []func() datasource.DataSource{} if you prefer
+	return []func() datasource.DataSource{
+		yaml_split.NewYamlSplitDataSource,
+	}
 }
 
 func (p *k8sinlineProvider) Schema(ctx context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
