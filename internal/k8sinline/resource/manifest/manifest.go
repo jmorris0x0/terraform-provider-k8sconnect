@@ -13,11 +13,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -58,12 +60,12 @@ type manifestResource struct {
 }
 
 type manifestResourceModel struct {
-	ID                types.String           `tfsdk:"id"`
-	YAMLBody          types.String           `tfsdk:"yaml_body"`
-	ClusterConnection ClusterConnectionModel `tfsdk:"cluster_connection"`
-	DeleteProtection  types.Bool             `tfsdk:"delete_protection"`
-	DeleteTimeout     types.String           `tfsdk:"delete_timeout"`
-	ForceDestroy      types.Bool             `tfsdk:"force_destroy"`
+	ID                types.String `tfsdk:"id"`
+	YAMLBody          types.String `tfsdk:"yaml_body"`
+	ClusterConnection types.Object `tfsdk:"cluster_connection"`
+	DeleteProtection  types.Bool   `tfsdk:"delete_protection"`
+	DeleteTimeout     types.String `tfsdk:"delete_timeout"`
+	ForceDestroy      types.Bool   `tfsdk:"force_destroy"`
 }
 
 // NewManifestResource creates a new manifest resource (backward compatibility)
@@ -182,6 +184,22 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
+	// Check if cluster connection is ready (handles unknown values during planning)
+	if !r.isConnectionReady(data.ClusterConnection) {
+		resp.Diagnostics.AddError(
+			"Cluster Connection Not Ready",
+			"Cluster connection contains unknown values. This usually happens during planning when dependencies are not yet resolved.",
+		)
+		return
+	}
+
+	// Convert to connection model
+	conn, err := r.convertObjectToConnectionModel(ctx, data.ClusterConnection)
+	if err != nil {
+		resp.Diagnostics.AddError("Connection Conversion Failed", err.Error())
+		return
+	}
+
 	// Parse YAML into unstructured object
 	obj, err := r.parseYAML(data.YAMLBody.ValueString())
 	if err != nil {
@@ -190,14 +208,14 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 	}
 
 	// Create K8s client from cluster connection (now with caching)
-	client, err := r.clientGetter(data.ClusterConnection)
+	client, err := r.clientGetter(conn)
 	if err != nil {
 		resp.Diagnostics.AddError("Connection Failed", fmt.Sprintf("Failed to create Kubernetes client: %s", err))
 		return
 	}
 
 	// Generate resource ID (moved up to use in annotation)
-	id := r.generateID(obj, data.ClusterConnection)
+	id := r.generateID(obj, conn)
 	data.ID = types.StringValue(id)
 
 	// Set ownership annotation before applying
@@ -244,6 +262,19 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
+	// Check if cluster connection is ready
+	if !r.isConnectionReady(data.ClusterConnection) {
+		// During planning, if connection is unknown, we can't read - just return current state
+		return
+	}
+
+	// Convert to connection model
+	conn, err := r.convertObjectToConnectionModel(ctx, data.ClusterConnection)
+	if err != nil {
+		resp.Diagnostics.AddError("Connection Conversion Failed", err.Error())
+		return
+	}
+
 	// Parse YAML to get object metadata
 	obj, err := r.parseYAML(data.YAMLBody.ValueString())
 	if err != nil {
@@ -252,7 +283,7 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 	}
 
 	// Create K8s client from cluster connection (cached)
-	client, err := r.clientGetter(data.ClusterConnection)
+	client, err := r.clientGetter(conn)
 	if err != nil {
 		resp.Diagnostics.AddError("Connection Failed", fmt.Sprintf("Failed to create Kubernetes client: %s", err))
 		return
@@ -297,6 +328,22 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
+	// Check if cluster connection is ready
+	if !r.isConnectionReady(data.ClusterConnection) {
+		resp.Diagnostics.AddError(
+			"Cluster Connection Not Ready",
+			"Cluster connection contains unknown values. This usually happens during planning when dependencies are not yet resolved.",
+		)
+		return
+	}
+
+	// Convert plan connection to model
+	conn, err := r.convertObjectToConnectionModel(ctx, data.ClusterConnection)
+	if err != nil {
+		resp.Diagnostics.AddError("Connection Conversion Failed", err.Error())
+		return
+	}
+
 	// Get prior state to check for connection changes
 	var priorState manifestResourceModel
 	diags = req.State.Get(ctx, &priorState)
@@ -305,14 +352,19 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	// Check if connection changed and validate if so
-	if r.anyConnectionFieldChanged(data.ClusterConnection, priorState.ClusterConnection) {
-		if err := r.validateOwnership(ctx, data); err != nil {
-			resp.Diagnostics.AddError("Connection Change Blocked", err.Error())
-			return
+	// Check connection changes only if both states are ready
+	if r.isConnectionReady(priorState.ClusterConnection) {
+		priorConn, err := r.convertObjectToConnectionModel(ctx, priorState.ClusterConnection)
+		if err == nil {
+			if r.anyConnectionFieldChanged(conn, priorConn) {
+				if err := r.validateOwnership(ctx, data); err != nil {
+					resp.Diagnostics.AddError("Connection Change Blocked", err.Error())
+					return
+				}
+				resp.Diagnostics.AddWarning("Connection Changed",
+					"Connection details changed. Verified target cluster via ownership annotation.")
+			}
 		}
-		resp.Diagnostics.AddWarning("Connection Changed",
-			"Connection details changed. Verified target cluster via ownership annotation.")
 	}
 
 	// Parse YAML into unstructured object
@@ -323,7 +375,7 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 
 	// Create K8s client from cluster connection (cached)
-	client, err := r.clientGetter(data.ClusterConnection)
+	client, err := r.clientGetter(conn)
 	if err != nil {
 		resp.Diagnostics.AddError("Connection Failed", fmt.Sprintf("Failed to create Kubernetes client: %s", err))
 		return
@@ -373,12 +425,28 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 		return
 	}
 
-	// Check delete protection
+	// Check delete protection first (doesn't require connection)
 	if !data.DeleteProtection.IsNull() && data.DeleteProtection.ValueBool() {
 		resp.Diagnostics.AddError(
 			"Resource Protected from Deletion",
 			"This resource has delete_protection enabled. To delete this resource, first set delete_protection = false in your configuration, run terraform apply, then run terraform destroy.",
 		)
+		return
+	}
+
+	// Check if cluster connection is ready
+	if !r.isConnectionReady(data.ClusterConnection) {
+		resp.Diagnostics.AddError(
+			"Cluster Connection Not Ready",
+			"Cannot delete resource: cluster connection contains unknown values.",
+		)
+		return
+	}
+
+	// Convert to connection model
+	conn, err := r.convertObjectToConnectionModel(ctx, data.ClusterConnection)
+	if err != nil {
+		resp.Diagnostics.AddError("Connection Conversion Failed", err.Error())
 		return
 	}
 
@@ -390,7 +458,7 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 	}
 
 	// Create K8s client from cluster connection (cached)
-	client, err := r.clientGetter(data.ClusterConnection)
+	client, err := r.clientGetter(conn)
 	if err != nil {
 		resp.Diagnostics.AddError("Connection Failed", fmt.Sprintf("Failed to create Kubernetes client: %s", err))
 		return
@@ -652,21 +720,32 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 	// Since we don't have the final cluster connection yet, we'll use the context
 	resourceID := r.generateIDFromImport(liveObj, kubeContext)
 
+	// Create connection model for import
+	connModel := ClusterConnectionModel{
+		Host:                 types.StringNull(),
+		ClusterCACertificate: types.StringNull(),
+		KubeconfigFile:       types.StringValue(kubeconfigPath),
+		KubeconfigRaw:        types.StringNull(),
+		Context:              types.StringValue(kubeContext),
+		Exec:                 nil,
+	}
+
+	// Convert to types.Object
+	connObj, err := r.convertConnectionModelToObject(ctx, connModel)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Import Failed: Connection Conversion Error",
+			fmt.Sprintf("Failed to convert connection model to object: %s", err.Error()),
+		)
+		return
+	}
+
 	// Populate state with imported data
-	// We need to populate cluster_connection with the details we used for import
-	// so that subsequent Read operations can succeed
 	importedData := manifestResourceModel{
-		ID:       types.StringValue(resourceID),
-		YAMLBody: types.StringValue(string(yamlBytes)),
-		ClusterConnection: ClusterConnectionModel{
-			Host:                 types.StringNull(),
-			ClusterCACertificate: types.StringNull(),
-			KubeconfigFile:       types.StringValue(kubeconfigPath),
-			KubeconfigRaw:        types.StringNull(),
-			Context:              types.StringValue(kubeContext),
-			Exec:                 nil,
-		},
-		DeleteProtection: types.BoolValue(false), // default
+		ID:                types.StringValue(resourceID),
+		YAMLBody:          types.StringValue(string(yamlBytes)),
+		ClusterConnection: connObj,                // Now using types.Object
+		DeleteProtection:  types.BoolValue(false), // default
 	}
 
 	// Set the imported state
@@ -1027,7 +1106,13 @@ func (r *manifestResource) validateOwnership(ctx context.Context, data manifestR
 		return fmt.Errorf("failed to parse YAML: %w", err)
 	}
 
-	client, err := r.clientGetter(data.ClusterConnection)
+	// Convert connection object to model
+	conn, err := r.convertObjectToConnectionModel(ctx, data.ClusterConnection)
+	if err != nil {
+		return fmt.Errorf("failed to convert connection: %w", err)
+	}
+
+	client, err := r.clientGetter(conn)
 	if err != nil {
 		return fmt.Errorf("failed to create client: %w", err)
 	}
@@ -1286,4 +1371,56 @@ func (r *manifestResource) namespaceFlag(obj *unstructured.Unstructured) string 
 		return fmt.Sprintf("-n %s", namespace)
 	}
 	return ""
+}
+
+// convertObjectToConnectionModel converts types.Object to ClusterConnectionModel
+func (r *manifestResource) convertObjectToConnectionModel(ctx context.Context, obj types.Object) (ClusterConnectionModel, error) {
+	if obj.IsNull() {
+		return ClusterConnectionModel{}, fmt.Errorf("cluster connection is null")
+	}
+
+	if obj.IsUnknown() {
+		return ClusterConnectionModel{}, fmt.Errorf("cluster connection contains unknown values")
+	}
+
+	var conn ClusterConnectionModel
+	diags := obj.As(ctx, &conn, basetypes.ObjectAsOptions{})
+	if diags.HasError() {
+		return ClusterConnectionModel{}, fmt.Errorf("failed to convert cluster connection: %s", diags)
+	}
+
+	return conn, nil
+}
+
+// isConnectionReady checks if the connection object is ready (not null/unknown)
+func (r *manifestResource) isConnectionReady(obj types.Object) bool {
+	return !obj.IsNull() && !obj.IsUnknown()
+}
+
+// convertConnectionModelToObject converts ClusterConnectionModel to types.Object
+func (r *manifestResource) convertConnectionModelToObject(ctx context.Context, conn ClusterConnectionModel) (types.Object, error) {
+	// Define the object type based on our schema
+	objectType := types.ObjectType{
+		AttrTypes: map[string]attr.Type{
+			"host":                   types.StringType,
+			"cluster_ca_certificate": types.StringType,
+			"kubeconfig_file":        types.StringType,
+			"kubeconfig_raw":         types.StringType,
+			"context":                types.StringType,
+			"exec": types.ObjectType{
+				AttrTypes: map[string]attr.Type{
+					"api_version": types.StringType,
+					"command":     types.StringType,
+					"args":        types.ListType{ElemType: types.StringType},
+				},
+			},
+		},
+	}
+
+	obj, diags := types.ObjectValueFrom(ctx, objectType.AttrTypes, conn)
+	if diags.HasError() {
+		return types.ObjectNull(objectType.AttrTypes), fmt.Errorf("failed to convert connection model to object: %s", diags)
+	}
+
+	return obj, nil
 }

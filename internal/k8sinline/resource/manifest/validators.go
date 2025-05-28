@@ -7,6 +7,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 // ConfigValidators implements resource-level validation for the manifest resource
@@ -44,13 +45,38 @@ func (v *clusterConnectionValidator) ValidateResource(ctx context.Context, req r
 
 	conn := data.ClusterConnection
 
+	// If connection is unknown (during planning), skip ALL validation
+	// The connection will be validated again during apply when values are known
+	if conn.IsUnknown() {
+		return
+	}
+
+	// If connection is null, that's an error
+	if conn.IsNull() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("cluster_connection"),
+			"Missing Cluster Connection Configuration",
+			"cluster_connection block is required.",
+		)
+		return
+	}
+
+	// Convert to connection model to access fields
+	r := &manifestResource{} // Create a temporary resource instance for the helper method
+	connModel, err := r.convertObjectToConnectionModel(ctx, conn)
+	if err != nil {
+		// If conversion fails, it might be due to unknown values, which is okay during planning
+		// Don't report validation errors for unknown values - they'll be validated at apply time
+		return
+	}
+
+	// Rest of validation logic stays the same...
 	// Check for inline mode (host + cluster_ca_certificate)
-	// A field is "specified" if it's not null (even if unknown during planning)
-	hasInline := !conn.Host.IsNull() || !conn.ClusterCACertificate.IsNull()
+	hasInline := !connModel.Host.IsNull() || !connModel.ClusterCACertificate.IsNull()
 
 	// Check for kubeconfig modes
-	hasFile := !conn.KubeconfigFile.IsNull()
-	hasRaw := !conn.KubeconfigRaw.IsNull()
+	hasFile := !connModel.KubeconfigFile.IsNull()
+	hasRaw := !connModel.KubeconfigRaw.IsNull()
 
 	// Count active modes
 	modeCount := 0
@@ -62,8 +88,8 @@ func (v *clusterConnectionValidator) ValidateResource(ctx context.Context, req r
 
 		// For inline mode, both host AND cluster_ca_certificate are required
 		// Only validate this if we can actually check the values (not unknown)
-		if !conn.Host.IsUnknown() && !conn.ClusterCACertificate.IsUnknown() {
-			if conn.Host.IsNull() && !conn.ClusterCACertificate.IsNull() {
+		if !connModel.Host.IsUnknown() && !connModel.ClusterCACertificate.IsUnknown() {
+			if connModel.Host.IsNull() && !connModel.ClusterCACertificate.IsNull() {
 				resp.Diagnostics.AddAttributeError(
 					path.Root("cluster_connection").AtName("host"),
 					"Missing Required Field for Inline Connection",
@@ -71,7 +97,7 @@ func (v *clusterConnectionValidator) ValidateResource(ctx context.Context, req r
 				)
 			}
 
-			if conn.ClusterCACertificate.IsNull() && !conn.Host.IsNull() {
+			if connModel.ClusterCACertificate.IsNull() && !connModel.Host.IsNull() {
 				resp.Diagnostics.AddAttributeError(
 					path.Root("cluster_connection").AtName("cluster_ca_certificate"),
 					"Missing Required Field for Inline Connection",
@@ -91,7 +117,19 @@ func (v *clusterConnectionValidator) ValidateResource(ctx context.Context, req r
 		activeModes = append(activeModes, "kubeconfig_raw")
 	}
 
-	// Validate exactly one mode is specified
+	// Only validate mode count if we have enough information
+	// If any fields are unknown, we can't make definitive statements about mode count
+	hasUnknownFields := connModel.Host.IsUnknown() ||
+		connModel.ClusterCACertificate.IsUnknown() ||
+		connModel.KubeconfigFile.IsUnknown() ||
+		connModel.KubeconfigRaw.IsUnknown()
+
+	if hasUnknownFields {
+		// Skip mode validation when we have unknown values
+		return
+	}
+
+	// Validate exactly one mode is specified (only when all values are known)
 	if modeCount == 0 {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("cluster_connection"),
@@ -138,7 +176,22 @@ func (v *execAuthValidator) ValidateResource(ctx context.Context, req resource.V
 		return
 	}
 
-	exec := data.ClusterConnection.Exec
+	conn := data.ClusterConnection
+
+	// If connection is unknown or null, skip validation
+	if conn.IsUnknown() || conn.IsNull() {
+		return
+	}
+
+	// Convert to connection model to access exec field
+	r := &manifestResource{} // Create a temporary resource instance for the helper method
+	connModel, err := r.convertObjectToConnectionModel(ctx, conn)
+	if err != nil {
+		// If conversion fails, it might be due to unknown values during planning
+		return
+	}
+
+	exec := connModel.Exec
 	if exec == nil {
 		return // No exec config, nothing to validate
 	}
@@ -277,10 +330,29 @@ func (v *requiredFieldsValidator) ValidateResource(ctx context.Context, req reso
 }
 
 // Helper function to check if cluster connection is completely empty
-func isClusterConnectionEmpty(conn ClusterConnectionModel) bool {
-	return conn.Host.IsNull() &&
-		conn.ClusterCACertificate.IsNull() &&
-		conn.KubeconfigFile.IsNull() &&
-		conn.KubeconfigRaw.IsNull() &&
-		conn.Exec == nil
+func isClusterConnectionEmpty(conn types.Object) bool {
+	// If connection is unknown during planning, it's NOT empty - just not ready yet
+	if conn.IsUnknown() {
+		return false // Unknown != empty, it means values will be available later
+	}
+
+	// If connection is null, it's definitely empty
+	if conn.IsNull() {
+		return true
+	}
+
+	// Try to convert to model to check if all fields are null
+	r := &manifestResource{}
+	connModel, err := r.convertObjectToConnectionModel(context.Background(), conn)
+	if err != nil {
+		// If conversion fails but object is not null/unknown, assume it has values
+		// This handles cases where partial unknown values prevent conversion
+		return false
+	}
+
+	return connModel.Host.IsNull() &&
+		connModel.ClusterCACertificate.IsNull() &&
+		connModel.KubeconfigFile.IsNull() &&
+		connModel.KubeconfigRaw.IsNull() &&
+		connModel.Exec == nil
 }

@@ -2,14 +2,17 @@
 package manifest
 
 import (
+	"context"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 // Simple unit tests for validator helper functions and core logic
-
 func TestIsClusterConnectionEmpty(t *testing.T) {
+	r := &manifestResource{} // Helper for conversion
+	ctx := context.Background()
+
 	tests := []struct {
 		name     string
 		conn     ClusterConnectionModel
@@ -73,7 +76,13 @@ func TestIsClusterConnectionEmpty(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := isClusterConnectionEmpty(tt.conn)
+			// Convert ClusterConnectionModel to types.Object for testing
+			connObj, err := r.convertConnectionModelToObject(ctx, tt.conn)
+			if err != nil {
+				t.Fatalf("failed to convert connection model: %v", err)
+			}
+
+			result := isClusterConnectionEmpty(connObj)
 			if result != tt.expected {
 				t.Errorf("expected %v, got %v", tt.expected, result)
 			}

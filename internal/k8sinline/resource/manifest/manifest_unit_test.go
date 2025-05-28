@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -775,4 +776,69 @@ func TestAnyConnectionFieldChanged(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUnknownValuesHandling(t *testing.T) {
+	r := &manifestResource{}
+	ctx := context.Background()
+
+	t.Run("isConnectionReady handles unknown values", func(t *testing.T) {
+		// Test with unknown object
+		unknownObj := types.ObjectUnknown(map[string]attr.Type{
+			"host": types.StringType,
+		})
+
+		if r.isConnectionReady(unknownObj) {
+			t.Error("unknown object should not be ready")
+		}
+
+		// Test with null object
+		nullObj := types.ObjectNull(map[string]attr.Type{
+			"host": types.StringType,
+		})
+
+		if r.isConnectionReady(nullObj) {
+			t.Error("null object should not be ready")
+		}
+
+		// Test with known object
+		knownObj, err := types.ObjectValue(
+			map[string]attr.Type{
+				"host":                   types.StringType,
+				"cluster_ca_certificate": types.StringType,
+				"kubeconfig_file":        types.StringType,
+				"kubeconfig_raw":         types.StringType,
+				"context":                types.StringType,
+			},
+			map[string]attr.Value{
+				"host":                   types.StringValue("https://example.com"),
+				"cluster_ca_certificate": types.StringValue("test-ca"),
+				"kubeconfig_file":        types.StringNull(),
+				"kubeconfig_raw":         types.StringNull(),
+				"context":                types.StringNull(),
+			},
+		)
+		if err != nil {
+			t.Fatalf("failed to create known object: %v", err)
+		}
+
+		if !r.isConnectionReady(knownObj) {
+			t.Error("known object should be ready")
+		}
+	})
+
+	t.Run("convertObjectToConnectionModel handles unknown values", func(t *testing.T) {
+		// Test with unknown object
+		unknownObj := types.ObjectUnknown(map[string]attr.Type{
+			"host": types.StringType,
+		})
+
+		_, err := r.convertObjectToConnectionModel(ctx, unknownObj)
+		if err == nil {
+			t.Error("should fail to convert unknown object")
+		}
+		if !strings.Contains(err.Error(), "unknown") {
+			t.Errorf("error should mention unknown values, got: %v", err)
+		}
+	})
 }
