@@ -13,6 +13,7 @@ PROVIDER_VERSION ?= 0.1.0
 
 build:
 	@echo "🔨 Building provider binary"
+	go mod tidy
 	go build -o bin/terraform-provider-k8sinline .
 
 test:
