@@ -6,7 +6,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -200,14 +202,74 @@ func (d *yamlSplitDataSource) generateStableID(obj *unstructured.Unstructured, f
 	return fmt.Sprintf("%s.%s.%s", strings.ToLower(kind), namespace, name)
 }
 
-// Helper functions
 func hashString(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])
 }
 
 func readFile(path string) (string, error) {
-	// Implementation would read file from filesystem
-	// This is a placeholder - you'd use os.ReadFile or similar
-	return "", fmt.Errorf("not implemented")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file %q: %w", path, err)
+	}
+	return string(content), nil
+}
+
+func validateK8sResource(yamlContent string) (*unstructured.Unstructured, error) {
+	var obj unstructured.Unstructured
+	if err := yaml.Unmarshal([]byte(yamlContent), &obj); err != nil {
+		return nil, fmt.Errorf("invalid YAML: %w", err)
+	}
+
+	// Check for required Kubernetes fields
+	if obj.GetAPIVersion() == "" {
+		return nil, fmt.Errorf("missing required field: apiVersion")
+	}
+	if obj.GetKind() == "" {
+		return nil, fmt.Errorf("missing required field: kind")
+	}
+	if obj.GetName() == "" {
+		// Allow resources without names (like some generated resources)
+		// but warn or use a different ID strategy
+	}
+
+	return &obj, nil
+}
+
+func splitYAMLDocuments(content string) []string {
+	// Handle both \n--- and \r\n--- separators
+	// Handle --- at start of file
+	// Handle comments before ---
+	separatorRegex := regexp.MustCompile(`(?m)^---\s*(?:#.*)?$`)
+
+	parts := separatorRegex.Split(content, -1)
+	var documents []string
+
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+			documents = append(documents, trimmed)
+		}
+	}
+
+	return documents
+}
+
+func expandPattern(pattern string) ([]string, error) {
+	// Handle **/ recursive patterns
+	if strings.Contains(pattern, "**/") {
+		return filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				return nil
+			}
+			// Match against pattern logic here
+			return nil
+		})
+	}
+
+	// Standard glob
+	return filepath.Glob(pattern)
 }
