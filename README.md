@@ -94,6 +94,34 @@ cluster_connection = {
 
 ---
 
+## Multi-Document YAML
+
+Split YAML files containing multiple Kubernetes manifests:
+
+```hcl
+# Split multi-document YAML
+data "k8sinline_yaml_split" "app" {
+  content = file("${path.module}/app-manifests.yaml")
+}
+
+# Apply each manifest individually  
+resource "k8sinline_manifest" "app" {
+  for_each = data.k8sinline_yaml_split.app.manifests
+  
+  yaml_body = each.value
+  
+  cluster_connection = {
+    kubeconfig_raw = var.kubeconfig
+  }
+}
+```
+
+The `yaml_split` data source creates stable IDs like `deployment.my-app.nginx` and `service.my-app.nginx`, preventing unnecessary resource recreation when manifests are reordered.
+
+**→ [Complete examples and patterns](docs/guides/multi-document-yaml.md)**
+
+---
+
 ## Key Features
 
 - ✅ **Server-side apply** - Uses Kubernetes' native apply mechanism, not kubectl
