@@ -4,11 +4,7 @@ Test that token refresh works. This will be important for long applies. How to t
 
 Some kind of multi-cluster test? Not sure how to accomplish this.
 
-Add structured diff. This would be a good feature. Does this mean I have to put yaml in the state? Is it already?
 
-We are just applying actual text currently. Maybe marshal to json early and applying that.
-
-Suppress whitespace changes? After or during structured diffs?
 
 Failure test for missing CRD?
 
@@ -38,3 +34,12 @@ We have no drift detection in Read()
 Do we have metadata for the yaml split yet? Would be useful for errors.
 
 https://claude.ai/chat/2301902a-c7ad-4daf-89ba-a6d5fd064b69
+
+
+
+
+Add structured diff. This would be a good feature. Does this mean I have to put yaml in the state? Is it already?
+
+We are just applying actual text currently. Maybe marshal to json early and applying that.
+
+Suppress whitespace changes? After or during structured diffs?

@@ -1006,3 +1006,163 @@ YAML
   }
 }
 `
+
+func TestAccManifestResource_OwnershipConflict(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+	}
+
+	k8sClient := createK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sinline": providerserver.NewProtocol6WithError(k8sinline.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create first resource
+			{
+				Config: testAccManifestConfigOwnershipFirst,
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckNamespaceExists(k8sClient, "acctest-ownership"),
+					testAccCheckOwnershipAnnotationExists(k8sClient, "acctest-ownership"),
+				),
+			},
+			// Step 2: Try to create second k8sinline resource with same object
+			// Should fail due to ownership conflict
+			{
+				Config: testAccManifestConfigOwnershipConflict,
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				ExpectError: regexp.MustCompile("already managed|ownership conflict"),
+			},
+		},
+		CheckDestroy: testAccCheckNamespaceDestroy(k8sClient, "acctest-ownership"),
+	})
+}
+
+func TestAccManifestResource_ExternalResourceConflict(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+	}
+
+	k8sClient := createK8sClient(t, raw)
+	namespaceName := "acctest-external-" + fmt.Sprintf("%d", time.Now().Unix())
+
+	// Create namespace externally (no k8sinline ownership)
+	ctx := context.Background()
+	_, err := k8sClient.CoreV1().Namespaces().Create(ctx, &v1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{Name: namespaceName},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create external namespace: %v", err)
+	}
+	defer k8sClient.CoreV1().Namespaces().Delete(ctx, namespaceName, metav1.DeleteOptions{})
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sinline": providerserver.NewProtocol6WithError(k8sinline.New()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testAccManifestConfigExternalConflict,
+				ConfigVariables: config.Variables{
+					"raw":  config.StringVariable(raw),
+					"name": config.StringVariable(namespaceName),
+				},
+				ExpectError: regexp.MustCompile("already exists.*not managed"),
+			},
+		},
+	})
+}
+
+// Helper function to check ownership annotation exists
+func testAccCheckOwnershipAnnotationExists(client kubernetes.Interface, namespaceName string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		ns, err := client.CoreV1().Namespaces().Get(ctx, namespaceName, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("namespace %q does not exist: %v", namespaceName, err)
+		}
+
+		annotations := ns.GetAnnotations()
+		if annotations == nil {
+			return fmt.Errorf("namespace %q has no annotations", namespaceName)
+		}
+
+		ownershipID, exists := annotations["k8sinline.terraform.io/id"]
+		if !exists || ownershipID == "" {
+			return fmt.Errorf("namespace %q missing ownership annotation", namespaceName)
+		}
+
+		return nil
+	}
+}
+
+// Test configurations
+const testAccManifestConfigOwnershipFirst = `
+variable "raw" { type = string }
+provider "k8sinline" {}
+
+resource "k8sinline_manifest" "first" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: acctest-ownership
+YAML
+  cluster_connection = { kubeconfig_raw = var.raw }
+}
+`
+
+const testAccManifestConfigOwnershipConflict = `
+variable "raw" { type = string }
+provider "k8sinline" {}
+
+resource "k8sinline_manifest" "first" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: acctest-ownership
+YAML
+  cluster_connection = { kubeconfig_raw = var.raw }
+}
+
+resource "k8sinline_manifest" "second" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: acctest-ownership
+  labels:
+    attempt: duplicate
+YAML
+  cluster_connection = { kubeconfig_raw = var.raw }
+}
+`
+
+const testAccManifestConfigExternalConflict = `
+variable "raw" { type = string }
+variable "name" { type = string }
+provider "k8sinline" {}
+
+resource "k8sinline_manifest" "external_conflict" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${var.name}
+YAML
+  cluster_connection = { kubeconfig_raw = var.raw }
+}
+`
