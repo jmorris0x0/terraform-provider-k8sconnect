@@ -35,7 +35,7 @@ Do we have metadata for the yaml split yet? Would be useful for errors.
 
 https://claude.ai/chat/2301902a-c7ad-4daf-89ba-a6d5fd064b69
 
-
+How to handle immutable resources? This is tough.
 
 
 Add structured diff. This would be a good feature. Does this mean I have to put yaml in the state? Is it already?
@@ -43,3 +43,6 @@ Add structured diff. This would be a good feature. Does this mean I have to put 
 We are just applying actual text currently. Maybe marshal to json early and applying that.
 
 Suppress whitespace changes? After or during structured diffs?
+
+
+what happens if a resource changes it's api version? What happens then? Will the ID change or a new resource created.
