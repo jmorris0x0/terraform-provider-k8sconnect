@@ -1,0 +1,317 @@
+# ADR-002: Terraform Resource ID Strategy for Kubernetes Providers
+
+## Status
+Proposed
+
+## Context
+
+When building a Terraform provider that manages Kubernetes resources with per-resource connection configuration, we must decide how to generate Terraform resource IDs. This decision has significant implications for resource stability, multi-cluster support, and conflict prevention.
+
+The fundamental question is: **Should we use deterministic or non-deterministic (random) resource IDs?**
+
+## Decision Drivers
+
+1. **Resource Stability**: Users must not lose resources due to configuration changes
+2. **Conflict Prevention**: Multiple Terraform configurations must not accidentally manage the same Kubernetes resource
+3. **Multi-cluster Support**: Same Kubernetes resource (namespace/kind/name) across different clusters must be distinguishable
+4. **Plan-time Compatibility**: ID generation must work during Terraform's planning phase without external network calls
+5. **User Experience**: Minimize operational complexity for users
+
+## Considered Options
+
+### Option 1: Deterministic IDs Based on Resource Identity
+
+Generate IDs deterministically from Kubernetes resource properties:
+
+```go
+func generateID(namespace, kind, name string) string {
+    data := fmt.Sprintf("%s/%s/%s", namespace, kind, name)
+    hash := sha256.Sum256([]byte(data))
+    return hex.EncodeToString(hash[:])
+}
+```
+
+**Advantages:**
+- Simple and predictable
+- Same Kubernetes resource always gets same Terraform ID
+- No external dependencies during planning
+
+**Critical Limitations:**
+This approach fails to meet essential requirements for multi-cluster scenarios:
+
+#### The Impossible Requirements Triangle
+
+For deterministic IDs to work safely, we need ALL of the following:
+
+1. **Extreme Stability**: IDs must never change due to configuration modifications, certificate rotations, or infrastructure changes
+2. **Determinism**: Same inputs must always produce the same ID to prevent Terraform state collisions
+3. **Multi-cluster Isolation**: Resources with identical namespace/kind/name in different clusters must have different IDs
+
+#### Why Deterministic IDs Cannot Satisfy All Requirements
+
+**Kubernetes Resource Identity Only:**
+```go
+ID = hash(namespace + kind + name)
+```
+- ✅ Stable: Never changes
+- ✅ Deterministic: Same inputs = same ID
+- ❌ Multi-cluster: Same resource in different clusters = collision
+
+**Adding Cluster Information:**
+```go
+ID = hash(clusterIdentifier + namespace + kind + name)
+```
+
+All possible cluster identifiers have fatal flaws:
+
+- **Cluster UID**: Requires network call during planning phase (violates Terraform constraints)
+- **Server URL**: Changes due to load balancer updates, DNS changes, infrastructure migrations
+- **Kubeconfig Content**: Changes with certificate rotations, formatting changes, credential updates
+- **Connection Configuration**: Any modification breaks all resource IDs
+
+#### The Planning Phase Constraint
+
+Terraform's planning phase requirements make cluster-based deterministic IDs impossible:
+
+```
+PLAN PHASE (where IDs are generated):
+├── Must be fast (no network calls)
+├── Must be safe (no side effects)
+├── Only has configuration data available
+└── Cannot contact external systems
+
+APPLY PHASE:
+├── Can contact external systems
+├── But resource IDs are already locked in
+└── Too late to change IDs
+```
+
+This eliminates any approach requiring cluster queries (like Cluster UID) to generate stable IDs.
+
+### Option 2: Non-Deterministic (Random) IDs with Annotation-Based Ownership
+
+Generate random UUIDs for Terraform resource IDs and use Kubernetes annotations for ownership tracking and conflict prevention.
+
+```go
+func generateID() string {
+    return uuid.New().String() // Random UUID4
+}
+
+func setOwnership(obj *unstructured.Unstructured, terraformID string) {
+    annotations := obj.GetAnnotations()
+    if annotations == nil {
+        annotations = make(map[string]string)
+    }
+    annotations["k8sinline.terraform.io/terraform-id"] = terraformID
+    obj.SetAnnotations(annotations)
+}
+```
+
+## Decision
+
+**We choose Option 2: Non-deterministic IDs with annotation-based ownership tracking.**
+
+## Rationale
+
+Since deterministic IDs cannot satisfy the impossible requirements triangle, we must abandon the deterministic constraint and solve conflict prevention through a different mechanism.
+
+### How It Works
+
+1. **Resource Creation**: Generate random UUID for Terraform resource ID
+2. **Ownership Annotation**: Store the Terraform ID in Kubernetes resource annotations
+3. **Conflict Detection**: Check annotations during operations to prevent conflicts
+4. **Multi-cluster Safety**: Different Terraform resources get different UUIDs even for identical Kubernetes resources
+
+### Conflict Prevention Mechanism
+
+```go
+func validateOwnership(liveObj *unstructured.Unstructured, expectedID string) error {
+    annotations := liveObj.GetAnnotations()
+    existingID := annotations["k8sinline.terraform.io/terraform-id"]
+    
+    if existingID == "" {
+        return fmt.Errorf("Resource exists but not managed by k8sinline. Use 'terraform import' to adopt.")
+    }
+    
+    if existingID != expectedID {
+        return fmt.Errorf("Resource managed by different k8sinline resource (ID: %s)", existingID)
+    }
+    
+    return nil // Safe to proceed
+}
+```
+
+### Import Handling
+
+```go
+func importResource(obj *unstructured.Unstructured) (string, error) {
+    annotations := obj.GetAnnotations()
+    existingID := annotations["k8sinline.terraform.io/terraform-id"]
+    
+    if existingID != "" {
+        return existingID, nil // Use existing ID
+    }
+    
+    // New management - generate ID and set annotation
+    newID := uuid.New().String()
+    annotations["k8sinline.terraform.io/terraform-id"] = newID
+    obj.SetAnnotations(annotations)
+    
+    return newID, nil
+}
+```
+
+## Benefits
+
+### ✅ Solves All Core Requirements
+- **Stability**: Random UUIDs never change due to configuration changes
+- **Multi-cluster Support**: Same Kubernetes resource in different clusters gets different Terraform IDs
+- **Plan-time Compatible**: No external calls needed during planning
+- **Conflict Prevention**: Ownership annotations prevent management conflicts
+
+### ✅ Follows Kubernetes Ecosystem Patterns
+This approach mirrors how successful Kubernetes tools handle ownership:
+- **Helm**: Uses annotations and labels for release ownership
+- **ArgoCD**: Uses `app.kubernetes.io/managed-by` annotations
+- **Operators**: Use annotations for resource ownership tracking
+
+### ✅ Superior Error Messages
+```
+Error: Resource conflict detected
+
+The Namespace "production" is already managed by a different 
+k8sinline resource (ID: a1b2c3d4).
+
+To resolve:
+1. To adopt: terraform import k8sinline_manifest.prod production
+2. To use different resource: choose different namespace name
+3. If migrating: remove existing annotations first
+```
+
+### ✅ Safe Configuration Changes
+Connection configuration can change freely without affecting resource identity:
+
+```hcl
+resource "k8sinline_manifest" "app" {
+  # ID: "a1b2c3d4-e5f6-7890-abcd-1234567890ef" (never changes)
+  
+  cluster_connection = {
+    # These can change safely:
+    kubeconfig_raw = var.updated_kubeconfig
+    context = var.new_context
+  }
+}
+```
+
+## Drawbacks
+
+### ❌ Resource IDs Not Human-Readable
+Terraform resource IDs become UUIDs instead of meaningful identifiers:
+```bash
+# Before (deterministic):
+terraform show | grep "id = "
+# id = "namespace.production"
+
+# After (random):
+terraform show | grep "id = "  
+# id = "a1b2c3d4-e5f6-7890-abcd-1234567890ef"
+```
+
+### ❌ Conflict Detection at Apply-Time
+Conflicts are detected during `terraform apply` rather than `terraform plan`:
+```bash
+# User won't see conflicts until apply phase
+terraform plan   # ✅ Succeeds
+terraform apply  # ❌ Fails with ownership conflict
+```
+
+### ❌ Dependency on Kubernetes Annotations
+Solution relies on Kubernetes annotation storage and retrieval:
+- Annotations could be stripped by other tools
+- Adds metadata to Kubernetes resources
+- Requires annotation management during import/export
+
+### ❌ More Complex Import Process
+Resource import becomes more sophisticated:
+- Must check for existing ownership annotations
+- Must generate and set annotations for unmanaged resources
+- Import errors are more complex to diagnose
+
+### ❌ Debugging Complexity
+Troubleshooting requires correlating Terraform UUIDs with Kubernetes annotations:
+```bash
+# Finding which Terraform resource manages a Kubernetes object:
+kubectl get namespace production -o jsonpath='{.metadata.annotations.k8sinline\.terraform\.io/terraform-id}'
+# a1b2c3d4-e5f6-7890-abcd-1234567890ef
+
+# Then search Terraform state:
+terraform state list | grep a1b2c3d4
+```
+
+## Implementation Considerations
+
+### Annotation Schema
+```yaml
+metadata:
+  annotations:
+    k8sinline.terraform.io/terraform-id: "uuid4-string"
+    k8sinline.terraform.io/state-file: "optional-state-identifier"
+    k8sinline.terraform.io/created-at: "2024-01-01T00:00:00Z"
+```
+
+### Migration Path
+For providers transitioning from deterministic to random IDs:
+1. Add annotation support while maintaining deterministic IDs
+2. Provide migration tooling to move existing resources
+3. Switch new resources to random IDs
+4. Eventually deprecate deterministic ID support
+
+### State File Impact
+Random IDs will appear in Terraform state files but won't affect functionality:
+```json
+{
+  "instances": [
+    {
+      "schema_version": 1,
+      "attributes": {
+        "id": "a1b2c3d4-e5f6-7890-abcd-1234567890ef",
+        "yaml_body": "...",
+        "cluster_connection": { ... }
+      }
+    }
+  ]
+}
+```
+
+## Alternatives Considered and Rejected
+
+### User-Provided Cluster Identifiers
+```hcl
+resource "k8sinline_manifest" "example" {
+  cluster_name = "production"  # User provides stable name
+  cluster_connection = { ... }
+}
+```
+**Rejected**: Adds user complexity and still subject to user error.
+
+### Provider-Level Connection Configuration
+```hcl
+provider "k8sinline" {
+  clusters = {
+    prod = { kubeconfig_raw = var.prod_config }
+  }
+}
+```
+**Rejected**: Eliminates the core value proposition of per-resource connections.
+
+### Resource-Only IDs with Runtime Validation
+```go
+ID = hash(namespace + kind + name)  // No cluster component
+```
+**Rejected**: Doesn't support multi-cluster scenarios, which is a core requirement.
+
+## Conclusion
+
+While non-deterministic IDs with annotation-based ownership introduce some complexity, they are the only viable solution that satisfies all core requirements. The approach aligns with Kubernetes ecosystem patterns and provides a foundation for robust multi-cluster resource management.
+
+The trade-off of human-readable IDs for operational safety and stability is justified given the impossible constraints of deterministic ID generation in multi-cluster environments.
