@@ -46,3 +46,5 @@ Suppress whitespace changes? After or during structured diffs?
 
 
 what happens if a resource changes it's api version? What happens then? Will the ID change or a new resource created.
+
+Fix pod drift when Gi vs BG vs MB
