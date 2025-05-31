@@ -1,4 +1,4 @@
-Decide nested object name. cluster_connection is kind of verbose.
+no Decide nested object name. cluster_connection is kind of verbose.
 
 Test that token refresh works. This will be important for long applies. How to test for this?
 
@@ -48,3 +48,5 @@ Suppress whitespace changes? After or during structured diffs?
 what happens if a resource changes it's api version? What happens then? Will the ID change or a new resource created.
 
 Fix pod drift when Gi vs BG vs MB
+
+test: try to apply a namespace that already exists. kubesystem or default.
