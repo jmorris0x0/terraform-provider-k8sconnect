@@ -44,7 +44,6 @@ We are just applying actual text currently. Maybe marshal to json early and appl
 
 Suppress whitespace changes? After or during structured diffs?
 
-
 what happens if a resource changes it's api version? What happens then? Will the ID change or a new resource created.
 
 Fix pod drift when Gi vs BG vs MB
