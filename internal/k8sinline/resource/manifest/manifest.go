@@ -50,9 +50,10 @@ type ClusterConnectionModel struct {
 }
 
 type execAuthModel struct {
-	APIVersion types.String   `tfsdk:"api_version"`
-	Command    types.String   `tfsdk:"command"`
-	Args       []types.String `tfsdk:"args"`
+	APIVersion types.String            `tfsdk:"api_version"`
+	Command    types.String            `tfsdk:"command"`
+	Args       []types.String          `tfsdk:"args"`
+	Env        map[string]types.String `tfsdk:"env"`
 }
 
 type manifestResource struct {
@@ -150,7 +151,7 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 						Description: "Context name within the provided kubeconfig (file or raw).",
 					},
 					"exec": schema.SingleNestedAttribute{
-						Description: "Inline exec‑auth configuration for dynamic credentials. Must include api_version and command; args is optional.",
+						Description: "Inline exec‑auth configuration for dynamic credentials...",
 						Optional:    true,
 						Sensitive:   true,
 						Attributes: map[string]schema.Attribute{
@@ -166,6 +167,12 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 								ElementType: types.StringType,
 								Optional:    true,
 								Description: "Command arguments (e.g., ['eks', 'get-token', '--cluster-name', 'my-cluster']).",
+							},
+							// ADD THIS:
+							"env": schema.MapAttribute{
+								ElementType: types.StringType,
+								Optional:    true,
+								Description: "Environment variables to set when executing the command (e.g., AWS_PROFILE = 'prod').",
 							},
 						},
 					},
@@ -887,11 +894,24 @@ func (r *manifestResource) createInlineConfig(conn ClusterConnectionModel) (*res
 			args[i] = arg.ValueString()
 		}
 
+		// Process environment variables
+		var envVars []clientcmdapi.ExecEnvVar
+		if conn.Exec.Env != nil {
+			for name, value := range conn.Exec.Env {
+				if !value.IsNull() {
+					envVars = append(envVars, clientcmdapi.ExecEnvVar{
+						Name:  name,
+						Value: value.ValueString(),
+					})
+				}
+			}
+		}
+
 		config.ExecProvider = &clientcmdapi.ExecConfig{
 			APIVersion:      conn.Exec.APIVersion.ValueString(),
 			Command:         conn.Exec.Command.ValueString(),
 			Args:            args,
-			Env:             []clientcmdapi.ExecEnvVar{},
+			Env:             envVars,
 			InteractiveMode: clientcmdapi.NeverExecInteractiveMode,
 		}
 	}
@@ -1416,6 +1436,7 @@ func (r *manifestResource) convertConnectionModelToObject(ctx context.Context, c
 					"api_version": types.StringType,
 					"command":     types.StringType,
 					"args":        types.ListType{ElemType: types.StringType},
+					"env":         types.MapType{ElemType: types.StringType},
 				},
 			},
 		},
