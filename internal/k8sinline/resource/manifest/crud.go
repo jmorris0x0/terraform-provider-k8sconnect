@@ -1,0 +1,401 @@
+// internal/k8sinline/resource/manifest/crud.go
+package manifest
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
+	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/k8sclient"
+	"k8s.io/apimachinery/pkg/api/errors"
+)
+
+func (r *manifestResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var data manifestResourceModel
+
+	diags := req.Config.Get(ctx, &data)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Check if cluster connection is ready (handles unknown values during planning)
+	if !r.isConnectionReady(data.ClusterConnection) {
+		resp.Diagnostics.AddError(
+			"Cluster Connection Not Ready",
+			"Cluster connection contains unknown values. This usually happens during planning when dependencies are not yet resolved.",
+		)
+		return
+	}
+
+	// Convert to connection model
+	conn, err := r.convertObjectToConnectionModel(ctx, data.ClusterConnection)
+	if err != nil {
+		resp.Diagnostics.AddError("Connection Conversion Failed", err.Error())
+		return
+	}
+
+	// Parse YAML into unstructured object
+	obj, err := r.parseYAML(data.YAMLBody.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid YAML", fmt.Sprintf("Failed to parse YAML: %s", err))
+		return
+	}
+
+	// Create K8s client from cluster connection (now with caching)
+	client, err := r.clientGetter(conn)
+	if err != nil {
+		resp.Diagnostics.AddError("Connection Failed", fmt.Sprintf("Failed to create Kubernetes client: %s", err))
+		return
+	}
+
+	// Generate resource ID (moved up to use in annotation)
+	id := r.generateID(obj, conn)
+	data.ID = types.StringValue(id)
+
+	// Set ownership annotation before applying
+	annotations := obj.GetAnnotations()
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
+	annotations["k8sinline.terraform.io/id"] = data.ID.ValueString()
+	obj.SetAnnotations(annotations)
+
+	// Apply the manifest using server-side apply
+	err = client.SetFieldManager("k8sinline").Apply(ctx, obj, k8sclient.ApplyOptions{
+		FieldManager: "k8sinline",
+		Force:        false,
+	})
+	if err != nil {
+		resourceDesc := fmt.Sprintf("%s %s", obj.GetKind(), obj.GetName())
+		severity, title, detail := r.classifyK8sError(err, "Create", resourceDesc)
+		if severity == "warning" {
+			resp.Diagnostics.AddWarning(title, detail)
+		} else {
+			resp.Diagnostics.AddError(title, detail)
+		}
+		return
+	}
+
+	tflog.Trace(ctx, "applied manifest", map[string]interface{}{
+		"id":        data.ID.ValueString(),
+		"kind":      obj.GetKind(),
+		"name":      obj.GetName(),
+		"namespace": obj.GetNamespace(),
+	})
+
+	diags = resp.State.Set(ctx, &data)
+	resp.Diagnostics.Append(diags...)
+}
+
+func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var data manifestResourceModel
+
+	diags := req.State.Get(ctx, &data)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Check if cluster connection is ready
+	if !r.isConnectionReady(data.ClusterConnection) {
+		tflog.Info(ctx, "Skipping Read due to unknown connection values", map[string]interface{}{
+			"resource_id":        data.ID.ValueString(),
+			"connection_unknown": true,
+		})
+
+		return
+	}
+
+	// Convert to connection model
+	conn, err := r.convertObjectToConnectionModel(ctx, data.ClusterConnection)
+	if err != nil {
+		resp.Diagnostics.AddError("Connection Conversion Failed", err.Error())
+		return
+	}
+
+	// Parse YAML to get object metadata
+	obj, err := r.parseYAML(data.YAMLBody.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid YAML", fmt.Sprintf("Failed to parse YAML: %s", err))
+		return
+	}
+
+	// Create K8s client from cluster connection (cached)
+	client, err := r.clientGetter(conn)
+	if err != nil {
+		resp.Diagnostics.AddError("Connection Failed", fmt.Sprintf("Failed to create Kubernetes client: %s", err))
+		return
+	}
+
+	// Get GVR for the object
+	gvr, err := r.getGVR(ctx, client, obj)
+	if err != nil {
+		resp.Diagnostics.AddError("Resource Discovery Failed", fmt.Sprintf("Failed to determine resource type: %s", err))
+		return
+	}
+
+	// Check if object still exists
+	_, err = client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Object no longer exists - remove from state
+			resp.State.RemoveResource(ctx)
+			return
+		}
+		// Other errors should be reported
+		resourceDesc := fmt.Sprintf("%s %s", obj.GetKind(), obj.GetName())
+		severity, title, detail := r.classifyK8sError(err, "Read", resourceDesc)
+		if severity == "warning" {
+			resp.Diagnostics.AddWarning(title, detail)
+		} else {
+			resp.Diagnostics.AddError(title, detail)
+		}
+		return
+	}
+
+	// Object exists - keep current state
+	diags = resp.State.Set(ctx, &data)
+	resp.Diagnostics.Append(diags...)
+}
+
+func (r *manifestResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var data manifestResourceModel
+	diags := req.Plan.Get(ctx, &data)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Check if cluster connection is ready
+	if !r.isConnectionReady(data.ClusterConnection) {
+		resp.Diagnostics.AddError(
+			"Cluster Connection Not Ready",
+			"Cluster connection contains unknown values. This usually happens during planning when dependencies are not yet resolved.",
+		)
+		return
+	}
+
+	// Convert plan connection to model
+	conn, err := r.convertObjectToConnectionModel(ctx, data.ClusterConnection)
+	if err != nil {
+		resp.Diagnostics.AddError("Connection Conversion Failed", err.Error())
+		return
+	}
+
+	// Get prior state to check for connection changes
+	var priorState manifestResourceModel
+	diags = req.State.Get(ctx, &priorState)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Check connection changes only if both states are ready
+	if r.isConnectionReady(priorState.ClusterConnection) {
+		priorConn, err := r.convertObjectToConnectionModel(ctx, priorState.ClusterConnection)
+		if err == nil {
+			if r.anyConnectionFieldChanged(conn, priorConn) {
+				if err := r.validateOwnership(ctx, data); err != nil {
+					resp.Diagnostics.AddError("Connection Change Blocked", err.Error())
+					return
+				}
+				resp.Diagnostics.AddWarning("Connection Changed",
+					"Connection details changed. Verified target cluster via ownership annotation.")
+			}
+		}
+	}
+
+	// Parse YAML into unstructured object
+	obj, err := r.parseYAML(data.YAMLBody.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid YAML", fmt.Sprintf("Failed to parse YAML: %s", err))
+		return
+	}
+
+	// Create K8s client from cluster connection (cached)
+	client, err := r.clientGetter(conn)
+	if err != nil {
+		resp.Diagnostics.AddError("Connection Failed", fmt.Sprintf("Failed to create Kubernetes client: %s", err))
+		return
+	}
+
+	// Set ownership annotation before applying
+	annotations := obj.GetAnnotations()
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
+	annotations["k8sinline.terraform.io/id"] = data.ID.ValueString()
+	obj.SetAnnotations(annotations)
+
+	// Apply the updated manifest (server-side apply is idempotent)
+	err = client.SetFieldManager("k8sinline").Apply(ctx, obj, k8sclient.ApplyOptions{
+		FieldManager: "k8sinline",
+		Force:        false,
+	})
+	if err != nil {
+		resourceDesc := fmt.Sprintf("%s %s", obj.GetKind(), obj.GetName())
+		severity, title, detail := r.classifyK8sError(err, "Update", resourceDesc)
+		if severity == "warning" {
+			resp.Diagnostics.AddWarning(title, detail)
+		} else {
+			resp.Diagnostics.AddError(title, detail)
+		}
+		return
+	}
+
+	tflog.Trace(ctx, "updated manifest", map[string]interface{}{
+		"id":        data.ID.ValueString(),
+		"kind":      obj.GetKind(),
+		"name":      obj.GetName(),
+		"namespace": obj.GetNamespace(),
+	})
+
+	diags = resp.State.Set(ctx, &data)
+	resp.Diagnostics.Append(diags...)
+}
+
+func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var data manifestResourceModel
+
+	diags := req.State.Get(ctx, &data)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Check delete protection first (doesn't require connection)
+	if !data.DeleteProtection.IsNull() && data.DeleteProtection.ValueBool() {
+		resp.Diagnostics.AddError(
+			"Resource Protected from Deletion",
+			"This resource has delete_protection enabled. To delete this resource, first set delete_protection = false in your configuration, run terraform apply, then run terraform destroy.",
+		)
+		return
+	}
+
+	// Check if cluster connection is ready
+	if !r.isConnectionReady(data.ClusterConnection) {
+		resp.Diagnostics.AddError(
+			"Cluster Connection Not Ready",
+			"Cannot delete resource: cluster connection contains unknown values.",
+		)
+		return
+	}
+
+	// Convert to connection model
+	conn, err := r.convertObjectToConnectionModel(ctx, data.ClusterConnection)
+	if err != nil {
+		resp.Diagnostics.AddError("Connection Conversion Failed", err.Error())
+		return
+	}
+
+	// Parse YAML to get object metadata
+	obj, err := r.parseYAML(data.YAMLBody.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid YAML", fmt.Sprintf("Failed to parse YAML: %s", err))
+		return
+	}
+
+	// Create K8s client from cluster connection (cached)
+	client, err := r.clientGetter(conn)
+	if err != nil {
+		resp.Diagnostics.AddError("Connection Failed", fmt.Sprintf("Failed to create Kubernetes client: %s", err))
+		return
+	}
+
+	// Get GVR for the object
+	gvr, err := r.getGVR(ctx, client, obj)
+	if err != nil {
+		resp.Diagnostics.AddError("Resource Discovery Failed", fmt.Sprintf("Failed to determine resource type: %s", err))
+		return
+	}
+
+	// Check if resource exists before attempting deletion
+	_, err = client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Object already gone - that's fine
+			tflog.Trace(ctx, "object already deleted", map[string]interface{}{
+				"id":        data.ID.ValueString(),
+				"kind":      obj.GetKind(),
+				"name":      obj.GetName(),
+				"namespace": obj.GetNamespace(),
+			})
+			return
+		}
+		// Other errors should be reported
+		resourceDesc := fmt.Sprintf("%s %s", obj.GetKind(), obj.GetName())
+		severity, title, detail := r.classifyK8sError(err, "Delete", resourceDesc)
+		if severity == "warning" {
+			resp.Diagnostics.AddWarning(title, detail)
+		} else {
+			resp.Diagnostics.AddError(title, detail)
+		}
+		return
+	}
+
+	// Initiate deletion
+	err = client.Delete(ctx, gvr, obj.GetNamespace(), obj.GetName(), k8sclient.DeleteOptions{})
+	if err != nil && !errors.IsNotFound(err) {
+		resourceDesc := fmt.Sprintf("%s %s", obj.GetKind(), obj.GetName())
+		severity, title, detail := r.classifyK8sError(err, "Delete", resourceDesc)
+		if severity == "warning" {
+			resp.Diagnostics.AddWarning(title, detail)
+		} else {
+			resp.Diagnostics.AddError(title, detail)
+		}
+		return
+	}
+
+	// Wait for normal deletion to complete
+	timeout := r.getDeleteTimeout(data)
+	forceDestroy := !data.ForceDestroy.IsNull() && data.ForceDestroy.ValueBool()
+
+	tflog.Debug(ctx, "Starting deletion wait", map[string]interface{}{
+		"timeout":       timeout.String(),
+		"force_destroy": forceDestroy,
+	})
+
+	err = r.waitForDeletion(ctx, client, gvr, obj, timeout)
+	if err == nil {
+		// Successful normal deletion
+		tflog.Trace(ctx, "deleted manifest normally", map[string]interface{}{
+			"id":        data.ID.ValueString(),
+			"kind":      obj.GetKind(),
+			"name":      obj.GetName(),
+			"namespace": obj.GetNamespace(),
+		})
+		return
+	}
+
+	// Normal deletion failed/timed out - check if we should force destroy
+	if !forceDestroy {
+		// Not forcing, so report the timeout error with helpful guidance
+		r.handleDeletionTimeout(resp, client, gvr, obj, timeout, err)
+		return
+	}
+
+	// Force destroy enabled - remove finalizers and delete
+	tflog.Warn(ctx, "Normal deletion failed, attempting force destroy", map[string]interface{}{
+		"resource": fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName()),
+		"timeout":  timeout.String(),
+	})
+
+	if err := r.forceDestroy(ctx, client, gvr, obj, resp); err != nil {
+		resp.Diagnostics.AddError(
+			"Force Destroy Failed",
+			fmt.Sprintf("Failed to force destroy %s %s: %s", obj.GetKind(), obj.GetName(), err.Error()),
+		)
+		return
+	}
+
+	// Log successful force destroy
+	tflog.Info(ctx, "Force destroyed manifest", map[string]interface{}{
+		"id":        data.ID.ValueString(),
+		"kind":      obj.GetKind(),
+		"name":      obj.GetName(),
+		"namespace": obj.GetNamespace(),
+	})
+}

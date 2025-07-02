@@ -3,8 +3,6 @@ package manifest
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,7 +11,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/k8sclient"
 )
@@ -256,17 +253,4 @@ func (r *manifestResource) parseImportID(importID string) (context, namespace, k
 	default:
 		return "", "", "", "", fmt.Errorf("expected 3 or 4 parts separated by '/', got %d parts", len(parts))
 	}
-}
-
-// Helper function to generateID after import:
-func (r *manifestResource) generateIDFromImport(obj *unstructured.Unstructured, context string) string {
-	data := fmt.Sprintf("%s/%s/%s/%s",
-		context, // Use context as cluster identifier for imports
-		obj.GetNamespace(),
-		obj.GetKind(),
-		obj.GetName(),
-	)
-
-	hash := sha256.Sum256([]byte(data))
-	return hex.EncodeToString(hash[:])
 }

@@ -1,4 +1,4 @@
-// internal/k8sinline/resource/manifest/operations.go
+// internal/k8sinline/resource/manifest/deletion.go
 package manifest
 
 import (
@@ -9,59 +9,11 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/k8sclient"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8sschema "k8s.io/apimachinery/pkg/runtime/schema"
-
-	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/k8sclient"
 )
-
-func (r *manifestResource) validateOwnership(ctx context.Context, data manifestResourceModel) error {
-	obj, err := r.parseYAML(data.YAMLBody.ValueString())
-	if err != nil {
-		return fmt.Errorf("failed to parse YAML: %w", err)
-	}
-
-	// Convert connection object to model
-	conn, err := r.convertObjectToConnectionModel(ctx, data.ClusterConnection)
-	if err != nil {
-		return fmt.Errorf("failed to convert connection: %w", err)
-	}
-
-	client, err := r.clientGetter(conn)
-	if err != nil {
-		return fmt.Errorf("failed to create client: %w", err)
-	}
-
-	gvr, err := r.getGVR(ctx, client, obj)
-	if err != nil {
-		return fmt.Errorf("failed to determine GVR: %w", err)
-	}
-
-	liveObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
-	if err != nil {
-		if errors.IsNotFound(err) {
-			return nil // Object doesn't exist - safe
-		}
-		return fmt.Errorf("failed to check existing resource: %w", err)
-	}
-
-	// Check ownership annotation
-	annotations := liveObj.GetAnnotations()
-	if annotations == nil {
-		return fmt.Errorf("resource exists but has no ownership annotation - may be unmanaged")
-	}
-
-	actualID := annotations["k8sinline.terraform.io/id"]
-	expectedID := data.ID.ValueString()
-
-	if actualID != expectedID {
-		return fmt.Errorf("connection targets different cluster - resource %s %q exists but is not managed by this Terraform resource (different ID: %s vs %s)",
-			obj.GetKind(), obj.GetName(), actualID, expectedID)
-	}
-
-	return nil // Same resource, safe to proceed
-}
 
 // forceDestroy removes finalizers and forces deletion
 func (r *manifestResource) forceDestroy(ctx context.Context, client k8sclient.K8sClient, gvr k8sschema.GroupVersionResource, obj *unstructured.Unstructured, resp *resource.DeleteResponse) error {

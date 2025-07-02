@@ -3,11 +3,8 @@ package manifest
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"fmt"
-	"reflect"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -227,40 +224,4 @@ func (r *manifestResource) convertConnectionModelToObject(ctx context.Context, c
 	}
 
 	return obj, nil
-}
-
-// getClusterID creates a stable identifier for the cluster connection
-func (r *manifestResource) getClusterID(conn ClusterConnectionModel) string {
-	// Use host if available, otherwise hash the kubeconfig
-	if !conn.Host.IsNull() {
-		return conn.Host.ValueString()
-	}
-
-	var data string
-	if !conn.KubeconfigFile.IsNull() {
-		data = conn.KubeconfigFile.ValueString()
-	} else if !conn.KubeconfigRaw.IsNull() {
-		data = conn.KubeconfigRaw.ValueString()
-	}
-
-	hash := sha256.Sum256([]byte(data))
-	return hex.EncodeToString(hash[:8]) // Use first 8 bytes for shorter ID
-}
-
-func (r *manifestResource) anyConnectionFieldChanged(plan, state ClusterConnectionModel) bool {
-	return !plan.Host.Equal(state.Host) ||
-		!plan.ClusterCACertificate.Equal(state.ClusterCACertificate) ||
-		!plan.KubeconfigFile.Equal(state.KubeconfigFile) ||
-		!plan.KubeconfigRaw.Equal(state.KubeconfigRaw) ||
-		!plan.Context.Equal(state.Context) ||
-		!reflect.DeepEqual(plan.Exec, state.Exec)
-}
-
-// isEmptyConnection checks if the cluster connection is empty/unconfigured
-func (r *manifestResource) isEmptyConnection(conn ClusterConnectionModel) bool {
-	hasInline := !conn.Host.IsNull() || !conn.ClusterCACertificate.IsNull()
-	hasFile := !conn.KubeconfigFile.IsNull()
-	hasRaw := !conn.KubeconfigRaw.IsNull()
-
-	return !hasInline && !hasFile && !hasRaw
 }
