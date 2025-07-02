@@ -1006,3 +1006,99 @@ YAML
   }
 }
 `
+
+func TestAccManifestResource_DeferredAuthWithComputedEnvVars(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+	}
+
+	k8sClient := createK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sinline": providerserver.NewProtocol6WithError(k8sinline.New()),
+		},
+		ExternalProviders: map[string]resource.ExternalProvider{
+			"random": {
+				Source:            "hashicorp/random",
+				VersionConstraint: "~> 3.5",
+			},
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testAccManifestConfigDeferredAuthWithExecEnv,
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					// Verify the manifest was created successfully
+					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_deferred_env", "id"),
+					testAccCheckConfigMapExists(k8sClient, "default", "test-deferred-auth-env"),
+
+					// Verify the random values made it into the ConfigMap data
+					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_deferred_env", "yaml_body"),
+
+					// Verify exec env vars were populated after apply
+					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_deferred_env", "cluster_connection.exec.env.TEST_SESSION_ID"),
+					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_deferred_env", "cluster_connection.exec.env.TEST_TRACE_ID"),
+					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_deferred_env", "cluster_connection.exec.env.TEST_RUN_ID"),
+
+					// Verify the exec command and args are what we expect
+					resource.TestCheckResourceAttr("k8sinline_manifest.test_deferred_env", "cluster_connection.exec.command", "sh"),
+					resource.TestCheckResourceAttr("k8sinline_manifest.test_deferred_env", "cluster_connection.exec.args.#", "2"),
+				),
+			},
+		},
+		CheckDestroy: testAccCheckConfigMapDestroy(k8sClient, "default", "test-deferred-auth-env"),
+	})
+}
+
+const testAccManifestConfigDeferredAuthWithExecEnv = `
+variable "raw" {
+  type = string
+}
+
+# These create unknown values during plan
+resource "random_string" "session_id" {
+  length = 16
+  special = false
+}
+
+resource "random_uuid" "trace_id" {}
+
+resource "k8sinline_manifest" "test_deferred_env" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-deferred-auth-env
+  namespace: default
+data:
+  test: "auth-was-deferred"
+  session_id: "${random_string.session_id.result}"
+  trace_id: "${random_uuid.trace_id.result}"
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+    
+    # This exec block contains env vars that are unknown during plan
+    # They're harmless TEST_* vars that won't affect actual authentication
+    exec = {
+      api_version = "client.authentication.k8s.io/v1"
+      command     = "sh"
+      args        = ["-c", "kubectl config view --raw"]
+      
+      # These env vars will be unknown during plan, forcing deferred auth
+      env = {
+        TEST_SESSION_ID = random_string.session_id.result
+        TEST_TRACE_ID   = random_uuid.trace_id.result
+        TEST_RUN_ID     = "deferred-${random_uuid.trace_id.result}"
+      }
+    }
+  }
+}
+`
