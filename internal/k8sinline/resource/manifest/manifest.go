@@ -264,7 +264,11 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 
 	// Check if cluster connection is ready
 	if !r.isConnectionReady(data.ClusterConnection) {
-		// During planning, if connection is unknown, we can't read - just return current state
+		tflog.Info(ctx, "Skipping Read due to unknown connection values", map[string]interface{}{
+			"resource_id":        data.ID.ValueString(),
+			"connection_unknown": true,
+		})
+
 		return
 	}
 
