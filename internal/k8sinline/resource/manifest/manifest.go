@@ -17,6 +17,8 @@ var _ resource.Resource = (*manifestResource)(nil)
 
 var _ resource.ResourceWithConfigValidators = (*manifestResource)(nil)
 
+var _ resource.ResourceWithModifyPlan = (*manifestResource)(nil)
+
 // ClientGetter function type for dependency injection
 type ClientGetter func(ClusterConnectionModel) (k8sclient.K8sClient, error)
 
@@ -42,12 +44,13 @@ type manifestResource struct {
 }
 
 type manifestResourceModel struct {
-	ID                types.String `tfsdk:"id"`
-	YAMLBody          types.String `tfsdk:"yaml_body"`
-	ClusterConnection types.Object `tfsdk:"cluster_connection"`
-	DeleteProtection  types.Bool   `tfsdk:"delete_protection"`
-	DeleteTimeout     types.String `tfsdk:"delete_timeout"`
-	ForceDestroy      types.Bool   `tfsdk:"force_destroy"`
+	ID                     types.String `tfsdk:"id"`
+	YAMLBody               types.String `tfsdk:"yaml_body"`
+	ClusterConnection      types.Object `tfsdk:"cluster_connection"`
+	DeleteProtection       types.Bool   `tfsdk:"delete_protection"`
+	DeleteTimeout          types.String `tfsdk:"delete_timeout"`
+	ForceDestroy           types.Bool   `tfsdk:"force_destroy"`
+	ManagedStateProjection types.String `tfsdk:"managed_state_projection"`
 }
 
 // NewManifestResource creates a new manifest resource (backward compatibility)
@@ -83,6 +86,14 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 			"yaml_body": schema.StringAttribute{
 				Required:    true,
 				Description: "UTF‑8 encoded, single‑document Kubernetes YAML. Multi‑doc files will fail validation.",
+			},
+			"managed_state_projection": schema.StringAttribute{
+				Computed:    true,
+				Sensitive:   false,
+				Description: "JSON projection of Kubernetes state for fields managed by this resource",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"delete_protection": schema.BoolAttribute{
 				Optional:    true,
