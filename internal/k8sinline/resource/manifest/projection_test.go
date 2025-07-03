@@ -39,8 +39,7 @@ func TestExtractFieldPaths_StrategicMerge(t *testing.T) {
 			expectedPaths: []string{
 				"spec.containers[name=nginx].name",
 				"spec.containers[name=nginx].image",
-				"spec.containers[name=nginx].ports[containerPort=80].containerPort",
-				"spec.containers[name=nginx].ports[containerPort=80].protocol",
+				"spec.containers[name=nginx].ports",
 				"spec.containers[name=sidecar].name",
 				"spec.containers[name=sidecar].image",
 				"spec.replicas",
@@ -142,10 +141,17 @@ func TestExtractFieldPaths_StrategicMerge(t *testing.T) {
 							"value": "val2",
 						},
 					},
+					"ports": []interface{}{ // Not containers, so uses array-level
+						map[string]interface{}{
+							"port":     80,
+							"protocol": "TCP",
+						},
+					},
 				},
 			},
 			expectedPaths: []string{
 				"spec.customField", // Array-level tracking for unknown fields
+				"spec.ports",       // Array-level tracking (not container ports)
 			},
 		},
 		{

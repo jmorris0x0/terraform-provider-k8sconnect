@@ -30,7 +30,77 @@ func (r *manifestResource) parseYAML(yamlStr string) (*unstructured.Unstructured
 		return nil, fmt.Errorf("metadata.name is required")
 	}
 
+	// Validate containers have names (critical for strategic merge)
+	if err := validateContainerNames(obj); err != nil {
+		return nil, fmt.Errorf("invalid manifest: %w", err)
+	}
+
 	return obj, nil
+}
+
+// validateContainerNames ensures all containers have names for strategic merge to work correctly
+func validateContainerNames(obj *unstructured.Unstructured) error {
+	// Check spec.containers
+	containers, found, _ := unstructured.NestedSlice(obj.Object, "spec", "containers")
+	if found {
+		for i, container := range containers {
+			if containerMap, ok := container.(map[string]interface{}); ok {
+				if name, _ := containerMap["name"].(string); name == "" {
+					return fmt.Errorf("container at index %d is missing required 'name' field", i)
+				}
+			}
+		}
+	}
+
+	// Check spec.initContainers
+	initContainers, found, _ := unstructured.NestedSlice(obj.Object, "spec", "initContainers")
+	if found {
+		for i, container := range initContainers {
+			if containerMap, ok := container.(map[string]interface{}); ok {
+				if name, _ := containerMap["name"].(string); name == "" {
+					return fmt.Errorf("initContainer at index %d is missing required 'name' field", i)
+				}
+			}
+		}
+	}
+
+	// Check spec.template.spec.containers (for Deployments, DaemonSets, etc.)
+	templateContainers, found, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
+	if found {
+		for i, container := range templateContainers {
+			if containerMap, ok := container.(map[string]interface{}); ok {
+				if name, _ := containerMap["name"].(string); name == "" {
+					return fmt.Errorf("template container at index %d is missing required 'name' field", i)
+				}
+			}
+		}
+	}
+
+	// Check spec.template.spec.initContainers
+	templateInitContainers, found, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "initContainers")
+	if found {
+		for i, container := range templateInitContainers {
+			if containerMap, ok := container.(map[string]interface{}); ok {
+				if name, _ := containerMap["name"].(string); name == "" {
+					return fmt.Errorf("template initContainer at index %d is missing required 'name' field", i)
+				}
+			}
+		}
+	}
+
+	// Check spec.jobTemplate.spec.template.spec.containers (for CronJobs)
+	cronJobContainers, found, _ := unstructured.NestedSlice(obj.Object, "spec", "jobTemplate", "spec", "template", "spec", "containers")
+	if found {
+		for i, container := range cronJobContainers {
+			if containerMap, ok := container.(map[string]interface{}); ok {
+				if name, _ := containerMap["name"].(string); name == "" {
+					return fmt.Errorf("jobTemplate container at index %d is missing required 'name' field", i)
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 // objectToYAML converts an unstructured object back to clean YAML
