@@ -61,6 +61,49 @@ func TestAccManifestResource_Basic(t *testing.T) {
 	})
 }
 
+const testNamespaceYAML = `apiVersion: v1
+kind: Namespace
+metadata:
+  name: acctest-exec
+`
+
+const testAccManifestConfigBasic = `
+variable "host" {
+  type = string
+}
+variable "ca" {
+  type = string
+}
+variable "cmd" {
+  type = string
+}
+variable "raw" {
+  type = string
+}
+
+provider "k8sinline" {}
+
+resource "k8sinline_manifest" "test_exec" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: acctest-exec
+YAML
+
+  cluster_connection = {
+    host                   = var.host
+    cluster_ca_certificate = var.ca
+
+    exec = {
+      api_version = "client.authentication.k8s.io/v1"
+      command     = var.cmd
+      args        = ["hello"]
+    }
+  }
+}
+`
+
 func TestAccManifestResource_KubeconfigRaw(t *testing.T) {
 	t.Parallel()
 
@@ -91,6 +134,33 @@ func TestAccManifestResource_KubeconfigRaw(t *testing.T) {
 		CheckDestroy: testAccCheckNamespaceDestroy(k8sClient, "acctest-raw"),
 	})
 }
+
+const testNamespaceYAMLRaw = `apiVersion: v1
+kind: Namespace
+metadata:
+  name: acctest-raw
+`
+
+const testAccManifestConfigKubeconfigRaw = `
+variable "raw" {
+  type = string
+}
+
+provider "k8sinline" {}
+
+resource "k8sinline_manifest" "test_raw" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: acctest-raw
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
+`
 
 func TestAccManifestResource_KubeconfigFile(t *testing.T) {
 	t.Parallel()
@@ -137,6 +207,33 @@ func TestAccManifestResource_KubeconfigFile(t *testing.T) {
 	})
 }
 
+const testNamespaceYAMLFile = `apiVersion: v1
+kind: Namespace
+metadata:
+  name: acctest-file
+`
+
+const testAccManifestConfigKubeconfigFile = `
+variable "kubeconfig_path" {
+  type = string
+}
+
+provider "k8sinline" {}
+
+resource "k8sinline_manifest" "test_file" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: acctest-file
+YAML
+
+  cluster_connection = {
+    kubeconfig_file = var.kubeconfig_path
+  }
+}
+`
+
 // Test different resource types
 func TestAccManifestResource_Pod(t *testing.T) {
 	t.Parallel()
@@ -168,137 +265,6 @@ func TestAccManifestResource_Pod(t *testing.T) {
 		CheckDestroy: testAccCheckPodDestroy(k8sClient, "default", "acctest-pod"),
 	})
 }
-
-// Alternative: Test namespace inference with ConfigMap (simpler than Pod)
-func TestAccManifestResource_DefaultNamespaceInference(t *testing.T) {
-	t.Parallel()
-
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
-	if raw == "" {
-		t.Skip("TF_ACC_KUBECONFIG_RAW not set, skipping")
-	}
-
-	k8sClient := createK8sClient(t, raw)
-
-	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
-			"k8sinline": providerserver.NewProtocol6WithError(k8sinline.New()),
-		},
-		Steps: []resource.TestStep{
-			{
-				Config: testAccManifestConfigDefaultNamespace,
-				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
-				},
-				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("k8sinline_manifest.test_default_ns", "yaml_body", testConfigMapYAMLNoNamespace),
-					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_default_ns", "id"),
-					// Key test: ConfigMap with no namespace should end up in default
-					testAccCheckConfigMapExists(k8sClient, "default", "acctest-config"),
-				),
-			},
-		},
-		CheckDestroy: testAccCheckConfigMapDestroy(k8sClient, "default", "acctest-config"),
-	})
-}
-
-// Test constants
-const testNamespaceYAML = `apiVersion: v1
-kind: Namespace
-metadata:
-  name: acctest-exec
-`
-
-const testAccManifestConfigBasic = `
-variable "host" {
-  type = string
-}
-variable "ca" {
-  type = string
-}
-variable "cmd" {
-  type = string
-}
-variable "raw" {
-  type = string
-}
-
-provider "k8sinline" {}
-
-resource "k8sinline_manifest" "test_exec" {
-  yaml_body = <<YAML
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: acctest-exec
-YAML
-
-  cluster_connection = {
-    host                   = var.host
-    cluster_ca_certificate = var.ca
-
-    exec = {
-      api_version = "client.authentication.k8s.io/v1"
-      command     = var.cmd
-      args        = ["hello"]
-    }
-  }
-}
-`
-
-const testNamespaceYAMLRaw = `apiVersion: v1
-kind: Namespace
-metadata:
-  name: acctest-raw
-`
-
-const testAccManifestConfigKubeconfigRaw = `
-variable "raw" {
-  type = string
-}
-
-provider "k8sinline" {}
-
-resource "k8sinline_manifest" "test_raw" {
-  yaml_body = <<YAML
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: acctest-raw
-YAML
-
-  cluster_connection = {
-    kubeconfig_raw = var.raw
-  }
-}
-`
-
-const testNamespaceYAMLFile = `apiVersion: v1
-kind: Namespace
-metadata:
-  name: acctest-file
-`
-
-const testAccManifestConfigKubeconfigFile = `
-variable "kubeconfig_path" {
-  type = string
-}
-
-provider "k8sinline" {}
-
-resource "k8sinline_manifest" "test_file" {
-  yaml_body = <<YAML
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: acctest-file
-YAML
-
-  cluster_connection = {
-    kubeconfig_file = var.kubeconfig_path
-  }
-}
-`
 
 const testPodYAML = `apiVersion: v1
 kind: Pod
@@ -339,6 +305,39 @@ YAML
 }
 `
 
+// Alternative: Test namespace inference with ConfigMap (simpler than Pod)
+func TestAccManifestResource_DefaultNamespaceInference(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	if raw == "" {
+		t.Skip("TF_ACC_KUBECONFIG_RAW not set, skipping")
+	}
+
+	k8sClient := createK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sinline": providerserver.NewProtocol6WithError(k8sinline.New()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testAccManifestConfigDefaultNamespace,
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("k8sinline_manifest.test_default_ns", "yaml_body", testConfigMapYAMLNoNamespace),
+					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_default_ns", "id"),
+					// Key test: ConfigMap with no namespace should end up in default
+					testAccCheckConfigMapExists(k8sClient, "default", "acctest-config"),
+				),
+			},
+		},
+		CheckDestroy: testAccCheckConfigMapDestroy(k8sClient, "default", "acctest-config"),
+	})
+}
+
 const testConfigMapYAMLNoNamespace = `apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -366,6 +365,97 @@ YAML
 
   cluster_connection = {
     kubeconfig_raw = var.raw
+  }
+}
+`
+
+func TestAccManifestResource_DeferredAuthWithComputedEnvVars(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+	}
+
+	k8sClient := createK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sinline": providerserver.NewProtocol6WithError(k8sinline.New()),
+		},
+		ExternalProviders: map[string]resource.ExternalProvider{
+			"random": {
+				Source:            "hashicorp/random",
+				VersionConstraint: "~> 3.5",
+			},
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testAccManifestConfigDeferredAuthWithExecEnv,
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					// Verify the manifest was created successfully
+					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_deferred_env", "id"),
+					testAccCheckConfigMapExists(k8sClient, "default", "test-deferred-auth-env"),
+					// Verify the random values made it into the exec env vars (not the YAML)
+					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_deferred_env", "cluster_connection.exec.env.TEST_SESSION_ID"),
+					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_deferred_env", "cluster_connection.exec.env.TEST_TRACE_ID"),
+					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_deferred_env", "cluster_connection.exec.env.TEST_RUN_ID"),
+					// Verify the exec command and args are what we expect
+					resource.TestCheckResourceAttr("k8sinline_manifest.test_deferred_env", "cluster_connection.exec.command", "sh"),
+					resource.TestCheckResourceAttr("k8sinline_manifest.test_deferred_env", "cluster_connection.exec.args.#", "2"),
+				),
+			},
+		},
+		CheckDestroy: testAccCheckConfigMapDestroy(k8sClient, "default", "test-deferred-auth-env"),
+	})
+}
+
+const testAccManifestConfigDeferredAuthWithExecEnv = `
+variable "raw" {
+  type = string
+}
+
+# These create unknown values during plan
+resource "random_string" "session_id" {
+  length = 16
+  special = false
+}
+
+resource "random_uuid" "trace_id" {}
+
+resource "k8sinline_manifest" "test_deferred_env" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-deferred-auth-env
+  namespace: default
+data:
+  test: "auth-was-deferred"
+  # Don't put unknown values in the YAML - that's not what we're testing
+  static_key: "static_value"
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+    
+    # This exec block contains env vars that are unknown during plan
+    # They're harmless TEST_* vars that won't affect actual authentication
+    exec = {
+      api_version = "client.authentication.k8s.io/v1"
+      command     = "sh"
+      args        = ["-c", "kubectl config view --raw"]
+      
+      # These env vars will be unknown during plan, forcing deferred auth
+      env = {
+        TEST_SESSION_ID = random_string.session_id.result
+        TEST_TRACE_ID   = random_uuid.trace_id.result
+        TEST_RUN_ID     = "deferred-${random_uuid.trace_id.result}"
+      }
+    }
   }
 }
 `

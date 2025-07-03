@@ -121,6 +121,34 @@ func TestAccManifestResource_DriftDetection(t *testing.T) {
 	})
 }
 
+const testAccManifestConfigDriftDetectionInitial = `
+variable "raw" {
+  type = string
+}
+
+provider "k8sinline" {}
+
+resource "k8sinline_manifest" "drift_test" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: drift-test-cm
+  namespace: default
+  annotations:
+    example.com/team: "backend-team"
+data:
+  key1: value1
+  key2: value2
+  key3: value3
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
+`
+
 func TestAccManifestResource_NoDriftWhenNoChanges(t *testing.T) {
 	t.Parallel()
 
@@ -195,6 +223,32 @@ func TestAccManifestResource_NoDriftWhenNoChanges(t *testing.T) {
 	})
 }
 
+const testAccManifestConfigNoDrift = `
+variable "raw" {
+  type = string
+}
+
+provider "k8sinline" {}
+
+resource "k8sinline_manifest" "no_drift" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: no-drift-cm
+  namespace: default
+data:
+  config: |
+    setting1=value1
+    setting2=value2
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
+`
+
 func TestAccManifestResource_DriftDetectionNestedStructures(t *testing.T) {
 	t.Parallel()
 
@@ -257,6 +311,43 @@ func TestAccManifestResource_DriftDetectionNestedStructures(t *testing.T) {
 	})
 }
 
+const testAccManifestConfigDriftDetectionDeployment = `
+variable "raw" {
+  type = string
+}
+
+provider "k8sinline" {}
+
+resource "k8sinline_manifest" "drift_deployment" {
+  yaml_body = <<YAML
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: drift-test-deployment
+  namespace: default
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: drift-test
+  template:
+    metadata:
+      labels:
+        app: drift-test
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.21
+        ports:
+        - containerPort: 80
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
+`
+
 func TestAccManifestResource_DriftDetectionArrays(t *testing.T) {
 	t.Parallel()
 
@@ -318,97 +409,6 @@ func TestAccManifestResource_DriftDetectionArrays(t *testing.T) {
 		CheckDestroy: testAccCheckServiceDestroy(k8sClient, "default", "drift-test-service"),
 	})
 }
-
-const testAccManifestConfigDriftDetectionInitial = `
-variable "raw" {
-  type = string
-}
-
-provider "k8sinline" {}
-
-resource "k8sinline_manifest" "drift_test" {
-  yaml_body = <<YAML
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: drift-test-cm
-  namespace: default
-  annotations:
-    example.com/team: "backend-team"
-data:
-  key1: value1
-  key2: value2
-  key3: value3
-YAML
-
-  cluster_connection = {
-    kubeconfig_raw = var.raw
-  }
-}
-`
-
-const testAccManifestConfigNoDrift = `
-variable "raw" {
-  type = string
-}
-
-provider "k8sinline" {}
-
-resource "k8sinline_manifest" "no_drift" {
-  yaml_body = <<YAML
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: no-drift-cm
-  namespace: default
-data:
-  config: |
-    setting1=value1
-    setting2=value2
-YAML
-
-  cluster_connection = {
-    kubeconfig_raw = var.raw
-  }
-}
-`
-
-const testAccManifestConfigDriftDetectionDeployment = `
-variable "raw" {
-  type = string
-}
-
-provider "k8sinline" {}
-
-resource "k8sinline_manifest" "drift_deployment" {
-  yaml_body = <<YAML
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: drift-test-deployment
-  namespace: default
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: drift-test
-  template:
-    metadata:
-      labels:
-        app: drift-test
-    spec:
-      containers:
-      - name: nginx
-        image: nginx:1.21
-        ports:
-        - containerPort: 80
-YAML
-
-  cluster_connection = {
-    kubeconfig_raw = var.raw
-  }
-}
-`
 
 const testAccManifestConfigDriftDetectionService = `
 variable "raw" {
