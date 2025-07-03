@@ -86,58 +86,43 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		"namespace": obj.GetNamespace(),
 	})
 
-	// NEW: Check if managed_state_projection was unknown in the plan
-	var plannedData manifestResourceModel
-	diags = req.Plan.Get(ctx, &plannedData)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
+	// Get GVR for the object
+	gvr, err := r.getGVR(ctx, client, obj)
+	if err != nil {
+		resp.Diagnostics.AddError("Resource Discovery Failed", fmt.Sprintf("Failed to determine resource type: %s", err))
 		return
 	}
 
-	// Only set managed_state_projection if it wasn't unknown in the plan
-	if !plannedData.ManagedStateProjection.IsUnknown() {
-		// Get GVR for the object
-		gvr, err := r.getGVR(ctx, client, obj)
-		if err != nil {
-			resp.Diagnostics.AddError("Resource Discovery Failed", fmt.Sprintf("Failed to determine resource type: %s", err))
-			return
-		}
+	// Extract paths from what we applied
+	paths := extractFieldPaths(obj.Object, "")
 
-		// Extract paths from what we applied
-		paths := extractFieldPaths(obj.Object, "")
-
-		// Get the current state after apply
-		currentObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
-		if err != nil {
-			resp.Diagnostics.AddError("Failed to read after create", fmt.Sprintf("Failed to read resource after creation: %s", err))
-			return
-		}
-
-		// Project the current state
-		projection, err := projectFields(currentObj.Object, paths)
-		if err != nil {
-			resp.Diagnostics.AddError("Projection Failed", fmt.Sprintf("Failed to project managed fields: %s", err))
-			return
-		}
-
-		// Store the projection
-		projectionJSON, err := toJSON(projection)
-		if err != nil {
-			resp.Diagnostics.AddError("JSON Conversion Failed", fmt.Sprintf("Failed to convert projection to JSON: %s", err))
-			return
-		}
-
-		data.ManagedStateProjection = types.StringValue(projectionJSON)
-
-		tflog.Debug(ctx, "Stored managed state projection", map[string]interface{}{
-			"path_count":      len(paths),
-			"projection_size": len(projectionJSON),
-		})
-	} else {
-		// Keep it as unknown
-		data.ManagedStateProjection = types.StringUnknown()
-		tflog.Debug(ctx, "Keeping managed_state_projection as unknown due to unknown plan value")
+	// Get the current state after apply
+	currentObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to read after create", fmt.Sprintf("Failed to read resource after creation: %s", err))
+		return
 	}
+
+	// Project the current state
+	projection, err := projectFields(currentObj.Object, paths)
+	if err != nil {
+		resp.Diagnostics.AddError("Projection Failed", fmt.Sprintf("Failed to project managed fields: %s", err))
+		return
+	}
+
+	// Store the projection
+	projectionJSON, err := toJSON(projection)
+	if err != nil {
+		resp.Diagnostics.AddError("JSON Conversion Failed", fmt.Sprintf("Failed to convert projection to JSON: %s", err))
+		return
+	}
+
+	data.ManagedStateProjection = types.StringValue(projectionJSON)
+
+	tflog.Debug(ctx, "Stored managed state projection", map[string]interface{}{
+		"path_count":      len(paths),
+		"projection_size": len(projectionJSON),
+	})
 
 	diags = resp.State.Set(ctx, &data)
 	resp.Diagnostics.Append(diags...)

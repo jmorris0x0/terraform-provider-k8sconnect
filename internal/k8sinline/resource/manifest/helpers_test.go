@@ -1,4 +1,4 @@
-// internal/k8sinline/resource/manifest/manifest_test_helpers.go
+// internal/k8sinline/resource/manifest/helpers_test.go
 package manifest_test
 
 import (
