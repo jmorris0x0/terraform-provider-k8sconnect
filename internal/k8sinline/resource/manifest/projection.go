@@ -9,7 +9,8 @@ import (
 
 // CRITICAL: This map ONLY contains fields we are 100% certain about.
 // These are from the core Kubernetes API and have been stable since v1.
-// If you're not sure, DO NOT add it here. Array-level tracking is safer than being wrong.
+// If you're not sure, DO NOT add it here. Losing diff granularity by
+// falling back to Array-level tracking is safer than being wrong.
 var absolutelyCertainStrategicMergeKeys = map[string]string{
 	// Pod spec containers - guaranteed since Kubernetes v1.0
 	"containers":     "name",
