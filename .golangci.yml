@@ -1,0 +1,73 @@
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  enable:
+    - bodyclose
+    - dupl
+    - errcheck
+    - exportloopref
+    - goconst
+    - gocritic
+    - gofmt
+    - goimports
+    - gosimple
+    - govet
+    - ineffassign
+    - misspell
+    - staticcheck
+    - typecheck
+    - unconvert
+    - unparam
+    - unused
+
+  disable:
+    # Too strict for a Terraform provider
+    - funlen
+    - gochecknoglobals
+    - gocognit
+    - godox
+    - gomnd
+    - lll
+
+linters-settings:
+  goconst:
+    min-len: 2
+    min-occurrences: 2
+  
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+    disabled-checks:
+      - dupImport
+      - ifElseChain
+      - octalLiteral
+  
+  gofmt:
+    simplify: true
+  
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment
+      - shadow
+
+issues:
+  exclude-rules:
+    # Exclude some linters from running on tests files
+    - path: _test\.go
+      linters:
+        - dupl
+        - gosec
+        - goconst
+    
+    # Terraform SDK uses unkeyed fields extensively
+    - linters:
+        - govet
+      text: "composite literal uses unkeyed fields"
+

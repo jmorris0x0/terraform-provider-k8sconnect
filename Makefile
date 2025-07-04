@@ -3,10 +3,8 @@ DEX_SSL_DIR      := $(OIDC_DIR)/ssl
 KIND_CLUSTER     ?= oidc-e2e
 TESTBUILD_DIR    := $(CURDIR)/.testbuild
 DEX_IMAGE        := ghcr.io/dexidp/dex:v2.42.1
-TERRAFORM_VERSION := 1.12.1
+TERRAFORM_VERSION := 1.12.2
 PROVIDER_VERSION ?= 0.1.0
-
-# 	  TF_ACC_TERRAFORM_VERSION=$(TERRAFORM_VERSION) \
 
 
 .PHONY: oidc-setup test-acc build vet clean test install docs
@@ -122,9 +120,14 @@ oidc-setup:
 
 test-acc: oidc-setup
 	@echo "🏃 Running acceptance tests..."; \
+	TF_VERSION="$${TF_ACC_TERRAFORM_VERSION:-$(TERRAFORM_VERSION)}"; \
+	if [ "$$TF_VERSION" != "$$(tfenv version-name)" ]; then \
+		echo "Installing Terraform $$TF_VERSION via tfenv..."; \
+		tfenv install $$TF_VERSION || true; \
+		tfenv use $$TF_VERSION || true; \
+	fi; \
 	export \
 	  TF_ACC=1 \
-	  TF_ACC_TERRAFORM_PATH="$(shell which terraform)" \
 	  TF_ACC_K8S_HOST="$$(cat $(TESTBUILD_DIR)/cluster-endpoint.txt)" \
 	  TF_ACC_K8S_CA="$$(base64 < $(TESTBUILD_DIR)/mock-ca.crt | tr -d '\n')" \
 	  TF_ACC_K8S_CMD="$(OIDC_DIR)/get-token.sh" \
@@ -133,6 +136,7 @@ test-acc: oidc-setup
 	echo "TF_ACC_K8S_CA=$$(echo $$TF_ACC_K8S_CA | cut -c1-20)..."; \
 	echo "TF_ACC_K8S_CMD=$$TF_ACC_K8S_CMD"; \
 	echo "TF_ACC_KUBECONFIG_RAW=$$(echo $$TF_ACC_KUBECONFIG_RAW | cut -c1-20)..."; \
+	echo "Terraform version: $$(terraform version -json | jq -r .terraform_version)"; \
 	go test -cover -v ./internal/k8sinline/... -timeout 30m -run "TestAcc"
 
 clean:
@@ -147,4 +151,46 @@ vet:
 
 docs:
 	tfplugindocs
+
+.PHONY: lint
+lint: vet
+	@echo "🔍 Running golangci-lint..."
+	@if ! command -v golangci-lint >/dev/null 2>&1; then \
+		echo "Installing golangci-lint..."; \
+		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | \
+			sh -s -- -b $$(go env GOPATH)/bin; \
+	fi
+	golangci-lint run --timeout=5m
+
+.PHONY: security-scan
+security-scan:
+	@echo "🔒 Running security scans..."
+	@if ! command -v gosec >/dev/null 2>&1; then \
+		echo "Installing gosec..."; \
+		go install github.com/securego/gosec/v2/cmd/gosec@latest; \
+	fi
+	@if ! command -v govulncheck >/dev/null 2>&1; then \
+		echo "Installing govulncheck..."; \
+		go install golang.org/x/vuln/cmd/govulncheck@latest; \
+	fi
+	gosec -quiet ./...
+	govulncheck ./...
+
+.PHONY: release-dry-run
+release-dry-run:
+	@echo "🔍 Testing release process locally..."
+	@if ! command -v goreleaser >/dev/null 2>&1; then \
+		echo "Installing goreleaser..."; \
+		go install github.com/goreleaser/goreleaser/v2@latest; \
+	fi
+	goreleaser release --snapshot --skip=publish --clean
+
+.PHONY: release-check
+release-check:
+	@echo "✅ Checking release configuration..."
+	@if ! command -v goreleaser >/dev/null 2>&1; then \
+		echo "Installing goreleaser..."; \
+		go install github.com/goreleaser/goreleaser/v2@latest; \
+	fi
+	goreleaser check
 

@@ -1,0 +1,52 @@
+name: Test macOS
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+
+permissions:
+  contents: read
+
+jobs:
+  test-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+      
+      - name: Install Docker and Kind
+        run: |
+          # macOS runners don't have Docker by default
+          brew install --cask docker
+          brew install kind kubectl
+          
+          # Start Docker Desktop
+          sudo /Applications/Docker.app/Contents/MacOS/Docker --unattended --install-privileged-components
+          open -a /Applications/Docker.app --args --unattended --accept-license
+          
+          # Wait for Docker to be ready
+          echo "Waiting for Docker to start..."
+          while ! docker info >/dev/null 2>&1; do
+            sleep 5
+          done
+      
+      - name: Run acceptance tests
+        run: |
+          export CI=true
+          make oidc-setup
+          make test-acc
+        continue-on-error: true  # macOS Docker can be flaky in CI
+      
+      - name: Clean up
+        if: always()
+        run: kind delete cluster --name oidc-e2e || true
+

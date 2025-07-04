@@ -1,0 +1,81 @@
+# https://goreleaser.com
+version: 2
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+builds:
+  - env:
+      - CGO_ENABLED=0
+    mod_timestamp: '{{ .CommitTimestamp }}'
+    flags:
+      - -trimpath
+    ldflags:
+      - '-s -w -X main.version={{.Version}} -X main.commit={{.Commit}}'
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    binary: '{{ .ProjectName }}_v{{ .Version }}'
+archives:
+  - format: zip
+    name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+checksum:
+  extra_files:
+    - glob: 'terraform-registry-manifest.json'
+      name_template: '{{ .ProjectName }}_{{ .Version }}_manifest.json'
+  name_template: '{{ .ProjectName }}_{{ .Version }}_SHA256SUMS'
+  algorithm: sha256
+signs:
+  - artifacts: checksum
+    args:
+      - "--batch"
+      - "--local-user"
+      - "{{ .Env.GPG_FINGERPRINT }}"
+      - "--output"
+      - "${signature}"
+      - "--detach-sign"
+      - "${artifact}"
+release:
+  extra_files:
+    - glob: 'terraform-registry-manifest.json'
+      name_template: '{{ .ProjectName }}_{{ .Version }}_manifest.json'
+  # Draft releases initially during alpha
+  draft: true
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^test:'
+      - '^chore:'
+      - '^docs:'
+      - 'merge conflict'
+      - Merge pull request
+      - Merge remote-tracking branch
+      - Merge branch
+      - go mod tidy
+  groups:
+    - title: 'New Resources'
+      regexp: "^.*feat\\(resource\\):+.*$"
+      order: 0
+    - title: 'New Data Sources'
+      regexp: "^.*feat\\(data-source\\):+.*$"
+      order: 1
+    - title: 'Features'
+      regexp: "^.*feat:+.*$"
+      order: 2
+    - title: 'Bug Fixes'
+      regexp: "^.*fix:+.*$"
+      order: 3
+    - title: 'Dependency Updates'
+      regexp: "^.*build\\(deps\\):+.*$"
+      order: 4
+    - title: Other
+      order: 999
