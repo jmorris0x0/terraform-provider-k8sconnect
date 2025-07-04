@@ -1,6 +1,8 @@
 # terraform-provider-k8sinline
 
-![Build Status](https://github.com/jmorris0x0/terraform-provider-k8sinline/actions/workflows/build.yml/badge.svg)
+![Tests](https://github.com/jmorris0x0/terraform-provider-k8sinline/actions/workflows/test.yml/badge.svg)
+![Security](https://github.com/jmorris0x0/terraform-provider-k8sinline/actions/workflows/security.yml/badge.svg)
+![Release](https://github.com/jmorris0x0/terraform-provider-k8sinline/actions/workflows/release.yml/badge.svg)
 
 A Terraform provider for applying Kubernetes YAML manifests **with inline, per‑resource connection settings**.
 
