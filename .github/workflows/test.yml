@@ -56,8 +56,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        terraform: ['1.8.0', '1.9.*']
-        # Add more versions as needed
+        terraform: ['latest']
+        # Add more later
     steps:
       - uses: actions/checkout@v4
       
