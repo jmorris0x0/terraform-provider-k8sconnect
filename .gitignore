@@ -15,9 +15,6 @@ terraform-provider-k8sinline
 *.gcda
 *.gcno
 
-# Go modules
-go.sum
-
 # Vendor directory
 /vendor/
 
