@@ -1,6 +1,6 @@
 module github.com/jmorris0x0/terraform-provider-k8sinline
 
-go 1.24.2
+go 1.24.4
 
 require (
 	github.com/hashicorp/terraform-plugin-framework v1.15.0
