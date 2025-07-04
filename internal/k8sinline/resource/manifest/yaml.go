@@ -4,17 +4,51 @@ package manifest
 import (
 	"context"
 	"fmt"
+	"io"
+	"strings"
 
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/k8sclient"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8sschema "k8s.io/apimachinery/pkg/runtime/schema"
-	"sigs.k8s.io/yaml"
+	"k8s.io/apimachinery/pkg/util/yaml"
+	sigsyaml "sigs.k8s.io/yaml"
 )
+
+// isMultiDocumentYAML checks if the YAML content contains multiple documents
+func isMultiDocumentYAML(yamlStr string) bool {
+	// Use yaml decoder to properly detect multiple documents
+	decoder := yaml.NewYAMLOrJSONDecoder(strings.NewReader(yamlStr), 4096)
+
+	documentCount := 0
+	for {
+		var obj interface{}
+		err := decoder.Decode(&obj)
+		if err != nil {
+			if err == io.EOF {
+				// End of stream, no more documents
+				break
+			}
+			// Invalid YAML, but that will be caught by parseYAML later
+			break
+		}
+		documentCount++
+		if documentCount > 1 {
+			return true
+		}
+	}
+
+	return false
+}
 
 // parseYAML converts YAML string to unstructured.Unstructured
 func (r *manifestResource) parseYAML(yamlStr string) (*unstructured.Unstructured, error) {
+	// Check for multi-document YAML
+	if isMultiDocumentYAML(yamlStr) {
+		return nil, fmt.Errorf("multi-document YAML detected (contains '---' separator). Use the k8sinline_yaml_split data source to split the documents first")
+	}
+
 	obj := &unstructured.Unstructured{}
-	err := yaml.Unmarshal([]byte(yamlStr), obj)
+	err := sigsyaml.Unmarshal([]byte(yamlStr), obj)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal YAML: %w", err)
 	}
@@ -109,7 +143,7 @@ func (r *manifestResource) objectToYAML(obj *unstructured.Unstructured) ([]byte,
 	cleanObj := r.cleanObjectForExport(obj)
 
 	// Convert to YAML
-	yamlBytes, err := yaml.Marshal(cleanObj.Object)
+	yamlBytes, err := sigsyaml.Marshal(cleanObj.Object)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal object to YAML: %w", err)
 	}
