@@ -91,7 +91,7 @@ jobs:
           make oidc-setup
       
       - name: Run acceptance tests
-        run: make test-acc
+        run: make testacc
         env:
           TF_ACC_TERRAFORM_VERSION: ${{ matrix.terraform }}
       

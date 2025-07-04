@@ -7,7 +7,7 @@ TERRAFORM_VERSION := 1.12.2
 PROVIDER_VERSION ?= 0.1.0
 
 
-.PHONY: oidc-setup test-acc build vet clean test install docs
+.PHONY: oidc-setup testacc build vet clean test install docs
 
 build:
 	@echo "🔨 Building provider binary"
@@ -118,7 +118,7 @@ oidc-setup:
 	kubectl config view --raw --minify \
 	  > $(TESTBUILD_DIR)/kubeconfig.yaml
 
-test-acc: oidc-setup
+testacc: oidc-setup
 	@echo "🏃 Running acceptance tests..."; \
 	TF_VERSION="$${TF_ACC_TERRAFORM_VERSION:-$(TERRAFORM_VERSION)}"; \
 	if [ "$$TF_VERSION" != "$$(tfenv version-name)" ]; then \

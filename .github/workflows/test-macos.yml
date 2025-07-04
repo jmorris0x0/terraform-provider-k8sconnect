@@ -43,7 +43,7 @@ jobs:
         run: |
           export CI=true
           make oidc-setup
-          make test-acc
+          make testacc
         continue-on-error: true  # macOS Docker can be flaky in CI
       
       - name: Clean up

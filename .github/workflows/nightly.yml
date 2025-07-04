@@ -48,7 +48,7 @@ jobs:
         run: |
           # OpenTofu uses 'tofu' binary, so we need to adjust
           export TF_ACC_TERRAFORM_PATH=$(which tofu)
-          make test-acc
+          make testacc
       
       - name: Clean up
         if: always()
@@ -79,7 +79,7 @@ jobs:
           make oidc-setup
       
       - name: Run acceptance tests
-        run: make test-acc
+        run: make testacc
       
       - name: Clean up
         if: always()
