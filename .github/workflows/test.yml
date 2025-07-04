@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -71,14 +72,22 @@ jobs:
           terraform_version: ${{ matrix.terraform }}
           terraform_wrapper: false
       
-      - name: Create Kind cluster
+      - name: Install dependencies
         run: |
+          # Install kubectl (required for oidc-setup)
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+          
           # Install Kind
           curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
           chmod +x ./kind
           sudo mv ./kind /usr/local/bin/kind
-          
-          # Create cluster with OIDC config
+      
+      - name: Create Kind cluster
+        run: |
+          # Set CI flag for Makefile
+          export CI=true
           make oidc-setup
       
       - name: Run acceptance tests
