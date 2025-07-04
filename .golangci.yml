@@ -1,32 +1,39 @@
-version: 2
-
+version: "2"
 run:
-  timeout: 5m
   tests: true
-
 linters:
   enable:
-    - gofmt
-    - gosimple
-    - govet
-    - ineffassign
     - misspell
-    - staticcheck
-
-linters-settings:
-  gofmt:
-    simplify: true
-  
-  govet:
-    enable-all: true
-    disable:
-      - fieldalignment
-      - shadow
-
-issues:
-  exclude-rules:
-    # Terraform SDK uses unkeyed fields extensively
-    - linters:
-        - govet
-      text: "composite literal uses unkeyed fields"
-
+  settings:
+    govet:
+      disable:
+        - fieldalignment
+        - shadow
+      enable-all: true
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - govet
+        text: composite literal uses unkeyed fields
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofmt
+  settings:
+    gofmt:
+      simplify: true
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
