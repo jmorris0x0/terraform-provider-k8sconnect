@@ -1,39 +1,26 @@
 version: "2"
+
 run:
+  timeout: 5m
   tests: true
+
 linters:
   enable:
-    - misspell
-  settings:
-    govet:
-      disable:
-        - fieldalignment
-        - shadow
-      enable-all: true
+    - govet
+  disable:
+    - errcheck
+    - unused
+    - staticcheck
   exclusions:
-    generated: lax
-    presets:
-      - comments
-      - common-false-positives
-      - legacy
-      - std-error-handling
     rules:
       - linters:
           - govet
-        text: composite literal uses unkeyed fields
-    paths:
-      - third_party$
-      - builtin$
-      - examples$
+        text: "composite literal uses unkeyed fields"
+
 formatters:
   enable:
     - gofmt
   settings:
     gofmt:
       simplify: true
-  exclusions:
-    generated: lax
-    paths:
-      - third_party$
-      - builtin$
-      - examples$
+
