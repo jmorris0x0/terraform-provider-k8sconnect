@@ -38,7 +38,10 @@ jobs:
         with:
           go-version-file: 'go.mod'
           cache: true
-      
+
+      - name: Download dependencies
+        run: go mod download
+
       - name: Run govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
