@@ -111,10 +111,10 @@ jobs:
       
       - name: Run go vet
         run: go vet ./...
-      
+
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          version: v2.2.1
           args: --timeout=5m
 
