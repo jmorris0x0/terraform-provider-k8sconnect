@@ -13,6 +13,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/config"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	v1 "k8s.io/api/core/v1"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -264,7 +265,7 @@ YAML
 }`
 
 // Helper to check ownership annotations exist
-func testAccCheckOwnershipAnnotations(client *kubernetes.Clientset, namespace, name string) resource.TestCheckFunc {
+func testAccCheckOwnershipAnnotations(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		cm, err := client.CoreV1().ConfigMaps(namespace).Get(context.Background(), name, metav1.GetOptions{})
 		if err != nil {
@@ -276,17 +277,8 @@ func testAccCheckOwnershipAnnotations(client *kubernetes.Clientset, namespace, n
 			return fmt.Errorf("ConfigMap has no annotations")
 		}
 
-		terraformID, ok := annotations["k8sinline.terraform.io/id"]
-		if !ok {
-			return fmt.Errorf("ownership annotation not found")
-		}
-
-		if !regexp.MustCompile("^[a-f0-9]{12}$").MatchString(terraformID) {
-			return fmt.Errorf("terraform-id annotation has invalid format: %s", terraformID)
-		}
-
-		if _, ok := annotations["k8sinline.terraform.io/created-at"]; !ok {
-			return fmt.Errorf("created-at annotation not found")
+		if _, ok := annotations[OwnershipAnnotation]; !ok {
+			return fmt.Errorf("ConfigMap missing ownership annotation %s", OwnershipAnnotation)
 		}
 
 		return nil

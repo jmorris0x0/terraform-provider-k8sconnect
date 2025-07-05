@@ -9,18 +9,19 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-// Ownership annotation constants
 const (
-	OwnershipAnnotation = "k8sinline.terraform.io/id" // Keep existing annotation key
+	OwnershipAnnotation = "k8sinline.terraform.io/terraform-id"
 	CreatedAtAnnotation = "k8sinline.terraform.io/created-at"
-	DefaultFieldManager = "k8sinline"
 )
 
-// generateID creates a 12-character random hex ID (like Docker)
+// generateID creates a random 12-character hex ID for Terraform resource identification
 func (r *manifestResource) generateID() string {
-	b := make([]byte, 6) // 6 bytes = 12 hex chars
-	rand.Read(b)
-	return hex.EncodeToString(b)
+	bytes := make([]byte, 6) // 6 bytes = 12 hex chars
+	if _, err := rand.Read(bytes); err != nil {
+		// Fallback to timestamp-based ID if random fails
+		return fmt.Sprintf("%x", time.Now().UnixNano())[:12]
+	}
+	return hex.EncodeToString(bytes)
 }
 
 // setOwnershipAnnotation marks a Kubernetes resource as managed by this Terraform resource
