@@ -51,6 +51,39 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
+	// Get GVR for the object first
+	gvr, err := r.getGVR(ctx, client, obj)
+	if err != nil {
+		resp.Diagnostics.AddError("Resource Discovery Failed",
+			fmt.Sprintf("Failed to determine resource type: %s", err))
+		return
+	}
+
+	// Check if resource already exists
+	existingObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
+	if err == nil {
+		// Resource exists - check ownership
+		existingID := r.getOwnershipID(existingObj)
+		if existingID != "" {
+			// Already managed by k8sinline
+			resp.Diagnostics.AddError(
+				"Resource Already Managed",
+				fmt.Sprintf("resource managed by different k8sinline resource (Terraform ID: %s)", existingID),
+			)
+			return
+		}
+		// Resource exists but not managed - we can take ownership
+		tflog.Info(ctx, "adopting unmanaged resource", map[string]interface{}{
+			"kind": obj.GetKind(),
+			"name": obj.GetName(),
+		})
+	} else if !errors.IsNotFound(err) {
+		// Real error checking if resource exists
+		resp.Diagnostics.AddError("Existence Check Failed",
+			fmt.Sprintf("Failed to check if resource exists: %s", err))
+		return
+	}
+
 	id := r.generateID()
 	data.ID = types.StringValue(id)
 	r.setOwnershipAnnotation(obj, id)
@@ -77,13 +110,6 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		"name":      obj.GetName(),
 		"namespace": obj.GetNamespace(),
 	})
-
-	// Get GVR for the object
-	gvr, err := r.getGVR(ctx, client, obj)
-	if err != nil {
-		resp.Diagnostics.AddError("Resource Discovery Failed", fmt.Sprintf("Failed to determine resource type: %s", err))
-		return
-	}
 
 	// Extract paths from what we applied
 	paths := extractFieldPaths(obj.Object, "")
@@ -185,6 +211,27 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
+	// Check ownership - but ONLY validate ID match, not treat as conflict
+	existingID := r.getOwnershipID(currentObj)
+	if existingID == "" {
+		// Resource exists but has no ownership annotation
+		// This could happen if annotations were stripped
+		// Re-add our ownership annotation during next apply
+		tflog.Warn(ctx, "resource missing ownership annotation", map[string]interface{}{
+			"id":   data.ID.ValueString(),
+			"kind": obj.GetKind(),
+			"name": obj.GetName(),
+		})
+		// Continue with read - don't treat as error
+	} else if existingID != data.ID.ValueString() {
+		// Different owner - this is a real conflict
+		resp.Diagnostics.AddError(
+			"Resource Ownership Conflict",
+			fmt.Sprintf("Resource is managed by different k8sinline resource (Terraform ID: %s)", existingID),
+		)
+		return
+	}
+
 	// NEW: Extract paths from the yaml_body to know what we manage
 	paths := extractFieldPaths(obj.Object, "")
 
@@ -216,42 +263,55 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 
 func (r *manifestResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var data manifestResourceModel
+	var configData manifestResourceModel
 
+	// Get current state
 	diags := req.State.Get(ctx, &data)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
+	// Get desired configuration
+	diags = req.Config.Get(ctx, &configData)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	// Check if cluster connection is ready
-	if !r.isConnectionReady(data.ClusterConnection) {
+	if !r.isConnectionReady(configData.ClusterConnection) {
 		resp.Diagnostics.AddError(
 			"Cluster Connection Not Ready",
-			"Cannot update resource: cluster connection contains unknown values. This usually happens during planning when dependencies are not yet resolved.",
+			"Cannot update resource: cluster connection contains unknown values.",
 		)
 		return
 	}
 
-	// Convert to connection model
-	conn, err := r.convertObjectToConnectionModel(ctx, data.ClusterConnection)
+	// Use connection from config (which may have changed)
+	conn, err := r.convertObjectToConnectionModel(ctx, configData.ClusterConnection)
 	if err != nil {
 		resp.Diagnostics.AddError("Connection Conversion Failed", err.Error())
 		return
 	}
 
-	// Parse YAML into unstructured object
-	obj, err := r.parseYAML(data.YAMLBody.ValueString())
+	// Parse YAML
+	obj, err := r.parseYAML(configData.YAMLBody.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Invalid YAML", fmt.Sprintf("Failed to parse YAML: %s", err))
 		return
 	}
 
-	// Create K8s client from cluster connection (cached)
+	// Create K8s client with new connection
 	client, err := r.clientGetter(conn)
 	if err != nil {
-		resp.Diagnostics.AddError("Connection Failed", fmt.Sprintf("Failed to create Kubernetes client: %s", err))
+		resp.Diagnostics.AddError("Connection Failed",
+			fmt.Sprintf("Failed to create Kubernetes client: %s", err))
 		return
 	}
+
+	// Preserve the existing ID - it should never change
+	configData.ID = data.ID
 
 	// Check ownership before updating
 	gvr, err := r.getGVR(ctx, client, obj)
@@ -262,28 +322,27 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 
 	liveObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
-	if err != nil && !errors.IsNotFound(err) {
+	if err != nil {
+		if errors.IsNotFound(err) {
+			resp.Diagnostics.AddError("Resource Not Found",
+				"Resource no longer exists in Kubernetes")
+			return
+		}
 		resp.Diagnostics.AddError("Ownership Check Failed",
 			fmt.Sprintf("Could not check resource ownership: %s", err))
 		return
 	}
 
-	// If resource exists, validate we own it
-	if err == nil {
-		if err := r.validateOwnership(liveObj, data.ID.ValueString()); err != nil {
-			resp.Diagnostics.AddError("Resource Ownership Conflict", err.Error())
-			return
-		}
-		tflog.Trace(ctx, "ownership validated", map[string]interface{}{
-			"resource": fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName()),
-			"id":       data.ID.ValueString(),
-		})
+	// Validate ownership
+	if err := r.validateOwnership(liveObj, data.ID.ValueString()); err != nil {
+		resp.Diagnostics.AddError("Resource Ownership Conflict", err.Error())
+		return
 	}
 
-	// Set ownership annotation before applying
+	// Set ownership annotation with existing ID
 	r.setOwnershipAnnotation(obj, data.ID.ValueString())
 
-	// Apply the updated manifest (server-side apply is idempotent)
+	// Apply the updated manifest
 	err = client.SetFieldManager("k8sinline").Apply(ctx, obj, k8sclient.ApplyOptions{
 		FieldManager: "k8sinline",
 		Force:        false,
@@ -299,14 +358,46 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	tflog.Trace(ctx, "updated manifest", map[string]interface{}{
-		"id":        data.ID.ValueString(),
-		"kind":      obj.GetKind(),
-		"name":      obj.GetName(),
-		"namespace": obj.GetNamespace(),
-	})
+	// Update projection
+	paths := extractFieldPaths(obj.Object, "")
+	currentObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to read after update",
+			fmt.Sprintf("Failed to read resource after update: %s", err))
+		return
+	}
 
-	diags = resp.State.Set(ctx, &data)
+	projection, err := projectFields(currentObj.Object, paths)
+	if err != nil {
+		resp.Diagnostics.AddError("Projection Failed",
+			fmt.Sprintf("Failed to project managed fields: %s", err))
+		return
+	}
+
+	projectionJSON, err := toJSON(projection)
+	if err != nil {
+		resp.Diagnostics.AddError("JSON Conversion Failed",
+			fmt.Sprintf("Failed to convert projection to JSON: %s", err))
+		return
+	}
+
+	// Build final state with:
+	// - ID from existing state (never changes)
+	// - Connection from config (may have changed)
+	// - Other fields from config
+	// - Computed projection
+	finalData := manifestResourceModel{
+		ID:                     data.ID, // Preserve existing ID
+		YAMLBody:               configData.YAMLBody,
+		ClusterConnection:      configData.ClusterConnection,
+		DeleteProtection:       configData.DeleteProtection,
+		DeleteTimeout:          configData.DeleteTimeout,
+		ForceDestroy:           configData.ForceDestroy,
+		ManagedStateProjection: types.StringValue(projectionJSON),
+	}
+
+	// Save the updated state
+	diags = resp.State.Set(ctx, &finalData)
 	resp.Diagnostics.Append(diags...)
 }
 
@@ -332,7 +423,7 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 	if !r.isConnectionReady(data.ClusterConnection) {
 		resp.Diagnostics.AddError(
 			"Cluster Connection Not Ready",
-			"Cannot delete resource: cluster connection contains unknown values.",
+			"Cannot delete resource: cluster connection contains unknown values. This usually happens during planning when dependencies are not yet resolved.",
 		)
 		return
 	}
@@ -363,6 +454,13 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 	if err != nil {
 		resp.Diagnostics.AddError("Resource Discovery Failed", fmt.Sprintf("Failed to determine resource type: %s", err))
 		return
+	}
+
+	// Get timeout configuration
+	timeout := r.getDeleteTimeout(data)
+	forceDestroy := false
+	if !data.ForceDestroy.IsNull() {
+		forceDestroy = data.ForceDestroy.ValueBool()
 	}
 
 	// Check if resource exists before attempting deletion
@@ -403,14 +501,6 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 	}
 
 	// Wait for normal deletion to complete
-	timeout := r.getDeleteTimeout(data)
-	forceDestroy := !data.ForceDestroy.IsNull() && data.ForceDestroy.ValueBool()
-
-	tflog.Debug(ctx, "Starting deletion wait", map[string]interface{}{
-		"timeout":       timeout.String(),
-		"force_destroy": forceDestroy,
-	})
-
 	err = r.waitForDeletion(ctx, client, gvr, obj, timeout)
 	if err == nil {
 		// Successful normal deletion
