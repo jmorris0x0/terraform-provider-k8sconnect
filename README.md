@@ -159,9 +159,9 @@ After import, add the `cluster_connection` block to your configuration to match 
 ## Security Considerations 🔐
 
 Connection credentials are stored in Terraform state. Mitigate by:
-- Encrypting remote state (S3 + KMS, Terraform Cloud, etc.)
 - Using dynamic credentials (exec auth) instead of static tokens
-- Sourcing secrets from Vault/AWS Secrets Manager
+- Encrypting remote state (S3 + KMS, Terraform Cloud, etc.) 
+
 
 All `cluster_connection` fields are marked sensitive and won't appear in logs or plan output.
 
@@ -177,7 +177,7 @@ All `cluster_connection` fields are marked sensitive and won't appear in logs or
 ## Requirements
 
 - Terraform 1.6+
-- Kubernetes 1.17+ (uses server-side apply)
+- Kubernetes 1.17+ (uses only server-side apply)
 
 ---
 
