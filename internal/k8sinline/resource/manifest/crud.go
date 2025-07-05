@@ -55,14 +55,6 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 	data.ID = types.StringValue(id)
 	r.setOwnershipAnnotation(obj, id)
 
-	// Set ownership annotation before applying
-	annotations := obj.GetAnnotations()
-	if annotations == nil {
-		annotations = make(map[string]string)
-	}
-	annotations["k8sinline.terraform.io/id"] = data.ID.ValueString()
-	obj.SetAnnotations(annotations)
-
 	// Apply the manifest using server-side apply
 	err = client.SetFieldManager("k8sinline").Apply(ctx, obj, k8sclient.ApplyOptions{
 		FieldManager: "k8sinline",

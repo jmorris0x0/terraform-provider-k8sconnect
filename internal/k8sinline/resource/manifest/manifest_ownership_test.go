@@ -218,7 +218,7 @@ func TestAccManifestResource_OwnershipImport(t *testing.T) {
 			{
 				ResourceName:      "k8sinline_manifest.import_test",
 				ImportState:       true,
-				ImportStateId:     "kind-kind/default/ConfigMap/test-import-ownership",
+				ImportStateId:     "kind-oidc-e2e/default/ConfigMap/test-import-ownership",
 				ImportStateVerify: false, // Skip verify since import doesn't set all attributes
 				Config:            testAccManifestConfigOwnershipImport,
 				ConfigVariables: config.Variables{
@@ -277,8 +277,8 @@ func testAccCheckOwnershipAnnotations(client kubernetes.Interface, namespace, na
 			return fmt.Errorf("ConfigMap has no annotations")
 		}
 
-		if _, ok := annotations[OwnershipAnnotation]; !ok {
-			return fmt.Errorf("ConfigMap missing ownership annotation %s", OwnershipAnnotation)
+		if _, ok := annotations["k8sinline.terraform.io/terraform-id"]; !ok {
+			return fmt.Errorf("ConfigMap missing ownership annotation k8sinline.terraform.io/terraform-id")
 		}
 
 		return nil
