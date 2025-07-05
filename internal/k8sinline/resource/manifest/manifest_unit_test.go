@@ -369,42 +369,33 @@ func TestGetGVR(t *testing.T) {
 func TestGenerateID(t *testing.T) {
 	r := &manifestResource{}
 
-	obj := &unstructured.Unstructured{}
-	obj.SetAPIVersion("v1")
-	obj.SetKind("Namespace")
-	obj.SetName("test-namespace")
-
-	conn := ClusterConnectionModel{
-		Host:                 types.StringValue("https://example.com"),
-		ClusterCACertificate: types.StringValue("test-ca"),
-		KubeconfigFile:       types.StringNull(),
-		KubeconfigRaw:        types.StringNull(),
-		Context:              types.StringNull(),
-		Exec:                 nil,
+	// Test that IDs are 12 hex characters
+	id1 := r.generateID()
+	if len(id1) != 12 {
+		t.Errorf("expected ID length 12, got %d", len(id1))
 	}
 
-	id1 := r.generateID(obj, conn)
-	id2 := r.generateID(obj, conn)
-
-	// Should be deterministic
-	if id1 != id2 {
-		t.Errorf("expected consistent ID generation, got %q and %q", id1, id2)
+	// Test that IDs contain only hex characters
+	for _, char := range id1 {
+		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f')) {
+			t.Errorf("ID contains non-hex character: %c", char)
+		}
 	}
 
-	// Should be non-empty hex string
-	if len(id1) == 0 {
-		t.Error("expected non-empty ID")
+	// Test that IDs are random (not deterministic)
+	id2 := r.generateID()
+	if id1 == id2 {
+		t.Error("expected different IDs on each call, got identical IDs")
 	}
 
-	// Test different inputs produce different IDs
-	obj2 := &unstructured.Unstructured{}
-	obj2.SetAPIVersion("v1")
-	obj2.SetKind("Namespace")
-	obj2.SetName("different-namespace")
-
-	id3 := r.generateID(obj2, conn)
-	if id1 == id3 {
-		t.Error("expected different IDs for different objects")
+	// Generate multiple IDs to check uniqueness
+	ids := make(map[string]bool)
+	for i := 0; i < 100; i++ {
+		id := r.generateID()
+		if ids[id] {
+			t.Errorf("duplicate ID generated: %s", id)
+		}
+		ids[id] = true
 	}
 }
 
@@ -722,57 +713,6 @@ func TestStubK8sClient_GetGVRFromKind(t *testing.T) {
 			}
 			if obj.GetName() != tt.resourceName {
 				t.Errorf("expected name %q, got %q", tt.resourceName, obj.GetName())
-			}
-		})
-	}
-}
-
-func TestAnyConnectionFieldChanged(t *testing.T) {
-	r := &manifestResource{}
-
-	base := ClusterConnectionModel{
-		Host:    types.StringValue("https://example.com"),
-		Context: types.StringValue("prod"),
-	}
-
-	tests := []struct {
-		name     string
-		plan     ClusterConnectionModel
-		state    ClusterConnectionModel
-		expected bool
-	}{
-		{
-			name:     "no change",
-			plan:     base,
-			state:    base,
-			expected: false,
-		},
-		{
-			name: "host changed",
-			plan: ClusterConnectionModel{
-				Host:    types.StringValue("https://different.com"),
-				Context: types.StringValue("prod"),
-			},
-			state:    base,
-			expected: true,
-		},
-		{
-			name: "context changed",
-			plan: ClusterConnectionModel{
-				Host:    types.StringValue("https://example.com"),
-				Context: types.StringValue("staging"),
-			},
-			state:    base,
-			expected: true,
-		},
-		// Add more cases...
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := r.anyConnectionFieldChanged(tt.plan, tt.state)
-			if result != tt.expected {
-				t.Errorf("expected %v, got %v", tt.expected, result)
 			}
 		})
 	}

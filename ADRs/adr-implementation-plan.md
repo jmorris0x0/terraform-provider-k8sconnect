@@ -1,6 +1,6 @@
 # Implementation Plan: Non-Deterministic IDs with Annotation-Based Ownership
 
-This document outlines the changes needed to implement ADR-002, switching from deterministic to random UUID-based Terraform resource IDs with Kubernetes annotation-based ownership tracking.
+This document outlines the changes needed to implement ADR-004, switching from deterministic to random UUID-based Terraform resource IDs with Kubernetes annotation-based ownership tracking.
 
 ## Overview
 

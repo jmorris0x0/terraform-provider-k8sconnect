@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        opentofu: ['1.8.0', 'latest']
+        opentofu: ['1.10.2']
     steps:
       - uses: actions/checkout@v4
       

@@ -22,7 +22,7 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Invalid Import ID",
-			fmt.Sprintf("Expected format: <context>/<namespace>/<kind>/<name> or <context>/<kind>/<name>\n\nExamples:\n"+
+			fmt.Sprintf("Expected format: <context>/<namespace>/<kind>/<n> or <context>/<kind>/<n>\n\nExamples:\n"+
 				"  prod/default/Pod/nginx\n"+
 				"  staging/kube-system/Service/coredns\n"+
 				"  prod/Namespace/my-namespace\n"+
@@ -36,7 +36,7 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		resp.Diagnostics.AddError(
 			"Import Failed: Missing Context",
 			"The import ID must include a kubeconfig context as the first part.\n\n"+
-				"Format: <context>/<namespace>/<kind>/<name> or <context>/<kind>/<name>\n\n"+
+				"Format: <context>/<namespace>/<kind>/<n> or <context>/<kind>/<n>\n\n"+
 				"Available contexts can be found with: kubectl config get-contexts",
 		)
 		return
@@ -84,6 +84,14 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		)
 		return
 	}
+
+	tflog.Debug(ctx, "import using kubeconfig", map[string]interface{}{
+		"path":      kubeconfigPath,
+		"context":   kubeContext,
+		"kind":      kind,
+		"name":      name,
+		"namespace": namespace,
+	})
 
 	// Create K8s client using kubeconfig file and context
 	client, err := k8sclient.NewDynamicK8sClientFromKubeconfigFile(kubeconfigPath, kubeContext)
@@ -172,9 +180,31 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		return
 	}
 
-	// Generate resource ID using a special import-based approach
-	// Since we don't have the final cluster connection yet, we'll use the context
-	resourceID := r.generateIDFromImport(liveObj, kubeContext)
+	// NEW: Check for existing ownership and generate ID accordingly
+	existingID := r.getOwnershipID(liveObj)
+	var resourceID string
+
+	if existingID != "" {
+		// Resource already managed by k8sinline - use existing ID
+		resourceID = existingID
+		tflog.Warn(ctx, "importing resource already managed by k8sinline", map[string]interface{}{
+			"terraform_id": resourceID,
+			"kind":         kind,
+			"name":         name,
+			"namespace":    namespace,
+			"context":      kubeContext,
+		})
+	} else {
+		// Resource not managed by k8sinline - generate new ID
+		resourceID = r.generateID()
+		tflog.Info(ctx, "importing unmanaged resource", map[string]interface{}{
+			"terraform_id": resourceID,
+			"kind":         kind,
+			"name":         name,
+			"namespace":    namespace,
+			"context":      kubeContext,
+		})
+	}
 
 	// Create connection model for import
 	connModel := ClusterConnectionModel{
@@ -191,55 +221,32 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Import Failed: Connection Conversion Error",
-			fmt.Sprintf("Failed to convert connection model to object: %s", err.Error()),
+			fmt.Sprintf("Failed to convert connection model: %s", err.Error()),
 		)
 		return
 	}
 
-	// Populate state with imported data
+	// Create imported data
 	importedData := manifestResourceModel{
 		ID:                types.StringValue(resourceID),
 		YAMLBody:          types.StringValue(string(yamlBytes)),
-		ClusterConnection: connObj,                // Now using types.Object
-		DeleteProtection:  types.BoolValue(false), // default
+		ClusterConnection: connObj,
+		DeleteProtection:  types.BoolValue(false),
 	}
 
-	// Set the imported state
 	diags := resp.State.Set(ctx, &importedData)
 	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
 
-	tflog.Info(ctx, "successfully imported resource", map[string]interface{}{
-		"import_id":   req.ID,
-		"resource_id": resourceID,
-		"kind":        liveObj.GetKind(),
-		"name":        liveObj.GetName(),
-		"namespace":   liveObj.GetNamespace(),
-		"context":     kubeContext,
-		"kubeconfig":  kubeconfigPath,
+	tflog.Info(ctx, "import completed", map[string]interface{}{
+		"id":         resourceID,
+		"kind":       kind,
+		"name":       name,
+		"namespace":  namespace,
+		"kubeconfig": kubeconfigPath,
+		"context":    kubeContext,
 	})
-
-	// Add informational message about next steps
-	resp.Diagnostics.AddWarning(
-		"Import Successful - Configuration Required",
-		"The resource has been imported successfully. You must now configure the cluster_connection block in your Terraform configuration to match your desired connection method.\n\n"+
-			"Example configuration:\n"+
-			"  resource \"k8sinline_manifest\" \"example\" {\n"+
-			"    yaml_body = \"# Populated by import\"\n"+
-			"    \n"+
-			"    cluster_connection = {\n"+
-			"      # Choose your preferred connection method:\n"+
-			"      kubeconfig_file = \"~/.kube/config\"\n"+
-			"      context         = \""+kubeContext+"\"\n"+
-			"    }\n"+
-			"  }\n\n"+
-			"Run 'terraform plan' to see if your configuration matches the imported resource.",
-	)
 }
 
-// Updated parseImportID function to handle new format with context
 func (r *manifestResource) parseImportID(importID string) (context, namespace, kind, name string, err error) {
 	parts := strings.Split(importID, "/")
 

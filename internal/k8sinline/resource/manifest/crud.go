@@ -51,9 +51,9 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	// Generate resource ID (moved up to use in annotation)
-	id := r.generateID(obj, conn)
+	id := r.generateID()
 	data.ID = types.StringValue(id)
+	r.setOwnershipAnnotation(obj, id)
 
 	// Set ownership annotation before applying
 	annotations := obj.GetAnnotations()
@@ -224,7 +224,8 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 
 func (r *manifestResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var data manifestResourceModel
-	diags := req.Plan.Get(ctx, &data)
+
+	diags := req.State.Get(ctx, &data)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -234,39 +235,16 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 	if !r.isConnectionReady(data.ClusterConnection) {
 		resp.Diagnostics.AddError(
 			"Cluster Connection Not Ready",
-			"Cluster connection contains unknown values. This usually happens during planning when dependencies are not yet resolved.",
+			"Cannot update resource: cluster connection contains unknown values. This usually happens during planning when dependencies are not yet resolved.",
 		)
 		return
 	}
 
-	// Convert plan connection to model
+	// Convert to connection model
 	conn, err := r.convertObjectToConnectionModel(ctx, data.ClusterConnection)
 	if err != nil {
 		resp.Diagnostics.AddError("Connection Conversion Failed", err.Error())
 		return
-	}
-
-	// Get prior state to check for connection changes
-	var priorState manifestResourceModel
-	diags = req.State.Get(ctx, &priorState)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	// Check connection changes only if both states are ready
-	if r.isConnectionReady(priorState.ClusterConnection) {
-		priorConn, err := r.convertObjectToConnectionModel(ctx, priorState.ClusterConnection)
-		if err == nil {
-			if r.anyConnectionFieldChanged(conn, priorConn) {
-				if err := r.validateOwnership(ctx, data); err != nil {
-					resp.Diagnostics.AddError("Connection Change Blocked", err.Error())
-					return
-				}
-				resp.Diagnostics.AddWarning("Connection Changed",
-					"Connection details changed. Verified target cluster via ownership annotation.")
-			}
-		}
 	}
 
 	// Parse YAML into unstructured object
@@ -283,13 +261,35 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	// Set ownership annotation before applying
-	annotations := obj.GetAnnotations()
-	if annotations == nil {
-		annotations = make(map[string]string)
+	// Check ownership before updating
+	gvr, err := r.getGVR(ctx, client, obj)
+	if err != nil {
+		resp.Diagnostics.AddError("Resource Discovery Failed",
+			fmt.Sprintf("Failed to determine resource type: %s", err))
+		return
 	}
-	annotations["k8sinline.terraform.io/id"] = data.ID.ValueString()
-	obj.SetAnnotations(annotations)
+
+	liveObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
+	if err != nil && !errors.IsNotFound(err) {
+		resp.Diagnostics.AddError("Ownership Check Failed",
+			fmt.Sprintf("Could not check resource ownership: %s", err))
+		return
+	}
+
+	// If resource exists, validate we own it
+	if err == nil {
+		if err := r.validateOwnership(liveObj, data.ID.ValueString()); err != nil {
+			resp.Diagnostics.AddError("Resource Ownership Conflict", err.Error())
+			return
+		}
+		tflog.Trace(ctx, "ownership validated", map[string]interface{}{
+			"resource": fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName()),
+			"id":       data.ID.ValueString(),
+		})
+	}
+
+	// Set ownership annotation before applying
+	r.setOwnershipAnnotation(obj, data.ID.ValueString())
 
 	// Apply the updated manifest (server-side apply is idempotent)
 	err = client.SetFieldManager("k8sinline").Apply(ctx, obj, k8sclient.ApplyOptions{
