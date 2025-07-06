@@ -131,6 +131,7 @@ The `yaml_split` data source creates stable IDs like `deployment.my-app.nginx` a
 - ✅ **Multi-cluster support** - Each resource can connect to a different cluster, no provider aliases needed
 - ✅ **True field management** - Only diffs and manages fields you define, coexists with other controllers
 - ✅ **Module-friendly** - Resources with connections work inside modules, apply everything in one phase
+- ✅ **Native YAML support** - Use your existing Kubernetes YAML directly, no HCL conversion needed
 - ✅ **Server-side apply only** - No client-side logic, uses Kubernetes' native conflict resolution
 - ✅ **Accurate drift detection** - Dry-run ensures diffs always show exactly what will change
 - ✅ **Ownership tracking** - Prevents conflicts between Terraform states and unmanaged resources
