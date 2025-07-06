@@ -128,13 +128,12 @@ The `yaml_split` data source creates stable IDs like `deployment.my-app.nginx` a
 
 ## Key Features
 
-- ✅ **Server-side apply** - Uses Kubernetes' native apply mechanism, not kubectl
-- ✅ **Connection caching** - Reuses clients across resources for performance  
-- ✅ **Import existing resources** - Supports standard Terraform import workflow
-- ✅ **Delete protection** - Set `delete_protection = true` for critical resources
-- ✅ **Force destroy** - Remove stuck finalizers with `force_destroy = true`
-- ✅ **ownership tracking** - Prevents accidental overwrites of unmanaged resources
-- ✅ **dry-run diffs** - Ensures diffs are always accurte
+- ✅ **Multi-cluster support** - Each resource can connect to a different cluster, no provider aliases needed
+- ✅ **True field management** - Only diffs and manages fields you define, coexists with other controllers
+- ✅ **Module-friendly** - Resources with connections work inside modules, apply everything in one phase
+- ✅ **Server-side apply only** - No client-side logic, uses Kubernetes' native conflict resolution
+- ✅ **Accurate drift detection** - Dry-run ensures diffs always show exactly what will change
+- ✅ **Ownership tracking** - Prevents conflicts between Terraform states and unmanaged resources
 
 ---
 
