@@ -286,3 +286,18 @@ func writeKubeconfigToTempFile(t *testing.T, kubeconfigContent string) string {
 
 	return tmpfile.Name()
 }
+
+func testAccCheckResourceQuotaDestroy(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		_, err := client.CoreV1().ResourceQuotas(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				fmt.Printf("✅ Verified ResourceQuota %s/%s was deleted\n", namespace, name)
+				return nil
+			}
+			return fmt.Errorf("unexpected error checking ResourceQuota: %v", err)
+		}
+		return fmt.Errorf("ResourceQuota %s/%s still exists after deletion", namespace, name)
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/config"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline"
 )
 
@@ -19,6 +20,8 @@ func TestAccManifestResource_QuantityNormalization(t *testing.T) {
 	if raw == "" {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
+
+	k8sClient := createK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -46,6 +49,7 @@ func TestAccManifestResource_QuantityNormalization(t *testing.T) {
 				ExpectNonEmptyPlan: false, // Verifies no drift from quantity normalization!
 			},
 		},
+		CheckDestroy: testAccCheckResourceQuotaDestroy(k8sClient, "default", "test-quantities"),
 	})
 }
 
@@ -155,6 +159,8 @@ func TestAccManifestResource_ContainerResourcesNormalization(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	k8sClient := createK8sClient(t, raw)
+
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
 			"k8sinline": providerserver.NewProtocol6WithError(k8sinline.New()),
@@ -179,6 +185,7 @@ func TestAccManifestResource_ContainerResourcesNormalization(t *testing.T) {
 				ExpectNonEmptyPlan: false,
 			},
 		},
+		CheckDestroy: testAccCheckDeploymentDestroy(k8sClient, "default", "test-resources"),
 	})
 }
 

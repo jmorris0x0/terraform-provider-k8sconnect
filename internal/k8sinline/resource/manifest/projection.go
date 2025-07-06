@@ -343,12 +343,3 @@ func toJSON(obj map[string]interface{}) (string, error) {
 	}
 	return string(bytes), nil
 }
-
-// fromJSON converts a JSON string to map
-func fromJSON(jsonStr string) (map[string]interface{}, error) {
-	var obj map[string]interface{}
-	if err := json.Unmarshal([]byte(jsonStr), &obj); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal projection: %w", err)
-	}
-	return obj, nil
-}

@@ -53,13 +53,6 @@ type manifestResourceModel struct {
 	ManagedStateProjection types.String `tfsdk:"managed_state_projection"`
 }
 
-// NewManifestResource creates a new manifest resource (backward compatibility)
-func NewManifestResource() resource.Resource {
-	return &manifestResource{
-		clientGetter: CreateK8sClientFromConnection,
-	}
-}
-
 // NewManifestResourceWithClientGetter creates a manifest resource with custom client getter
 func NewManifestResourceWithClientGetter(getter ClientGetter) resource.Resource {
 	return &manifestResource{
