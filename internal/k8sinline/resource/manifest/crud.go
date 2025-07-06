@@ -333,9 +333,22 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	// Validate ownership
-	if err := r.validateOwnership(liveObj, data.ID.ValueString()); err != nil {
-		resp.Diagnostics.AddError("Resource Ownership Conflict", err.Error())
+	// Manual ownership validation to allow drift recovery
+	// DO NOT use validateOwnership here as it will fail when annotations are stripped
+	existingID := r.getOwnershipID(liveObj)
+	if existingID == "" {
+		// Resource exists but has no ownership annotation
+		// This happens when annotations are stripped (e.g., by external tools)
+		// We'll re-add our ownership annotation during apply
+		tflog.Warn(ctx, "resource missing ownership annotation during update", map[string]interface{}{
+			"id":   data.ID.ValueString(),
+			"kind": obj.GetKind(),
+			"name": obj.GetName(),
+		})
+	} else if existingID != data.ID.ValueString() {
+		// Different owner - this is a real conflict
+		resp.Diagnostics.AddError("Resource Ownership Conflict",
+			fmt.Sprintf("resource managed by different k8sinline resource (Terraform ID: %s)", existingID))
 		return
 	}
 

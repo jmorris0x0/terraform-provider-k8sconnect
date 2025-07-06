@@ -133,7 +133,8 @@ The `yaml_split` data source creates stable IDs like `deployment.my-app.nginx` a
 - ✅ **Import existing resources** - Supports standard Terraform import workflow
 - ✅ **Delete protection** - Set `delete_protection = true` for critical resources
 - ✅ **Force destroy** - Remove stuck finalizers with `force_destroy = true`
-- ✅ **Ownership tracking** - Prevents accidental overwrites of unmanaged resources
+- ✅ **ownership tracking** - Prevents accidental overwrites of unmanaged resources
+- ✅ **dry-run diffs** - Ensures diffs are always accurte
 
 ---
 

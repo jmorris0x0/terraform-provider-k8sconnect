@@ -7,18 +7,19 @@ TERRAFORM_VERSION := 1.12.2
 PROVIDER_VERSION ?= 0.1.0
 
 
-.PHONY: oidc-setup testacc build vet clean test install docs
-
+.PHONY: build
 build:
 	@echo "🔨 Building provider binary"
 	go get -u ./...
 	go mod tidy
 	go build -o bin/terraform-provider-k8sinline .
 
+.PHONY: test
 test:
 	@echo "🧪 Running unit tests"
 	go test -v ./... -run "^Test[^A].*"
 
+.PHONY: install
 install:
 	@echo "🔧 Building and installing provider..."
 	@echo "📦 Ensuring dependencies are up to date..."
@@ -73,6 +74,7 @@ install:
 	echo "    }"; \
 	echo "  }"
 
+.PHONY: oidc-setup 
 oidc-setup:
 	@echo "🔐 Generating self‑signed certs"
 	@rm -fr $(DEX_SSL_DIR)
@@ -118,6 +120,7 @@ oidc-setup:
 	kubectl config view --raw --minify \
 	  > $(TESTBUILD_DIR)/kubeconfig.yaml
 
+.PHONY: testacc
 testacc: oidc-setup
 	@echo "🏃 Running acceptance tests..."; \
 	TF_VERSION="$${TF_ACC_TERRAFORM_VERSION:-$(TERRAFORM_VERSION)}"; \
@@ -139,16 +142,19 @@ testacc: oidc-setup
 	echo "Terraform version: $$(terraform version -json | jq -r .terraform_version)"; \
 	go test -cover -v ./internal/k8sinline/... -timeout 30m -run "TestAcc"
 
+.PHONY: clean
 clean:
 	-docker rm -f dex
 	-kind delete cluster --name $(KIND_CLUSTER)
 	-rm -rf $(TESTBUILD_DIR) $(DEX_SSL_DIR)
 	-rm -rf bin/
 
+.PHONY: vet
 vet:
 	@echo "🔍 Running go vet on all packages"
 	@go vet ./...
 
+.PHONY: docs
 docs:
 	tfplugindocs
 
@@ -193,4 +199,18 @@ release-check:
 		go install github.com/goreleaser/goreleaser/v2@latest; \
 	fi
 	goreleaser check
+
+.PHONY: coverage
+coverage: oidc-setup
+	@echo "📊 Building unified coverage report"
+	@PROFILE=coverage.out ; \
+	TF_ACC=1 \
+	  TF_ACC_K8S_HOST="$$(cat $(TESTBUILD_DIR)/cluster-endpoint.txt)" \
+	  TF_ACC_K8S_CA="$$(base64 < $(TESTBUILD_DIR)/mock-ca.crt | tr -d '\n')" \
+	  TF_ACC_K8S_CMD="$(OIDC_DIR)/get-token.sh" \
+	  TF_ACC_KUBECONFIG_RAW="$$(cat $(TESTBUILD_DIR)/kubeconfig.yaml)" \
+	  go test ./... -coverpkg=./... -covermode=atomic -coverprofile=$$PROFILE -count=1 ; \
+	go tool cover -func=$$PROFILE ; \
+	go tool cover -html=$$PROFILE -o coverage.html ; \
+	echo "HTML report written to ./coverage.html"
 

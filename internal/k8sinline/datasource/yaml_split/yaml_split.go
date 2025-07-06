@@ -396,12 +396,6 @@ func (d *yamlSplitDataSource) matchesPattern(pattern, path string) bool {
 	return err == nil && matched
 }
 
-// isYAMLFile checks if a file has a YAML extension
-func (d *yamlSplitDataSource) isYAMLFile(path string) bool {
-	ext := strings.ToLower(filepath.Ext(path))
-	return ext == ".yaml" || ext == ".yml"
-}
-
 // readFile reads a file and returns its content as string
 func (d *yamlSplitDataSource) readFile(path string) (string, error) {
 	content, err := os.ReadFile(path)
@@ -415,10 +409,4 @@ func (d *yamlSplitDataSource) readFile(path string) (string, error) {
 func hashString(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])
-}
-
-// isYAMLFileExt checks if a file extension indicates YAML content
-func isYAMLFileExt(path string) bool {
-	ext := strings.ToLower(filepath.Ext(path))
-	return ext == ".yaml" || ext == ".yml"
 }
