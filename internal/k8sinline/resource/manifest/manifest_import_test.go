@@ -184,3 +184,214 @@ resource "k8sinline_manifest" "test_import" {
     kubeconfig_raw = var.raw
   }
 }`
+
+func TestAccManifestResource_ImportWithManagedFields(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+	}
+
+	k8sClient := createK8sClient(t, raw)
+
+	// Create a ConfigMap with multiple fields to test projection
+	configMapName := "acctest-import-fields-" + fmt.Sprintf("%d", time.Now().Unix())
+
+	// Create the ConfigMap directly in Kubernetes
+	ctx := context.Background()
+	cm := &v1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      configMapName,
+			Namespace: "default",
+			Labels: map[string]string{
+				"test":       "import",
+				"created-by": "terraform-test",
+			},
+			Annotations: map[string]string{
+				"test-annotation": "value",
+			},
+		},
+		Data: map[string]string{
+			"key1": "value1",
+			"key2": "value2",
+			"key3": "value3",
+		},
+	}
+
+	_, err := k8sClient.CoreV1().ConfigMaps("default").Create(ctx, cm, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create test ConfigMap: %v", err)
+	}
+
+	// Ensure cleanup even if test fails
+	defer func() {
+		k8sClient.CoreV1().ConfigMaps("default").Delete(ctx, configMapName, metav1.DeleteOptions{})
+	}()
+
+	// Write the kubeconfig to a temporary file for import to use
+	kubeconfigFile := writeKubeconfigToTempFile(t, raw)
+	defer os.Remove(kubeconfigFile)
+
+	// Set KUBECONFIG environment variable for the import
+	oldKubeconfig := os.Getenv("KUBECONFIG")
+	os.Setenv("KUBECONFIG", kubeconfigFile)
+	defer func() {
+		if oldKubeconfig != "" {
+			os.Setenv("KUBECONFIG", oldKubeconfig)
+		} else {
+			os.Unsetenv("KUBECONFIG")
+		}
+	}()
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sinline": providerserver.NewProtocol6WithError(k8sinline.New()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testAccManifestConfigImportPlaceholder,
+				ConfigVariables: config.Variables{
+					"raw":  config.StringVariable(raw),
+					"name": config.StringVariable(configMapName),
+				},
+				ResourceName:  "k8sinline_manifest.test_import",
+				ImportState:   true,
+				ImportStateId: fmt.Sprintf("kind-oidc-e2e/default/ConfigMap/%s", configMapName),
+
+				ImportStateCheck: func(states []*terraform.InstanceState) error {
+					if len(states) != 1 {
+						return fmt.Errorf("expected 1 state, got %d", len(states))
+					}
+					state := states[0]
+
+					// Verify that yaml_body was populated
+					yamlBody := state.Attributes["yaml_body"]
+					if yamlBody == "" {
+						return fmt.Errorf("yaml_body should be populated after import")
+					}
+
+					// Verify the YAML contains expected content
+					if !strings.Contains(yamlBody, configMapName) {
+						return fmt.Errorf("yaml_body should contain ConfigMap name %q", configMapName)
+					}
+					if !strings.Contains(yamlBody, "key1: value1") {
+						return fmt.Errorf("yaml_body should contain data fields")
+					}
+
+					// Verify server-generated fields were removed
+					if strings.Contains(yamlBody, "uid:") {
+						return fmt.Errorf("yaml_body should not contain server-generated uid field")
+					}
+					if strings.Contains(yamlBody, "resourceVersion:") {
+						return fmt.Errorf("yaml_body should not contain server-generated resourceVersion field")
+					}
+
+					// NEW: Verify managed_state_projection was populated
+					projection := state.Attributes["managed_state_projection"]
+					if projection == "" {
+						return fmt.Errorf("managed_state_projection should be populated after import")
+					}
+
+					// NEW: Verify projection contains expected fields
+					// The projection should be a JSON string containing the managed fields
+					if !strings.Contains(projection, "\"apiVersion\"") {
+						return fmt.Errorf("managed_state_projection should contain apiVersion field")
+					}
+					if !strings.Contains(projection, "\"metadata\"") {
+						return fmt.Errorf("managed_state_projection should contain metadata field")
+					}
+					if !strings.Contains(projection, "\"data\"") {
+						return fmt.Errorf("managed_state_projection should contain data field")
+					}
+
+					// NEW: Log projection for debugging
+					fmt.Printf("✅ Import successful with managed state projection:\n")
+					fmt.Printf("   Projection size: %d bytes\n", len(projection))
+					fmt.Printf("   Contains metadata: %v\n", strings.Contains(projection, "metadata"))
+					fmt.Printf("   Contains data: %v\n", strings.Contains(projection, "data"))
+
+					return nil
+				},
+
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_import", "id"),
+					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_import", "yaml_body"),
+					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_import", "managed_state_projection"),
+					// Verify the ConfigMap still exists after import
+					testAccCheckConfigMapExists(k8sClient, "default", configMapName),
+				),
+			},
+			// After import, verify that plan shows expected changes (normal import workflow)
+			{
+				Config: testAccManifestConfigImportPlaceholder,
+				ConfigVariables: config.Variables{
+					"raw":  config.StringVariable(raw),
+					"name": config.StringVariable(configMapName),
+				},
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true, // Plan SHOULD show diff between placeholder and imported state
+			},
+		},
+		CheckDestroy: testAccCheckConfigMapDestroy(k8sClient, "default", configMapName),
+	})
+}
+
+const testAccManifestConfigImportWithFields = `
+variable "raw" {
+  type = string
+}
+variable "name" {
+  type = string  
+}
+
+provider "k8sinline" {}
+
+resource "k8sinline_manifest" "test_import" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: ${var.name}
+      namespace: default
+      labels:
+        test: import
+        created-by: terraform-test
+      annotations:
+        test-annotation: value
+    data:
+      key1: value1
+      key2: value2
+      key3: value3
+  YAML
+  
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
+`
+
+const testAccManifestConfigImportPlaceholder = `
+variable "raw" {
+  type = string
+}
+variable "name" {
+  type = string  
+}
+
+provider "k8sinline" {}
+
+resource "k8sinline_manifest" "test_import" {
+  # Minimal valid YAML that will be replaced by import
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: placeholder
+  YAML
+  
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
+`

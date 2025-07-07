@@ -16,6 +16,7 @@ import (
 )
 
 // ImportState method implementing kubeconfig strategy
+// ImportState method implementing kubeconfig strategy with managed fields tracking
 func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Parse import ID: "context/namespace/kind/name" or "context/kind/name" for cluster-scoped
 	kubeContext, namespace, kind, name, err := r.parseImportID(req.ID)
@@ -120,67 +121,46 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 					"This usually means:\n"+
 					"1. Invalid kubeconfig file\n"+
 					"2. Cluster is unreachable\n"+
-					"3. Authentication failed\n\n"+
-					"Kubeconfig: %s\n"+
-					"Context: %s\n"+
-					"Details: %s", kubeconfigPath, kubeContext, err.Error()),
+					"3. Context credentials have expired\n\n"+
+					"Details: %s", err.Error()),
 			)
 		}
 		return
 	}
 
-	// Discover GVR and fetch the live object in one step
+	// Discover GVR from kind and fetch the resource
 	_, liveObj, err := client.GetGVRFromKind(ctx, kind, namespace, name)
 	if err != nil {
-		if strings.Contains(err.Error(), "no API resource found for kind") {
+		if strings.Contains(err.Error(), "not found") {
 			resp.Diagnostics.AddError(
-				"Import Failed: Unknown Resource Kind",
-				fmt.Sprintf("The resource kind \"%s\" was not found in the cluster.\n\n"+
-					"This usually means:\n"+
-					"1. The kind name is misspelled (check capitalization)\n"+
-					"2. A CRD needs to be installed first\n"+
-					"3. The resource type doesn't exist in this Kubernetes version\n\n"+
-					"Check available resource types:\n"+
-					"  kubectl api-resources | grep -i %s", kind, strings.ToLower(kind)),
-			)
-		} else if strings.Contains(err.Error(), "not found") {
-			resp.Diagnostics.AddError(
-				"Import Failed: Resource Not Found",
-				fmt.Sprintf("The %s \"%s\" was not found in the cluster.\n\n"+
-					"Verify the resource exists:\n"+
-					"  kubectl get %s %s %s\n\n"+
-					"Context: %s\n"+
-					"Details: %s",
-					kind, name, strings.ToLower(kind), name,
-					func() string {
-						if namespace != "" {
-							return fmt.Sprintf("-n %s", namespace)
-						}
-						return ""
-					}(), kubeContext, err.Error()),
+				"Import Failed: Resource not found",
+				fmt.Sprintf("Resource %s/%s (kind: %s) not found in context %q.\n\n"+
+					"Verify that:\n"+
+					"- The resource exists: kubectl get %s %s -n %s --context=%s\n"+
+					"- You have permission to read this resource",
+					namespace, name, kind, kubeContext,
+					strings.ToLower(kind), name, namespace, kubeContext),
 			)
 		} else {
 			resp.Diagnostics.AddError(
-				"Import Failed: Discovery/Fetch Error",
-				fmt.Sprintf("Failed to discover or fetch the %s \"%s\".\n\n"+
-					"Context: %s\n"+
-					"Details: %s", kind, name, kubeContext, err.Error()),
+				"Import Failed",
+				fmt.Sprintf("Failed to fetch resource: %s", err.Error()),
 			)
 		}
 		return
 	}
 
-	// Convert live object back to clean YAML
+	// Convert to YAML for state
 	yamlBytes, err := r.objectToYAML(liveObj)
 	if err != nil {
 		resp.Diagnostics.AddError(
-			"Import Failed: YAML Conversion Error",
-			fmt.Sprintf("Failed to convert the imported object to YAML: %s", err.Error()),
+			"Import Failed: YAML conversion error",
+			fmt.Sprintf("Failed to convert resource to YAML: %s", err.Error()),
 		)
 		return
 	}
 
-	// NEW: Check for existing ownership and generate ID accordingly
+	// Check for existing ownership and generate ID accordingly
 	existingID := r.getOwnershipID(liveObj)
 	var resourceID string
 
@@ -206,6 +186,25 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		})
 	}
 
+	// NEW: Extract field paths from the imported object
+	paths := extractFieldPaths(liveObj.Object, "")
+
+	// NEW: Project the current state for managed fields
+	projection, err := projectFields(liveObj.Object, paths)
+	if err != nil {
+		resp.Diagnostics.AddError("Projection Failed",
+			fmt.Sprintf("Failed to project managed fields during import: %s", err))
+		return
+	}
+
+	// NEW: Convert projection to JSON
+	projectionJSON, err := toJSON(projection)
+	if err != nil {
+		resp.Diagnostics.AddError("JSON Conversion Failed",
+			fmt.Sprintf("Failed to convert projection to JSON during import: %s", err))
+		return
+	}
+
 	// Create connection model for import
 	connModel := ClusterConnectionModel{
 		Host:                 types.StringNull(),
@@ -226,24 +225,27 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		return
 	}
 
-	// Create imported data
+	// Create imported data with managed state projection
 	importedData := manifestResourceModel{
-		ID:                types.StringValue(resourceID),
-		YAMLBody:          types.StringValue(string(yamlBytes)),
-		ClusterConnection: connObj,
-		DeleteProtection:  types.BoolValue(false),
+		ID:                     types.StringValue(resourceID),
+		YAMLBody:               types.StringValue(string(yamlBytes)),
+		ClusterConnection:      connObj,
+		DeleteProtection:       types.BoolValue(false),
+		ManagedStateProjection: types.StringValue(projectionJSON), // NEW: Set the projection
 	}
 
 	diags := resp.State.Set(ctx, &importedData)
 	resp.Diagnostics.Append(diags...)
 
-	tflog.Info(ctx, "import completed", map[string]interface{}{
-		"id":         resourceID,
-		"kind":       kind,
-		"name":       name,
-		"namespace":  namespace,
-		"kubeconfig": kubeconfigPath,
-		"context":    kubeContext,
+	tflog.Info(ctx, "import completed with managed fields tracking", map[string]interface{}{
+		"id":              resourceID,
+		"kind":            kind,
+		"name":            name,
+		"namespace":       namespace,
+		"kubeconfig":      kubeconfigPath,
+		"context":         kubeContext,
+		"managed_paths":   len(paths),
+		"projection_size": len(projectionJSON),
 	})
 }
 
