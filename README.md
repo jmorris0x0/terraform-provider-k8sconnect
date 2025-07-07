@@ -163,6 +163,8 @@ Connection credentials are stored in Terraform state. Mitigate by:
 - Using dynamic credentials (exec auth) instead of static tokens
 - Encrypting remote state (S3 + KMS, Terraform Cloud, etc.) 
 
+*You should probably be doing these things regardless.*
+
 
 All `cluster_connection` fields are marked sensitive and won't appear in logs or plan output.
 
