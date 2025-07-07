@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"net/http"
+	"net/url"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -75,22 +77,61 @@ func (r *manifestResource) createInlineConfig(conn ClusterConnectionModel) (*res
 	if conn.Host.IsNull() {
 		return nil, fmt.Errorf("host is required for inline connection")
 	}
-	if conn.ClusterCACertificate.IsNull() {
-		return nil, fmt.Errorf("cluster_ca_certificate is required for inline connection")
-	}
 
-	// Decode base64-encoded CA certificate
-	caData, err := base64.StdEncoding.DecodeString(conn.ClusterCACertificate.ValueString())
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode cluster_ca_certificate: %w", err)
-	}
-
-	// Build REST config directly
+	// Build REST config
 	config := &rest.Config{
 		Host: conn.Host.ValueString(),
-		TLSClientConfig: rest.TLSClientConfig{
-			CAData: caData,
-		},
+	}
+
+	// Handle TLS/CA certificate
+	if !conn.ClusterCACertificate.IsNull() {
+		caData, err := base64.StdEncoding.DecodeString(conn.ClusterCACertificate.ValueString())
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode cluster_ca_certificate: %w", err)
+		}
+		config.TLSClientConfig.CAData = caData
+	}
+
+	// Handle insecure mode
+	if !conn.Insecure.IsNull() && conn.Insecure.ValueBool() {
+		config.TLSClientConfig.Insecure = true
+	}
+
+	// Validate CA cert or insecure
+	if conn.ClusterCACertificate.IsNull() && (conn.Insecure.IsNull() || !conn.Insecure.ValueBool()) {
+		return nil, fmt.Errorf("cluster_ca_certificate is required for secure connections (or set insecure=true)")
+	}
+
+	// Handle authentication methods
+
+	// Bearer token
+	if !conn.Token.IsNull() {
+		config.BearerToken = conn.Token.ValueString()
+	}
+
+	// Client certificate authentication
+	if !conn.ClientCertificate.IsNull() && !conn.ClientKey.IsNull() {
+		certData, err := base64.StdEncoding.DecodeString(conn.ClientCertificate.ValueString())
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode client_certificate: %w", err)
+		}
+
+		keyData, err := base64.StdEncoding.DecodeString(conn.ClientKey.ValueString())
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode client_key: %w", err)
+		}
+
+		config.TLSClientConfig.CertData = certData
+		config.TLSClientConfig.KeyData = keyData
+	}
+
+	// Handle proxy
+	if !conn.ProxyURL.IsNull() {
+		proxyURL, err := url.Parse(conn.ProxyURL.ValueString())
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse proxy_url: %w", err)
+		}
+		config.Proxy = http.ProxyURL(proxyURL)
 	}
 
 	// Add exec provider if specified
@@ -100,7 +141,6 @@ func (r *manifestResource) createInlineConfig(conn ClusterConnectionModel) (*res
 			args[i] = arg.ValueString()
 		}
 
-		// Process environment variables
 		var envVars []clientcmdapi.ExecEnvVar
 		if conn.Exec.Env != nil {
 			for name, value := range conn.Exec.Env {
@@ -120,6 +160,15 @@ func (r *manifestResource) createInlineConfig(conn ClusterConnectionModel) (*res
 			Env:             envVars,
 			InteractiveMode: clientcmdapi.NeverExecInteractiveMode,
 		}
+	}
+
+	// Validate we have some authentication
+	hasAuth := !conn.Token.IsNull() ||
+		(!conn.ClientCertificate.IsNull() && !conn.ClientKey.IsNull()) ||
+		(conn.Exec != nil && !conn.Exec.APIVersion.IsNull())
+
+	if !hasAuth {
+		return nil, fmt.Errorf("no authentication method specified: provide token, client certificates, or exec configuration")
 	}
 
 	return config, nil
@@ -207,6 +256,11 @@ func (r *manifestResource) convertConnectionModelToObject(ctx context.Context, c
 			"kubeconfig_file":        types.StringType,
 			"kubeconfig_raw":         types.StringType,
 			"context":                types.StringType,
+			"token":                  types.StringType,
+			"client_certificate":     types.StringType,
+			"client_key":             types.StringType,
+			"insecure":               types.BoolType,
+			"proxy_url":              types.StringType,
 			"exec": types.ObjectType{
 				AttrTypes: map[string]attr.Type{
 					"api_version": types.StringType,

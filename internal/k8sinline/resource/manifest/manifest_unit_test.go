@@ -229,13 +229,15 @@ func TestCreateInlineConfig_ValidationErrors(t *testing.T) {
 			expect: "host is required for inline connection",
 		},
 		{
-			name: "missing CA certificate",
+			name: "missing CA without insecure",
 			conn: ClusterConnectionModel{
 				Host:                 types.StringValue("https://test.com"),
 				ClusterCACertificate: types.StringNull(),
+				Token:                types.StringValue("test-token"),
+				Insecure:             types.BoolValue(false), // Explicitly set to false
 				Exec:                 nil,
 			},
-			expect: "cluster_ca_certificate is required for inline connection",
+			expect: "cluster_ca_certificate is required for secure connections",
 		},
 		{
 			name: "invalid base64 CA",
@@ -781,4 +783,82 @@ func TestUnknownValuesHandling(t *testing.T) {
 			t.Errorf("error should mention unknown values, got: %v", err)
 		}
 	})
+}
+
+func TestCreateInlineConfig_TokenAuth(t *testing.T) {
+	r := &manifestResource{}
+
+	conn := ClusterConnectionModel{
+		Host:                 types.StringValue("https://test.example.com"),
+		ClusterCACertificate: types.StringValue(base64.StdEncoding.EncodeToString([]byte("test-ca"))),
+		Token:                types.StringValue("test-bearer-token"),
+	}
+
+	config, err := r.createInlineConfig(conn)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if config.BearerToken != "test-bearer-token" {
+		t.Errorf("expected bearer token 'test-bearer-token', got %q", config.BearerToken)
+	}
+}
+
+func TestCreateInlineConfig_ClientCertAuth(t *testing.T) {
+	r := &manifestResource{}
+
+	conn := ClusterConnectionModel{
+		Host:                 types.StringValue("https://test.example.com"),
+		ClusterCACertificate: types.StringValue(base64.StdEncoding.EncodeToString([]byte("test-ca"))),
+		ClientCertificate:    types.StringValue(base64.StdEncoding.EncodeToString([]byte("test-cert"))),
+		ClientKey:            types.StringValue(base64.StdEncoding.EncodeToString([]byte("test-key"))),
+	}
+
+	config, err := r.createInlineConfig(conn)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if string(config.TLSClientConfig.CertData) != "test-cert" {
+		t.Error("cert data mismatch")
+	}
+	if string(config.TLSClientConfig.KeyData) != "test-key" {
+		t.Error("key data mismatch")
+	}
+}
+
+func TestCreateInlineConfig_Insecure(t *testing.T) {
+	r := &manifestResource{}
+
+	conn := ClusterConnectionModel{
+		Host:     types.StringValue("https://test.example.com"),
+		Token:    types.StringValue("test-token"),
+		Insecure: types.BoolValue(true),
+	}
+
+	config, err := r.createInlineConfig(conn)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !config.TLSClientConfig.Insecure {
+		t.Error("expected insecure to be true")
+	}
+}
+
+func TestCreateInlineConfig_NoAuth(t *testing.T) {
+	r := &manifestResource{}
+
+	conn := ClusterConnectionModel{
+		Host:                 types.StringValue("https://test.example.com"),
+		ClusterCACertificate: types.StringValue(base64.StdEncoding.EncodeToString([]byte("test-ca"))),
+	}
+
+	_, err := r.createInlineConfig(conn)
+	if err == nil {
+		t.Fatal("expected error for missing auth")
+	}
+	if !strings.Contains(err.Error(), "no authentication method specified") {
+		t.Errorf("unexpected error: %v", err)
+	}
 }

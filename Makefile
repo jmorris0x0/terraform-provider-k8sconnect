@@ -106,8 +106,9 @@ oidc-setup:
 	@echo "🚀 Creating Kind cluster with OIDC config"
 	kind create cluster --name $(KIND_CLUSTER) --config=$(OIDC_DIR)/kind-oidc.yaml
 
-	@echo "🔐 Applying minimal RBAC for OIDC user"
+	@echo "🔐 Applying RBAC resources"
 	kubectl apply -f $(OIDC_DIR)/rbac.yaml
+	kubectl apply -f $(OIDC_DIR)/auth-resources.yaml
 
 	@echo "📥 Extracting kubeconfig and CA for Terraform"
 	mkdir -p $(TESTBUILD_DIR)
@@ -119,6 +120,13 @@ oidc-setup:
 	  > $(TESTBUILD_DIR)/cluster-endpoint.txt
 	kubectl config view --raw --minify \
 	  > $(TESTBUILD_DIR)/kubeconfig.yaml
+
+	@echo "🔑 Creating service account token"
+	kubectl create token test-sa -n default --duration=24h > $(TESTBUILD_DIR)/sa-token.txt
+
+	@echo "📜 Generating client certificates"
+	@chmod +x $(OIDC_DIR)/setup-certs.sh
+	@$(OIDC_DIR)/setup-certs.sh $(TESTBUILD_DIR)
 
 .PHONY: testacc
 testacc: oidc-setup
@@ -134,11 +142,17 @@ testacc: oidc-setup
 	  TF_ACC_K8S_HOST="$$(cat $(TESTBUILD_DIR)/cluster-endpoint.txt)" \
 	  TF_ACC_K8S_CA="$$(base64 < $(TESTBUILD_DIR)/mock-ca.crt | tr -d '\n')" \
 	  TF_ACC_K8S_CMD="$(OIDC_DIR)/get-token.sh" \
-	  TF_ACC_KUBECONFIG_RAW="$$(cat $(TESTBUILD_DIR)/kubeconfig.yaml)"; \
+	  TF_ACC_KUBECONFIG_RAW="$$(cat $(TESTBUILD_DIR)/kubeconfig.yaml)" \
+	  TF_ACC_K8S_TOKEN="$$(cat $(TESTBUILD_DIR)/sa-token.txt)" \
+	  TF_ACC_K8S_CLIENT_CERT="$$(base64 < $(TESTBUILD_DIR)/client.crt | tr -d '\n')" \
+	  TF_ACC_K8S_CLIENT_KEY="$$(base64 < $(TESTBUILD_DIR)/client.key | tr -d '\n')"; \
 	echo "TF_ACC_K8S_HOST=$$TF_ACC_K8S_HOST"; \
 	echo "TF_ACC_K8S_CA=$$(echo $$TF_ACC_K8S_CA | cut -c1-20)..."; \
 	echo "TF_ACC_K8S_CMD=$$TF_ACC_K8S_CMD"; \
 	echo "TF_ACC_KUBECONFIG_RAW=$$(echo $$TF_ACC_KUBECONFIG_RAW | cut -c1-20)..."; \
+	echo "TF_ACC_K8S_TOKEN=$$(echo $$TF_ACC_K8S_TOKEN | cut -c1-20)..."; \
+	echo "TF_ACC_K8S_CLIENT_CERT=$$(echo $$TF_ACC_K8S_CLIENT_CERT | cut -c1-20)..."; \
+	echo "TF_ACC_K8S_CLIENT_KEY=$$(echo $$TF_ACC_K8S_CLIENT_KEY | cut -c1-20)..."; \
 	echo "Terraform version: $$(terraform version -json | jq -r .terraform_version)"; \
 	go test -cover -v ./internal/k8sinline/... -timeout 30m -run "TestAcc"
 
@@ -209,6 +223,9 @@ coverage: oidc-setup
 	  TF_ACC_K8S_CA="$$(base64 < $(TESTBUILD_DIR)/mock-ca.crt | tr -d '\n')" \
 	  TF_ACC_K8S_CMD="$(OIDC_DIR)/get-token.sh" \
 	  TF_ACC_KUBECONFIG_RAW="$$(cat $(TESTBUILD_DIR)/kubeconfig.yaml)" \
+	  TF_ACC_K8S_TOKEN="$$(cat $(TESTBUILD_DIR)/sa-token.txt)" \
+	  TF_ACC_K8S_CLIENT_CERT="$$(base64 < $(TESTBUILD_DIR)/client.crt | tr -d '\n')" \
+	  TF_ACC_K8S_CLIENT_KEY="$$(base64 < $(TESTBUILD_DIR)/client.key | tr -d '\n')" \
 	  go test ./... -coverpkg=./... -covermode=atomic -coverprofile=$$PROFILE -count=1 ; \
 	go tool cover -func=$$PROFILE ; \
 	go tool cover -html=$$PROFILE -o coverage.html ; \

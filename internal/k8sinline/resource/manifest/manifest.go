@@ -29,6 +29,11 @@ type ClusterConnectionModel struct {
 	KubeconfigFile       types.String   `tfsdk:"kubeconfig_file"`
 	KubeconfigRaw        types.String   `tfsdk:"kubeconfig_raw"`
 	Context              types.String   `tfsdk:"context"`
+	Token                types.String   `tfsdk:"token"`
+	ClientCertificate    types.String   `tfsdk:"client_certificate"`
+	ClientKey            types.String   `tfsdk:"client_key"`
+	Insecure             types.Bool     `tfsdk:"insecure"`
+	ProxyURL             types.String   `tfsdk:"proxy_url"`
 	Exec                 *execAuthModel `tfsdk:"exec"`
 }
 
@@ -128,6 +133,30 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 						Optional:    true,
 						Sensitive:   true,
 						Description: "Context name within the provided kubeconfig (file or raw).",
+					},
+					"token": schema.StringAttribute{
+						Optional:    true,
+						Sensitive:   true,
+						Description: "Bearer token for authentication (e.g., service account token).",
+					},
+					"client_certificate": schema.StringAttribute{
+						Optional:    true,
+						Sensitive:   true,
+						Description: "PEM-encoded client certificate for authentication. Must be used with client_key.",
+					},
+					"client_key": schema.StringAttribute{
+						Optional:    true,
+						Sensitive:   true,
+						Description: "PEM-encoded client key for authentication. Must be used with client_certificate.",
+					},
+					"insecure": schema.BoolAttribute{
+						Optional:    true,
+						Description: "Skip TLS certificate verification (only for development/testing).",
+					},
+					"proxy_url": schema.StringAttribute{
+						Optional:    true,
+						Sensitive:   true,
+						Description: "HTTP/HTTPS proxy URL for cluster communication (e.g., http://proxy.corp.com:8080).",
 					},
 					"exec": schema.SingleNestedAttribute{
 						Description: "Inline exec‑auth configuration for dynamic credentials...",

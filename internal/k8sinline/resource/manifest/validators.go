@@ -70,9 +70,8 @@ func (v *clusterConnectionValidator) ValidateResource(ctx context.Context, req r
 		return
 	}
 
-	// Rest of validation logic stays the same...
-	// Check for inline mode (host + cluster_ca_certificate)
-	hasInline := !connModel.Host.IsNull() || !connModel.ClusterCACertificate.IsNull()
+	// Check for inline mode (host-based)
+	hasInline := !connModel.Host.IsNull()
 
 	// Check for kubeconfig modes
 	hasFile := !connModel.KubeconfigFile.IsNull()
@@ -85,26 +84,6 @@ func (v *clusterConnectionValidator) ValidateResource(ctx context.Context, req r
 	if hasInline {
 		modeCount++
 		activeModes = append(activeModes, "inline")
-
-		// For inline mode, both host AND cluster_ca_certificate are required
-		// Only validate this if we can actually check the values (not unknown)
-		if !connModel.Host.IsUnknown() && !connModel.ClusterCACertificate.IsUnknown() {
-			if connModel.Host.IsNull() && !connModel.ClusterCACertificate.IsNull() {
-				resp.Diagnostics.AddAttributeError(
-					path.Root("cluster_connection").AtName("host"),
-					"Missing Required Field for Inline Connection",
-					"When using inline connection mode, both 'host' and 'cluster_ca_certificate' are required.",
-				)
-			}
-
-			if connModel.ClusterCACertificate.IsNull() && !connModel.Host.IsNull() {
-				resp.Diagnostics.AddAttributeError(
-					path.Root("cluster_connection").AtName("cluster_ca_certificate"),
-					"Missing Required Field for Inline Connection",
-					"When using inline connection mode, both 'host' and 'cluster_ca_certificate' are required.",
-				)
-			}
-		}
 	}
 
 	if hasFile {
@@ -135,7 +114,7 @@ func (v *clusterConnectionValidator) ValidateResource(ctx context.Context, req r
 			path.Root("cluster_connection"),
 			"Missing Cluster Connection Configuration",
 			"Exactly one cluster connection mode must be specified:\n\n"+
-				"• **Inline mode**: Set both 'host' and 'cluster_ca_certificate'\n"+
+				"• **Inline mode**: Set 'host' with authentication\n"+
 				"• **Kubeconfig file**: Set 'kubeconfig_file'\n"+
 				"• **Kubeconfig raw**: Set 'kubeconfig_raw'",
 		)
@@ -145,10 +124,48 @@ func (v *clusterConnectionValidator) ValidateResource(ctx context.Context, req r
 			"Multiple Cluster Connection Modes Specified",
 			fmt.Sprintf("Only one cluster connection mode can be specified, but found %d: %v\n\n"+
 				"Choose exactly one:\n"+
-				"• **Inline mode**: Set both 'host' and 'cluster_ca_certificate' (remove kubeconfig settings)\n"+
+				"• **Inline mode**: Set 'host' with authentication (remove kubeconfig settings)\n"+
 				"• **Kubeconfig file**: Set 'kubeconfig_file' (remove inline and raw kubeconfig settings)\n"+
 				"• **Kubeconfig raw**: Set 'kubeconfig_raw' (remove inline and file kubeconfig settings)",
 				modeCount, activeModes),
+		)
+	}
+
+	// Additional validation for inline mode
+	if hasInline && modeCount == 1 {
+		// Validate CA cert or insecure for inline mode
+		if connModel.ClusterCACertificate.IsNull() && (connModel.Insecure.IsNull() || !connModel.Insecure.ValueBool()) {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("cluster_connection"),
+				"Missing TLS Configuration",
+				"Inline connections require either 'cluster_ca_certificate' or 'insecure = true'.",
+			)
+		}
+
+		// Validate authentication is provided
+		hasAuth := !connModel.Token.IsNull() ||
+			(!connModel.ClientCertificate.IsNull() && !connModel.ClientKey.IsNull()) ||
+			(connModel.Exec != nil && !connModel.Exec.APIVersion.IsNull())
+
+		if !hasAuth {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("cluster_connection"),
+				"Missing Authentication",
+				"Inline connections require at least one authentication method:\n"+
+					"• Bearer token: Set 'token'\n"+
+					"• Client certificates: Set both 'client_certificate' and 'client_key'\n"+
+					"• Exec auth: Configure the 'exec' block",
+			)
+		}
+	}
+
+	// Validate client certificate and key are provided together
+	if (!connModel.ClientCertificate.IsNull() && connModel.ClientKey.IsNull()) ||
+		(connModel.ClientCertificate.IsNull() && !connModel.ClientKey.IsNull()) {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("cluster_connection"),
+			"Incomplete Client Certificate Configuration",
+			"Both 'client_certificate' and 'client_key' must be provided together for client certificate authentication.",
 		)
 	}
 }
@@ -354,5 +371,9 @@ func isClusterConnectionEmpty(conn types.Object) bool {
 		connModel.ClusterCACertificate.IsNull() &&
 		connModel.KubeconfigFile.IsNull() &&
 		connModel.KubeconfigRaw.IsNull() &&
+		connModel.Token.IsNull() &&
+		connModel.ClientCertificate.IsNull() &&
+		connModel.ClientKey.IsNull() &&
+		connModel.ProxyURL.IsNull() &&
 		connModel.Exec == nil
 }
