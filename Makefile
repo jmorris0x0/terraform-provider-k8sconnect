@@ -1,10 +1,10 @@
-OIDC_DIR         := $(CURDIR)/test/oidc-e2e
-DEX_SSL_DIR      := $(OIDC_DIR)/ssl
-KIND_CLUSTER     ?= oidc-e2e
-TESTBUILD_DIR    := $(CURDIR)/.testbuild
-DEX_IMAGE        := ghcr.io/dexidp/dex:v2.42.1
-TERRAFORM_VERSION := 1.12.2
-PROVIDER_VERSION ?= 0.1.0
+OIDC_DIR          := $(CURDIR)/test/oidc-e2e
+DEX_SSL_DIR       := $(OIDC_DIR)/ssl
+KIND_CLUSTER      ?= oidc-e2e
+TESTBUILD_DIR     := $(CURDIR)/.testbuild
+DEX_IMAGE         := ghcr.io/dexidp/dex:v2.42.1
+TERRAFORM_VERSION := 1.13.0-alpha20250702
+PROVIDER_VERSION  ?= 0.1.0
 
 
 .PHONY: build
