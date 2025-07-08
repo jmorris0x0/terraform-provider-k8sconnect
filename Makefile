@@ -6,13 +6,15 @@ DEX_IMAGE         := ghcr.io/dexidp/dex:v2.42.1
 TERRAFORM_VERSION := 1.13.0-alpha20250702
 PROVIDER_VERSION  ?= 0.1.0
 
+# Build variables for version injection
+LDFLAGS := -ldflags="-w -s -X github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline.version=$(PROVIDER_VERSION)"
 
 .PHONY: build
 build:
 	@echo "🔨 Building provider binary"
 	go get -u ./...
 	go mod tidy
-	go build -o bin/terraform-provider-k8sinline .
+	go build $(LDFLAGS) -o bin/terraform-provider-k8sinline .
 
 .PHONY: test
 test:
@@ -50,7 +52,7 @@ install:
 	INSTALL_DIR=$$HOME/.terraform.d/plugins/registry.terraform.io/local/k8sinline/$(PROVIDER_VERSION)/$${TARGET_OS}_$${TARGET_ARCH}; \
 	echo "🏗️  Building for $${TARGET_OS}/$${TARGET_ARCH}..."; \
 	mkdir -p bin; \
-	if ! GOOS=$$TARGET_OS GOARCH=$$TARGET_ARCH CGO_ENABLED=0 go build -ldflags="-w -s" -o bin/$$BINARY_NAME .; then \
+	if ! GOOS=$$TARGET_OS GOARCH=$$TARGET_ARCH CGO_ENABLED=0 go build $(LDFLAGS) -o bin/$$BINARY_NAME .; then \
 		echo "❌ Build failed!"; \
 		exit 1; \
 	fi; \
