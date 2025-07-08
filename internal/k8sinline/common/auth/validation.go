@@ -42,6 +42,12 @@ func ValidateConnection(ctx context.Context, conn ClusterConnectionModel) error 
 		return fmt.Errorf("multiple cluster connection modes specified (%v): use only one", activeModes)
 	}
 
+	// Validate client certificate configuration BEFORE checking inline auth
+	// This ensures we catch mismatched cert/key errors first
+	if err := validateClientCertificates(conn); err != nil {
+		return err
+	}
+
 	// Additional validation for inline mode
 	if hasInline {
 		if err := validateInlineConnection(conn); err != nil {
@@ -54,11 +60,6 @@ func ValidateConnection(ctx context.Context, conn ClusterConnectionModel) error 
 		if err := validateExecAuth(conn.Exec); err != nil {
 			return err
 		}
-	}
-
-	// Validate client certificate configuration
-	if err := validateClientCertificates(conn); err != nil {
-		return err
 	}
 
 	return nil

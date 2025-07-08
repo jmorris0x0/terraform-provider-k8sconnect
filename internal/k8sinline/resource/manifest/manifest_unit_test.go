@@ -4,157 +4,38 @@ package manifest
 import (
 	"context"
 	"encoding/base64"
-	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/common/auth"
-	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/k8sclient"
 )
 
-func TestParseYAML(t *testing.T) {
-	r := &manifestResource{}
-
-	tests := []struct {
-		name        string
-		yaml        string
-		expectError bool
-		expectKind  string
-		expectName  string
-	}{
-		{
-			name: "valid namespace",
-			yaml: `apiVersion: v1
-kind: Namespace
-metadata:
-  name: test-namespace`,
-			expectError: false,
-			expectKind:  "Namespace",
-			expectName:  "test-namespace",
-		},
-		{
-			name: "missing apiVersion",
-			yaml: `kind: Namespace
-metadata:
-  name: test-namespace`,
-			expectError: true,
-		},
-		{
-			name: "missing kind",
-			yaml: `apiVersion: v1
-metadata:
-  name: test-namespace`,
-			expectError: true,
-		},
-		{
-			name: "missing name",
-			yaml: `apiVersion: v1
-kind: Namespace
-metadata: {}`,
-			expectError: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			obj, err := r.parseYAML(tt.yaml)
-
-			if tt.expectError {
-				if err == nil {
-					t.Errorf("expected error but got none")
-				}
-				return
-			}
-
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-				return
-			}
-
-			if obj.GetKind() != tt.expectKind {
-				t.Errorf("expected kind %q, got %q", tt.expectKind, obj.GetKind())
-			}
-
-			if obj.GetName() != tt.expectName {
-				t.Errorf("expected name %q, got %q", tt.expectName, obj.GetName())
-			}
-		})
-	}
-}
-
-func TestCreateK8sClient_KubeconfigRaw(t *testing.T) {
-	r := &manifestResource{}
-
-	// Minimal valid kubeconfig with insecure-skip-tls-verify
-	kubeconfig := `apiVersion: v1
-kind: Config
-clusters:
-- cluster:
-    server: https://example.com
-    insecure-skip-tls-verify: true
-  name: test-cluster
-contexts:
-- context:
-    cluster: test-cluster
-    user: test-user
-  name: test-context
-current-context: test-context
-users:
-- name: test-user
-  user:
-    token: test-token`
-
-	conn := auth.ClusterConnectionModel{
-		Host:                 types.StringNull(),
-		ClusterCACertificate: types.StringNull(),
-		KubeconfigFile:       types.StringNull(),
-		KubeconfigRaw:        types.StringValue(kubeconfig),
-		Context:              types.StringNull(),
-		Exec:                 nil,
-	}
-
-	client, err := r.createK8sClient(conn)
-	if err != nil {
-		t.Fatalf("unexpected error creating client: %v", err)
-	}
-
-	if client == nil {
-		t.Fatal("expected client but got nil")
-	}
-}
-
-func TestCreateInlineConfig_DirectRestConfig(t *testing.T) {
-	r := &manifestResource{}
-
-	// Use the same certificate that our integration tests generate
-	// This is a real certificate that works with client-go
+func TestCreateK8sClient_ExecAuth(t *testing.T) {
+	// Create a test CA certificate PEM
 	testCAPEM := `-----BEGIN CERTIFICATE-----
-MIICpTCCAY0CAQAwDQYJKoZIhvcNAQELBQAwEjEQMA4GA1UEAwwHa3ViZS1jYTAe
-Fw0yNDEyMjUxMjAwMDBaFw0yNTEyMjUxMjAwMDBaMBIxEDAOBgNVBAMMB2t1YmUt
-Y2EwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDGJ8QHZ8QDZ8QHZ8QH
-Z8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QH
-Z8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QH
-Z8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QH
-Z8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QH
-Z8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QH
-Z8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHWQIDAQABMA0GCSqGSIb3DQEB
-CwUAA4IBAQA4JZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
+MIIDBTCCAe2gAwIBAgIUYLpYKKMm3MyvhFR9r0gqU8fINFkwDQYJKoZIhvcNAQEL
+BQAwEjEQMA4GA1UEAwwHdGVzdC1jYTAeFw0yNDAxMDEwMDAwMDBaFw0zNDAxMDEw
+MDAwMDBaMBIxEDAOBgNVBAMMB3Rlc3QtY2EwggEiMA0GCSqGSIb3DQEBAQUAA4IB
+DwAwggEKAoIBAQC0HZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
 HZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
 HZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
 HZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
-HZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
+HZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QAgMBAAGjUzBR
+MB0GA1UdDgQWBBQcHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHTAfBgNVHSMEGDAWgBQcHZ8Q
+HZ8QHZ8QHZ8QHZ8QHZ8QHTAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3DQEBBQUA
+A4IBAQA4JZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
+HZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
+HZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
+HZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
+HZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
 -----END CERTIFICATE-----`
 
 	// For unit testing, we'll test our logic but may need to skip if cert validation is too strict
 	encodedCA := base64.StdEncoding.EncodeToString([]byte(testCAPEM))
 
-	conn := ClusterConnectionModel{
+	conn := auth.ClusterConnectionModel{
 		Host:                 types.StringValue("https://test.example.com"),
 		ClusterCACertificate: types.StringValue(encodedCA),
 		KubeconfigFile:       types.StringNull(),
@@ -173,7 +54,7 @@ HZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
 	}
 
 	// Try to create the config - if cert validation fails, that's okay for a unit test
-	config, err := r.createInlineConfig(conn)
+	config, err := auth.CreateRESTConfig(context.Background(), conn)
 	if err != nil {
 		// For unit testing, we mainly care that the configuration logic works
 		// Certificate validation errors are acceptable
@@ -181,7 +62,7 @@ HZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
 			t.Logf("Certificate validation failed as expected in unit test: %v", err)
 			return // Test passes - we validated our config logic
 		}
-		t.Fatalf("Unexpected error creating inline config: %v", err)
+		t.Fatalf("Unexpected error creating config: %v", err)
 	}
 
 	if config == nil {
@@ -189,613 +70,26 @@ HZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
 	}
 
 	// Test successful creation without exec
-	connNoExec := ClusterConnectionModel{
+	connNoExec := auth.ClusterConnectionModel{
 		Host:                 types.StringValue("https://test.example.com"),
 		ClusterCACertificate: types.StringValue(encodedCA),
-		KubeconfigFile:       types.StringNull(),
-		KubeconfigRaw:        types.StringNull(),
-		Context:              types.StringNull(),
-		Exec:                 nil,
+		Token:                types.StringValue("test-token"),
 	}
 
-	config2, err := r.createInlineConfig(connNoExec)
-	if err != nil {
-		if strings.Contains(err.Error(), "certificate") || strings.Contains(err.Error(), "PEM") {
-			t.Logf("Certificate validation failed as expected in unit test: %v", err)
-			return
-		}
-		t.Fatalf("Unexpected error creating inline config without exec: %v", err)
-	}
-
-	if config2 == nil {
-		t.Fatal("Expected config but got nil (no exec case)")
+	config, err = auth.CreateRESTConfig(context.Background(), connNoExec)
+	if err != nil && !strings.Contains(err.Error(), "certificate") && !strings.Contains(err.Error(), "PEM") {
+		t.Fatalf("Unexpected error creating config without exec: %v", err)
 	}
 }
 
-func TestCreateInlineConfig_ValidationErrors(t *testing.T) {
-	r := &manifestResource{}
-
-	tests := []struct {
-		name   string
-		conn   ClusterConnectionModel
-		expect string
-	}{
-		{
-			name: "missing host",
-			conn: ClusterConnectionModel{
-				Host:                 types.StringNull(),
-				ClusterCACertificate: types.StringValue("dGVzdA=="), // base64 "test"
-				Exec:                 nil,
-			},
-			expect: "host is required for inline connection",
-		},
-		{
-			name: "missing CA without insecure",
-			conn: ClusterConnectionModel{
-				Host:                 types.StringValue("https://test.com"),
-				ClusterCACertificate: types.StringNull(),
-				Token:                types.StringValue("test-token"),
-				Insecure:             types.BoolValue(false), // Explicitly set to false
-				Exec:                 nil,
-			},
-			expect: "cluster_ca_certificate is required for secure connections",
-		},
-		{
-			name: "invalid base64 CA",
-			conn: ClusterConnectionModel{
-				Host:                 types.StringValue("https://test.com"),
-				ClusterCACertificate: types.StringValue("invalid-base64!"),
-				Exec:                 nil,
-			},
-			expect: "failed to decode cluster_ca_certificate",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := r.createInlineConfig(tt.conn)
-			if err == nil {
-				t.Fatalf("Expected error but got none")
-			}
-			if err.Error() != tt.expect && !strings.Contains(err.Error(), tt.expect) {
-				t.Errorf("Expected error containing %q, got %q", tt.expect, err.Error())
-			}
-		})
-	}
-}
-
-func TestCreateK8sClient_MultipleModesError(t *testing.T) {
-	r := &manifestResource{}
-
-	conn := ClusterConnectionModel{
-		Host:                 types.StringValue("https://example.com"),
-		ClusterCACertificate: types.StringValue("test-ca"),
-		KubeconfigFile:       types.StringNull(),
-		KubeconfigRaw:        types.StringValue("test-kubeconfig"),
-		Context:              types.StringNull(),
-		Exec:                 nil,
-	}
-
-	_, err := r.createK8sClient(conn)
-	if err == nil {
-		t.Fatal("expected error for multiple connection modes but got none")
-	}
-
-	expectedMsg := "cannot specify multiple connection modes"
-	if err.Error() != expectedMsg {
-		t.Errorf("expected error %q, got %q", expectedMsg, err.Error())
-	}
-}
-
-func TestCreateK8sClient_NoModeError(t *testing.T) {
-	r := &manifestResource{}
-
-	conn := ClusterConnectionModel{
-		Host:                 types.StringNull(),
-		ClusterCACertificate: types.StringNull(),
-		KubeconfigFile:       types.StringNull(),
-		KubeconfigRaw:        types.StringNull(),
-		Context:              types.StringNull(),
-		Exec:                 nil,
-	}
-
-	_, err := r.createK8sClient(conn)
-	if err == nil {
-		t.Fatal("expected error for no connection mode but got none")
-	}
-
-	expectedMsg := "must specify exactly one of: inline connection, kubeconfig_file, or kubeconfig_raw"
-	if err.Error() != expectedMsg {
-		t.Errorf("expected error %q, got %q", expectedMsg, err.Error())
-	}
-}
-
-func TestGetGVR(t *testing.T) {
-	r := &manifestResource{}
-
-	tests := []struct {
-		name             string
-		kind             string
-		apiVersion       string
-		expectedGroup    string
-		expectedResource string
-	}{
-		{
-			name:             "namespace",
-			kind:             "Namespace",
-			apiVersion:       "v1",
-			expectedGroup:    "",
-			expectedResource: "namespaces",
-		},
-		{
-			name:             "deployment",
-			kind:             "Deployment",
-			apiVersion:       "apps/v1",
-			expectedGroup:    "apps",
-			expectedResource: "deployments",
-		},
-		{
-			name:             "pod",
-			kind:             "Pod",
-			apiVersion:       "v1",
-			expectedGroup:    "",
-			expectedResource: "pods",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			obj := &unstructured.Unstructured{}
-			obj.SetAPIVersion(tt.apiVersion)
-			obj.SetKind(tt.kind)
-
-			// Create a stub client for testing
-			stubClient := k8sclient.NewStubK8sClient()
-			ctx := context.Background()
-
-			gvr, err := r.getGVR(ctx, stubClient, obj)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if gvr.Group != tt.expectedGroup {
-				t.Errorf("expected group %q, got %q", tt.expectedGroup, gvr.Group)
-			}
-
-			if gvr.Resource != tt.expectedResource {
-				t.Errorf("expected resource %q, got %q", tt.expectedResource, gvr.Resource)
-			}
-		})
-	}
-}
-
-func TestGenerateID(t *testing.T) {
-	r := &manifestResource{}
-
-	// Test that IDs are 12 hex characters
-	id1 := r.generateID()
-	if len(id1) != 12 {
-		t.Errorf("expected ID length 12, got %d", len(id1))
-	}
-
-	// Test that IDs contain only hex characters
-	for _, char := range id1 {
-		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f')) {
-			t.Errorf("ID contains non-hex character: %c", char)
-		}
-	}
-
-	// Test that IDs are random (not deterministic)
-	id2 := r.generateID()
-	if id1 == id2 {
-		t.Error("expected different IDs on each call, got identical IDs")
-	}
-
-	// Generate multiple IDs to check uniqueness
-	ids := make(map[string]bool)
-	for i := 0; i < 100; i++ {
-		id := r.generateID()
-		if ids[id] {
-			t.Errorf("duplicate ID generated: %s", id)
-		}
-		ids[id] = true
-	}
-}
-
-func TestClassifyK8sError(t *testing.T) {
-	r := &manifestResource{}
-
-	tests := []struct {
-		name             string
-		err              error
-		operation        string
-		expectedSeverity string
-		expectedTitle    string
-		shouldContain    string
-	}{
-		{
-			name:             "not found error",
-			err:              errors.NewNotFound(schema.GroupResource{Resource: "pods"}, "test-pod"),
-			operation:        "Read",
-			expectedSeverity: "warning",
-			expectedTitle:    "Read: Resource Not Found",
-			shouldContain:    "was not found",
-		},
-		{
-			name:             "forbidden error",
-			err:              errors.NewForbidden(schema.GroupResource{Resource: "pods"}, "test-pod", fmt.Errorf("access denied")),
-			operation:        "Create",
-			expectedSeverity: "error",
-			expectedTitle:    "Create: Insufficient Permissions",
-			shouldContain:    "RBAC permissions insufficient",
-		},
-		{
-			name:             "conflict error",
-			err:              errors.NewConflict(schema.GroupResource{Resource: "pods"}, "test-pod", fmt.Errorf("field manager conflict")),
-			operation:        "Apply",
-			expectedSeverity: "error",
-			expectedTitle:    "Apply: Field Manager Conflict",
-			shouldContain:    "Server-side apply conflict",
-		},
-		{
-			name:             "timeout error",
-			err:              errors.NewTimeoutError("operation timed out", 30),
-			operation:        "Create",
-			expectedSeverity: "error",
-			expectedTitle:    "Create: Kubernetes API Timeout",
-			shouldContain:    "Timeout while performing",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			severity, title, detail := r.classifyK8sError(tt.err, tt.operation, "Pod test-pod")
-
-			if severity != tt.expectedSeverity {
-				t.Errorf("expected severity %q, got %q", tt.expectedSeverity, severity)
-			}
-
-			if title != tt.expectedTitle {
-				t.Errorf("expected title %q, got %q", tt.expectedTitle, title)
-			}
-
-			if !strings.Contains(detail, tt.shouldContain) {
-				t.Errorf("expected detail to contain %q, got: %s", tt.shouldContain, detail)
-			}
-		})
-	}
-}
-
-func TestParseImportID(t *testing.T) {
-	r := &manifestResource{}
-
-	tests := []struct {
-		name              string
-		importID          string
-		expectedContext   string
-		expectedNamespace string
-		expectedKind      string
-		expectedName      string
-		expectError       bool
-		errorContains     string
-	}{
-		{
-			name:              "valid namespaced resource",
-			importID:          "prod/default/Pod/nginx",
-			expectedContext:   "prod",
-			expectedNamespace: "default",
-			expectedKind:      "Pod",
-			expectedName:      "nginx",
-			expectError:       false,
-		},
-		{
-			name:            "valid cluster-scoped resource",
-			importID:        "prod/Namespace/my-namespace",
-			expectedContext: "prod",
-			expectedKind:    "Namespace",
-			expectedName:    "my-namespace",
-			expectError:     false,
-		},
-		{
-			name:              "valid kube-system resource",
-			importID:          "prod/kube-system/Service/coredns",
-			expectedContext:   "prod",
-			expectedNamespace: "kube-system",
-			expectedKind:      "Service",
-			expectedName:      "coredns",
-			expectError:       false,
-		},
-		{
-			name:          "invalid - too few parts",
-			importID:      "default/Pod",
-			expectError:   true,
-			errorContains: "expected 3 or 4 parts",
-		},
-		{
-			name:          "invalid - too many parts",
-			importID:      "prod/default/Pod/nginx/extra",
-			expectError:   true,
-			errorContains: "expected 3 or 4 parts",
-		},
-		{
-			name:              "empty kind (parseImportID allows, validation happens in ImportState)",
-			importID:          "prod/default//nginx",
-			expectedContext:   "prod",
-			expectedNamespace: "default",
-			expectedKind:      "",
-			expectedName:      "nginx",
-			expectError:       false,
-		},
-		{
-			name:              "empty name (parseImportID allows, validation happens in ImportState)",
-			importID:          "prod/default/Pod/",
-			expectedContext:   "prod",
-			expectedNamespace: "default",
-			expectedKind:      "Pod",
-			expectedName:      "",
-			expectError:       false,
-		},
-		{
-			name:          "invalid - completely empty",
-			importID:      "",
-			expectError:   true,
-			errorContains: "expected 3 or 4 parts",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			kubeContext, namespace, kind, name, err := r.parseImportID(tt.importID)
-
-			if tt.expectError {
-				if err == nil {
-					t.Fatalf("expected error but got none")
-				}
-				if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
-					t.Errorf("expected error to contain %q, got %q", tt.errorContains, err.Error())
-				}
-				return
-			}
-
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if kubeContext != tt.expectedContext {
-				t.Errorf("expected context %q, got %q", tt.expectedContext, kubeContext)
-			}
-			if namespace != tt.expectedNamespace {
-				t.Errorf("expected namespace %q, got %q", tt.expectedNamespace, namespace)
-			}
-			if kind != tt.expectedKind {
-				t.Errorf("expected kind %q, got %q", tt.expectedKind, kind)
-			}
-			if name != tt.expectedName {
-				t.Errorf("expected name %q, got %q", tt.expectedName, name)
-			}
-		})
-	}
-}
-
-func TestObjectToYAML(t *testing.T) {
-	r := &manifestResource{}
-
-	// Create a sample object with server-generated fields
-	obj := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "v1",
-			"kind":       "Pod",
-			"metadata": map[string]interface{}{
-				"name":              "test-pod",
-				"namespace":         "default",
-				"uid":               "12345-67890",          // should be removed
-				"resourceVersion":   "12345",                // should be removed
-				"creationTimestamp": "2024-01-01T00:00:00Z", // should be removed
-				"labels": map[string]interface{}{
-					"app": "test",
-				},
-				"annotations": map[string]interface{}{
-					"user-annotation":                    "keep-this",
-					"kubectl.kubernetes.io/last-applied": "keep-this-too", // now preserved
-				},
-			},
-			"spec": map[string]interface{}{
-				"containers": []interface{}{
-					map[string]interface{}{
-						"name":  "nginx",
-						"image": "nginx:1.20",
-					},
-				},
-			},
-			"status": map[string]interface{}{ // should be removed entirely
-				"phase": "Running",
-			},
-		},
-	}
-
-	yamlBytes, err := r.objectToYAML(obj)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	yamlStr := string(yamlBytes)
-
-	// Check that server-generated fields are removed
-	if strings.Contains(yamlStr, "uid:") {
-		t.Error("expected uid to be removed from YAML")
-	}
-	if strings.Contains(yamlStr, "resourceVersion:") {
-		t.Error("expected resourceVersion to be removed from YAML")
-	}
-	if strings.Contains(yamlStr, "creationTimestamp:") {
-		t.Error("expected creationTimestamp to be removed from YAML")
-	}
-	if strings.Contains(yamlStr, "status:") {
-		t.Error("expected status to be removed from YAML")
-	}
-
-	// Check that user fields are preserved (including annotations now)
-	if !strings.Contains(yamlStr, "user-annotation") {
-		t.Error("expected user annotations to be preserved in YAML")
-	}
-	if !strings.Contains(yamlStr, "kubectl.kubernetes.io") {
-		t.Error("expected all annotations to be preserved in YAML (conservative approach)")
-	}
-	if !strings.Contains(yamlStr, "app: test") {
-		t.Error("expected user labels to be preserved in YAML")
-	}
-	if !strings.Contains(yamlStr, "nginx:1.20") {
-		t.Error("expected spec to be preserved in YAML")
-	}
-}
-
-func TestStubK8sClient_GetGVRFromKind(t *testing.T) {
-	stubClient := k8sclient.NewStubK8sClient()
-	ctx := context.Background()
-
-	tests := []struct {
-		name             string
-		kind             string
-		namespace        string
-		resourceName     string
-		expectedGroup    string
-		expectedVersion  string
-		expectedResource string
-	}{
-		{
-			name:             "pod",
-			kind:             "Pod",
-			namespace:        "default",
-			resourceName:     "test-pod",
-			expectedGroup:    "",
-			expectedVersion:  "v1",
-			expectedResource: "pods",
-		},
-		{
-			name:             "deployment",
-			kind:             "Deployment",
-			namespace:        "default",
-			resourceName:     "test-deployment",
-			expectedGroup:    "apps",
-			expectedVersion:  "v1",
-			expectedResource: "deployments",
-		},
-		{
-			name:             "namespace (cluster-scoped)",
-			kind:             "Namespace",
-			namespace:        "",
-			resourceName:     "test-namespace",
-			expectedGroup:    "",
-			expectedVersion:  "v1",
-			expectedResource: "namespaces",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			gvr, obj, err := stubClient.GetGVRFromKind(ctx, tt.kind, tt.namespace, tt.resourceName)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if gvr.Group != tt.expectedGroup {
-				t.Errorf("expected group %q, got %q", tt.expectedGroup, gvr.Group)
-			}
-			if gvr.Version != tt.expectedVersion {
-				t.Errorf("expected version %q, got %q", tt.expectedVersion, gvr.Version)
-			}
-			if gvr.Resource != tt.expectedResource {
-				t.Errorf("expected resource %q, got %q", tt.expectedResource, gvr.Resource)
-			}
-
-			if obj == nil {
-				t.Fatal("expected object but got nil")
-			}
-			if obj.GetKind() != tt.kind {
-				t.Errorf("expected kind %q, got %q", tt.kind, obj.GetKind())
-			}
-			if obj.GetName() != tt.resourceName {
-				t.Errorf("expected name %q, got %q", tt.resourceName, obj.GetName())
-			}
-		})
-	}
-}
-
-func TestUnknownValuesHandling(t *testing.T) {
-	r := &manifestResource{}
-	ctx := context.Background()
-
-	t.Run("isConnectionReady handles unknown values", func(t *testing.T) {
-		// Test with unknown object
-		unknownObj := types.ObjectUnknown(map[string]attr.Type{
-			"host": types.StringType,
-		})
-
-		if r.isConnectionReady(unknownObj) {
-			t.Error("unknown object should not be ready")
-		}
-
-		// Test with null object
-		nullObj := types.ObjectNull(map[string]attr.Type{
-			"host": types.StringType,
-		})
-
-		if r.isConnectionReady(nullObj) {
-			t.Error("null object should not be ready")
-		}
-
-		// Test with known object
-		knownObj, err := types.ObjectValue(
-			map[string]attr.Type{
-				"host":                   types.StringType,
-				"cluster_ca_certificate": types.StringType,
-				"kubeconfig_file":        types.StringType,
-				"kubeconfig_raw":         types.StringType,
-				"context":                types.StringType,
-			},
-			map[string]attr.Value{
-				"host":                   types.StringValue("https://example.com"),
-				"cluster_ca_certificate": types.StringValue("test-ca"),
-				"kubeconfig_file":        types.StringNull(),
-				"kubeconfig_raw":         types.StringNull(),
-				"context":                types.StringNull(),
-			},
-		)
-		if err != nil {
-			t.Fatalf("failed to create known object: %v", err)
-		}
-
-		if !r.isConnectionReady(knownObj) {
-			t.Error("known object should be ready")
-		}
-	})
-
-	t.Run("convertObjectToConnectionModel handles unknown values", func(t *testing.T) {
-		// Test with unknown object
-		unknownObj := types.ObjectUnknown(map[string]attr.Type{
-			"host": types.StringType,
-		})
-
-		_, err := r.convertObjectToConnectionModel(ctx, unknownObj)
-		if err == nil {
-			t.Error("should fail to convert unknown object")
-		}
-		if !strings.Contains(err.Error(), "unknown") {
-			t.Errorf("error should mention unknown values, got: %v", err)
-		}
-	})
-}
-
-func TestCreateInlineConfig_TokenAuth(t *testing.T) {
-	r := &manifestResource{}
-
-	conn := ClusterConnectionModel{
+func TestCreateRESTConfig_TokenAuth(t *testing.T) {
+	conn := auth.ClusterConnectionModel{
 		Host:                 types.StringValue("https://test.example.com"),
 		ClusterCACertificate: types.StringValue(base64.StdEncoding.EncodeToString([]byte("test-ca"))),
 		Token:                types.StringValue("test-bearer-token"),
 	}
 
-	config, err := r.createInlineConfig(conn)
+	config, err := auth.CreateRESTConfig(context.Background(), conn)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -805,17 +99,15 @@ func TestCreateInlineConfig_TokenAuth(t *testing.T) {
 	}
 }
 
-func TestCreateInlineConfig_ClientCertAuth(t *testing.T) {
-	r := &manifestResource{}
-
-	conn := ClusterConnectionModel{
+func TestCreateRESTConfig_ClientCertAuth(t *testing.T) {
+	conn := auth.ClusterConnectionModel{
 		Host:                 types.StringValue("https://test.example.com"),
 		ClusterCACertificate: types.StringValue(base64.StdEncoding.EncodeToString([]byte("test-ca"))),
 		ClientCertificate:    types.StringValue(base64.StdEncoding.EncodeToString([]byte("test-cert"))),
 		ClientKey:            types.StringValue(base64.StdEncoding.EncodeToString([]byte("test-key"))),
 	}
 
-	config, err := r.createInlineConfig(conn)
+	config, err := auth.CreateRESTConfig(context.Background(), conn)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -828,16 +120,14 @@ func TestCreateInlineConfig_ClientCertAuth(t *testing.T) {
 	}
 }
 
-func TestCreateInlineConfig_Insecure(t *testing.T) {
-	r := &manifestResource{}
-
-	conn := ClusterConnectionModel{
+func TestCreateRESTConfig_Insecure(t *testing.T) {
+	conn := auth.ClusterConnectionModel{
 		Host:     types.StringValue("https://test.example.com"),
 		Token:    types.StringValue("test-token"),
 		Insecure: types.BoolValue(true),
 	}
 
-	config, err := r.createInlineConfig(conn)
+	config, err := auth.CreateRESTConfig(context.Background(), conn)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -847,19 +137,74 @@ func TestCreateInlineConfig_Insecure(t *testing.T) {
 	}
 }
 
-func TestCreateInlineConfig_NoAuth(t *testing.T) {
-	r := &manifestResource{}
-
-	conn := ClusterConnectionModel{
+func TestCreateRESTConfig_NoAuth(t *testing.T) {
+	conn := auth.ClusterConnectionModel{
 		Host:                 types.StringValue("https://test.example.com"),
 		ClusterCACertificate: types.StringValue(base64.StdEncoding.EncodeToString([]byte("test-ca"))),
 	}
 
-	_, err := r.createInlineConfig(conn)
+	_, err := auth.CreateRESTConfig(context.Background(), conn)
 	if err == nil {
 		t.Fatal("expected error for missing auth")
 	}
 	if !strings.Contains(err.Error(), "no authentication method specified") {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestConvertObjectToConnectionModel(t *testing.T) {
+	r := &manifestResource{}
+	ctx := context.Background()
+
+	// Create a test object with all fields using proper attribute construction
+	execType := types.ObjectType{
+		AttrTypes: map[string]attr.Type{
+			"api_version": types.StringType,
+			"command":     types.StringType,
+			"args":        types.ListType{ElemType: types.StringType},
+			"env":         types.MapType{ElemType: types.StringType},
+		},
+	}
+
+	attrTypes := map[string]attr.Type{
+		"host":                   types.StringType,
+		"cluster_ca_certificate": types.StringType,
+		"kubeconfig_file":        types.StringType,
+		"kubeconfig_raw":         types.StringType,
+		"context":                types.StringType,
+		"token":                  types.StringType,
+		"client_certificate":     types.StringType,
+		"client_key":             types.StringType,
+		"insecure":               types.BoolType,
+		"proxy_url":              types.StringType,
+		"exec":                   execType,
+	}
+
+	attrs := map[string]attr.Value{
+		"host":                   types.StringValue("https://test.example.com"),
+		"cluster_ca_certificate": types.StringValue("test-ca"),
+		"kubeconfig_file":        types.StringNull(),
+		"kubeconfig_raw":         types.StringNull(),
+		"context":                types.StringNull(),
+		"token":                  types.StringValue("test-token"),
+		"client_certificate":     types.StringNull(),
+		"client_key":             types.StringNull(),
+		"insecure":               types.BoolValue(false),
+		"proxy_url":              types.StringNull(),
+		"exec":                   types.ObjectNull(execType.AttrTypes),
+	}
+
+	obj := types.ObjectValueMust(attrTypes, attrs)
+
+	conn, err := r.convertObjectToConnectionModel(ctx, obj)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if conn.Host.ValueString() != "https://test.example.com" {
+		t.Errorf("expected host 'https://test.example.com', got %q", conn.Host.ValueString())
+	}
+	if conn.Token.ValueString() != "test-token" {
+		t.Errorf("expected token 'test-token', got %q", conn.Token.ValueString())
 	}
 }

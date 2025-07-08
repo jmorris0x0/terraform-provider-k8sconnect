@@ -16,30 +16,30 @@ func TestIsClusterConnectionEmpty(t *testing.T) {
 
 	cases := []struct {
 		name     string
-		conn     ClusterConnectionModel
+		conn     auth.ClusterConnectionModel
 		expected bool
 	}{
-		{"completely empty", ClusterConnectionModel{}, true},
-		{"host only", ClusterConnectionModel{
+		{"completely empty", auth.ClusterConnectionModel{}, true},
+		{"host only", auth.ClusterConnectionModel{
 			Host: types.StringValue("https://example.com"),
 		}, false},
-		{"cluster_ca_certificate only", ClusterConnectionModel{
+		{"cluster_ca_certificate only", auth.ClusterConnectionModel{
 			ClusterCACertificate: types.StringValue("cert-bytes"),
 		}, false},
-		{"kubeconfig_file only", ClusterConnectionModel{
+		{"kubeconfig_file only", auth.ClusterConnectionModel{
 			KubeconfigFile: types.StringValue("/path/to/config"),
 		}, false},
-		{"kubeconfig_raw only", ClusterConnectionModel{
+		{"kubeconfig_raw only", auth.ClusterConnectionModel{
 			KubeconfigRaw: types.StringValue("raw-config"),
 		}, false},
-		{"exec present", ClusterConnectionModel{
-			Exec: &execAuthModel{
+		{"exec present", auth.ClusterConnectionModel{
+			Exec: &auth.ExecAuthModel{
 				APIVersion: types.StringValue("v1"),
 				Command:    types.StringValue("kubectl"),
 				Args:       []types.String{types.StringValue("version")},
 			},
 		}, false},
-		{"all nulls", ClusterConnectionModel{
+		{"all nulls", auth.ClusterConnectionModel{
 			Host:                 types.StringNull(),
 			ClusterCACertificate: types.StringNull(),
 			KubeconfigFile:       types.StringNull(),
@@ -50,7 +50,7 @@ func TestIsClusterConnectionEmpty(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			obj, err := r.convertConnectionModelToObject(ctx, tc.conn)
+			obj, err := r.convertConnectionToObject(ctx, tc.conn)
 			if err != nil {
 				t.Fatalf("conversion failed: %v", err)
 			}
@@ -63,7 +63,7 @@ func TestIsClusterConnectionEmpty(t *testing.T) {
 
 func TestConnectionModeDetection(t *testing.T) {
 	// inline
-	inline := ClusterConnectionModel{
+	inline := auth.ClusterConnectionModel{
 		Host:                 types.StringValue("https://example.com"),
 		ClusterCACertificate: types.StringValue("ca"),
 	}
@@ -79,7 +79,7 @@ func TestConnectionModeDetection(t *testing.T) {
 }
 
 func TestExecFieldCompleteness(t *testing.T) {
-	exec := &execAuthModel{
+	exec := &auth.ExecAuthModel{
 		APIVersion: types.StringValue("client.authentication.k8s.io/v1"),
 		// missing command and args
 	}
@@ -124,11 +124,11 @@ func TestConfigValidatorsSlice(t *testing.T) {
 	}
 }
 
-func hasInlineMode(c ClusterConnectionModel) bool {
+func hasInlineMode(c auth.ClusterConnectionModel) bool {
 	return !c.Host.IsNull() || !c.ClusterCACertificate.IsNull()
 }
 
-func countModes(c ClusterConnectionModel) int {
+func countModes(c auth.ClusterConnectionModel) int {
 	n := 0
 	if hasInlineMode(c) {
 		n++
@@ -142,7 +142,7 @@ func countModes(c ClusterConnectionModel) int {
 	return n
 }
 
-func execMissingFields(e *execAuthModel) []string {
+func execMissingFields(e *auth.ExecAuthModel) []string {
 	var m []string
 	if e == nil {
 		return []string{"api_version", "command", "args"}
