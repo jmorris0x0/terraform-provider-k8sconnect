@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/k8sclient"
 )
 
@@ -109,7 +110,7 @@ users:
   user:
     token: test-token`
 
-	conn := ClusterConnectionModel{
+	conn := auth.ClusterConnectionModel{
 		Host:                 types.StringNull(),
 		ClusterCACertificate: types.StringNull(),
 		KubeconfigFile:       types.StringNull(),
@@ -159,7 +160,7 @@ HZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
 		KubeconfigFile:       types.StringNull(),
 		KubeconfigRaw:        types.StringNull(),
 		Context:              types.StringNull(),
-		Exec: &execAuthModel{
+		Exec: &auth.ExecAuthModel{
 			APIVersion: types.StringValue("client.authentication.k8s.io/v1"),
 			Command:    types.StringValue("aws"),
 			Args: []types.String{

@@ -88,7 +88,7 @@ func (p *k8sinlineProvider) getCachedClient(conn auth.ClusterConnectionModel) (k
 		return nil, fmt.Errorf("failed to create REST config: %w", err)
 	}
 
-	client, err := k8sclient.NewK8sClient(config)
+	client, err := k8sclient.NewDynamicK8sClient(config)
 	if err != nil {
 		return nil, err
 	}

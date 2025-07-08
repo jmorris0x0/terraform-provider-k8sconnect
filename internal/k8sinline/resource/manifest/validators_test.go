@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/common/auth"
 )
 
 func TestIsClusterConnectionEmpty(t *testing.T) {

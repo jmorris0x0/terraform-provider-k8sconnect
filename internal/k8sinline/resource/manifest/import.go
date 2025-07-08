@@ -229,7 +229,7 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 	importedData := manifestResourceModel{
 		ID:                     types.StringValue(resourceID),
 		YAMLBody:               types.StringValue(string(yamlBytes)),
-		ClusterConnection:      connObj,
+		ClusterConnection:      connectionObj,
 		DeleteProtection:       types.BoolValue(false),
 		ManagedStateProjection: types.StringValue(projectionJSON), // NEW: Set the projection
 	}
