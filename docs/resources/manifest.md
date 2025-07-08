@@ -36,12 +36,17 @@ Applies a single‑document Kubernetes YAML manifest to a cluster, with per‑re
 
 Optional:
 
+- `client_certificate` (String, Sensitive) PEM-encoded client certificate for authentication. Must be used with client_key.
+- `client_key` (String, Sensitive) PEM-encoded client key for authentication. Must be used with client_certificate.
 - `cluster_ca_certificate` (String, Sensitive) PEM‑encoded CA certificate bundle for the API server. Required for inline mode.
 - `context` (String, Sensitive) Context name within the provided kubeconfig (file or raw).
 - `exec` (Attributes, Sensitive) Inline exec‑auth configuration for dynamic credentials... (see [below for nested schema](#nestedatt--cluster_connection--exec))
 - `host` (String, Sensitive) Kubernetes API server endpoint (e.g. https://example.com). Required for inline mode.
+- `insecure` (Boolean) Skip TLS certificate verification (only for development/testing).
 - `kubeconfig_file` (String, Sensitive) Filesystem path to an existing kubeconfig file. Always supports live diffing.
 - `kubeconfig_raw` (String, Sensitive) Raw kubeconfig YAML content (CI‑friendly).
+- `proxy_url` (String, Sensitive) HTTP/HTTPS proxy URL for cluster communication (e.g., http://proxy.corp.com:8080).
+- `token` (String, Sensitive) Bearer token for authentication (e.g., service account token).
 
 <a id="nestedatt--cluster_connection--exec"></a>
 ### Nested Schema for `cluster_connection.exec`

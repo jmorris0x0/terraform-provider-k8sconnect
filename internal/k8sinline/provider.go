@@ -105,7 +105,6 @@ func (p *k8sinlineProvider) getCachedClient(conn auth.ClusterConnectionModel) (k
 }
 
 // generateCacheKey creates a unique key for caching clients based on connection config.
-// Updated to use the common auth model.
 func (p *k8sinlineProvider) generateCacheKey(conn auth.ClusterConnectionModel) string {
 	h := sha256.New()
 
