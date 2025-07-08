@@ -12,6 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 
+	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/datasource/yaml_split"
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/k8sclient"
 	manifestres "github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/resource/manifest"
@@ -64,48 +65,16 @@ func (p *k8sinlineProvider) DataSources(ctx context.Context) []func() datasource
 }
 
 func (p *k8sinlineProvider) Schema(ctx context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
-	// no provider‑level schema
+	// no provider‑level schema yet
 }
 
-// ConnectionConfig represents the essential connection details used for caching
-type ConnectionConfig struct {
-	Host                 string
-	ClusterCACertificate string
-	KubeconfigFile       string
-	KubeconfigRaw        string
-	Context              string
-	ExecAPIVersion       string
-	ExecCommand          string
-	ExecArgs             []string
-}
+// getCachedClient returns a cached Kubernetes client for the given connection.
+// This now uses the common auth package.
+func (p *k8sinlineProvider) getCachedClient(conn auth.ClusterConnectionModel) (k8sclient.K8sClient, error) {
+	// Generate cache key based on connection config
+	cacheKey := p.generateCacheKey(conn)
 
-// generateCacheKey creates a stable hash from connection configuration
-func (p *k8sinlineProvider) generateCacheKey(config ConnectionConfig) string {
-	// Create a deterministic string from all connection parameters
-	data := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%v",
-		config.Host,
-		config.ClusterCACertificate,
-		config.KubeconfigFile,
-		config.KubeconfigRaw,
-		config.Context,
-		config.ExecAPIVersion,
-		config.ExecCommand,
-		config.ExecArgs,
-	)
-
-	hash := sha256.Sum256([]byte(data))
-	return hex.EncodeToString(hash[:])
-}
-
-// getCachedClient returns a cached client or creates a new one
-func (p *k8sinlineProvider) getCachedClient(conn manifestres.ClusterConnectionModel) (k8sclient.K8sClient, error) {
-	// Convert to our internal config format
-	config := p.convertToConnectionConfig(conn)
-
-	// Generate cache key
-	cacheKey := p.generateCacheKey(config)
-
-	// Try to get existing client
+	// Check cache first
 	p.cacheMutex.RLock()
 	if client, exists := p.clientCache[cacheKey]; exists {
 		p.cacheMutex.RUnlock()
@@ -113,13 +82,18 @@ func (p *k8sinlineProvider) getCachedClient(conn manifestres.ClusterConnectionMo
 	}
 	p.cacheMutex.RUnlock()
 
-	// Create new client - delegate to the manifest resource's existing logic
-	client, err := manifestres.CreateK8sClientFromConnection(conn)
+	// Create new client using common auth
+	config, err := auth.CreateRESTConfig(context.Background(), conn)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create cached client: %w", err)
+		return nil, fmt.Errorf("failed to create REST config: %w", err)
 	}
 
-	// Cache the new client
+	client, err := k8sclient.NewK8sClient(config)
+	if err != nil {
+		return nil, err
+	}
+
+	// Cache the client
 	p.cacheMutex.Lock()
 	p.clientCache[cacheKey] = client
 	p.cacheMutex.Unlock()
@@ -127,58 +101,35 @@ func (p *k8sinlineProvider) getCachedClient(conn manifestres.ClusterConnectionMo
 	return client, nil
 }
 
-// convertToConnectionConfig extracts essential connection details for caching
-func (p *k8sinlineProvider) convertToConnectionConfig(conn manifestres.ClusterConnectionModel) ConnectionConfig {
-	config := ConnectionConfig{}
+// generateCacheKey creates a unique key for caching clients based on connection config.
+// Updated to use the common auth model.
+func (p *k8sinlineProvider) generateCacheKey(conn auth.ClusterConnectionModel) string {
+	h := sha256.New()
 
-	if !conn.Host.IsNull() {
-		config.Host = conn.Host.ValueString()
-	}
-	if !conn.ClusterCACertificate.IsNull() {
-		config.ClusterCACertificate = conn.ClusterCACertificate.ValueString()
-	}
-	if !conn.KubeconfigFile.IsNull() {
-		config.KubeconfigFile = conn.KubeconfigFile.ValueString()
-	}
-	if !conn.KubeconfigRaw.IsNull() {
-		config.KubeconfigRaw = conn.KubeconfigRaw.ValueString()
-	}
-	if !conn.Context.IsNull() {
-		config.Context = conn.Context.ValueString()
-	}
+	// Hash all connection fields
+	h.Write([]byte(conn.Host.ValueString()))
+	h.Write([]byte(conn.ClusterCACertificate.ValueString()))
+	h.Write([]byte(conn.KubeconfigFile.ValueString()))
+	h.Write([]byte(conn.KubeconfigRaw.ValueString()))
+	h.Write([]byte(conn.Context.ValueString()))
+	h.Write([]byte(conn.Token.ValueString()))
+	h.Write([]byte(conn.ClientCertificate.ValueString()))
+	h.Write([]byte(conn.ClientKey.ValueString()))
+	h.Write([]byte(fmt.Sprintf("%v", conn.Insecure.ValueBool())))
+	h.Write([]byte(conn.ProxyURL.ValueString()))
 
-	// Handle exec config
+	// Hash exec config if present
 	if conn.Exec != nil {
-		if !conn.Exec.APIVersion.IsNull() {
-			config.ExecAPIVersion = conn.Exec.APIVersion.ValueString()
+		h.Write([]byte(conn.Exec.APIVersion.ValueString()))
+		h.Write([]byte(conn.Exec.Command.ValueString()))
+		for _, arg := range conn.Exec.Args {
+			h.Write([]byte(arg.ValueString()))
 		}
-		if !conn.Exec.Command.IsNull() {
-			config.ExecCommand = conn.Exec.Command.ValueString()
-		}
-		if len(conn.Exec.Args) > 0 {
-			config.ExecArgs = make([]string, len(conn.Exec.Args))
-			for i, arg := range conn.Exec.Args {
-				config.ExecArgs[i] = arg.ValueString()
-			}
+		for k, v := range conn.Exec.Env {
+			h.Write([]byte(k))
+			h.Write([]byte(v.ValueString()))
 		}
 	}
 
-	return config
-}
-
-// GetCacheStats returns cache statistics for debugging/monitoring
-func (p *k8sinlineProvider) GetCacheStats() map[string]interface{} {
-	p.cacheMutex.RLock()
-	defer p.cacheMutex.RUnlock()
-
-	return map[string]interface{}{
-		"cached_clients": len(p.clientCache),
-		"cache_keys": func() []string {
-			keys := make([]string, 0, len(p.clientCache))
-			for k := range p.clientCache {
-				keys = append(keys, k[:8]+"...") // Only show first 8 chars for security
-			}
-			return keys
-		}(),
-	}
+	return hex.EncodeToString(h.Sum(nil))
 }

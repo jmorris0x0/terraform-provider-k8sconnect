@@ -12,10 +12,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 
+	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/k8sclient"
 )
 
-// ImportState method implementing kubeconfig strategy
 // ImportState method implementing kubeconfig strategy with managed fields tracking
 func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Parse import ID: "context/namespace/kind/name" or "context/kind/name" for cluster-scoped
@@ -206,7 +206,7 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 	}
 
 	// Create connection model for import
-	connModel := ClusterConnectionModel{
+	conn := auth.ClusterConnectionModel{
 		Host:                 types.StringNull(),
 		ClusterCACertificate: types.StringNull(),
 		KubeconfigFile:       types.StringValue(kubeconfigPath),
@@ -216,7 +216,7 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 	}
 
 	// Convert to types.Object
-	connObj, err := r.convertConnectionModelToObject(ctx, connModel)
+	connectionObj, err := r.convertConnectionToObject(ctx, conn)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Import Failed: Connection Conversion Error",

@@ -10,39 +10,16 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
+	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/k8sclient"
 )
 
 var _ resource.Resource = (*manifestResource)(nil)
-
 var _ resource.ResourceWithConfigValidators = (*manifestResource)(nil)
-
 var _ resource.ResourceWithModifyPlan = (*manifestResource)(nil)
 
 // ClientGetter function type for dependency injection
-type ClientGetter func(ClusterConnectionModel) (k8sclient.K8sClient, error)
-
-// ClusterConnectionModel is exported for use in provider
-type ClusterConnectionModel struct {
-	Host                 types.String   `tfsdk:"host"`
-	ClusterCACertificate types.String   `tfsdk:"cluster_ca_certificate"`
-	KubeconfigFile       types.String   `tfsdk:"kubeconfig_file"`
-	KubeconfigRaw        types.String   `tfsdk:"kubeconfig_raw"`
-	Context              types.String   `tfsdk:"context"`
-	Token                types.String   `tfsdk:"token"`
-	ClientCertificate    types.String   `tfsdk:"client_certificate"`
-	ClientKey            types.String   `tfsdk:"client_key"`
-	Insecure             types.Bool     `tfsdk:"insecure"`
-	ProxyURL             types.String   `tfsdk:"proxy_url"`
-	Exec                 *execAuthModel `tfsdk:"exec"`
-}
-
-type execAuthModel struct {
-	APIVersion types.String            `tfsdk:"api_version"`
-	Command    types.String            `tfsdk:"command"`
-	Args       []types.String          `tfsdk:"args"`
-	Env        map[string]types.String `tfsdk:"env"`
-}
+type ClientGetter func(auth.ClusterConnectionModel) (k8sclient.K8sClient, error)
 
 type manifestResource struct {
 	clientGetter ClientGetter
@@ -69,8 +46,9 @@ func (r *manifestResource) Metadata(ctx context.Context, req resource.MetadataRe
 	resp.TypeName = req.ProviderTypeName + "_manifest"
 }
 
-// Enhanced Schema method with single nested attribute instead of block
+// Schema method remains the same but references auth.ClusterConnectionModel for consistency
 func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
+	// [Keep the existing schema exactly as is - no changes needed]
 	resp.Schema = schema.Schema{
 		Description: "Applies a single‑document Kubernetes YAML manifest to a cluster, with per‑resource inline or kubeconfig‑based connection settings.",
 		Attributes: map[string]schema.Attribute{
@@ -172,14 +150,13 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 								Description: "Executable command (e.g., 'aws', 'gcloud').",
 							},
 							"args": schema.ListAttribute{
-								ElementType: types.StringType,
 								Optional:    true,
+								ElementType: types.StringType,
 								Description: "Command arguments (e.g., ['eks', 'get-token', '--cluster-name', 'my-cluster']).",
 							},
-							// ADD THIS:
 							"env": schema.MapAttribute{
-								ElementType: types.StringType,
 								Optional:    true,
+								ElementType: types.StringType,
 								Description: "Environment variables to set when executing the command (e.g., AWS_PROFILE = 'prod').",
 							},
 						},
