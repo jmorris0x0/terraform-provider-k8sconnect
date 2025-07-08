@@ -18,6 +18,9 @@ import (
 	manifestres "github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/resource/manifest"
 )
 
+// version is set by ldflags during build
+var version string = "dev"
+
 // Ensure we implement the provider interface
 var _ provider.Provider = (*k8sinlineProvider)(nil)
 
@@ -37,7 +40,7 @@ func New() provider.Provider {
 
 func (p *k8sinlineProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
 	resp.TypeName = "k8sinline"
-	resp.Version = "0.1.0"
+	resp.Version = version
 }
 
 func (p *k8sinlineProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
