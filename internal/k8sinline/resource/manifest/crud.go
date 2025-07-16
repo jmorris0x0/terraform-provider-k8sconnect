@@ -8,6 +8,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/k8sclient"
 	"k8s.io/apimachinery/pkg/api/errors"
 )
@@ -22,7 +23,8 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 	}
 
 	// Check if cluster connection is ready (handles unknown values during planning)
-	if !r.isConnectionReady(data.ClusterConnection) {
+	// Note: Now we need to check if we have ANY connection (resource OR provider level)
+	if !data.ClusterConnection.IsNull() && !r.isConnectionReady(data.ClusterConnection) {
 		resp.Diagnostics.AddError(
 			"Cluster Connection Not Ready",
 			"Cluster connection contains unknown values. This usually happens during planning when dependencies are not yet resolved.",
@@ -30,11 +32,59 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	// Convert to connection model
-	conn, err := r.convertObjectToConnectionModel(ctx, data.ClusterConnection)
-	if err != nil {
-		resp.Diagnostics.AddError("Connection Conversion Failed", err.Error())
-		return
+	// Try to resolve connection (resource level or provider level)
+	var effectiveConn auth.ClusterConnectionModel
+
+	if r.connResolver != nil {
+		// We have a resolver, use it to get effective connection
+		var resourceConn *auth.ClusterConnectionModel
+
+		// Convert resource-level connection if present
+		if !data.ClusterConnection.IsNull() && !data.ClusterConnection.IsUnknown() {
+			conn, err := r.convertObjectToConnectionModel(ctx, data.ClusterConnection)
+			if err != nil {
+				resp.Diagnostics.AddError("Connection Conversion Failed", err.Error())
+				return
+			}
+			resourceConn = &conn
+		}
+
+		// Resolve effective connection
+		resolvedConn, err := r.connResolver.ResolveConnection(resourceConn)
+		if err != nil {
+			resp.Diagnostics.AddError("No Cluster Connection Available",
+				fmt.Sprintf("%s\n\nYou can configure a connection either at the provider level or in the resource's cluster_connection block.", err.Error()))
+			return
+		}
+		effectiveConn = resolvedConn
+
+		// IMPORTANT: If using provider connection, store it in state
+		if resourceConn == nil {
+			// Resource is using provider-level connection
+			// We need to store it to prevent accidental cluster switches
+			connObj, err := r.convertConnectionToObject(ctx, effectiveConn)
+			if err != nil {
+				resp.Diagnostics.AddError("Failed to store connection", err.Error())
+				return
+			}
+			data.ClusterConnection = connObj
+
+			tflog.Info(ctx, "using provider-level connection, storing in resource state")
+		}
+	} else {
+		// Fallback for old behavior (no resolver)
+		if data.ClusterConnection.IsNull() {
+			resp.Diagnostics.AddError("No Cluster Connection",
+				"cluster_connection is required when provider-level connection is not configured")
+			return
+		}
+
+		conn, err := r.convertObjectToConnectionModel(ctx, data.ClusterConnection)
+		if err != nil {
+			resp.Diagnostics.AddError("Connection Conversion Failed", err.Error())
+			return
+		}
+		effectiveConn = conn
 	}
 
 	// Parse YAML into unstructured object
@@ -44,8 +94,8 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	// Create K8s client from cluster connection (now with caching)
-	client, err := r.clientGetter(conn)
+	// Create K8s client using the resolved connection
+	client, err := r.clientGetter(effectiveConn)
 	if err != nil {
 		resp.Diagnostics.AddError("Connection Failed", fmt.Sprintf("Failed to create Kubernetes client: %s", err))
 		return
@@ -157,28 +207,25 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 
 	// Check if cluster connection is ready
 	if !r.isConnectionReady(data.ClusterConnection) {
-		tflog.Info(ctx, "Skipping Read due to unknown connection values", map[string]interface{}{
-			"resource_id":        data.ID.ValueString(),
-			"connection_unknown": true,
-		})
+		tflog.Info(ctx, "Skipping Read due to unknown connection values")
 		return
 	}
 
-	// Convert to connection model
+	// Get connection from state (this already has the effective connection stored)
 	conn, err := r.convertObjectToConnectionModel(ctx, data.ClusterConnection)
 	if err != nil {
 		resp.Diagnostics.AddError("Connection Conversion Failed", err.Error())
 		return
 	}
 
-	// Parse YAML to get object metadata
+	// Parse the stored YAML to get resource info
 	obj, err := r.parseYAML(data.YAMLBody.ValueString())
 	if err != nil {
-		resp.Diagnostics.AddError("Invalid YAML", fmt.Sprintf("Failed to parse YAML: %s", err))
+		resp.Diagnostics.AddError("Invalid YAML in State", fmt.Sprintf("Failed to parse stored YAML: %s", err))
 		return
 	}
 
-	// Create K8s client from cluster connection (cached)
+	// Create K8s client
 	client, err := r.clientGetter(conn)
 	if err != nil {
 		resp.Diagnostics.AddError("Connection Failed", fmt.Sprintf("Failed to create Kubernetes client: %s", err))
@@ -188,132 +235,127 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 	// Get GVR for the object
 	gvr, err := r.getGVR(ctx, client, obj)
 	if err != nil {
-		resp.Diagnostics.AddError("Resource Discovery Failed", fmt.Sprintf("Failed to determine resource type: %s", err))
+		// If we can't determine resource type, resource might be gone
+		tflog.Info(ctx, "Failed to determine resource type during Read", map[string]interface{}{
+			"error": err.Error(),
+			"kind":  obj.GetKind(),
+		})
+		resp.State.RemoveResource(ctx)
 		return
 	}
 
-	// Check if object still exists
+	// Get current state from cluster
 	currentObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
 	if err != nil {
 		if errors.IsNotFound(err) {
-			// Object no longer exists - remove from state
+			tflog.Info(ctx, "Resource not found, removing from state", map[string]interface{}{
+				"kind":      obj.GetKind(),
+				"name":      obj.GetName(),
+				"namespace": obj.GetNamespace(),
+			})
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		// Other errors should be reported
-		resourceDesc := fmt.Sprintf("%s %s", obj.GetKind(), obj.GetName())
-		severity, title, detail := r.classifyK8sError(err, "Read", resourceDesc)
-		if severity == "warning" {
-			resp.Diagnostics.AddWarning(title, detail)
+		resp.Diagnostics.AddError("Failed to read resource", fmt.Sprintf("Failed to get resource from cluster: %s", err))
+		return
+	}
+
+	// Verify ownership
+	currentID := r.getOwnershipID(currentObj)
+	expectedID := data.ID.ValueString()
+
+	if currentID != expectedID {
+		if currentID == "" {
+			resp.Diagnostics.AddError(
+				"Resource Ownership Lost",
+				fmt.Sprintf("The %s '%s' exists but is no longer managed by this Terraform resource. "+
+					"The ownership annotations have been removed. "+
+					"Use 'terraform import' to re-adopt this resource or delete it from your configuration.",
+					obj.GetKind(), obj.GetName()),
+			)
 		} else {
-			resp.Diagnostics.AddError(title, detail)
+			resp.Diagnostics.AddError(
+				"Resource Managed by Different Terraform Resource",
+				fmt.Sprintf("The %s '%s' is now managed by a different Terraform resource (ID: %s). "+
+					"Remove this resource from your configuration or use 'terraform import -force' to take ownership.",
+					obj.GetKind(), obj.GetName(), currentID),
+			)
 		}
+		resp.State.RemoveResource(ctx)
 		return
 	}
 
-	// Check ownership - but ONLY validate ID match, not treat as conflict
-	existingID := r.getOwnershipID(currentObj)
-	if existingID == "" {
-		// Resource exists but has no ownership annotation
-		// This could happen if annotations were stripped
-		// Re-add our ownership annotation during next apply
-		tflog.Warn(ctx, "resource missing ownership annotation", map[string]interface{}{
-			"id":   data.ID.ValueString(),
-			"kind": obj.GetKind(),
-			"name": obj.GetName(),
-		})
-		// Continue with read - don't treat as error
-	} else if existingID != data.ID.ValueString() {
-		// Different owner - this is a real conflict
-		resp.Diagnostics.AddError(
-			"Resource Ownership Conflict",
-			fmt.Sprintf("Resource is managed by different k8sinline resource (Terraform ID: %s)", existingID),
-		)
-		return
-	}
-
-	// NEW: Extract paths from the yaml_body to know what we manage
-	paths := extractFieldPaths(obj.Object, "")
-
-	// NEW: Project current Kubernetes state for our managed fields
-	projection, err := projectFields(currentObj.Object, paths)
-	if err != nil {
-		resp.Diagnostics.AddError("Projection Failed", fmt.Sprintf("Failed to project managed fields: %s", err))
-		return
-	}
-
-	// NEW: Update the projection in state
-	projectionJSON, err := toJSON(projection)
-	if err != nil {
-		resp.Diagnostics.AddError("JSON Conversion Failed", fmt.Sprintf("Failed to convert projection to JSON: %s", err))
-		return
-	}
-
-	data.ManagedStateProjection = types.StringValue(projectionJSON)
-
-	tflog.Debug(ctx, "Updated managed state projection during read", map[string]interface{}{
-		"path_count":      len(paths),
-		"projection_size": len(projectionJSON),
+	// Resource exists and we own it - state remains unchanged
+	tflog.Trace(ctx, "Read completed successfully", map[string]interface{}{
+		"id":   data.ID.ValueString(),
+		"kind": obj.GetKind(),
+		"name": obj.GetName(),
 	})
 
-	// Object exists - keep current state
+	// Set the state (unchanged)
 	diags = resp.State.Set(ctx, &data)
 	resp.Diagnostics.Append(diags...)
 }
 
 func (r *manifestResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var data manifestResourceModel
-	var configData manifestResourceModel
+	var plan, state manifestResourceModel
 
-	// Get current state
-	diags := req.State.Get(ctx, &data)
+	// Get both plan and current state
+	diags := req.Plan.Get(ctx, &plan)
+	resp.Diagnostics.Append(diags...)
+	diags = req.State.Get(ctx, &state)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	// Get desired configuration
-	diags = req.Config.Get(ctx, &configData)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
+	// Check if connection is changing
+	if r.connResolver != nil && !plan.ClusterConnection.Equal(state.ClusterConnection) {
+		// Connection is changing - verify it's safe
+		oldConn, err := r.convertObjectToConnectionModel(ctx, state.ClusterConnection)
+		if err != nil {
+			resp.Diagnostics.AddError("Failed to parse old connection", err.Error())
+			return
+		}
+
+		newConn, err := r.convertObjectToConnectionModel(ctx, plan.ClusterConnection)
+		if err != nil {
+			resp.Diagnostics.AddError("Failed to parse new connection", err.Error())
+			return
+		}
+
+		// Use resolver to check if this targets a different cluster
+		if err := r.connResolver.ValidateConnectionChange(oldConn, newConn); err != nil {
+			resp.Diagnostics.AddError("Connection Change Blocked", err.Error())
+			return
+		}
 	}
 
-	// Check if cluster connection is ready
-	if !r.isConnectionReady(configData.ClusterConnection) {
-		resp.Diagnostics.AddError(
-			"Cluster Connection Not Ready",
-			"Cannot update resource: cluster connection contains unknown values.",
-		)
-		return
-	}
-
-	// Use connection from config (which may have changed)
-	conn, err := r.convertObjectToConnectionModel(ctx, configData.ClusterConnection)
+	// Get connection from plan (uses the stored effective connection)
+	conn, err := r.convertObjectToConnectionModel(ctx, plan.ClusterConnection)
 	if err != nil {
 		resp.Diagnostics.AddError("Connection Conversion Failed", err.Error())
 		return
 	}
 
-	// Parse YAML
-	obj, err := r.parseYAML(configData.YAMLBody.ValueString())
+	// Parse the YAML
+	obj, err := r.parseYAML(plan.YAMLBody.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Invalid YAML", fmt.Sprintf("Failed to parse YAML: %s", err))
 		return
 	}
 
-	// Create K8s client with new connection
+	// Ensure the resource has our ownership annotation with the correct ID
+	r.setOwnershipAnnotation(obj, state.ID.ValueString())
+
+	// Create K8s client
 	client, err := r.clientGetter(conn)
 	if err != nil {
-		resp.Diagnostics.AddError("Connection Failed",
-			fmt.Sprintf("Failed to create Kubernetes client: %s", err))
+		resp.Diagnostics.AddError("Connection Failed", fmt.Sprintf("Failed to create Kubernetes client: %s", err))
 		return
 	}
 
-	// Preserve the existing ID - it should never change
-	configData.ID = data.ID
-
-	// Check ownership before updating
+	// Get GVR for the object
 	gvr, err := r.getGVR(ctx, client, obj)
 	if err != nil {
 		resp.Diagnostics.AddError("Resource Discovery Failed",
@@ -321,39 +363,39 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	liveObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
+	// Verify the resource still exists and we own it
+	currentObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
 	if err != nil {
 		if errors.IsNotFound(err) {
-			resp.Diagnostics.AddError("Resource Not Found",
-				"Resource no longer exists in Kubernetes")
+			resp.Diagnostics.AddError(
+				"Resource Not Found",
+				fmt.Sprintf("The %s '%s' no longer exists in the cluster. It may have been deleted outside of Terraform.",
+					obj.GetKind(), obj.GetName()),
+			)
 			return
 		}
-		resp.Diagnostics.AddError("Ownership Check Failed",
-			fmt.Sprintf("Could not check resource ownership: %s", err))
+		resp.Diagnostics.AddError("Failed to check resource", fmt.Sprintf("Failed to get current resource state: %s", err))
 		return
 	}
 
-	// Manual ownership validation to allow drift recovery
-	// DO NOT use validateOwnership here as it will fail when annotations are stripped
-	existingID := r.getOwnershipID(liveObj)
-	if existingID == "" {
-		// Resource exists but has no ownership annotation
-		// This happens when annotations are stripped (e.g., by external tools)
-		// We'll re-add our ownership annotation during apply
-		tflog.Warn(ctx, "resource missing ownership annotation during update", map[string]interface{}{
-			"id":   data.ID.ValueString(),
-			"kind": obj.GetKind(),
-			"name": obj.GetName(),
-		})
-	} else if existingID != data.ID.ValueString() {
-		// Different owner - this is a real conflict
-		resp.Diagnostics.AddError("Resource Ownership Conflict",
-			fmt.Sprintf("resource managed by different k8sinline resource (Terraform ID: %s)", existingID))
+	// Verify ownership
+	currentID := r.getOwnershipID(currentObj)
+	if currentID != state.ID.ValueString() {
+		if currentID == "" {
+			resp.Diagnostics.AddError(
+				"Resource Ownership Lost",
+				fmt.Sprintf("The %s '%s' is no longer managed by Terraform. The ownership annotations have been removed.",
+					obj.GetKind(), obj.GetName()),
+			)
+		} else {
+			resp.Diagnostics.AddError(
+				"Resource Ownership Conflict",
+				fmt.Sprintf("The %s '%s' is now managed by a different Terraform resource (ID: %s).",
+					obj.GetKind(), obj.GetName(), currentID),
+			)
+		}
 		return
 	}
-
-	// Set ownership annotation with existing ID
-	r.setOwnershipAnnotation(obj, data.ID.ValueString())
 
 	// Apply the updated manifest
 	err = client.SetFieldManager("k8sinline").Apply(ctx, obj, k8sclient.ApplyOptions{
@@ -371,46 +413,43 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	// Update projection
+	tflog.Trace(ctx, "updated manifest", map[string]interface{}{
+		"id":        state.ID.ValueString(),
+		"kind":      obj.GetKind(),
+		"name":      obj.GetName(),
+		"namespace": obj.GetNamespace(),
+	})
+
+	// Extract paths from what we applied
 	paths := extractFieldPaths(obj.Object, "")
-	currentObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
+
+	// Get the current state after apply
+	updatedObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
 	if err != nil {
-		resp.Diagnostics.AddError("Failed to read after update",
-			fmt.Sprintf("Failed to read resource after update: %s", err))
+		resp.Diagnostics.AddError("Failed to read after update", fmt.Sprintf("Failed to read resource after update: %s", err))
 		return
 	}
 
-	projection, err := projectFields(currentObj.Object, paths)
+	// Project the current state
+	projection, err := projectFields(updatedObj.Object, paths)
 	if err != nil {
-		resp.Diagnostics.AddError("Projection Failed",
-			fmt.Sprintf("Failed to project managed fields: %s", err))
+		resp.Diagnostics.AddError("Projection Failed", fmt.Sprintf("Failed to project managed fields: %s", err))
 		return
 	}
 
+	// Store the projection
 	projectionJSON, err := toJSON(projection)
 	if err != nil {
-		resp.Diagnostics.AddError("JSON Conversion Failed",
-			fmt.Sprintf("Failed to convert projection to JSON: %s", err))
+		resp.Diagnostics.AddError("JSON Conversion Failed", fmt.Sprintf("Failed to convert projection to JSON: %s", err))
 		return
 	}
 
-	// Build final state with:
-	// - ID from existing state (never changes)
-	// - Connection from config (may have changed)
-	// - Other fields from config
-	// - Computed projection
-	finalData := manifestResourceModel{
-		ID:                     data.ID, // Preserve existing ID
-		YAMLBody:               configData.YAMLBody,
-		ClusterConnection:      configData.ClusterConnection,
-		DeleteProtection:       configData.DeleteProtection,
-		DeleteTimeout:          configData.DeleteTimeout,
-		ForceDestroy:           configData.ForceDestroy,
-		ManagedStateProjection: types.StringValue(projectionJSON),
-	}
+	// Update the plan with the new projection and preserve the ID
+	plan.ID = state.ID
+	plan.ManagedStateProjection = types.StringValue(projectionJSON)
 
-	// Save the updated state
-	diags = resp.State.Set(ctx, &finalData)
+	// Save updated data to state
+	diags = resp.State.Set(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
 }
 
@@ -423,39 +462,30 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 		return
 	}
 
-	// Check delete protection first (doesn't require connection)
+	// Check delete protection first
 	if !data.DeleteProtection.IsNull() && data.DeleteProtection.ValueBool() {
 		resp.Diagnostics.AddError(
-			"Resource Protected from Deletion",
-			"This resource has delete_protection enabled. To delete this resource, first set delete_protection = false in your configuration, run terraform apply, then run terraform destroy.",
+			"Delete Protection Enabled",
+			"This resource has delete protection enabled. Set delete_protection = false to allow deletion.",
 		)
 		return
 	}
 
-	// Check if cluster connection is ready
-	if !r.isConnectionReady(data.ClusterConnection) {
-		resp.Diagnostics.AddError(
-			"Cluster Connection Not Ready",
-			"Cannot delete resource: cluster connection contains unknown values. This usually happens during planning when dependencies are not yet resolved.",
-		)
-		return
-	}
-
-	// Convert to connection model
+	// Get connection from state
 	conn, err := r.convertObjectToConnectionModel(ctx, data.ClusterConnection)
 	if err != nil {
 		resp.Diagnostics.AddError("Connection Conversion Failed", err.Error())
 		return
 	}
 
-	// Parse YAML to get object metadata
+	// Parse the YAML to get resource info
 	obj, err := r.parseYAML(data.YAMLBody.ValueString())
 	if err != nil {
-		resp.Diagnostics.AddError("Invalid YAML", fmt.Sprintf("Failed to parse YAML: %s", err))
+		resp.Diagnostics.AddError("Invalid YAML in State", fmt.Sprintf("Failed to parse stored YAML: %s", err))
 		return
 	}
 
-	// Create K8s client from cluster connection (cached)
+	// Create K8s client
 	client, err := r.clientGetter(conn)
 	if err != nil {
 		resp.Diagnostics.AddError("Connection Failed", fmt.Sprintf("Failed to create Kubernetes client: %s", err))

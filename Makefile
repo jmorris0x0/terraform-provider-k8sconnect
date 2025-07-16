@@ -12,7 +12,6 @@ LDFLAGS := -ldflags="-w -s -X github.com/jmorris0x0/terraform-provider-k8sinline
 .PHONY: build
 build:
 	@echo "🔨 Building provider binary"
-	go get -u ./...
 	go mod tidy
 	go build $(LDFLAGS) -o bin/terraform-provider-k8sinline .
 

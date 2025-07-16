@@ -10,6 +10,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
+	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/common"
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/common/client"
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/datasource/yaml_split"
@@ -26,12 +27,6 @@ var _ provider.Provider = (*k8sinlineProvider)(nil)
 // k8sinlineProviderModel describes the provider data model.
 type k8sinlineProviderModel struct {
 	ClusterConnection types.Object `tfsdk:"cluster_connection"`
-}
-
-// ProviderData contains shared components passed to resources
-type ProviderData struct {
-	ConnectionResolver *auth.ConnectionResolver
-	ClientFactory      client.ClientFactory
 }
 
 // k8sinlineProvider is our Terraform provider
@@ -192,15 +187,15 @@ func (p *k8sinlineProvider) Configure(ctx context.Context, req provider.Configur
 		p.connectionResolver.SetProviderConnection(&conn)
 	}
 
-	// Create provider data to pass to resources
-	providerData := &ProviderData{
+	// Create connection config to pass to resources
+	connectionConfig := &common.ConnectionConfig{
 		ConnectionResolver: p.connectionResolver,
 		ClientFactory:      p.clientFactory,
 	}
 
-	// Make provider data available to resources and data sources
-	resp.DataSourceData = providerData
-	resp.ResourceData = providerData
+	// Make connection config available to resources and data sources
+	resp.DataSourceData = connectionConfig
+	resp.ResourceData = connectionConfig
 }
 
 func (p *k8sinlineProvider) Resources(ctx context.Context) []func() resource.Resource {

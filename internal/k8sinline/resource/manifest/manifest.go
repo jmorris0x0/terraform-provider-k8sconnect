@@ -10,19 +10,27 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
+	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/common"
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/common/auth"
+	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/common/client"
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/k8sclient"
 )
 
 var _ resource.Resource = (*manifestResource)(nil)
 var _ resource.ResourceWithConfigValidators = (*manifestResource)(nil)
 var _ resource.ResourceWithModifyPlan = (*manifestResource)(nil)
+var _ resource.ResourceWithImportState = (*manifestResource)(nil)
+var _ resource.ResourceWithConfigure = (*manifestResource)(nil)
 
 // ClientGetter function type for dependency injection
 type ClientGetter func(auth.ClusterConnectionModel) (k8sclient.K8sClient, error)
 
 type manifestResource struct {
-	clientGetter ClientGetter
+	clientGetter ClientGetter // Keep for backward compatibility
+
+	// New fields for connection config
+	connResolver  *auth.ConnectionResolver
+	clientFactory client.ClientFactory
 }
 
 type manifestResourceModel struct {
@@ -46,9 +54,33 @@ func (r *manifestResource) Metadata(ctx context.Context, req resource.MetadataRe
 	resp.TypeName = req.ProviderTypeName + "_manifest"
 }
 
-// Schema method remains the same but references auth.ClusterConnectionModel for consistency
+func (r *manifestResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+	// Skip if provider data is not available (e.g., during planning)
+	if req.ProviderData == nil {
+		return
+	}
+
+	// Try to get connection config
+	connectionConfig, ok := req.ProviderData.(*common.ConnectionConfig)
+	if !ok {
+		resp.Diagnostics.AddError(
+			"Unexpected Provider Data Type",
+			"Expected *common.ConnectionConfig but got something else. This is a provider bug.",
+		)
+		return
+	}
+
+	// Store the components
+	r.connResolver = connectionConfig.ConnectionResolver
+	r.clientFactory = connectionConfig.ClientFactory
+
+	// For backward compatibility, create a clientGetter that uses the factory
+	r.clientGetter = func(conn auth.ClusterConnectionModel) (k8sclient.K8sClient, error) {
+		return r.clientFactory.GetClient(conn)
+	}
+}
+
 func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
-	// [Keep the existing schema exactly as is - no changes needed]
 	resp.Schema = schema.Schema{
 		Description: "Applies a single‑document Kubernetes YAML manifest to a cluster, with per‑resource inline or kubeconfig‑based connection settings.",
 		Attributes: map[string]schema.Attribute{
@@ -63,105 +95,94 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 				Required:    true,
 				Description: "UTF‑8 encoded, single‑document Kubernetes YAML. Multi‑doc files will fail validation.",
 			},
-			"managed_state_projection": schema.StringAttribute{
-				Computed:    true,
-				Sensitive:   false,
-				Description: "JSON projection of Kubernetes state for fields managed by this resource",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"delete_protection": schema.BoolAttribute{
-				Optional:    true,
-				Description: "When enabled, prevents Terraform from deleting this resource. Must be disabled before destruction. Defaults to false.",
-			},
-			"delete_timeout": schema.StringAttribute{
-				Optional:    true,
-				Description: "Maximum time to wait for resource deletion. Defaults to '5m' for most resources, '10m' for Namespaces/PVs. Examples: '1m', '10m', '1h'. Set '0' to skip waiting (not recommended).",
-			},
-			"force_destroy": schema.BoolAttribute{
-				Optional:    true,
-				Description: "When enabled, removes finalizers to force deletion if normal deletion times out. ⚠️ WARNING: May cause data loss. Use only when you understand the implications. Defaults to false.",
-			},
 			"cluster_connection": schema.SingleNestedAttribute{
-				Required:    true,
-				Description: "Connection settings for the target cluster. Exactly one of inline, kubeconfig_file or kubeconfig_raw must be populated.",
+				Optional:    true, // Changed from Required to Optional
+				Description: "Cluster connection configuration for this resource. If not specified, uses the provider-level connection.",
 				Attributes: map[string]schema.Attribute{
 					"host": schema.StringAttribute{
 						Optional:    true,
-						Sensitive:   true,
-						Description: "Kubernetes API server endpoint (e.g. https://example.com). Required for inline mode.",
+						Description: "The hostname (in form of URI) of the Kubernetes API server.",
 					},
 					"cluster_ca_certificate": schema.StringAttribute{
 						Optional:    true,
-						Sensitive:   true,
-						Description: "PEM‑encoded CA certificate bundle for the API server. Required for inline mode.",
+						Description: "PEM-encoded root certificate bundle for TLS authentication.",
 					},
 					"kubeconfig_file": schema.StringAttribute{
 						Optional:    true,
-						Sensitive:   true,
-						Description: "Filesystem path to an existing kubeconfig file. Always supports live diffing.",
+						Description: "Path to the kubeconfig file.",
 					},
 					"kubeconfig_raw": schema.StringAttribute{
 						Optional:    true,
 						Sensitive:   true,
-						Description: "Raw kubeconfig YAML content (CI‑friendly).",
+						Description: "Raw kubeconfig file content.",
 					},
 					"context": schema.StringAttribute{
 						Optional:    true,
-						Sensitive:   true,
-						Description: "Context name within the provided kubeconfig (file or raw).",
+						Description: "Context to use from the kubeconfig.",
 					},
 					"token": schema.StringAttribute{
 						Optional:    true,
 						Sensitive:   true,
-						Description: "Bearer token for authentication (e.g., service account token).",
+						Description: "Token to authenticate to the Kubernetes API server.",
 					},
 					"client_certificate": schema.StringAttribute{
 						Optional:    true,
-						Sensitive:   true,
-						Description: "PEM-encoded client certificate for authentication. Must be used with client_key.",
+						Description: "PEM-encoded client certificate for TLS authentication.",
 					},
 					"client_key": schema.StringAttribute{
 						Optional:    true,
 						Sensitive:   true,
-						Description: "PEM-encoded client key for authentication. Must be used with client_certificate.",
+						Description: "PEM-encoded client certificate key for TLS authentication.",
 					},
 					"insecure": schema.BoolAttribute{
 						Optional:    true,
-						Description: "Skip TLS certificate verification (only for development/testing).",
+						Description: "Whether server should be accessed without verifying the TLS certificate.",
 					},
 					"proxy_url": schema.StringAttribute{
 						Optional:    true,
-						Sensitive:   true,
-						Description: "HTTP/HTTPS proxy URL for cluster communication (e.g., http://proxy.corp.com:8080).",
+						Description: "URL of the proxy to use for requests.",
 					},
 					"exec": schema.SingleNestedAttribute{
-						Description: "Inline exec‑auth configuration for dynamic credentials...",
 						Optional:    true,
-						Sensitive:   true,
+						Description: "Configuration for exec-based authentication.",
 						Attributes: map[string]schema.Attribute{
 							"api_version": schema.StringAttribute{
-								Optional:    true,
-								Description: "Authentication API version (e.g., 'client.authentication.k8s.io/v1').",
+								Required:    true,
+								Description: "API version to use when encoding the ExecCredentials resource.",
 							},
 							"command": schema.StringAttribute{
-								Optional:    true,
-								Description: "Executable command (e.g., 'aws', 'gcloud').",
+								Required:    true,
+								Description: "Command to execute.",
 							},
 							"args": schema.ListAttribute{
 								Optional:    true,
 								ElementType: types.StringType,
-								Description: "Command arguments (e.g., ['eks', 'get-token', '--cluster-name', 'my-cluster']).",
+								Description: "Arguments to pass when executing the plugin.",
 							},
 							"env": schema.MapAttribute{
 								Optional:    true,
 								ElementType: types.StringType,
-								Description: "Environment variables to set when executing the command (e.g., AWS_PROFILE = 'prod').",
+								Description: "Environment variables to set when executing the plugin.",
 							},
 						},
 					},
 				},
+			},
+			"delete_protection": schema.BoolAttribute{
+				Optional:    true,
+				Description: "Prevent accidental deletion of the resource. If set to true, the resource cannot be deleted unless this field is set to false.",
+			},
+			"delete_timeout": schema.StringAttribute{
+				Optional:    true,
+				Description: "How long to wait for a resource to be deleted before considering the deletion failed. Defaults to 300s (5 minutes).",
+			},
+			"force_destroy": schema.BoolAttribute{
+				Optional:    true,
+				Description: "Force destroy resources that have finalizers and are stuck in 'Terminating' state. This removes finalizers before deletion.",
+			},
+			"managed_state_projection": schema.StringAttribute{
+				Computed:    true,
+				Description: "Internal field used to track managed fields for accurate drift detection.",
 			},
 		},
 	}
