@@ -3,16 +3,15 @@ package k8sinline
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"fmt"
-	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
+	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/common/auth"
+	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/common/client"
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/datasource/yaml_split"
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/k8sclient"
 	manifestres "github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/resource/manifest"
@@ -24,17 +23,29 @@ var version string = "dev"
 // Ensure we implement the provider interface
 var _ provider.Provider = (*k8sinlineProvider)(nil)
 
-// k8sinlineProvider is our Terraform provider with connection caching.
+// k8sinlineProviderModel describes the provider data model.
+type k8sinlineProviderModel struct {
+	ClusterConnection types.Object `tfsdk:"cluster_connection"`
+}
+
+// ProviderData contains shared components passed to resources
+type ProviderData struct {
+	ConnectionResolver *auth.ConnectionResolver
+	ClientFactory      client.ClientFactory
+}
+
+// k8sinlineProvider is our Terraform provider
 type k8sinlineProvider struct {
-	// Connection cache - key is connection hash, value is cached client
-	clientCache map[string]k8sclient.K8sClient
-	cacheMutex  sync.RWMutex
+	// Connection resolver and client factory
+	connectionResolver *auth.ConnectionResolver
+	clientFactory      client.ClientFactory
 }
 
 // New returns a factory for k8sinlineProvider
 func New() provider.Provider {
 	return &k8sinlineProvider{
-		clientCache: make(map[string]k8sclient.K8sClient),
+		connectionResolver: auth.NewConnectionResolver(),
+		clientFactory:      client.NewCachedClientFactory(),
 	}
 }
 
@@ -43,20 +54,162 @@ func (p *k8sinlineProvider) Metadata(ctx context.Context, req provider.MetadataR
 	resp.Version = version
 }
 
+func (p *k8sinlineProvider) Schema(ctx context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
+	resp.Schema = schema.Schema{
+		Description: "The k8sinline provider enables management of Kubernetes resources with inline or provider-level authentication.",
+		Attributes: map[string]schema.Attribute{
+			"cluster_connection": schema.SingleNestedAttribute{
+				Optional:    true,
+				Description: "Default cluster connection configuration. Resources will use this connection unless they specify their own.",
+				Attributes: map[string]schema.Attribute{
+					"host": schema.StringAttribute{
+						Optional:    true,
+						Description: "The hostname (in form of URI) of the Kubernetes API server.",
+					},
+					"cluster_ca_certificate": schema.StringAttribute{
+						Optional:    true,
+						Description: "PEM-encoded root certificate bundle for TLS authentication.",
+					},
+					"kubeconfig_file": schema.StringAttribute{
+						Optional:    true,
+						Description: "Path to the kubeconfig file. Defaults to KUBECONFIG environment variable or ~/.kube/config.",
+					},
+					"kubeconfig_raw": schema.StringAttribute{
+						Optional:    true,
+						Sensitive:   true,
+						Description: "Raw kubeconfig file content.",
+					},
+					"context": schema.StringAttribute{
+						Optional:    true,
+						Description: "Context to use from the kubeconfig file.",
+					},
+					"token": schema.StringAttribute{
+						Optional:    true,
+						Sensitive:   true,
+						Description: "Token to authenticate to the Kubernetes API server.",
+					},
+					"client_certificate": schema.StringAttribute{
+						Optional:    true,
+						Description: "PEM-encoded client certificate for TLS authentication.",
+					},
+					"client_key": schema.StringAttribute{
+						Optional:    true,
+						Sensitive:   true,
+						Description: "PEM-encoded client certificate key for TLS authentication.",
+					},
+					"insecure": schema.BoolAttribute{
+						Optional:    true,
+						Description: "Whether server should be accessed without verifying the TLS certificate.",
+					},
+					"proxy_url": schema.StringAttribute{
+						Optional:    true,
+						Description: "URL of the proxy to use for requests to the Kubernetes API.",
+					},
+					"exec": schema.SingleNestedAttribute{
+						Optional:    true,
+						Description: "Configuration for exec-based authentication.",
+						Attributes: map[string]schema.Attribute{
+							"api_version": schema.StringAttribute{
+								Required:    true,
+								Description: "API version to use when encoding the ExecCredentials resource.",
+							},
+							"command": schema.StringAttribute{
+								Required:    true,
+								Description: "Command to execute for credential plugin.",
+							},
+							"args": schema.ListAttribute{
+								Optional:    true,
+								ElementType: types.StringType,
+								Description: "Arguments to pass when executing the plugin.",
+							},
+							"env": schema.MapAttribute{
+								Optional:    true,
+								ElementType: types.StringType,
+								Description: "Environment variables to set when executing the plugin.",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 func (p *k8sinlineProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
-	// Initialize cache if not already done
-	if p.clientCache == nil {
-		p.clientCache = make(map[string]k8sclient.K8sClient)
+	var config k8sinlineProviderModel
+
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
-	// No global configuration needed for now
-	// Resources will request cached clients via the injected getter function
+	// Check if provider has connection configuration
+	if !config.ClusterConnection.IsNull() && !config.ClusterConnection.IsUnknown() {
+		// Convert to connection model - reuse the same conversion logic from manifest resource
+		var conn auth.ClusterConnectionModel
+
+		attrs := config.ClusterConnection.Attributes()
+
+		// Basic fields
+		conn.Host = attrs["host"].(types.String)
+		conn.ClusterCACertificate = attrs["cluster_ca_certificate"].(types.String)
+		conn.KubeconfigFile = attrs["kubeconfig_file"].(types.String)
+		conn.KubeconfigRaw = attrs["kubeconfig_raw"].(types.String)
+		conn.Context = attrs["context"].(types.String)
+		conn.Token = attrs["token"].(types.String)
+		conn.ClientCertificate = attrs["client_certificate"].(types.String)
+		conn.ClientKey = attrs["client_key"].(types.String)
+		conn.Insecure = attrs["insecure"].(types.Bool)
+		conn.ProxyURL = attrs["proxy_url"].(types.String)
+
+		// Handle exec if present
+		if execObj, ok := attrs["exec"].(types.Object); ok && !execObj.IsNull() {
+			execAttrs := execObj.Attributes()
+			conn.Exec = &auth.ExecAuthModel{
+				APIVersion: execAttrs["api_version"].(types.String),
+				Command:    execAttrs["command"].(types.String),
+			}
+
+			// Handle args list
+			if argsList, ok := execAttrs["args"].(types.List); ok && !argsList.IsNull() {
+				args := make([]types.String, 0, len(argsList.Elements()))
+				for _, elem := range argsList.Elements() {
+					args = append(args, elem.(types.String))
+				}
+				conn.Exec.Args = args
+			}
+
+			// Handle env map
+			if envMap, ok := execAttrs["env"].(types.Map); ok && !envMap.IsNull() {
+				env := make(map[string]types.String)
+				for k, v := range envMap.Elements() {
+					env[k] = v.(types.String)
+				}
+				conn.Exec.Env = env
+			}
+		}
+
+		p.connectionResolver.SetProviderConnection(&conn)
+	}
+
+	// Create provider data to pass to resources
+	providerData := &ProviderData{
+		ConnectionResolver: p.connectionResolver,
+		ClientFactory:      p.clientFactory,
+	}
+
+	// Make provider data available to resources and data sources
+	resp.DataSourceData = providerData
+	resp.ResourceData = providerData
 }
 
 func (p *k8sinlineProvider) Resources(ctx context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		func() resource.Resource {
-			return manifestres.NewManifestResourceWithClientGetter(p.getCachedClient)
+			// For backward compatibility, wrap the new client factory to match old interface
+			return manifestres.NewManifestResourceWithClientGetter(func(conn auth.ClusterConnectionModel) (k8sclient.K8sClient, error) {
+				return p.clientFactory.GetClient(conn)
+			})
 		},
 	}
 }
@@ -65,73 +218,4 @@ func (p *k8sinlineProvider) DataSources(ctx context.Context) []func() datasource
 	return []func() datasource.DataSource{
 		yaml_split.NewYamlSplitDataSource,
 	}
-}
-
-func (p *k8sinlineProvider) Schema(ctx context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
-	// no provider‑level schema yet
-}
-
-// getCachedClient returns a cached Kubernetes client for the given connection.
-// This now uses the common auth package.
-func (p *k8sinlineProvider) getCachedClient(conn auth.ClusterConnectionModel) (k8sclient.K8sClient, error) {
-	// Generate cache key based on connection config
-	cacheKey := p.generateCacheKey(conn)
-
-	// Check cache first
-	p.cacheMutex.RLock()
-	if client, exists := p.clientCache[cacheKey]; exists {
-		p.cacheMutex.RUnlock()
-		return client, nil
-	}
-	p.cacheMutex.RUnlock()
-
-	// Create new client using common auth
-	config, err := auth.CreateRESTConfig(context.Background(), conn)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create REST config: %w", err)
-	}
-
-	client, err := k8sclient.NewDynamicK8sClient(config)
-	if err != nil {
-		return nil, err
-	}
-
-	// Cache the client
-	p.cacheMutex.Lock()
-	p.clientCache[cacheKey] = client
-	p.cacheMutex.Unlock()
-
-	return client, nil
-}
-
-// generateCacheKey creates a unique key for caching clients based on connection config.
-func (p *k8sinlineProvider) generateCacheKey(conn auth.ClusterConnectionModel) string {
-	h := sha256.New()
-
-	// Hash all connection fields
-	h.Write([]byte(conn.Host.ValueString()))
-	h.Write([]byte(conn.ClusterCACertificate.ValueString()))
-	h.Write([]byte(conn.KubeconfigFile.ValueString()))
-	h.Write([]byte(conn.KubeconfigRaw.ValueString()))
-	h.Write([]byte(conn.Context.ValueString()))
-	h.Write([]byte(conn.Token.ValueString()))
-	h.Write([]byte(conn.ClientCertificate.ValueString()))
-	h.Write([]byte(conn.ClientKey.ValueString()))
-	h.Write([]byte(fmt.Sprintf("%v", conn.Insecure.ValueBool())))
-	h.Write([]byte(conn.ProxyURL.ValueString()))
-
-	// Hash exec config if present
-	if conn.Exec != nil {
-		h.Write([]byte(conn.Exec.APIVersion.ValueString()))
-		h.Write([]byte(conn.Exec.Command.ValueString()))
-		for _, arg := range conn.Exec.Args {
-			h.Write([]byte(arg.ValueString()))
-		}
-		for k, v := range conn.Exec.Env {
-			h.Write([]byte(k))
-			h.Write([]byte(v.ValueString()))
-		}
-	}
-
-	return hex.EncodeToString(h.Sum(nil))
 }
