@@ -11,11 +11,13 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/k8sclient"
 )
 
+// ImportState method implementing kubeconfig strategy with managed fields tracking
 // ImportState method implementing kubeconfig strategy with managed fields tracking
 func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Parse import ID: "context/namespace/kind/name" or "context/kind/name" for cluster-scoped
@@ -150,16 +152,6 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		return
 	}
 
-	// Convert to YAML for state
-	yamlBytes, err := r.objectToYAML(liveObj)
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Import Failed: YAML conversion error",
-			fmt.Sprintf("Failed to convert resource to YAML: %s", err.Error()),
-		)
-		return
-	}
-
 	// Check for existing ownership and generate ID accordingly
 	existingID := r.getOwnershipID(liveObj)
 	var resourceID string
@@ -175,15 +167,54 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 			"context":      kubeContext,
 		})
 	} else {
-		// Resource not managed by k8sinline - generate new ID
+		// Resource not managed by k8sinline - generate new ID and apply ownership
 		resourceID = r.generateID()
-		tflog.Info(ctx, "importing unmanaged resource", map[string]interface{}{
+
+		// Create a minimal object with ONLY the fields needed for annotation update
+		annotationObj := &unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion": liveObj.GetAPIVersion(),
+				"kind":       liveObj.GetKind(),
+				"metadata": map[string]interface{}{
+					"name":      liveObj.GetName(),
+					"namespace": liveObj.GetNamespace(),
+				},
+			},
+		}
+
+		// Set the ownership annotations on the minimal object
+		r.setOwnershipAnnotation(annotationObj, resourceID)
+
+		// Apply ONLY the annotation update (not the full liveObj)
+		err = client.Apply(ctx, annotationObj, k8sclient.ApplyOptions{
+			FieldManager: "k8sinline-import",
+			Force:        true,
+		})
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Import Failed: Could not apply ownership",
+				fmt.Sprintf("Failed to set ownership annotation on resource: %s", err),
+			)
+			return
+		}
+
+		tflog.Info(ctx, "importing unmanaged resource and applying ownership", map[string]interface{}{
 			"terraform_id": resourceID,
 			"kind":         kind,
 			"name":         name,
 			"namespace":    namespace,
 			"context":      kubeContext,
 		})
+	}
+
+	// Convert to YAML for state
+	yamlBytes, err := r.objectToYAML(liveObj)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Import Failed: YAML conversion error",
+			fmt.Sprintf("Failed to convert resource to YAML: %s", err.Error()),
+		)
+		return
 	}
 
 	// NEW: Extract field paths from the imported object

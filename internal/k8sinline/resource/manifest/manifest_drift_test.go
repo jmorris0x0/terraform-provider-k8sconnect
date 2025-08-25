@@ -4,6 +4,7 @@ package manifest_test
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
@@ -13,10 +14,8 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline"
-	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/k8sclient"
 )
 
 func TestAccManifestResource_DriftDetection(t *testing.T) {
@@ -47,46 +46,46 @@ func TestAccManifestResource_DriftDetection(t *testing.T) {
 				),
 			},
 			// Step 2: Modify ConfigMap outside of Terraform (simulating drift)
+			// Step 2: Modify ConfigMap outside of Terraform (simulating drift)
 			{
 				PreConfig: func() {
 					ctx := context.Background()
 
-					// Modify the ConfigMap using the same field manager to avoid conflicts
-					// This simulates drift without causing field manager conflicts
-					dynamicClient, err := k8sclient.NewDynamicK8sClientFromKubeconfig([]byte(raw), "")
+					// Get the current ConfigMap to preserve ownership annotations
+					cm, err := k8sClient.CoreV1().ConfigMaps("default").Get(ctx, "drift-test-cm", metav1.GetOptions{})
 					if err != nil {
-						t.Fatalf("Failed to create dynamic client: %v", err)
+						t.Fatalf("Failed to get ConfigMap: %v", err)
 					}
 
-					// Create modified object with same structure but different values
-					modifiedCM := &unstructured.Unstructured{
-						Object: map[string]interface{}{
-							"apiVersion": "v1",
-							"kind":       "ConfigMap",
-							"metadata": map[string]interface{}{
-								"name":      "drift-test-cm",
-								"namespace": "default",
-								"annotations": map[string]interface{}{
-									"example.com/team": "platform-team", // Changed from backend-team
-								},
-							},
-							"data": map[string]interface{}{
-								"key1": "modified-outside-terraform", // Changed value
-								"key2": "value2",                     // Unchanged
-								"key3": "value3-modified",            // Changed value
-								// Note: we're not adding/removing fields to avoid structural conflicts
-							},
-						},
+					// Preserve the ownership annotations
+					existingAnnotations := cm.GetAnnotations()
+
+					// Modify the ConfigMap data - these are fields we manage
+					cm.Data = map[string]string{
+						"key1": "modified-outside-terraform", // Changed value
+						"key2": "value2",                     // Unchanged
+						"key3": "value3-modified",            // Changed value
 					}
 
-					// Apply with k8sinline field manager (same as Terraform uses)
-					// This simulates drift that Terraform can correct
-					err = dynamicClient.Apply(ctx, modifiedCM, k8sclient.ApplyOptions{
-						FieldManager: "k8sinline",
-						Force:        true,
+					// Modify other annotations but preserve ownership
+					if cm.Annotations == nil {
+						cm.Annotations = make(map[string]string)
+					}
+					cm.Annotations["example.com/team"] = "platform-team" // Changed from backend-team
+
+					// Preserve ownership annotations
+					for k, v := range existingAnnotations {
+						if strings.HasPrefix(k, "k8sinline.terraform.io/") {
+							cm.Annotations[k] = v
+						}
+					}
+
+					// Use Update with FieldManager to ensure the change is tracked
+					_, err = k8sClient.CoreV1().ConfigMaps("default").Update(ctx, cm, metav1.UpdateOptions{
+						FieldManager: "manual-edit", // Different field manager to simulate external change
 					})
 					if err != nil {
-						t.Fatalf("Failed to apply modified ConfigMap: %v", err)
+						t.Fatalf("Failed to update ConfigMap: %v", err)
 					}
 					t.Log("✅ Modified ConfigMap outside of Terraform (simulating drift)")
 				},
@@ -94,9 +93,8 @@ func TestAccManifestResource_DriftDetection(t *testing.T) {
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
-				// This should show drift!
 				PlanOnly:           true,
-				ExpectNonEmptyPlan: true,
+				ExpectNonEmptyPlan: true, // Should detect drift!
 			},
 			// Step 3: Verify drift is corrected by apply
 			{

@@ -139,7 +139,7 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 	r.setOwnershipAnnotation(obj, id)
 
 	// Apply the manifest using server-side apply
-	err = client.SetFieldManager("k8sinline").Apply(ctx, obj, k8sclient.ApplyOptions{
+	err = client.Apply(ctx, obj, k8sclient.ApplyOptions{
 		FieldManager: "k8sinline",
 		Force:        false,
 	})
@@ -398,7 +398,7 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 
 	// Apply the updated manifest
-	err = client.SetFieldManager("k8sinline").Apply(ctx, obj, k8sclient.ApplyOptions{
+	err = client.Apply(ctx, obj, k8sclient.ApplyOptions{
 		FieldManager: "k8sinline",
 		Force:        false,
 	})
