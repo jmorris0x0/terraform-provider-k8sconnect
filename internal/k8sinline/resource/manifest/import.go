@@ -11,13 +11,11 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/k8sclient"
 )
 
-// ImportState method implementing kubeconfig strategy with managed fields tracking
 // ImportState method implementing kubeconfig strategy with managed fields tracking
 func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Parse import ID: "context/namespace/kind/name" or "context/kind/name" for cluster-scoped
@@ -157,55 +155,24 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 	var resourceID string
 
 	if existingID != "" {
-		// Resource already managed by k8sinline - use existing ID
-		resourceID = existingID
-		tflog.Warn(ctx, "importing resource already managed by k8sinline", map[string]interface{}{
-			"terraform_id": resourceID,
-			"kind":         kind,
-			"name":         name,
-			"namespace":    namespace,
-			"context":      kubeContext,
-		})
-	} else {
-		// Resource not managed by k8sinline - generate new ID and apply ownership
-		resourceID = r.generateID()
-
-		// Create a minimal object with ONLY the fields needed for annotation update
-		annotationObj := &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"apiVersion": liveObj.GetAPIVersion(),
-				"kind":       liveObj.GetKind(),
-				"metadata": map[string]interface{}{
-					"name":      liveObj.GetName(),
-					"namespace": liveObj.GetNamespace(),
-				},
-			},
-		}
-
-		// Set the ownership annotations on the minimal object
-		r.setOwnershipAnnotation(annotationObj, resourceID)
-
-		// Apply ONLY the annotation update (not the full liveObj)
-		err = client.Apply(ctx, annotationObj, k8sclient.ApplyOptions{
-			FieldManager: "k8sinline-import",
-			Force:        true,
-		})
-		if err != nil {
-			resp.Diagnostics.AddError(
-				"Import Failed: Could not apply ownership",
-				fmt.Sprintf("Failed to set ownership annotation on resource: %s", err),
-			)
-			return
-		}
-
-		tflog.Info(ctx, "importing unmanaged resource and applying ownership", map[string]interface{}{
-			"terraform_id": resourceID,
-			"kind":         kind,
-			"name":         name,
-			"namespace":    namespace,
-			"context":      kubeContext,
-		})
+		// Resource already managed by k8sinline - this is an error
+		resp.Diagnostics.AddError(
+			"Import Failed: Resource Already Managed",
+			fmt.Sprintf("This resource is already managed by another Terraform state (ID: %s).\n\n"+
+				"This usually means:\n"+
+				"- Another Terraform configuration is managing this resource\n"+
+				"- You're trying to import into the wrong state\n\n"+
+				"To resolve:\n"+
+				"1. Find the correct Terraform state that manages this resource\n"+
+				"2. Or remove the annotation first: kubectl annotate %s %s %s-\n"+
+				"   WARNING: Only do this if you're certain the other state no longer manages it!",
+				existingID, strings.ToLower(kind), name, OwnershipAnnotation),
+		)
+		return
 	}
+
+	// Resource not managed by k8sinline - generate new ID
+	resourceID = r.generateID()
 
 	// Convert to YAML for state
 	yamlBytes, err := r.objectToYAML(liveObj)
@@ -258,11 +225,12 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 
 	// Create imported data with managed state projection
 	importedData := manifestResourceModel{
-		ID:                     types.StringValue(resourceID),
-		YAMLBody:               types.StringValue(string(yamlBytes)),
-		ClusterConnection:      connectionObj,
-		DeleteProtection:       types.BoolValue(false),
-		ManagedStateProjection: types.StringValue(projectionJSON), // NEW: Set the projection
+		ID:                         types.StringValue(resourceID),
+		YAMLBody:                   types.StringValue(string(yamlBytes)),
+		ClusterConnection:          connectionObj,
+		DeleteProtection:           types.BoolValue(false),
+		ManagedStateProjection:     types.StringValue(projectionJSON),
+		ImportedWithoutAnnotations: types.BoolValue(true),
 	}
 
 	diags := resp.State.Set(ctx, &importedData)

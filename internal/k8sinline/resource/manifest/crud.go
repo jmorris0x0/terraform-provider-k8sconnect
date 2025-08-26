@@ -115,18 +115,30 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		// Resource exists - check ownership
 		existingID := r.getOwnershipID(existingObj)
 		if existingID != "" {
-			// Already managed by k8sinline
-			resp.Diagnostics.AddError(
-				"Resource Already Managed",
-				fmt.Sprintf("resource managed by different k8sinline resource (Terraform ID: %s)", existingID),
-			)
-			return
+			// Check if this is our resource (imported or previously created)
+			if existingID == data.ID.ValueString() {
+				// This is our resource - treat as update
+				tflog.Info(ctx, "resource already owned by this state, treating as update", map[string]interface{}{
+					"kind": obj.GetKind(),
+					"name": obj.GetName(),
+					"id":   existingID,
+				})
+				// Continue with the create logic which will act as an update
+			} else {
+				// Different ID - owned by another state
+				resp.Diagnostics.AddError(
+					"Resource Already Managed",
+					fmt.Sprintf("resource managed by different k8sinline resource (Terraform ID: %s)", existingID),
+				)
+				return
+			}
+		} else {
+			// Resource exists but not managed - we can take ownership
+			tflog.Info(ctx, "adopting unmanaged resource", map[string]interface{}{
+				"kind": obj.GetKind(),
+				"name": obj.GetName(),
+			})
 		}
-		// Resource exists but not managed - we can take ownership
-		tflog.Info(ctx, "adopting unmanaged resource", map[string]interface{}{
-			"kind": obj.GetKind(),
-			"name": obj.GetName(),
-		})
 	} else if !errors.IsNotFound(err) {
 		// Real error checking if resource exists
 		resp.Diagnostics.AddError("Existence Check Failed",
@@ -134,7 +146,15 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	id := r.generateID()
+	// Only generate new ID if we don't already have one
+	var id string
+	if data.ID.IsNull() || data.ID.ValueString() == "" {
+		id = r.generateID()
+	} else {
+		// Use existing ID (from import or previous apply)
+		id = data.ID.ValueString()
+	}
+
 	data.ID = types.StringValue(id)
 	r.setOwnershipAnnotation(obj, id)
 
@@ -192,6 +212,9 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		"projection_size": len(projectionJSON),
 	})
 
+	// Clear the import flag now that annotations are set
+	data.ImportedWithoutAnnotations = types.BoolNull()
+
 	diags = resp.State.Set(ctx, &data)
 	resp.Diagnostics.Append(diags...)
 }
@@ -204,6 +227,13 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	// Debug log
+	// TODO: Remove me after debug
+	tflog.Info(ctx, "Read called", map[string]interface{}{
+		"id":            data.ID.ValueString(),
+		"imported_flag": data.ImportedWithoutAnnotations,
+	})
 
 	// Check if cluster connection is ready
 	if !r.isConnectionReady(data.ClusterConnection) {
@@ -266,20 +296,28 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 
 	if currentID != expectedID {
 		if currentID == "" {
-			resp.Diagnostics.AddError(
-				"Resource Ownership Lost",
-				fmt.Sprintf("The %s '%s' exists but is no longer managed by this Terraform resource. "+
-					"The ownership annotations have been removed. "+
-					"Use 'terraform import' to re-adopt this resource or delete it from your configuration.",
-					obj.GetKind(), obj.GetName()),
-			)
-		} else {
-			resp.Diagnostics.AddError(
-				"Resource Managed by Different Terraform Resource",
-				fmt.Sprintf("The %s '%s' is now managed by a different Terraform resource (ID: %s). "+
-					"Remove this resource from your configuration or use 'terraform import -force' to take ownership.",
-					obj.GetKind(), obj.GetName(), currentID),
-			)
+			// No annotations found - check if this is expected (post-import)
+			if !data.ImportedWithoutAnnotations.IsNull() && data.ImportedWithoutAnnotations.ValueBool() {
+				// Expected - resource was imported without annotations
+				tflog.Info(ctx, "resource imported without annotations, will be added on next apply",
+					map[string]interface{}{
+						"id":   data.ID.ValueString(),
+						"kind": obj.GetKind(),
+						"name": obj.GetName(),
+					})
+				// Don't error - just continue with the read
+			} else {
+				// This is drift - annotations were removed
+				resp.Diagnostics.AddError(
+					"Resource Ownership Lost",
+					fmt.Sprintf("The %s '%s' exists but is no longer managed by this Terraform resource. "+
+						"The ownership annotations have been removed. "+
+						"Use 'terraform import' to re-adopt this resource or delete it from your configuration.",
+						obj.GetKind(), obj.GetName()),
+				)
+				resp.State.RemoveResource(ctx)
+				return
+			}
 		}
 		resp.State.RemoveResource(ctx)
 		return
@@ -447,6 +485,9 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 	// Update the plan with the new projection and preserve the ID
 	plan.ID = state.ID
 	plan.ManagedStateProjection = types.StringValue(projectionJSON)
+
+	// Clear the import flag if it was set
+	plan.ImportedWithoutAnnotations = types.BoolNull()
 
 	// Save updated data to state
 	diags = resp.State.Set(ctx, &plan)

@@ -44,12 +44,11 @@ func TestAccManifestResource_DeleteProtection(t *testing.T) {
 			},
 			// Step 2: Try to destroy - should fail due to protection
 			{
-				Config: testAccManifestConfigDeleteProtectionEnabled,
+				Config: testAccManifestConfigDeleteProtectionProviderOnly,
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
-				Destroy:     true,
-				ExpectError: regexp.MustCompile("Resource Protected from Deletion"),
+				ExpectError: regexp.MustCompile("Delete Protection Enabled"),
 			},
 			// Step 3: Disable protection
 			{
@@ -147,12 +146,7 @@ func TestAccManifestResource_ConnectionChange(t *testing.T) {
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
-				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_conn_change", "id"),
-					testAccCheckNamespaceExists(k8sClient, "acctest-conn-change"),
-				),
-				// Should show warning about connection change but not error
-				ExpectNonEmptyPlan: false,
+				ExpectError: regexp.MustCompile("connection change would move resource to a different cluster"),
 			},
 		},
 		CheckDestroy: testAccCheckNamespaceDestroy(k8sClient, "acctest-conn-change"),
@@ -309,4 +303,12 @@ YAML
     kubeconfig_raw = var.raw
   }
 }
+`
+
+const testAccManifestConfigDeleteProtectionProviderOnly = `
+variable "raw" {
+  type = string
+}
+
+provider "k8sinline" {}
 `

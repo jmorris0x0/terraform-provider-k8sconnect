@@ -7,6 +7,7 @@ import (
 	"os"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
@@ -203,6 +204,16 @@ func TestAccManifestResource_OwnershipImport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create test ConfigMap: %v", err)
 	}
+
+	// Verify it was created
+	createdCM, err := k8sClient.CoreV1().ConfigMaps("default").Get(ctx, "test-import-ownership", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Failed to verify ConfigMap creation: %v", err)
+	}
+	t.Logf("ConfigMap created successfully: %s/%s", createdCM.Namespace, createdCM.Name)
+
+	// Wait for ConfigMap to propagate
+	time.Sleep(2 * time.Second)
 
 	// Clean up after test
 	t.Cleanup(func() {

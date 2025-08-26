@@ -34,13 +34,14 @@ type manifestResource struct {
 }
 
 type manifestResourceModel struct {
-	ID                     types.String `tfsdk:"id"`
-	YAMLBody               types.String `tfsdk:"yaml_body"`
-	ClusterConnection      types.Object `tfsdk:"cluster_connection"`
-	DeleteProtection       types.Bool   `tfsdk:"delete_protection"`
-	DeleteTimeout          types.String `tfsdk:"delete_timeout"`
-	ForceDestroy           types.Bool   `tfsdk:"force_destroy"`
-	ManagedStateProjection types.String `tfsdk:"managed_state_projection"`
+	ID                         types.String `tfsdk:"id"`
+	YAMLBody                   types.String `tfsdk:"yaml_body"`
+	ClusterConnection          types.Object `tfsdk:"cluster_connection"`
+	DeleteProtection           types.Bool   `tfsdk:"delete_protection"`
+	DeleteTimeout              types.String `tfsdk:"delete_timeout"`
+	ForceDestroy               types.Bool   `tfsdk:"force_destroy"`
+	ManagedStateProjection     types.String `tfsdk:"managed_state_projection"`
+	ImportedWithoutAnnotations types.Bool   `tfsdk:"imported_without_annotations"`
 }
 
 // NewManifestResourceWithClientGetter creates a manifest resource with custom client getter
@@ -183,6 +184,10 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 			"managed_state_projection": schema.StringAttribute{
 				Computed:    true,
 				Description: "Internal field used to track managed fields for accurate drift detection.",
+			},
+			"imported_without_annotations": schema.BoolAttribute{
+				Computed:    true,
+				Description: "Internal flag tracking if resource was imported without ownership annotations",
 			},
 		},
 	}

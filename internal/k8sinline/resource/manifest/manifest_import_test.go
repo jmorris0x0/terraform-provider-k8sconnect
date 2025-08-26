@@ -287,13 +287,13 @@ func TestAccManifestResource_ImportWithManagedFields(t *testing.T) {
 						return fmt.Errorf("yaml_body should not contain server-generated resourceVersion field")
 					}
 
-					// NEW: Verify managed_state_projection was populated
+					// Verify managed_state_projection was populated
 					projection := state.Attributes["managed_state_projection"]
 					if projection == "" {
 						return fmt.Errorf("managed_state_projection should be populated after import")
 					}
 
-					// NEW: Verify projection contains expected fields
+					// Verify projection contains expected fields
 					// The projection should be a JSON string containing the managed fields
 					if !strings.Contains(projection, "\"apiVersion\"") {
 						return fmt.Errorf("managed_state_projection should contain apiVersion field")
@@ -305,7 +305,7 @@ func TestAccManifestResource_ImportWithManagedFields(t *testing.T) {
 						return fmt.Errorf("managed_state_projection should contain data field")
 					}
 
-					// NEW: Log projection for debugging
+					// Log projection for debugging
 					fmt.Printf("✅ Import successful with managed state projection:\n")
 					fmt.Printf("   Projection size: %d bytes\n", len(projection))
 					fmt.Printf("   Contains metadata: %v\n", strings.Contains(projection, "metadata"))
