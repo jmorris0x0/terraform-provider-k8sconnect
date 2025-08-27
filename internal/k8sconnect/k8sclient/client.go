@@ -405,9 +405,21 @@ func (d *DynamicK8sClient) GetGVRFromKind(ctx context.Context, kind, namespace, 
 	})
 
 	// Get all API resources from the cluster
+	// IMPORTANT: ServerGroupsAndResources can return partial results with a non-nil error
+	// This happens when some API groups are unavailable (like metrics-server during startup)
+	// We should continue with the resources we did get
 	_, apiResources, err := d.discovery.ServerGroupsAndResources()
 	if err != nil {
-		return schema.GroupVersionResource{}, nil, fmt.Errorf("failed to discover server resources: %w", err)
+		// Check if we got any resources at all
+		if apiResources == nil || len(apiResources) == 0 {
+			// Complete failure - no resources discovered
+			return schema.GroupVersionResource{}, nil, fmt.Errorf("failed to discover server resources: %w", err)
+		}
+		// Partial failure - log warning but continue with what we have
+		tflog.Warn(ctx, "Partial API discovery failure (continuing with available APIs)", map[string]interface{}{
+			"error":           err.Error(),
+			"apis_discovered": len(apiResources),
+		})
 	}
 
 	// Find all possible GVRs for this kind
@@ -448,33 +460,26 @@ func (d *DynamicK8sClient) GetGVRFromKind(ctx context.Context, kind, namespace, 
 	for i, candidate := range candidates {
 		obj, err := d.tryGetResource(ctx, candidate.GVR, candidate.Namespaced, namespace, name)
 		if err == nil && obj != nil {
-			tflog.Debug(ctx, "Found resource", map[string]interface{}{
-				"gvr":      candidate.GVR.String(),
-				"kind":     kind,
-				"name":     name,
-				"attempts": i + 1, // Log how many attempts it took
+			tflog.Debug(ctx, "Found resource using candidate GVR", map[string]interface{}{
+				"candidate_index": i,
+				"gvr":             candidate.GVR.String(),
+				"kind":            kind,
+				"name":            name,
+				"namespace":       namespace,
 			})
 			return candidate.GVR, obj, nil
 		}
-
-		// Only log failed attempts if there were multiple candidates
-		if len(candidates) > 1 {
-			tflog.Debug(ctx, "Candidate GVR failed", map[string]interface{}{
-				"gvr":   candidate.GVR.String(),
-				"error": err.Error(),
-			})
-		}
 	}
 
-	// If we get here, none of the candidates worked
-	availableGVRs := make([]string, len(candidates))
+	// None of the candidates worked
+	candidateStrings := make([]string, len(candidates))
 	for i, c := range candidates {
-		availableGVRs[i] = c.GVR.String()
+		candidateStrings[i] = c.GVR.String()
 	}
 
 	return schema.GroupVersionResource{}, nil, fmt.Errorf(
-		"resource %q named %q not found in namespace %q\n\nTried these API versions: %s",
-		kind, name, namespace, strings.Join(availableGVRs, ", "))
+		"resource %s/%s (kind: %s) not found. Tried API versions: %v",
+		namespace, name, kind, candidateStrings)
 }
 
 type candidateResource struct {

@@ -1,6 +1,5 @@
 OIDC_DIR          := $(CURDIR)/test/oidc-e2e
 DEX_SSL_DIR       := $(OIDC_DIR)/ssl
-KIND_CLUSTER      ?= oidc-e2e
 TESTBUILD_DIR     := $(CURDIR)/.testbuild
 DEX_IMAGE         := ghcr.io/dexidp/dex:v2.42.1
 TERRAFORM_VERSION := 1.13.0-alpha20250702
@@ -94,7 +93,7 @@ oidc-setup:
 	@mkdir -p $(DEX_SSL_DIR)
 	@cd $(OIDC_DIR) && ./gencert.sh
 
-	@echo "🌐 Ensuring 'kind' Docker network exists"
+	@echo "🌐 Ensuring Docker network exists"
 	- docker network inspect k3d-oidc-e2e >/dev/null 2>&1 || docker network create k3d-oidc-e2e
 
 
@@ -114,10 +113,10 @@ oidc-setup:
 	@until curl -sf --insecure https://localhost:5556/dex/.well-known/openid-configuration; do sleep 0.5; done
 	@echo "✅ Dex is up!"
 
-	@echo "🧹 Deleting existing Kind cluster (if any)"
+	@echo "🧹 Deleting existing cluster (if any)"
 	- k3d cluster delete oidc-e2e || true
 
-	@echo "🚀 Creating Kind cluster with OIDC config"
+	@echo "🚀 Creating cluster with OIDC config"
 	k3d cluster create \
 	  --config=$(OIDC_DIR)/k3d-oidc.yaml \
 	  --volume $(DEX_SSL_DIR)/cert.pem:/etc/kubernetes/pki/oidc/ca.pem@server:0
