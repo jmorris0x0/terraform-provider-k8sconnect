@@ -1,3 +1,4 @@
+// internal/k8sinline/resource/manifest/resource_ownership.go
 package manifest
 
 import (

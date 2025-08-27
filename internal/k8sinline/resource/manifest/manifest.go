@@ -39,6 +39,7 @@ type manifestResourceModel struct {
 	ClusterConnection          types.Object `tfsdk:"cluster_connection"`
 	DeleteProtection           types.Bool   `tfsdk:"delete_protection"`
 	DeleteTimeout              types.String `tfsdk:"delete_timeout"`
+	FieldOwnership             types.String `tfsdk:"field_ownership"`
 	ForceDestroy               types.Bool   `tfsdk:"force_destroy"`
 	ForceConflicts             types.Bool   `tfsdk:"force_conflicts"`
 	ManagedStateProjection     types.String `tfsdk:"managed_state_projection"`
@@ -193,6 +194,10 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 			"force_conflicts": schema.BoolAttribute{
 				Optional:    true,
 				Description: "Force ownership of fields even when conflicting with other field managers. Default is false, which warns but doesn't override other controllers.",
+			},
+			"field_ownership": schema.StringAttribute{
+				Computed:    true,
+				Description: "Internal tracking of field ownership by different controllers",
 			},
 		},
 	}

@@ -228,13 +228,6 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	// Debug log
-	// TODO: Remove me after debug
-	tflog.Info(ctx, "Read called", map[string]interface{}{
-		"id":            data.ID.ValueString(),
-		"imported_flag": data.ImportedWithoutAnnotations,
-	})
-
 	// Check if cluster connection is ready
 	if !r.isConnectionReady(data.ClusterConnection) {
 		tflog.Info(ctx, "Skipping Read due to unknown connection values")
@@ -329,7 +322,6 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	// CRITICAL FOR DRIFT DETECTION: Update managed state projection
 	// Extract paths from the stored YAML (what we're managing)
 	paths := extractFieldPaths(obj.Object, "")
 
