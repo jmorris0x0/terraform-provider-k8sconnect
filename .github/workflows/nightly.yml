@@ -25,7 +25,7 @@ jobs:
       matrix:
         opentofu: ['1.10.2']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - uses: actions/setup-go@v5
         with:
@@ -58,7 +58,7 @@ jobs:
     if: github.event_name == 'schedule' || inputs.enable_terraform_latest
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - uses: actions/setup-go@v5
         with:
