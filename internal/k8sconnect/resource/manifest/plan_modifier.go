@@ -102,7 +102,7 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 		return
 	}
 
-	// Update the plan
+	// Update the plan with projection
 	plannedData.ManagedStateProjection = types.StringValue(projectionJSON)
 
 	tflog.Debug(ctx, "Dry-run projection complete", map[string]interface{}{
@@ -110,13 +110,35 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 		"projection_size": len(projectionJSON),
 	})
 
+	// Check if we have state to compare against
+	if !req.State.Raw.IsNull() {
+		var stateData manifestResourceModel
+		diags := req.State.Get(ctx, &stateData)
+		resp.Diagnostics.Append(diags...)
+
+		if !resp.Diagnostics.HasError() && !stateData.ManagedStateProjection.IsNull() {
+			// If projections match, only YAML formatting changed in Kubernetes
+			if stateData.ManagedStateProjection.Equal(plannedData.ManagedStateProjection) {
+				tflog.Debug(ctx, "No Kubernetes resource changes detected, preserving YAML")
+
+				// Preserve the original YAML and internal fields since no actual changes will occur
+				plannedData.YAMLBody = stateData.YAMLBody
+				plannedData.ManagedStateProjection = stateData.ManagedStateProjection
+				plannedData.FieldOwnership = stateData.FieldOwnership
+				plannedData.ImportedWithoutAnnotations = stateData.ImportedWithoutAnnotations
+
+				// But still allow terraform-specific settings to update
+				// (delete_protection, force_conflicts, etc. keep their planned values)
+			} else {
+				// Only check conflicts if there are actual Kubernetes changes
+				r.checkFieldOwnershipConflicts(ctx, req, resp)
+			}
+		}
+	}
+
+	// Final plan set
 	diags = resp.Plan.Set(ctx, &plannedData)
 	resp.Diagnostics.Append(diags...)
-
-	// Check for field ownership conflicts if we have state
-	if !req.State.Raw.IsNull() {
-		r.checkFieldOwnershipConflicts(ctx, req, resp)
-	}
 }
 
 // checkFieldOwnershipConflicts detects when fields managed by other controllers are being changed

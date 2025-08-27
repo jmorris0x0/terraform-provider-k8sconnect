@@ -560,8 +560,8 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 	plan.ID = state.ID
 	plan.ManagedStateProjection = types.StringValue(projectionJSON)
 
-	// Clear the import flag if it was set
-	plan.ImportedWithoutAnnotations = types.BoolNull()
+	// Preserve the import flag from state
+	plan.ImportedWithoutAnnotations = state.ImportedWithoutAnnotations
 
 	// Save updated data to state
 	diags = resp.State.Set(ctx, &plan)
