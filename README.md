@@ -9,11 +9,9 @@ A Terraform provider for applying Kubernetes YAML manifests **with inline, per�
 Traditional providers force cluster configuration into the provider block; **k8sinline** pushes it down into each resource, freeing you to target *any* cluster from *any* module without aliases, workspaces, or wrapper hacks.
 
 
-## ⚠️ ALPHA RELEASE
+> ### ⚠️ ALPHA RELEASE
+> **This provider is in alpha and not suitable for production use.** Breaking changes may occur without notice. Use at your own risk.
 
-**This provider is in alpha and not suitable for production use.** Breaking changes may occur without notice. Use at your own risk.
-
----
 
 ---
 
