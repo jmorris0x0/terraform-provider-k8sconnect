@@ -38,30 +38,34 @@ terraform {
 
 provider "k8sconnect" {}
 
-# Deploy to AWS EKS with dynamic credentials
-resource "k8sconnect_manifest" "nginx" {
-  yaml_body = file("${path.module}/manifests/nginx.yaml")
-
-  cluster_connection = {
-    host                   = data.aws_eks_cluster.prod.endpoint
-    cluster_ca_certificate = data.aws_eks_cluster.prod.certificate_authority[0].data
-    
+# Store connections for multiple clusters
+locals {
+  prod_connection = {
+    host                   = aws_eks_cluster.prod.endpoint
+    cluster_ca_certificate = base64decode(aws_eks_cluster.prod.certificate_authority[0].data)
     exec = {
       api_version = "client.authentication.k8s.io/v1"
       command     = "aws"
-      args        = ["eks", "get-token", "--cluster-name", "prod-cluster"]
+      args        = ["eks", "get-token", "--cluster-name", "prod"]
     }
+  }
+  
+  # Use multiple connection methods for different environements
+  staging_connection = {
+    kubeconfig_raw = file("~/.kube/staging-config")
+    context        = "staging"
   }
 }
 
-# Deploy to staging with kubeconfig
-resource "k8sconnect_manifest" "staging_app" {
-  yaml_body = file("${path.module}/manifests/app.yaml")
+# Deploy to different clusters in one apply
+resource "k8sconnect_manifest" "prod_app" {
+  yaml_body          = file("app.yaml")
+  cluster_connection = local.prod_connection
+}
 
-  cluster_connection = {
-    kubeconfig_raw = aws_ssm_parameter.staging_kubeconfig.value
-    context        = "staging"
-  }
+resource "k8sconnect_manifest" "staging_app" {
+  yaml_body          = file("app.yaml")  
+  cluster_connection = local.staging_connection
 }
 ```
 
