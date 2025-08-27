@@ -304,27 +304,37 @@ func findChangedFields(current, desired map[string]interface{}, prefix string) [
 
 // addConflictWarning adds a warning diagnostic about field ownership conflicts
 func addConflictWarning(resp *resource.ModifyPlanResponse, conflicts []FieldConflict, forceConflicts types.Bool) {
-	var details []string
+	// Group conflicts by field manager
+	conflictsByManager := make(map[string][]FieldConflict)
 	for _, c := range conflicts {
-		details = append(details, fmt.Sprintf(
-			"  ~ %s: %v -> %v (managed by '%s')",
-			c.Path, formatValue(c.CurrentValue), formatValue(c.DesiredValue), c.Owner,
-		))
+		conflictsByManager[c.Owner] = append(conflictsByManager[c.Owner], c)
+	}
+
+	var details []string
+	for manager, managerConflicts := range conflictsByManager {
+		details = append(details, fmt.Sprintf("Managed by '%s':", manager))
+		for _, c := range managerConflicts {
+			details = append(details, fmt.Sprintf("  - %s: %v → %v",
+				c.Path, formatValue(c.CurrentValue), formatValue(c.DesiredValue)))
+		}
+		details = append(details, "") // Empty line between managers
 	}
 
 	message := fmt.Sprintf(
-		"The following fields will be changed but are currently managed by other controllers:\n\n%s\n\n",
+		"The following fields are managed by other controllers:\n\n%s",
 		strings.Join(details, "\n"),
 	)
 
 	if !forceConflicts.IsNull() && forceConflicts.ValueBool() {
-		message += "These fields will be forcibly updated because 'force_conflicts = true'."
+		message += "\nThese fields will be forcibly updated because 'force_conflicts = true'."
+		resp.Diagnostics.AddWarning("Field Ownership Conflicts - Will Force Update", message)
 	} else {
-		message += "These fields may not be updated unless 'force_conflicts = true' is set.\n" +
-			"The update might be rejected or immediately reverted by the other controller."
+		message += "\nTo resolve this conflict do one of the following:\n" +
+			"1. Remove the conflicting fields from your Terraform configuration\n" +
+			"2. Set 'force_conflicts = true' to override (may cause persistent conflicts)\n" +
+			"3. Ensure only one controller manages these fields"
+		resp.Diagnostics.AddWarning("Field Ownership Conflicts - Apply Will Fail", message)
 	}
-
-	resp.Diagnostics.AddWarning("Field Ownership Conflicts Detected", message)
 }
 
 // formatValue formats a value for display in conflict messages

@@ -327,11 +327,20 @@ func TestAccManifestResource_FieldManagerConflict(t *testing.T) {
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
-				Check: resource.ComposeTestCheckFunc(
-					// Deployment should still have 3 replicas (kubectl's value)
-					testAccCheckDeploymentReplicaCount(k8sClientset, "default", "field-conflict-test", 3),
-				),
-				// TODO: Check for warning in plan output once we verify ownership tracking works
+				ExpectError: regexp.MustCompile(`Field Manager Conflict`),
+			},
+
+			// You could also add a new step to verify the plan warning:
+			// Step 2b: Plan-only to check warning
+			{
+				Config: testAccManifestConfig_FieldConflictUpdate(false), // Try to change back to 4 replicas
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+				// Unfortunately Terraform test framework doesn't easily let us check for warnings
+				// But this step would trigger the warning in real usage
 			},
 			// Step 3: Try to change replicas back with Terraform (should warn about conflict)
 			{
@@ -339,11 +348,7 @@ func TestAccManifestResource_FieldManagerConflict(t *testing.T) {
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
-				Check: resource.ComposeTestCheckFunc(
-					// Should still be 3 because we didn't force
-					testAccCheckDeploymentReplicaCount(k8sClientset, "default", "field-conflict-test", 3),
-				),
-				ExpectNonEmptyPlan: true, // Because the field is owned by kubectl
+				ExpectError: regexp.MustCompile(`Field Manager Conflict`),
 			},
 			// Step 4: Force the change
 			{

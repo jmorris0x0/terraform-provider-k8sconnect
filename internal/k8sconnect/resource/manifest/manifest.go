@@ -193,7 +193,7 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 			},
 			"force_conflicts": schema.BoolAttribute{
 				Optional:    true,
-				Description: "Force ownership of fields even when conflicting with other field managers. Default is false, which warns but doesn't override other controllers.",
+				Description: "Force field manager conflicts during server-side apply. When false (default), operations will fail if another field manager owns the field. When true, forcibly takes ownership of conflicting fields.",
 			},
 			"field_ownership": schema.StringAttribute{
 				Computed:    true,

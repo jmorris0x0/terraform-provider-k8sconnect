@@ -3,6 +3,7 @@ package manifest
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -22,7 +23,13 @@ func (r *manifestResource) classifyK8sError(err error, operation, resourceDesc s
 
 	case errors.IsConflict(err):
 		return "error", fmt.Sprintf("%s: Field Manager Conflict", operation),
-			fmt.Sprintf("Server-side apply conflict detected for %s. Another tool or process may be managing the same fields. Consider using 'force=true' or resolve the conflict manually. Details: %v",
+			fmt.Sprintf("Server-side apply conflict detected for %s.\n"+
+				"Another controller is managing one or more fields in this resource.\n\n"+
+				"To resolve this conflict do one of the following:\n"+
+				"1. Remove the conflicting fields from your Terraform configuration\n"+
+				"2. Set 'force_conflicts = true' to override (may cause persistent conflicts)\n"+
+				"3. Ensure only one controller manages these fields\n\n"+
+				"Details: %v",
 				resourceDesc, err)
 
 	case errors.IsTimeout(err) || errors.IsServerTimeout(err):
@@ -97,4 +104,33 @@ func (r *manifestResource) extractImmutableFields(err error) []string {
 		}
 	}
 	return fields
+}
+
+func extractConflictDetails(err error) string {
+	// The Kubernetes error message typically contains field paths and managers
+	// Example: "conflict with \"kubectl\" with subresource \"scale\" using apps/v1: .spec.replicas"
+	errStr := err.Error()
+
+	// Parse out the conflicts - this is a simplified version
+	// You might need to adjust based on actual error format
+	var details []string
+
+	// Look for patterns like: conflict with "manager" ... : .field.path
+	conflictPattern := regexp.MustCompile(`conflict with "([^"]+)".*?: ([\.\w\[\]]+)`)
+	matches := conflictPattern.FindAllStringSubmatch(errStr, -1)
+
+	for _, match := range matches {
+		if len(match) >= 3 {
+			manager := match[1]
+			fieldPath := match[2]
+			details = append(details, fmt.Sprintf("- %s: managed by \"%s\"", fieldPath, manager))
+		}
+	}
+
+	if len(details) == 0 {
+		// Fallback if we can't parse - just show we detected conflicts
+		return "- Multiple field ownership conflicts detected"
+	}
+
+	return strings.Join(details, "\n")
 }
