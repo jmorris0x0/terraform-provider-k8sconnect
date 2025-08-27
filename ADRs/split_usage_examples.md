@@ -1,5 +1,5 @@
 # Example 1: Split inline multi-document YAML
-data "k8sinline_yaml_split" "app_manifests" {
+data "k8sconnect_yaml_split" "app_manifests" {
   content = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -40,8 +40,8 @@ YAML
 }
 
 # Apply all manifests with for_each (stable IDs!)
-resource "k8sinline_manifest" "app" {
-  for_each = data.k8sinline_yaml_split.app_manifests.manifests
+resource "k8sconnect_manifest" "app" {
+  for_each = data.k8sconnect_yaml_split.app_manifests.manifests
   
   yaml_body = each.value
   
@@ -51,12 +51,12 @@ resource "k8sinline_manifest" "app" {
 }
 
 # Example 2: Load from multiple files
-data "k8sinline_yaml_split" "all_configs" {
+data "k8sconnect_yaml_split" "all_configs" {
   pattern = "./k8s-configs/*.yaml"
 }
 
-resource "k8sinline_manifest" "configs" {
-  for_each = data.k8sinline_yaml_split.all_configs.manifests
+resource "k8sconnect_manifest" "configs" {
+  for_each = data.k8sconnect_yaml_split.all_configs.manifests
   
   yaml_body = each.value
   
@@ -74,7 +74,7 @@ resource "k8sinline_manifest" "configs" {
 # Example 3: Different clusters per manifest using locals
 locals {
   # Split the manifests
-  manifests = data.k8sinline_yaml_split.multi_cluster.manifests
+  manifests = data.k8sconnect_yaml_split.multi_cluster.manifests
   
   # Define cluster connections
   clusters = {
@@ -94,7 +94,7 @@ locals {
   }
 }
 
-resource "k8sinline_manifest" "multi_cluster" {
+resource "k8sconnect_manifest" "multi_cluster" {
   for_each = local.manifests
   
   yaml_body = each.value
@@ -103,9 +103,9 @@ resource "k8sinline_manifest" "multi_cluster" {
 }
 
 # Example 4: Dependency ordering with depends_on
-resource "k8sinline_manifest" "crds" {
+resource "k8sconnect_manifest" "crds" {
   for_each = {
-    for key, yaml in data.k8sinline_yaml_split.all_configs.manifests :
+    for key, yaml in data.k8sconnect_yaml_split.all_configs.manifests :
     key => yaml
     if can(regex("(?i)customresourcedefinition", yaml))
   }
@@ -117,9 +117,9 @@ resource "k8sinline_manifest" "crds" {
   }
 }
 
-resource "k8sinline_manifest" "apps" {
+resource "k8sconnect_manifest" "apps" {
   for_each = {
-    for key, yaml in data.k8sinline_yaml_split.all_configs.manifests :
+    for key, yaml in data.k8sconnect_yaml_split.all_configs.manifests :
     key => yaml
     if !can(regex("(?i)customresourcedefinition", yaml))
   }
@@ -130,7 +130,7 @@ resource "k8sinline_manifest" "apps" {
     kubeconfig_raw = var.kubeconfig
   }
   
-  depends_on = [k8sinline_manifest.crds]
+  depends_on = [k8sconnect_manifest.crds]
 }
 
 # The stable IDs look like:
@@ -140,7 +140,7 @@ resource "k8sinline_manifest" "apps" {
 # - "customresourcedefinition.prometheuses.monitoring.coreos.com" (cluster-scoped)
 
 # Example 5: Using with templatefile for dynamic content
-data "k8sinline_yaml_split" "templated" {
+data "k8sconnect_yaml_split" "templated" {
   content = templatefile("${path.module}/app-template.yaml", {
     app_name    = var.app_name
     environment = var.environment
@@ -148,8 +148,8 @@ data "k8sinline_yaml_split" "templated" {
   })
 }
 
-resource "k8sinline_manifest" "templated_app" {
-  for_each = data.k8sinline_yaml_split.templated.manifests
+resource "k8sconnect_manifest" "templated_app" {
+  for_each = data.k8sconnect_yaml_split.templated.manifests
   
   yaml_body = each.value
   

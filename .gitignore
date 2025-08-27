@@ -8,7 +8,7 @@
 *.out
 
 # Plugin binary
-terraform-provider-k8sinline
+terraform-provider-k8sconnect
 
 # Coverage profiles
 *.coverprofile

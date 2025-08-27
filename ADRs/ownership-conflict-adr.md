@@ -12,13 +12,13 @@ When multiple Terraform states (configurations) attempt to manage the same Kuber
 **Scenario**: Two separate Terraform projects manage the same Kubernetes namespace:
 ```hcl
 # State A (team-a.tfstate)
-resource "k8sinline_manifest" "prod_ns" {
+resource "k8sconnect_manifest" "prod_ns" {
   yaml_body = "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: production"
   # ... connection config
 }
 
 # State B (team-b.tfstate) 
-resource "k8sinline_manifest" "prod_namespace" {
+resource "k8sconnect_manifest" "prod_namespace" {
   yaml_body = "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: production"  
   # ... connection config
 }
@@ -159,7 +159,7 @@ The Kubernetes ecosystem expects:
 **Description:** Include Terraform context in field manager names
 
 ```go
-fieldManager := fmt.Sprintf("k8sinline-%s-%s", 
+fieldManager := fmt.Sprintf("k8sconnect-%s-%s", 
     terraform.WorkspaceName(), 
     hash(configPath)[:8])
 ```
@@ -184,8 +184,8 @@ fieldManager := fmt.Sprintf("k8sinline-%s-%s",
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: k8sinline-lock-namespace-production
-  namespace: k8sinline-system
+  name: k8sconnect-lock-namespace-production
+  namespace: k8sconnect-system
 data:
   owner: "team-a-state-abc123"
   created: "2024-01-01T00:00:00Z"
@@ -210,9 +210,9 @@ data:
 ```yaml
 metadata:
   annotations:
-    k8sinline.terraform.io/id: "abc123..."           # Deterministic resource ID
-    k8sinline.terraform.io/context: "team-a-cfg"     # Terraform context identifier  
-    k8sinline.terraform.io/created: "2024-01-01T00:00:00Z"
+    k8sconnect.terraform.io/id: "abc123..."           # Deterministic resource ID
+    k8sconnect.terraform.io/context: "team-a-cfg"     # Terraform context identifier  
+    k8sconnect.terraform.io/created: "2024-01-01T00:00:00Z"
 ```
 
 **Pros:**
@@ -236,14 +236,14 @@ metadata:
 ```yaml
 metadata:
   annotations:
-    k8sinline.terraform.io/id: "deterministic-hash"
-    k8sinline.terraform.io/context: "context-specific-hash"  
-    k8sinline.terraform.io/created: "timestamp"
+    k8sconnect.terraform.io/id: "deterministic-hash"
+    k8sconnect.terraform.io/context: "context-specific-hash"  
+    k8sconnect.terraform.io/created: "timestamp"
 ```
 
 **Secondary Ownership (Field Managers):**
 ```go
-fieldManager := "k8sinline" // Consistent across all instances
+fieldManager := "k8sconnect" // Consistent across all instances
 // Use force_conflicts judiciously based on annotation analysis
 ```
 
@@ -269,9 +269,9 @@ fieldManager := "k8sinline" // Consistent across all instances
 #### 1. Ownership Annotation Schema
 ```go
 const (
-    OwnershipIDAnnotation      = "k8sinline.terraform.io/id"
-    OwnershipContextAnnotation = "k8sinline.terraform.io/context"  
-    OwnershipTimestampAnnotation = "k8sinline.terraform.io/created-at"
+    OwnershipIDAnnotation      = "k8sconnect.terraform.io/id"
+    OwnershipContextAnnotation = "k8sconnect.terraform.io/context"  
+    OwnershipTimestampAnnotation = "k8sconnect.terraform.io/created-at"
 )
 
 type OwnershipContext struct {
@@ -286,14 +286,14 @@ type OwnershipContext struct {
 func (r *manifestResource) validateOwnership(liveObj *unstructured.Unstructured, expectedID string) error {
     annotations := liveObj.GetAnnotations()
     
-    // Check for k8sinline ownership
+    // Check for k8sconnect ownership
     actualID := annotations[OwnershipIDAnnotation]
     if actualID == "" {
-        return fmt.Errorf("resource exists but not managed by k8sinline - use terraform import")
+        return fmt.Errorf("resource exists but not managed by k8sconnect - use terraform import")
     }
     
     if actualID != expectedID {
-        return fmt.Errorf("resource managed by different k8sinline configuration")
+        return fmt.Errorf("resource managed by different k8sconnect configuration")
     }
     
     // Check context for potential conflicts
@@ -310,7 +310,7 @@ func (r *manifestResource) validateOwnership(liveObj *unstructured.Unstructured,
                 "Resolution options:\n" +
                 "1. Use 'terraform import' to adopt the resource\n" +
                 "2. Ensure only one Terraform configuration manages this resource\n" +
-                "3. Remove k8sinline annotations to release ownership",
+                "3. Remove k8sconnect annotations to release ownership",
                 existingContext.ConfigHash, existingContext.CreatedAt,
                 currentContext.ConfigHash)
         }
@@ -355,7 +355,7 @@ func generateOwnershipContext(data manifestResourceModel) OwnershipContext {
 
 ### Risks and Mitigations
 
-**Risk**: Annotation conflicts between different k8sinline versions
+**Risk**: Annotation conflicts between different k8sconnect versions
 - **Mitigation**: Use versioned annotation keys and migration logic
 
 **Risk**: Context detection failures
@@ -385,4 +385,4 @@ The recommended hybrid approach using ownership annotations combined with enhanc
 - Provides clear error messages and resolution guidance
 - Leverages both custom ownership tracking and Kubernetes native field management
 
-This approach positions k8sinline as the first Terraform Kubernetes provider to properly address cross-state ownership conflicts, providing a significant user experience improvement over existing alternatives.
+This approach positions k8sconnect as the first Terraform Kubernetes provider to properly address cross-state ownership conflicts, providing a significant user experience improvement over existing alternatives.

@@ -1,12 +1,12 @@
-# terraform-provider-k8sinline
+# terraform-provider-k8sconnect
 
-![Tests](https://github.com/jmorris0x0/terraform-provider-k8sinline/actions/workflows/test.yml/badge.svg)
-![Security](https://github.com/jmorris0x0/terraform-provider-k8sinline/actions/workflows/security.yml/badge.svg)
-![Release](https://github.com/jmorris0x0/terraform-provider-k8sinline/actions/workflows/release.yml/badge.svg)
+![Tests](https://github.com/jmorris0x0/terraform-provider-k8sconnect/actions/workflows/test.yml/badge.svg)
+![Security](https://github.com/jmorris0x0/terraform-provider-k8sconnect/actions/workflows/security.yml/badge.svg)
+![Release](https://github.com/jmorris0x0/terraform-provider-k8sconnect/actions/workflows/release.yml/badge.svg)
 
 A Terraform provider for applying Kubernetes YAML manifests **with inline, per‑resource connection settings**.
 
-Traditional providers force cluster configuration into the provider block; **k8sinline** pushes it down into each resource, freeing you to target *any* cluster from *any* module without aliases, workspaces, or wrapper hacks.
+Traditional providers force cluster configuration into the provider block; **k8sconnect** pushes it down into each resource, freeing you to target *any* cluster from *any* module without aliases, workspaces, or wrapper hacks.
 
 
 > ### ⚠️ ALPHA RELEASE
@@ -15,9 +15,9 @@ Traditional providers force cluster configuration into the provider block; **k8s
 
 ---
 
-## Why `k8sinline`
+## Why `k8sconnect`
 
-| Pain point                            | Conventional providers                                                      | **`k8sinline`**                                                             |
+| Pain point                            | Conventional providers                                                      | **`k8sconnect`**                                                             |
 | ------------------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | Cluster‑first dependency hell         | ❌ Two-phase workflow: deploy cluster, then configure provider, then deploy apps | ✅ Single apply handles cluster creation and workloads together |
 | Multi‑cluster support                 | ❌ Requires provider aliases or separate states per cluster                  | ✅ Inline connection per resource — all clusters in one plan                 |
@@ -29,17 +29,17 @@ Traditional providers force cluster configuration into the provider block; **k8s
 ```hcl
 terraform {
   required_providers {
-    k8sinline = {
-      source  = "jmorris0x0/k8sinline"
+    k8sconnect = {
+      source  = "jmorris0x0/k8sconnect"
       version = ">= 0.1.0"
     }
   }
 }
 
-provider "k8sinline" {}
+provider "k8sconnect" {}
 
 # Deploy to AWS EKS with dynamic credentials
-resource "k8sinline_manifest" "nginx" {
+resource "k8sconnect_manifest" "nginx" {
   yaml_body = file("${path.module}/manifests/nginx.yaml")
 
   cluster_connection = {
@@ -55,7 +55,7 @@ resource "k8sinline_manifest" "nginx" {
 }
 
 # Deploy to staging with kubeconfig
-resource "k8sinline_manifest" "staging_app" {
+resource "k8sconnect_manifest" "staging_app" {
   yaml_body = file("${path.module}/manifests/app.yaml")
 
   cluster_connection = {
@@ -109,13 +109,13 @@ Split YAML files containing multiple Kubernetes manifests:
 
 ```hcl
 # Split multi-document YAML
-data "k8sinline_yaml_split" "app" {
+data "k8sconnect_yaml_split" "app" {
   content = file("${path.module}/app-manifests.yaml")
 }
 
 # Apply each manifest individually  
-resource "k8sinline_manifest" "app" {
-  for_each = data.k8sinline_yaml_split.app.manifests
+resource "k8sconnect_manifest" "app" {
+  for_each = data.k8sconnect_yaml_split.app.manifests
   
   yaml_body = each.value
   
@@ -152,10 +152,10 @@ Import existing Kubernetes resources into Terraform management:
 export KUBECONFIG=~/.kube/config
 
 # Namespaced resources: context/namespace/Kind/name  
-terraform import k8sinline_manifest.nginx "prod/default/Pod/nginx-abc123"
+terraform import k8sconnect_manifest.nginx "prod/default/Pod/nginx-abc123"
 
 # Cluster-scoped resources: context/Kind/name
-terraform import k8sinline_manifest.namespace "prod/Namespace/my-namespace"
+terraform import k8sconnect_manifest.namespace "prod/Namespace/my-namespace"
 ```
 
 After import, add the `cluster_connection` block to your configuration to match how you want to connect during normal operations.
@@ -195,8 +195,8 @@ All `cluster_connection` fields are marked sensitive and won't appear in logs or
 ```hcl
 terraform {
   required_providers {
-    k8sinline = {
-      source  = "jmorris0x0/k8sinline"
+    k8sconnect = {
+      source  = "jmorris0x0/k8sconnect"
       version = ">= 0.1.0"
     }
   }
@@ -205,8 +205,8 @@ terraform {
 
 ### Local Development
 ```bash
-git clone https://github.com/jmorris0x0/terraform-provider-k8sinline.git
-cd terraform-provider-k8sinline
+git clone https://github.com/jmorris0x0/terraform-provider-k8sconnect.git
+cd terraform-provider-k8sconnect
 make install
 ```
 

@@ -1,4 +1,4 @@
-module github.com/jmorris0x0/terraform-provider-k8sinline
+module github.com/jmorris0x0/terraform-provider-k8sconnect
 
 go 1.24.4
 

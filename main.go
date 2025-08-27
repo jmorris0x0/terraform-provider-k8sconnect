@@ -7,7 +7,7 @@ import (
 	"log"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
-	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect"
 )
 
 func main() {
@@ -17,11 +17,11 @@ func main() {
 	flag.Parse()
 
 	opts := providerserver.ServeOpts{
-		Address: "registry.terraform.io/jmorris0x0/k8sinline",
+		Address: "registry.terraform.io/jmorris0x0/k8sconnect",
 		Debug:   debug,
 	}
 
-	err := providerserver.Serve(context.Background(), k8sinline.New, opts)
+	err := providerserver.Serve(context.Background(), k8sconnect.New, opts)
 
 	if err != nil {
 		log.Fatal(err.Error())

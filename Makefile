@@ -7,13 +7,13 @@ TERRAFORM_VERSION := 1.13.0-alpha20250702
 PROVIDER_VERSION  ?= 0.1.0
 
 # Build variables for version injection
-LDFLAGS := -ldflags="-w -s -X github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline.version=$(PROVIDER_VERSION)"
+LDFLAGS := -ldflags="-w -s -X github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect.version=$(PROVIDER_VERSION)"
 
 .PHONY: build
 build:
 	@echo "🔨 Building provider binary"
 	go mod tidy
-	go build $(LDFLAGS) -o bin/terraform-provider-k8sinline .
+	go build $(LDFLAGS) -o bin/terraform-provider-k8sconnect .
 
 .PHONY: test
 test:
@@ -41,14 +41,14 @@ install:
 		mingw*|msys*|cygwin*) TARGET_OS=windows ;; \
 		*) echo "❌ Unsupported OS: $$OS"; exit 1 ;; \
 	esac; \
-	BINARY_NAME=terraform-provider-k8sinline_$(PROVIDER_VERSION)_$${TARGET_OS}_$${TARGET_ARCH}; \
+	BINARY_NAME=terraform-provider-k8sconnect_$(PROVIDER_VERSION)_$${TARGET_OS}_$${TARGET_ARCH}; \
 	if [ "$$TARGET_OS" = "windows" ]; then \
 		BINARY_NAME=$${BINARY_NAME}.exe; \
-		FINAL_BINARY=terraform-provider-k8sinline.exe; \
+		FINAL_BINARY=terraform-provider-k8sconnect.exe; \
 	else \
-		FINAL_BINARY=terraform-provider-k8sinline; \
+		FINAL_BINARY=terraform-provider-k8sconnect; \
 	fi; \
-	INSTALL_DIR=$$HOME/.terraform.d/plugins/registry.terraform.io/local/k8sinline/$(PROVIDER_VERSION)/$${TARGET_OS}_$${TARGET_ARCH}; \
+	INSTALL_DIR=$$HOME/.terraform.d/plugins/registry.terraform.io/local/k8sconnect/$(PROVIDER_VERSION)/$${TARGET_OS}_$${TARGET_ARCH}; \
 	echo "🏗️  Building for $${TARGET_OS}/$${TARGET_ARCH}..."; \
 	mkdir -p bin; \
 	if ! GOOS=$$TARGET_OS GOARCH=$$TARGET_ARCH CGO_ENABLED=0 go build $(LDFLAGS) -o bin/$$BINARY_NAME .; then \
@@ -68,8 +68,8 @@ install:
 	echo "Usage:"; \
 	echo "  terraform {"; \
 	echo "    required_providers {"; \
-	echo "      k8sinline = {"; \
-	echo "        source  = \"local/k8sinline\""; \
+	echo "      k8sconnect = {"; \
+	echo "        source  = \"local/k8sconnect\""; \
 	echo "        version = \"$(PROVIDER_VERSION)\""; \
 	echo "      }"; \
 	echo "    }"; \
@@ -155,7 +155,7 @@ testacc: oidc-setup
 	echo "TF_ACC_K8S_CLIENT_CERT=$$(echo $$TF_ACC_K8S_CLIENT_CERT | cut -c1-20)..."; \
 	echo "TF_ACC_K8S_CLIENT_KEY=$$(echo $$TF_ACC_K8S_CLIENT_KEY | cut -c1-20)..."; \
 	echo "Terraform version: $$(terraform version -json | jq -r .terraform_version)"; \
-	go test -cover -v ./internal/k8sinline/... -timeout 30m -run "TestAcc"
+	go test -cover -v ./internal/k8sconnect/... -timeout 30m -run "TestAcc"
 
 .PHONY: clean
 clean:

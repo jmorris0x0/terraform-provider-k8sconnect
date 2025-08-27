@@ -102,7 +102,7 @@ func setOwnership(obj *unstructured.Unstructured, terraformID string) {
     if annotations == nil {
         annotations = make(map[string]string)
     }
-    annotations["k8sinline.terraform.io/terraform-id"] = terraformID
+    annotations["k8sconnect.terraform.io/terraform-id"] = terraformID
     obj.SetAnnotations(annotations)
 }
 ```
@@ -127,14 +127,14 @@ Since deterministic IDs cannot satisfy the impossible requirements triangle, we 
 ```go
 func validateOwnership(liveObj *unstructured.Unstructured, expectedID string) error {
     annotations := liveObj.GetAnnotations()
-    existingID := annotations["k8sinline.terraform.io/terraform-id"]
+    existingID := annotations["k8sconnect.terraform.io/terraform-id"]
     
     if existingID == "" {
-        return fmt.Errorf("Resource exists but not managed by k8sinline. Use 'terraform import' to adopt.")
+        return fmt.Errorf("Resource exists but not managed by k8sconnect. Use 'terraform import' to adopt.")
     }
     
     if existingID != expectedID {
-        return fmt.Errorf("Resource managed by different k8sinline resource (ID: %s)", existingID)
+        return fmt.Errorf("Resource managed by different k8sconnect resource (ID: %s)", existingID)
     }
     
     return nil // Safe to proceed
@@ -146,7 +146,7 @@ func validateOwnership(liveObj *unstructured.Unstructured, expectedID string) er
 ```go
 func importResource(obj *unstructured.Unstructured) (string, error) {
     annotations := obj.GetAnnotations()
-    existingID := annotations["k8sinline.terraform.io/terraform-id"]
+    existingID := annotations["k8sconnect.terraform.io/terraform-id"]
     
     if existingID != "" {
         return existingID, nil // Use existing ID
@@ -154,7 +154,7 @@ func importResource(obj *unstructured.Unstructured) (string, error) {
     
     // New management - generate ID and set annotation
     newID := uuid.New().String()
-    annotations["k8sinline.terraform.io/terraform-id"] = newID
+    annotations["k8sconnect.terraform.io/terraform-id"] = newID
     obj.SetAnnotations(annotations)
     
     return newID, nil
@@ -180,10 +180,10 @@ This approach mirrors how successful Kubernetes tools handle ownership:
 Error: Resource conflict detected
 
 The Namespace "production" is already managed by a different 
-k8sinline resource (ID: a1b2c3d4).
+k8sconnect resource (ID: a1b2c3d4).
 
 To resolve:
-1. To adopt: terraform import k8sinline_manifest.prod production
+1. To adopt: terraform import k8sconnect_manifest.prod production
 2. To use different resource: choose different namespace name
 3. If migrating: remove existing annotations first
 ```
@@ -192,7 +192,7 @@ To resolve:
 Connection configuration can change freely without affecting resource identity:
 
 ```hcl
-resource "k8sinline_manifest" "app" {
+resource "k8sconnect_manifest" "app" {
   # ID: "a1b2c3d4-e5f6-7890-abcd-1234567890ef" (never changes)
   
   cluster_connection = {
@@ -241,7 +241,7 @@ Resource import becomes more sophisticated:
 Troubleshooting requires correlating Terraform UUIDs with Kubernetes annotations:
 ```bash
 # Finding which Terraform resource manages a Kubernetes object:
-kubectl get namespace production -o jsonpath='{.metadata.annotations.k8sinline\.terraform\.io/terraform-id}'
+kubectl get namespace production -o jsonpath='{.metadata.annotations.k8sconnect\.terraform\.io/terraform-id}'
 # a1b2c3d4-e5f6-7890-abcd-1234567890ef
 
 # Then search Terraform state:
@@ -254,9 +254,9 @@ terraform state list | grep a1b2c3d4
 ```yaml
 metadata:
   annotations:
-    k8sinline.terraform.io/terraform-id: "uuid4-string"
-    k8sinline.terraform.io/state-file: "optional-state-identifier"
-    k8sinline.terraform.io/created-at: "2024-01-01T00:00:00Z"
+    k8sconnect.terraform.io/terraform-id: "uuid4-string"
+    k8sconnect.terraform.io/state-file: "optional-state-identifier"
+    k8sconnect.terraform.io/created-at: "2024-01-01T00:00:00Z"
 ```
 
 ### Migration Path
@@ -287,7 +287,7 @@ Random IDs will appear in Terraform state files but won't affect functionality:
 
 ### User-Provided Cluster Identifiers
 ```hcl
-resource "k8sinline_manifest" "example" {
+resource "k8sconnect_manifest" "example" {
   cluster_name = "production"  # User provides stable name
   cluster_connection = { ... }
 }
@@ -296,7 +296,7 @@ resource "k8sinline_manifest" "example" {
 
 ### Provider-Level Connection Configuration
 ```hcl
-provider "k8sinline" {
+provider "k8sconnect" {
   clusters = {
     prod = { kubeconfig_raw = var.prod_config }
   }

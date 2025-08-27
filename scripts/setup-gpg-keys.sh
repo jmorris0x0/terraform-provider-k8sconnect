@@ -22,8 +22,8 @@ Key-Type: RSA
 Key-Length: 4096
 Subkey-Type: RSA
 Subkey-Length: 4096
-Name-Real: k8sinline Terraform Provider
-Name-Email: terraform@k8sinline.local
+Name-Real: k8sconnect Terraform Provider
+Name-Email: terraform@k8sconnect.local
 Expire-Date: 0
 %no-protection
 %commit
@@ -34,8 +34,8 @@ gpg --batch --generate-key gpg-batch.txt
 rm gpg-batch.txt
 
 # Get the key ID
-KEY_ID=$(gpg --list-secret-keys --keyid-format=long terraform@k8sinline.local | grep sec | awk '{print $2}' | cut -d'/' -f2)
-FINGERPRINT=$(gpg --list-secret-keys --keyid-format=long terraform@k8sinline.local | grep -A1 "sec" | tail -1 | tr -d ' ')
+KEY_ID=$(gpg --list-secret-keys --keyid-format=long terraform@k8sconnect.local | grep sec | awk '{print $2}' | cut -d'/' -f2)
+FINGERPRINT=$(gpg --list-secret-keys --keyid-format=long terraform@k8sconnect.local | grep -A1 "sec" | tail -1 | tr -d ' ')
 
 echo
 echo "✅ Key generated successfully!"
@@ -45,24 +45,24 @@ echo
 
 # Export keys
 echo "Exporting keys..."
-gpg --armor --export terraform@k8sinline.local >k8sinline-public.asc
-gpg --armor --export-secret-keys terraform@k8sinline.local >k8sinline-private.asc
+gpg --armor --export terraform@k8sconnect.local >k8sconnect-public.asc
+gpg --armor --export-secret-keys terraform@k8sconnect.local >k8sconnect-private.asc
 
 echo "📄 Keys exported to:"
-echo "   Public key:  k8sinline-public.asc"
-echo "   Private key: k8sinline-private.asc"
+echo "   Public key:  k8sconnect-public.asc"
+echo "   Private key: k8sconnect-private.asc"
 echo
 
 echo "🔧 Next steps:"
 echo "1. Add these secrets to your GitHub repository:"
-echo "   - GPG_PRIVATE_KEY: Copy contents of k8sinline-private.asc"
+echo "   - GPG_PRIVATE_KEY: Copy contents of k8sconnect-private.asc"
 echo "   - GPG_PASSPHRASE: (leave empty since we used --no-protection)"
 echo
 echo "2. When ready to publish to Terraform Registry:"
-echo "   - Upload k8sinline-public.asc to https://registry.terraform.io/settings/gpg-keys"
+echo "   - Upload k8sconnect-public.asc to https://registry.terraform.io/settings/gpg-keys"
 echo
 echo "3. Keep your private key safe!"
 echo
 
 echo "🚨 Security reminder: Delete the private key file after adding to GitHub:"
-echo "   rm k8sinline-private.asc"
+echo "   rm k8sconnect-private.asc"

@@ -1,6 +1,6 @@
-# k8sinline_yaml_split Data Source
+# k8sconnect_yaml_split Data Source
 
-The `k8sinline_yaml_split` data source intelligently splits multi-document YAML content into individual manifests with stable, human-readable IDs. It's designed specifically for Kubernetes YAML files but works with any well-formed YAML content.
+The `k8sconnect_yaml_split` data source intelligently splits multi-document YAML content into individual manifests with stable, human-readable IDs. It's designed specifically for Kubernetes YAML files but works with any well-formed YAML content.
 
 ## Key Features
 
@@ -31,7 +31,7 @@ The `k8sinline_yaml_split` data source intelligently splits multi-document YAML 
 
 ### Inline Content
 ```hcl
-data "k8sinline_yaml_split" "app" {
+data "k8sconnect_yaml_split" "app" {
   content = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -60,8 +60,8 @@ YAML
 }
 
 # Apply each manifest individually
-resource "k8sinline_manifest" "app" {
-  for_each = data.k8sinline_yaml_split.app.manifests
+resource "k8sconnect_manifest" "app" {
+  for_each = data.k8sconnect_yaml_split.app.manifests
   
   yaml_body = each.value
   
@@ -78,17 +78,17 @@ resource "k8sinline_manifest" "app" {
 ### File Patterns
 ```hcl
 # Load all YAML files from a directory
-data "k8sinline_yaml_split" "configs" {
+data "k8sconnect_yaml_split" "configs" {
   pattern = "./k8s-configs/*.yaml"
 }
 
 # Recursive directory search
-data "k8sinline_yaml_split" "all_manifests" {
+data "k8sconnect_yaml_split" "all_manifests" {
   pattern = "./manifests/**/*.{yaml,yml}"
 }
 
-resource "k8sinline_manifest" "all" {
-  for_each = data.k8sinline_yaml_split.all_manifests.manifests
+resource "k8sconnect_manifest" "all" {
+  for_each = data.k8sconnect_yaml_split.all_manifests.manifests
   
   yaml_body = each.value
   
@@ -104,14 +104,14 @@ resource "k8sinline_manifest" "all" {
 ### Dependency Ordering
 ```hcl
 # Split all manifests
-data "k8sinline_yaml_split" "all" {
+data "k8sconnect_yaml_split" "all" {
   pattern = "./k8s/**/*.yaml"
 }
 
 # Apply CRDs first
-resource "k8sinline_manifest" "crds" {
+resource "k8sconnect_manifest" "crds" {
   for_each = {
-    for key, yaml in data.k8sinline_yaml_split.all.manifests :
+    for key, yaml in data.k8sconnect_yaml_split.all.manifests :
     key => yaml
     if can(regex("(?i)customresourcedefinition", yaml))
   }
@@ -124,9 +124,9 @@ resource "k8sinline_manifest" "crds" {
 }
 
 # Apply everything else after CRDs
-resource "k8sinline_manifest" "resources" {
+resource "k8sconnect_manifest" "resources" {
   for_each = {
-    for key, yaml in data.k8sinline_yaml_split.all.manifests :
+    for key, yaml in data.k8sconnect_yaml_split.all.manifests :
     key => yaml
     if !can(regex("(?i)customresourcedefinition", yaml))
   }
@@ -137,13 +137,13 @@ resource "k8sinline_manifest" "resources" {
     kubeconfig_raw = var.kubeconfig
   }
   
-  depends_on = [k8sinline_manifest.crds]
+  depends_on = [k8sconnect_manifest.crds]
 }
 ```
 
 ### Multi-Cluster Deployment
 ```hcl
-data "k8sinline_yaml_split" "apps" {
+data "k8sconnect_yaml_split" "apps" {
   pattern = "./apps/*.yaml"
 }
 
@@ -162,7 +162,7 @@ locals {
   
   # Route manifests to clusters based on naming
   cluster_manifests = {
-    for key, yaml in data.k8sinline_yaml_split.apps.manifests : 
+    for key, yaml in data.k8sconnect_yaml_split.apps.manifests : 
     key => {
       yaml    = yaml
       cluster = contains(key, "prod") ? "prod" : "staging"
@@ -171,7 +171,7 @@ locals {
 }
 
 # Deploy to appropriate clusters
-resource "k8sinline_manifest" "multi_cluster" {
+resource "k8sconnect_manifest" "multi_cluster" {
   for_each = local.cluster_manifests
   
   yaml_body = each.value.yaml
@@ -182,7 +182,7 @@ resource "k8sinline_manifest" "multi_cluster" {
 
 ### Dynamic Content with Templates
 ```hcl
-data "k8sinline_yaml_split" "templated" {
+data "k8sconnect_yaml_split" "templated" {
   content = templatefile("${path.module}/app-template.yaml", {
     app_name     = var.app_name
     environment  = var.environment
@@ -192,8 +192,8 @@ data "k8sinline_yaml_split" "templated" {
   })
 }
 
-resource "k8sinline_manifest" "templated_app" {
-  for_each = data.k8sinline_yaml_split.templated.manifests
+resource "k8sconnect_manifest" "templated_app" {
+  for_each = data.k8sconnect_yaml_split.templated.manifests
   
   yaml_body = each.value
   
@@ -244,7 +244,7 @@ The data source generates predictable, stable IDs based on Kubernetes resource m
 ### Example Error Conditions
 ```hcl
 # This will FAIL - duplicate resources
-data "k8sinline_yaml_split" "invalid" {
+data "k8sconnect_yaml_split" "invalid" {
   content = <<YAML
 apiVersion: v1
 kind: Pod
@@ -288,7 +288,7 @@ The data source follows a **fail-fast philosophy**: if there are any issues that
 ### Example Error Handling
 ```hcl
 # This will produce warnings but continue processing
-data "k8sinline_yaml_split" "mixed_quality" {
+data "k8sconnect_yaml_split" "mixed_quality" {
   content = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -334,7 +334,7 @@ data "yaml_split" "docs" {
 }
 
 # New approach  
-data "k8sinline_yaml_split" "docs" {
+data "k8sconnect_yaml_split" "docs" {
   content = file("manifests.yaml")
 }
 
@@ -349,12 +349,12 @@ data "k8sinline_yaml_split" "docs" {
 kubectl apply -f manifests/
 
 # New Terraform approach
-data "k8sinline_yaml_split" "manifests" {
+data "k8sconnect_yaml_split" "manifests" {
   pattern = "./manifests/*.yaml"
 }
 
-resource "k8sinline_manifest" "all" {
-  for_each = data.k8sinline_yaml_split.manifests.manifests
+resource "k8sconnect_manifest" "all" {
+  for_each = data.k8sconnect_yaml_split.manifests.manifests
   
   yaml_body = each.value
   cluster_connection = { /* ... */ }
