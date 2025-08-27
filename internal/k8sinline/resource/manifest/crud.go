@@ -12,6 +12,8 @@ import (
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sinline/internal/k8sinline/k8sclient"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
 func (r *manifestResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -300,32 +302,6 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		data.FieldOwnership = types.StringValue(string(ownershipJSON))
 	}
 
-	// Handle imported resources without annotations
-	if !data.ImportedWithoutAnnotations.IsNull() && data.ImportedWithoutAnnotations.ValueBool() {
-		// Set ownership annotation
-		r.setOwnershipAnnotation(currentObj, data.ID.ValueString())
-
-		// Apply the annotation
-		err = client.Apply(ctx, currentObj, k8sclient.ApplyOptions{
-			FieldManager: "k8sinline",
-			Force:        false,
-		})
-		if err != nil {
-			resp.Diagnostics.AddError("Failed to set ownership annotation",
-				fmt.Sprintf("Failed to update ownership annotation on imported resource: %s", err))
-			return
-		}
-
-		tflog.Info(ctx, "Set ownership annotation on imported resource", map[string]interface{}{
-			"kind": obj.GetKind(),
-			"name": obj.GetName(),
-			"id":   data.ID.ValueString(),
-		})
-
-		// Clear the flag
-		data.ImportedWithoutAnnotations = types.BoolNull()
-	}
-
 	// Verify ownership
 	currentID := r.getOwnershipID(currentObj)
 	if currentID == "" {
@@ -484,6 +460,40 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 	forceConflicts := false
 	if !plan.ForceConflicts.IsNull() {
 		forceConflicts = plan.ForceConflicts.ValueBool()
+	}
+
+	// Handle imported resources that need ownership annotation
+	if !state.ImportedWithoutAnnotations.IsNull() && state.ImportedWithoutAnnotations.ValueBool() {
+		// For imported resources, we need to add our ownership annotation using patch
+		annotationPatch := map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"annotations": map[string]interface{}{
+					OwnershipAnnotation: state.ID.ValueString(),
+				},
+			},
+		}
+
+		patchData, err := json.Marshal(annotationPatch)
+		if err != nil {
+			resp.Diagnostics.AddError("Failed to create patch", err.Error())
+			return
+		}
+
+		_, err = client.Patch(ctx, gvr, obj.GetNamespace(), obj.GetName(),
+			k8stypes.StrategicMergePatchType, patchData, metav1.PatchOptions{
+				FieldManager: "k8sinline",
+			})
+		if err != nil {
+			resp.Diagnostics.AddError("Failed to add ownership annotation",
+				fmt.Sprintf("Could not add ownership annotation to imported resource: %s", err))
+			return
+		}
+
+		tflog.Info(ctx, "Added ownership annotation to imported resource using patch", map[string]interface{}{
+			"kind": obj.GetKind(),
+			"name": obj.GetName(),
+			"id":   state.ID.ValueString(),
+		})
 	}
 
 	// Apply the updated manifest

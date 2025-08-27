@@ -5,8 +5,10 @@ import (
 	"context"
 	"strings"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // stubK8sClient is a test implementation of K8sClient that records method calls
@@ -212,6 +214,11 @@ func (s *stubK8sClient) GetGVRFromKind(ctx context.Context, kind, namespace, nam
 	}
 
 	return gvr, obj, nil
+}
+
+func (s *stubK8sClient) Patch(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string, patchType types.PatchType, data []byte, options metav1.PatchOptions) (*unstructured.Unstructured, error) {
+	// For stub, just return success or configured response
+	return s.GetResponse, nil
 }
 
 // Interface assertion to ensure stubK8sClient satisfies K8sClient

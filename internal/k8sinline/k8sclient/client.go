@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
@@ -47,6 +48,8 @@ type K8sClient interface {
 	// This is primarily used for import operations where API version is unknown
 	// Returns the GVR, the live object, and any error
 	GetGVRFromKind(ctx context.Context, kind, namespace, name string) (schema.GroupVersionResource, *unstructured.Unstructured, error)
+
+	Patch(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string, patchType types.PatchType, data []byte, options metav1.PatchOptions) (*unstructured.Unstructured, error)
 }
 
 // ApplyOptions holds options for server-side apply operations.
@@ -531,6 +534,19 @@ func (d *DynamicK8sClient) tryGetResource(ctx context.Context, gvr schema.GroupV
 	}
 
 	return resource.Get(ctx, name, metav1.GetOptions{})
+}
+
+func (d *DynamicK8sClient) Patch(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string, patchType types.PatchType, data []byte, options metav1.PatchOptions) (*unstructured.Unstructured, error) {
+	var result *unstructured.Unstructured
+	var err error
+
+	if namespace == "" {
+		result, err = d.client.Resource(gvr).Patch(ctx, name, patchType, data, options)
+	} else {
+		result, err = d.client.Resource(gvr).Namespace(namespace).Patch(ctx, name, patchType, data, options)
+	}
+
+	return result, err
 }
 
 // Interface assertion to ensure DynamicK8sClient satisfies K8sClient
