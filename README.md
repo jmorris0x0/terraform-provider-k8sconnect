@@ -30,7 +30,7 @@ Traditional providers force cluster configuration into the provider block; **k8s
 terraform {
   required_providers {
     k8sinline = {
-      source  = "github.com/jmorris0x0/terraform-provider-k8sinline"
+      source  = "jmorris0x0/k8sinline"
       version = ">= 0.1.0"
     }
   }
