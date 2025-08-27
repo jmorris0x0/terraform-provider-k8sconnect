@@ -7,14 +7,12 @@ import (
 	"os"
 	"regexp"
 	"testing"
-	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/config"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
-	v1 "k8s.io/api/core/v1"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -189,54 +187,42 @@ func TestAccManifestResource_OwnershipImport(t *testing.T) {
 
 	k8sClient := createK8sClient(t, raw)
 
-	// Create unmanaged ConfigMap first
-	ctx := context.Background()
-	cm := &v1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-import-ownership",
-			Namespace: "default",
-		},
-		Data: map[string]string{
-			"key": "value",
-		},
-	}
-	_, err := k8sClient.CoreV1().ConfigMaps("default").Create(ctx, cm, metav1.CreateOptions{})
-	if err != nil {
-		t.Fatalf("Failed to create test ConfigMap: %v", err)
-	}
-
-	// Verify it was created
-	createdCM, err := k8sClient.CoreV1().ConfigMaps("default").Get(ctx, "test-import-ownership", metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("Failed to verify ConfigMap creation: %v", err)
-	}
-	t.Logf("ConfigMap created successfully: %s/%s", createdCM.Namespace, createdCM.Name)
-
-	// Wait for ConfigMap to propagate
-	time.Sleep(2 * time.Second)
-
-	// Clean up after test
-	t.Cleanup(func() {
-		k8sClient.CoreV1().ConfigMaps("default").Delete(ctx, "test-import-ownership", metav1.DeleteOptions{})
-	})
-
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
 			"k8sinline": providerserver.NewProtocol6WithError(k8sinline.New()),
 		},
 		Steps: []resource.TestStep{
-			// Import existing resource
+			// Step 1: Create ConfigMap with Terraform
 			{
-				ResourceName:      "k8sinline_manifest.import_test",
-				ImportState:       true,
-				ImportStateId:     "kind-oidc-e2e/default/ConfigMap/test-import-ownership",
-				ImportStateVerify: false, // Skip verify since import doesn't set all attributes
-				Config:            testAccManifestConfigOwnershipImport,
+				Config: testAccManifestConfigOwnershipImport,
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestMatchResourceAttr("k8sinline_manifest.import_test", "id",
+						regexp.MustCompile("^[a-f0-9]{12}$")),
+					testAccCheckOwnershipAnnotations(k8sClient, "default", "test-import-ownership"),
+				),
 			},
-			// After import, apply should add ownership annotations
+			// Step 2: Import the ConfigMap
+			{
+				Config: testAccManifestConfigOwnershipImport,
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				ResourceName:      "k8sinline_manifest.import_test",
+				ImportState:       true,
+				ImportStateId:     "kind-oidc-e2e/default/ConfigMap/test-import-ownership",
+				ImportStateVerify: true,
+				ImportStateVerifyIgnore: []string{
+					"imported_without_annotations",
+					"cluster_connection",
+					"yaml_body",
+					"managed_state_projection",
+					"delete_protection",
+				},
+			},
+			// Step 3: Verify ownership annotations still exist after import
 			{
 				Config: testAccManifestConfigOwnershipImport,
 				ConfigVariables: config.Variables{

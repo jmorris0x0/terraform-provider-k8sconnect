@@ -220,21 +220,13 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 }
 
 func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	fmt.Printf("DEBUG: Read called after import\n")
-
 	var data manifestResourceModel
 
 	diags := req.State.Get(ctx, &data)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
-		fmt.Printf("DEBUG: Read - Failed to get state: %v\n", resp.Diagnostics.Errors())
 		return
 	}
-
-	fmt.Printf("DEBUG: Read - State loaded with ID: %s\n", data.ID.ValueString())
-	fmt.Printf("DEBUG: Read - YAMLBody length: %d\n", len(data.YAMLBody.ValueString()))
-	fmt.Printf("DEBUG: Read - ClusterConnection is null: %v\n", data.ClusterConnection.IsNull())
-	fmt.Printf("DEBUG: Read - ImportedWithoutAnnotations: %v\n", data.ImportedWithoutAnnotations.ValueBool())
 
 	// Debug log
 	// TODO: Remove me after debug
@@ -245,7 +237,6 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 
 	// Check if cluster connection is ready
 	if !r.isConnectionReady(data.ClusterConnection) {
-		fmt.Printf("DEBUG: Read - Connection not ready, skipping read\n")
 		tflog.Info(ctx, "Skipping Read due to unknown connection values")
 		return
 	}
@@ -253,44 +244,41 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 	// Get connection from state (this already has the effective connection stored)
 	conn, err := r.convertObjectToConnectionModel(ctx, data.ClusterConnection)
 	if err != nil {
-		fmt.Printf("DEBUG: Read - Failed to convert connection: %v\n", err)
 		resp.Diagnostics.AddError("Connection Conversion Failed", err.Error())
 		return
 	}
 
-	fmt.Printf("DEBUG: Read - Connection converted successfully\n")
-
 	// Parse the stored YAML to get resource info
 	obj, err := r.parseYAML(data.YAMLBody.ValueString())
 	if err != nil {
-		fmt.Printf("DEBUG: Read - Failed to parse YAML: %v\n", err)
-		resp.Diagnostics.AddError("Invalid YAML in state",
-			fmt.Sprintf("Failed to parse stored YAML: %s", err))
+		resp.Diagnostics.AddError("Invalid YAML in State", fmt.Sprintf("Failed to parse stored YAML: %s", err))
 		return
 	}
 
-	fmt.Printf("DEBUG: Read - Parsed YAML for %s/%s in namespace %s\n",
-		obj.GetKind(), obj.GetName(), obj.GetNamespace())
-
-	// Create a client
-	client, err := r.getClient(conn)
+	// Create K8s client
+	client, err := r.clientGetter(conn)
 	if err != nil {
-		fmt.Printf("DEBUG: Read - Failed to create client: %v\n", err)
-		resp.Diagnostics.AddError("Client Creation Failed",
-			fmt.Sprintf("Failed to create Kubernetes client: %s", err))
+		resp.Diagnostics.AddError("Connection Failed", fmt.Sprintf("Failed to create Kubernetes client: %s", err))
 		return
 	}
 
-	fmt.Printf("DEBUG: Read - Created Kubernetes client\n")
-
-	// Read current state from Kubernetes
-	currentObj, err := client.Get(ctx, obj.GetAPIVersion(), obj.GetKind(),
-		obj.GetNamespace(), obj.GetName())
+	// Get GVR for the object
+	gvr, err := r.getGVR(ctx, client, obj)
 	if err != nil {
-		fmt.Printf("DEBUG: Read - Failed to get resource from K8s: %v\n", err)
+		// If we can't determine resource type, resource might be gone
+		tflog.Info(ctx, "Failed to determine resource type during Read", map[string]interface{}{
+			"error": err.Error(),
+			"kind":  obj.GetKind(),
+		})
+		resp.State.RemoveResource(ctx)
+		return
+	}
+
+	// Get current state from cluster
+	currentObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
+	if err != nil {
 		if errors.IsNotFound(err) {
-			fmt.Printf("DEBUG: Read - Resource not found, removing from state\n")
-			tflog.Info(ctx, "Resource no longer exists, removing from state", map[string]interface{}{
+			tflog.Info(ctx, "Resource not found, removing from state", map[string]interface{}{
 				"kind":      obj.GetKind(),
 				"name":      obj.GetName(),
 				"namespace": obj.GetNamespace(),
@@ -298,91 +286,53 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		resp.Diagnostics.AddError("Read Failed",
-			fmt.Sprintf("Failed to read resource: %s", err))
+		resp.Diagnostics.AddError("Failed to read resource", fmt.Sprintf("Failed to get resource from cluster: %s", err))
 		return
 	}
 
-	fmt.Printf("DEBUG: Read - Successfully fetched resource from K8s\n")
+	// Verify ownership
+	currentID := r.getOwnershipID(currentObj)
+	expectedID := data.ID.ValueString()
 
-	// Check ownership
-	existingID := r.getOwnershipID(currentObj)
-	fmt.Printf("DEBUG: Read - Existing ownership ID: %s, Our ID: %s\n", existingID, data.ID.ValueString())
-
-	if existingID != "" && existingID != data.ID.ValueString() {
-		fmt.Printf("DEBUG: Read - Resource owned by different ID, resource hijacked\n")
-		// Resource has been hijacked by another terraform resource
-		tflog.Warn(ctx, "resource ownership changed", map[string]interface{}{
-			"our_id":      data.ID.ValueString(),
-			"existing_id": existingID,
-		})
+	if currentID != expectedID {
+		if currentID == "" {
+			// No annotations found - check if this is expected (post-import)
+			if !data.ImportedWithoutAnnotations.IsNull() && data.ImportedWithoutAnnotations.ValueBool() {
+				// Expected - resource was imported without annotations
+				tflog.Info(ctx, "resource imported without annotations, will be added on next apply",
+					map[string]interface{}{
+						"id":   data.ID.ValueString(),
+						"kind": obj.GetKind(),
+						"name": obj.GetName(),
+					})
+				// Don't error - just continue with the read
+			} else {
+				// This is drift - annotations were removed
+				resp.Diagnostics.AddError(
+					"Resource Ownership Lost",
+					fmt.Sprintf("The %s '%s' exists but is no longer managed by this Terraform resource. "+
+						"The ownership annotations have been removed. "+
+						"Use 'terraform import' to re-adopt this resource or delete it from your configuration.",
+						obj.GetKind(), obj.GetName()),
+				)
+				resp.State.RemoveResource(ctx)
+				return
+			}
+		}
 		resp.State.RemoveResource(ctx)
 		return
 	}
 
-	// For imported resources without annotations, we need to adopt them
-	if data.ImportedWithoutAnnotations.ValueBool() && existingID == "" {
-		fmt.Printf("DEBUG: Read - Adopting imported resource without annotations\n")
-		tflog.Info(ctx, "Adopting imported resource", map[string]interface{}{
-			"id": data.ID.ValueString(),
-		})
-		r.setOwnershipAnnotation(currentObj, data.ID.ValueString())
-		if err := client.Update(ctx, currentObj); err != nil {
-			fmt.Printf("DEBUG: Read - Failed to update annotations: %v\n", err)
-			resp.Diagnostics.AddError("Failed to set ownership",
-				fmt.Sprintf("Failed to update resource annotations: %s", err))
-			return
-		}
-		data.ImportedWithoutAnnotations = types.BoolValue(false)
-		fmt.Printf("DEBUG: Read - Successfully adopted resource\n")
-	}
+	// Resource exists and we own it - state remains unchanged
+	tflog.Trace(ctx, "Read completed successfully", map[string]interface{}{
+		"id":   data.ID.ValueString(),
+		"kind": obj.GetKind(),
+		"name": obj.GetName(),
+	})
 
-	// Read managed fields if we have projection data
-	if !data.ManagedStateProjection.IsNull() {
-		fmt.Printf("DEBUG: Read - Processing managed state projection\n")
-		projection, err := r.parseManagedProjection(data.ManagedStateProjection.ValueString())
-		if err != nil {
-			fmt.Printf("DEBUG: Read - Failed to parse projection: %v\n", err)
-			tflog.Warn(ctx, "Failed to parse managed state projection", map[string]interface{}{
-				"error": err.Error(),
-			})
-		} else {
-			// Check for drift in managed fields
-			drift := r.checkFieldDrift(currentObj.Object, projection)
-			if len(drift) > 0 {
-				fmt.Printf("DEBUG: Read - Detected drift in %d fields\n", len(drift))
-				tflog.Info(ctx, "Detected drift in managed fields", map[string]interface{}{
-					"drift_count": len(drift),
-					"fields":      drift,
-				})
-			}
-		}
-	}
-
-	// Convert current object to YAML (normalizing the format)
-	yamlBytes, err := r.objectToYAML(currentObj)
-	if err != nil {
-		fmt.Printf("DEBUG: Read - Failed to convert to YAML: %v\n", err)
-		resp.Diagnostics.AddError("YAML Conversion Failed",
-			fmt.Sprintf("Failed to convert resource to YAML: %s", err))
-		return
-	}
-
-	fmt.Printf("DEBUG: Read - Converted to YAML successfully, length: %d\n", len(yamlBytes))
-
-	// Update the YAML body in state with current state from cluster
-	data.YAMLBody = types.StringValue(string(yamlBytes))
-
-	// Save updated state
+	// Set the state (unchanged)
 	diags = resp.State.Set(ctx, &data)
 	resp.Diagnostics.Append(diags...)
-
-	if resp.Diagnostics.HasError() {
-		fmt.Printf("DEBUG: Read - Failed to set state: %v\n", resp.Diagnostics.Errors())
-		return
-	}
-
-	fmt.Printf("DEBUG: Read completed successfully\n")
 }
 
 func (r *manifestResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {

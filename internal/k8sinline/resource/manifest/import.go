@@ -194,26 +194,30 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 	var resourceID string
 
 	if existingID != "" {
-		fmt.Printf("DEBUG: Resource already managed, returning with error\n")
-		// Resource already managed by k8sinline - this is an error
-		resp.Diagnostics.AddError(
-			"Import Failed: Resource Already Managed",
-			fmt.Sprintf("This resource is already managed by another Terraform state (ID: %s).\n\n"+
-				"This usually means:\n"+
-				"- Another Terraform configuration is managing this resource\n"+
-				"- You're trying to import into the wrong state\n\n"+
-				"To resolve:\n"+
-				"1. Find the correct Terraform state that manages this resource\n"+
-				"2. Or remove the annotation first: kubectl annotate %s %s %s-\n"+
-				"   WARNING: Only do this if you're certain the other state no longer manages it!",
-				existingID, strings.ToLower(kind), name, OwnershipAnnotation),
-		)
-		return
-	}
+		// Resource already managed - use existing ID and warn
+		resourceID = existingID
 
-	// Resource not managed by k8sinline - generate new ID
-	resourceID = r.generateID()
-	fmt.Printf("DEBUG: Generated new resource ID: %s\n", resourceID)
+		resp.Diagnostics.AddWarning(
+			"Importing Already-Managed Resource",
+			fmt.Sprintf("This resource is already managed by k8sinline (ID: %s).\n"+
+				"The existing ownership will be maintained.\n"+
+				"If this resource is managed by another Terraform state, you may experience conflicts.\n"+
+				"To transfer ownership cleanly, remove the annotation first:\n"+
+				"kubectl annotate %s %s k8sinline.terraform.io/terraform-id-",
+				existingID, strings.ToLower(kind), name),
+		)
+
+		tflog.Warn(ctx, "importing already-managed resource", map[string]interface{}{
+			"existing_id": existingID,
+			"kind":        kind,
+			"name":        name,
+			"namespace":   namespace,
+		})
+	} else {
+		// Resource not yet managed - generate new ID
+		resourceID = r.generateID()
+		fmt.Printf("DEBUG: Generated new resource ID: %s\n", resourceID)
+	}
 
 	// Convert to YAML for state
 	fmt.Printf("DEBUG: Converting resource to YAML\n")
