@@ -18,9 +18,16 @@ import (
 
 // ImportState method implementing kubeconfig strategy with managed fields tracking
 func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	tflog.Info(ctx, "ImportState called", map[string]interface{}{"import_id": req.ID})
+	fmt.Printf("DEBUG: ImportState called with ID: %s\n", req.ID)
+
 	// Parse import ID: "context/namespace/kind/name" or "context/kind/name" for cluster-scoped
 	kubeContext, namespace, kind, name, err := r.parseImportID(req.ID)
+	fmt.Printf("DEBUG: Parsed import ID - context: %s, namespace: %s, kind: %s, name: %s, err: %v\n",
+		kubeContext, namespace, kind, name, err)
+
 	if err != nil {
+		fmt.Printf("DEBUG: Parse error, returning with error\n")
 		resp.Diagnostics.AddError(
 			"Invalid Import ID",
 			fmt.Sprintf("Expected format: <context>/<namespace>/<kind>/<n> or <context>/<kind>/<n>\n\nExamples:\n"+
@@ -32,8 +39,18 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		return
 	}
 
+	// TODO: Remove after debug
+	tflog.Info(ctx, "Parsed import ID", map[string]interface{}{
+		"context":   kubeContext,
+		"namespace": namespace,
+		"kind":      kind,
+		"name":      name,
+		"error":     err,
+	})
+
 	// Validate required parts
 	if kubeContext == "" {
+		fmt.Printf("DEBUG: Empty context, returning with error\n")
 		resp.Diagnostics.AddError(
 			"Import Failed: Missing Context",
 			"The import ID must include a kubeconfig context as the first part.\n\n"+
@@ -43,6 +60,7 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		return
 	}
 	if kind == "" {
+		fmt.Printf("DEBUG: Empty kind, returning with error\n")
 		resp.Diagnostics.AddError(
 			"Import Failed: Missing Kind",
 			"The resource kind cannot be empty in the import ID.",
@@ -50,6 +68,7 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		return
 	}
 	if name == "" {
+		fmt.Printf("DEBUG: Empty name, returning with error\n")
 		resp.Diagnostics.AddError(
 			"Import Failed: Missing Name",
 			"The resource name cannot be empty in the import ID.",
@@ -59,9 +78,14 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 
 	// Read kubeconfig from KUBECONFIG env var or default location
 	kubeconfigPath := os.Getenv("KUBECONFIG")
+	fmt.Printf("DEBUG: KUBECONFIG env var: %s\n", kubeconfigPath)
+
 	if kubeconfigPath == "" {
 		homeDir := os.Getenv("HOME")
+		fmt.Printf("DEBUG: HOME env var: %s\n", homeDir)
+
 		if homeDir == "" {
+			fmt.Printf("DEBUG: No HOME dir, returning with error\n")
 			resp.Diagnostics.AddError(
 				"Import Failed: KUBECONFIG Not Found",
 				"KUBECONFIG environment variable is not set and HOME directory could not be determined.\n\n"+
@@ -72,10 +96,16 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 			return
 		}
 		kubeconfigPath = filepath.Join(homeDir, ".kube", "config")
+		fmt.Printf("DEBUG: Using default kubeconfig path: %s\n", kubeconfigPath)
 	}
+
+	tflog.Info(ctx, "Using kubeconfig", map[string]interface{}{
+		"path": kubeconfigPath,
+	})
 
 	// Check if kubeconfig file exists
 	if _, err := os.Stat(kubeconfigPath); os.IsNotExist(err) {
+		fmt.Printf("DEBUG: Kubeconfig file not found at %s\n", kubeconfigPath)
 		resp.Diagnostics.AddError(
 			"Import Failed: Kubeconfig File Not Found",
 			fmt.Sprintf("Kubeconfig file not found at: %s\n\n"+
@@ -85,8 +115,9 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		)
 		return
 	}
+	fmt.Printf("DEBUG: Kubeconfig file exists at %s\n", kubeconfigPath)
 
-	tflog.Debug(ctx, "import using kubeconfig", map[string]interface{}{
+	tflog.Info(ctx, "import using kubeconfig", map[string]interface{}{
 		"path":      kubeconfigPath,
 		"context":   kubeContext,
 		"kind":      kind,
@@ -95,8 +126,10 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 	})
 
 	// Create K8s client using kubeconfig file and context
+	fmt.Printf("DEBUG: Creating K8s client with context %s\n", kubeContext)
 	client, err := k8sclient.NewDynamicK8sClientFromKubeconfigFile(kubeconfigPath, kubeContext)
 	if err != nil {
+		fmt.Printf("DEBUG: Failed to create K8s client: %v\n", err)
 		// Provide context-specific error messages
 		if strings.Contains(err.Error(), "context") && strings.Contains(err.Error(), "not found") {
 			resp.Diagnostics.AddError(
@@ -127,10 +160,13 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		}
 		return
 	}
+	fmt.Printf("DEBUG: K8s client created successfully\n")
 
 	// Discover GVR from kind and fetch the resource
+	fmt.Printf("DEBUG: Getting GVR for kind=%s, namespace=%s, name=%s\n", kind, namespace, name)
 	_, liveObj, err := client.GetGVRFromKind(ctx, kind, namespace, name)
 	if err != nil {
+		fmt.Printf("DEBUG: GetGVRFromKind failed: %v\n", err)
 		if strings.Contains(err.Error(), "not found") {
 			resp.Diagnostics.AddError(
 				"Import Failed: Resource not found",
@@ -149,12 +185,16 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		}
 		return
 	}
+	fmt.Printf("DEBUG: Resource found successfully\n")
 
 	// Check for existing ownership and generate ID accordingly
 	existingID := r.getOwnershipID(liveObj)
+	fmt.Printf("DEBUG: Existing ownership ID: %s\n", existingID)
+
 	var resourceID string
 
 	if existingID != "" {
+		fmt.Printf("DEBUG: Resource already managed, returning with error\n")
 		// Resource already managed by k8sinline - this is an error
 		resp.Diagnostics.AddError(
 			"Import Failed: Resource Already Managed",
@@ -173,35 +213,44 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 
 	// Resource not managed by k8sinline - generate new ID
 	resourceID = r.generateID()
+	fmt.Printf("DEBUG: Generated new resource ID: %s\n", resourceID)
 
 	// Convert to YAML for state
+	fmt.Printf("DEBUG: Converting resource to YAML\n")
 	yamlBytes, err := r.objectToYAML(liveObj)
 	if err != nil {
+		fmt.Printf("DEBUG: YAML conversion failed: %v\n", err)
 		resp.Diagnostics.AddError(
 			"Import Failed: YAML conversion error",
 			fmt.Sprintf("Failed to convert resource to YAML: %s", err.Error()),
 		)
 		return
 	}
+	fmt.Printf("DEBUG: YAML conversion successful, %d bytes\n", len(yamlBytes))
 
 	// NEW: Extract field paths from the imported object
 	paths := extractFieldPaths(liveObj.Object, "")
+	fmt.Printf("DEBUG: Extracted %d field paths\n", len(paths))
 
 	// NEW: Project the current state for managed fields
 	projection, err := projectFields(liveObj.Object, paths)
 	if err != nil {
+		fmt.Printf("DEBUG: Field projection failed: %v\n", err)
 		resp.Diagnostics.AddError("Projection Failed",
 			fmt.Sprintf("Failed to project managed fields during import: %s", err))
 		return
 	}
+	fmt.Printf("DEBUG: Field projection successful\n")
 
 	// NEW: Convert projection to JSON
 	projectionJSON, err := toJSON(projection)
 	if err != nil {
+		fmt.Printf("DEBUG: JSON conversion failed: %v\n", err)
 		resp.Diagnostics.AddError("JSON Conversion Failed",
 			fmt.Sprintf("Failed to convert projection to JSON during import: %s", err))
 		return
 	}
+	fmt.Printf("DEBUG: JSON conversion successful, %d bytes\n", len(projectionJSON))
 
 	// Create connection model for import
 	conn := auth.ClusterConnectionModel{
@@ -214,14 +263,17 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 	}
 
 	// Convert to types.Object
+	fmt.Printf("DEBUG: Converting connection to object\n")
 	connectionObj, err := r.convertConnectionToObject(ctx, conn)
 	if err != nil {
+		fmt.Printf("DEBUG: Connection conversion failed: %v\n", err)
 		resp.Diagnostics.AddError(
 			"Import Failed: Connection Conversion Error",
 			fmt.Sprintf("Failed to convert connection model: %s", err.Error()),
 		)
 		return
 	}
+	fmt.Printf("DEBUG: Connection conversion successful\n")
 
 	// Create imported data with managed state projection
 	importedData := manifestResourceModel{
@@ -233,8 +285,26 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		ImportedWithoutAnnotations: types.BoolValue(true),
 	}
 
+	fmt.Printf("DEBUG: Setting state\n")
 	diags := resp.State.Set(ctx, &importedData)
 	resp.Diagnostics.Append(diags...)
+
+	if resp.Diagnostics.HasError() {
+		fmt.Printf("DEBUG: State.Set returned errors\n")
+		for _, diag := range resp.Diagnostics.Errors() {
+			fmt.Printf("DEBUG: Diagnostic error: %s - %s\n", diag.Summary(), diag.Detail())
+		}
+		return
+	}
+
+	// Debug: Check what was actually set
+	fmt.Printf("DEBUG: State set with:\n")
+	fmt.Printf("  ID: %s\n", importedData.ID.ValueString())
+	fmt.Printf("  YAMLBody length: %d\n", len(importedData.YAMLBody.ValueString()))
+	fmt.Printf("  ManagedStateProjection length: %d\n", len(importedData.ManagedStateProjection.ValueString()))
+	fmt.Printf("  ImportedWithoutAnnotations: %v\n", importedData.ImportedWithoutAnnotations.ValueBool())
+	fmt.Printf("  DeleteProtection: %v\n", importedData.DeleteProtection.ValueBool())
+	fmt.Printf("  ClusterConnection is null: %v\n", importedData.ClusterConnection.IsNull())
 
 	tflog.Info(ctx, "import completed with managed fields tracking", map[string]interface{}{
 		"id":              resourceID,
@@ -246,6 +316,8 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		"managed_paths":   len(paths),
 		"projection_size": len(projectionJSON),
 	})
+
+	fmt.Printf("DEBUG: ImportState completed successfully\n")
 }
 
 func (r *manifestResource) parseImportID(importID string) (context, namespace, kind, name string, err error) {

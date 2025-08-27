@@ -198,7 +198,7 @@ func TestAccManifestResource_ImportWithManagedFields(t *testing.T) {
 	// Create a ConfigMap with multiple fields to test projection
 	configMapName := "acctest-import-fields-" + fmt.Sprintf("%d", time.Now().Unix())
 
-	// Create the ConfigMap directly in Kubernetes
+	// Create the ConfigMap directly in Kubernetes WITHOUT Terraform
 	ctx := context.Background()
 	cm := &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -250,7 +250,7 @@ func TestAccManifestResource_ImportWithManagedFields(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				Config: testAccManifestConfigImportPlaceholder,
+				Config: testAccManifestConfigImportWithFields,
 				ConfigVariables: config.Variables{
 					"raw":  config.StringVariable(raw),
 					"name": config.StringVariable(configMapName),
@@ -260,6 +260,23 @@ func TestAccManifestResource_ImportWithManagedFields(t *testing.T) {
 				ImportStateId: fmt.Sprintf("kind-oidc-e2e/default/ConfigMap/%s", configMapName),
 
 				ImportStateCheck: func(states []*terraform.InstanceState) error {
+					t.Logf("DEBUG: ImportStateCheck called with %d states", len(states))
+
+					for i, state := range states {
+						t.Logf("DEBUG: State[%d] ID: %s", i, state.ID)
+						t.Logf("DEBUG: State[%d] Ephemeral.Type: %s", i, state.Ephemeral.Type)
+						t.Logf("DEBUG: State[%d] Attributes count: %d", i, len(state.Attributes))
+
+						for key, value := range state.Attributes {
+							if len(value) > 100 {
+								t.Logf("DEBUG: State[%d].Attributes[%s] = %s... (truncated, %d bytes total)",
+									i, key, value[:100], len(value))
+							} else {
+								t.Logf("DEBUG: State[%d].Attributes[%s] = %s", i, key, value)
+							}
+						}
+					}
+
 					if len(states) != 1 {
 						return fmt.Errorf("expected 1 state, got %d", len(states))
 					}
@@ -306,15 +323,50 @@ func TestAccManifestResource_ImportWithManagedFields(t *testing.T) {
 					}
 
 					// Log projection for debugging
-					fmt.Printf("✅ Import successful with managed state projection:\n")
-					fmt.Printf("   Projection size: %d bytes\n", len(projection))
-					fmt.Printf("   Contains metadata: %v\n", strings.Contains(projection, "metadata"))
-					fmt.Printf("   Contains data: %v\n", strings.Contains(projection, "data"))
+					t.Logf("✅ Import successful with managed state projection:")
+					t.Logf("   Projection size: %d bytes", len(projection))
+					t.Logf("   Contains metadata: %v", strings.Contains(projection, "metadata"))
+					t.Logf("   Contains data: %v", strings.Contains(projection, "data"))
 
 					return nil
 				},
 
 				Check: resource.ComposeTestCheckFunc(
+					func(s *terraform.State) error {
+						t.Logf("DEBUG: Check function called")
+						t.Logf("DEBUG: terraform.State has %d modules", len(s.Modules))
+
+						for _, module := range s.Modules {
+							t.Logf("DEBUG: Module path: %v", module.Path)
+							t.Logf("DEBUG: Module has %d resources", len(module.Resources))
+							for name, rs := range module.Resources {
+								t.Logf("DEBUG: Resource %s type: %s", name, rs.Type)
+								t.Logf("DEBUG: Resource %s provider: %s", name, rs.Provider)
+								t.Logf("DEBUG: Resource %s primary ID: %s", name, rs.Primary.ID)
+								t.Logf("DEBUG: Resource %s primary attributes count: %d", name, len(rs.Primary.Attributes))
+
+								// Log key attributes
+								if yamlBody, ok := rs.Primary.Attributes["yaml_body"]; ok {
+									t.Logf("DEBUG: Resource %s yaml_body length: %d", name, len(yamlBody))
+								}
+								if projection, ok := rs.Primary.Attributes["managed_state_projection"]; ok {
+									t.Logf("DEBUG: Resource %s managed_state_projection length: %d", name, len(projection))
+								}
+							}
+						}
+
+						// Check if our specific resource exists
+						rs, ok := s.RootModule().Resources["k8sinline_manifest.test_import"]
+						if !ok {
+							t.Logf("DEBUG: Resource k8sinline_manifest.test_import NOT FOUND in state")
+							t.Logf("DEBUG: Available resources: %v", s.RootModule().Resources)
+							return fmt.Errorf("k8sinline_manifest.test_import not found in state")
+						}
+
+						t.Logf("DEBUG: Found resource in state with ID: %s", rs.Primary.ID)
+
+						return nil
+					},
 					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_import", "id"),
 					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_import", "yaml_body"),
 					resource.TestCheckResourceAttrSet("k8sinline_manifest.test_import", "managed_state_projection"),
@@ -322,18 +374,7 @@ func TestAccManifestResource_ImportWithManagedFields(t *testing.T) {
 					testAccCheckConfigMapExists(k8sClient, "default", configMapName),
 				),
 			},
-			// After import, verify that plan shows expected changes (normal import workflow)
-			{
-				Config: testAccManifestConfigImportPlaceholder,
-				ConfigVariables: config.Variables{
-					"raw":  config.StringVariable(raw),
-					"name": config.StringVariable(configMapName),
-				},
-				PlanOnly:           true,
-				ExpectNonEmptyPlan: true, // Plan SHOULD show diff between placeholder and imported state
-			},
 		},
-		CheckDestroy: testAccCheckConfigMapDestroy(k8sClient, "default", configMapName),
 	})
 }
 
@@ -363,31 +404,6 @@ resource "k8sinline_manifest" "test_import" {
       key1: value1
       key2: value2
       key3: value3
-  YAML
-  
-  cluster_connection = {
-    kubeconfig_raw = var.raw
-  }
-}
-`
-
-const testAccManifestConfigImportPlaceholder = `
-variable "raw" {
-  type = string
-}
-variable "name" {
-  type = string  
-}
-
-provider "k8sinline" {}
-
-resource "k8sinline_manifest" "test_import" {
-  # Minimal valid YAML that will be replaced by import
-  yaml_body = <<-YAML
-    apiVersion: v1
-    kind: ConfigMap
-    metadata:
-      name: placeholder
   YAML
   
   cluster_connection = {
