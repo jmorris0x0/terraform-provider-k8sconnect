@@ -1,0 +1,35 @@
+# test/oidc-e2e/k3d-oidc.yaml
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: oidc-e2e
+servers: 1
+agents: 0
+kubeAPI:
+  hostPort: "6443"
+network: k3d-oidc-e2e
+# Note: volumes are mounted via command line instead due to absolute path requirement
+options:
+  k3s:
+    extraArgs:
+      - arg: --kube-apiserver-arg=oidc-issuer-url=https://dex:5556/dex
+        nodeFilters:
+          - server:*
+      - arg: --kube-apiserver-arg=oidc-client-id=kubernetes
+        nodeFilters:
+          - server:*
+      - arg: --kube-apiserver-arg=oidc-username-claim=name
+        nodeFilters:
+          - server:*
+      - arg: --kube-apiserver-arg=oidc-ca-file=/etc/kubernetes/pki/oidc/ca.pem
+        nodeFilters:
+          - server:*
+  k3d:
+    wait: true
+    timeout: "120s"
+registries:
+  create:
+    name: k3d-oidc-e2e-registry
+    host: "0.0.0.0"
+    #hostPort: "5000"
+

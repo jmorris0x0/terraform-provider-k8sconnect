@@ -212,7 +212,7 @@ func TestAccManifestResource_OwnershipImport(t *testing.T) {
 				},
 				ResourceName:      "k8sconnect_manifest.import_test",
 				ImportState:       true,
-				ImportStateId:     "kind-oidc-e2e/default/ConfigMap/test-import-ownership",
+				ImportStateId:     "k3d-oidc-e2e/default/ConfigMap/test-import-ownership",
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
 					"imported_without_annotations",

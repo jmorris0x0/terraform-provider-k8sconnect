@@ -79,25 +79,30 @@ jobs:
           chmod +x kubectl
           sudo mv kubectl /usr/local/bin/
           
-          # Install Kind
-          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
-          chmod +x ./kind
-          sudo mv ./kind /usr/local/bin/kind
+          # Install K3d instead of KIND
+          curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
       
-      - name: Create Kind cluster
+      - name: Create K3d cluster
         run: |
           # Set CI flag for Makefile
           export CI=true
           make oidc-setup
+      
+      - name: Verify managedFields support
+        run: |
+          kubectl create deployment test-managed --image=nginx:1.19
+          kubectl get deployment test-managed -o json | jq '.metadata.managedFields' | grep -q manager || (echo "❌ managedFields not found!" && exit 1)
+          echo "✅ managedFields verified in K3d!"
+          kubectl delete deployment test-managed
       
       - name: Run acceptance tests
         run: make testacc
         env:
           TF_ACC_TERRAFORM_VERSION: ${{ matrix.terraform }}
       
-      - name: Clean up Kind cluster
+      - name: Clean up K3d cluster
         if: always()
-        run: kind delete cluster --name oidc-e2e || true
+        run: k3d cluster delete oidc-e2e || true
 
   lint:
     runs-on: ubuntu-latest

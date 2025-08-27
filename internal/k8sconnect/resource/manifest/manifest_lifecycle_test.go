@@ -185,7 +185,7 @@ YAML
 
   cluster_connection = {
     kubeconfig_raw = var.raw
-    context        = "kind-oidc-e2e"  # Explicit context (connection change)
+    context        = "k3d-oidc-e2e"  # Explicit context (connection change)
   }
 }
 `

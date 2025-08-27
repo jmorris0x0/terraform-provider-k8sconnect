@@ -77,19 +77,32 @@ install:
 
 .PHONY: oidc-setup 
 oidc-setup:
+	@echo "🔍 Checking for k3d installation..."
+	@if ! command -v k3d >/dev/null 2>&1; then \
+		echo "❌ k3d is not installed!"; \
+		echo ""; \
+		echo "Please install k3d using one of these methods:"; \
+		echo "  brew install k3d                    # macOS with Homebrew"; \
+		echo "  curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash"; \
+		echo ""; \
+		echo "For more installation options, visit: https://k3d.io/stable/#installation"; \
+		exit 1; \
+	fi
+	@echo "✅ k3d found: $$(k3d version)"
 	@echo "🔐 Generating self‑signed certs"
 	@rm -fr $(DEX_SSL_DIR)
 	@mkdir -p $(DEX_SSL_DIR)
 	@cd $(OIDC_DIR) && ./gencert.sh
 
 	@echo "🌐 Ensuring 'kind' Docker network exists"
-	- docker network inspect kind >/dev/null 2>&1 || docker network create kind
+	- docker network inspect k3d-oidc-e2e >/dev/null 2>&1 || docker network create k3d-oidc-e2e
+
 
 	@echo "🧹 Cleaning old Dex container"
 	- docker rm -f dex || true
 
 	@echo "🚀 Starting Dex (HTTPS)"
-	@docker run -d --name dex --network kind \
+	@docker run -d --name dex --network k3d-oidc-e2e \
 	  -v $(OIDC_DIR)/dex-config.yaml:/etc/dex/config.yaml \
 	  -v $(DEX_SSL_DIR)/cert.pem:/etc/dex/tls.crt \
 	  -v $(DEX_SSL_DIR)/key.pem:/etc/dex/tls.key \
@@ -102,10 +115,12 @@ oidc-setup:
 	@echo "✅ Dex is up!"
 
 	@echo "🧹 Deleting existing Kind cluster (if any)"
-	- kind delete cluster --name $(KIND_CLUSTER) || true
+	- k3d cluster delete oidc-e2e || true
 
 	@echo "🚀 Creating Kind cluster with OIDC config"
-	kind create cluster --name $(KIND_CLUSTER) --config=$(OIDC_DIR)/kind-oidc.yaml
+	k3d cluster create \
+	  --config=$(OIDC_DIR)/k3d-oidc.yaml \
+	  --volume $(DEX_SSL_DIR)/cert.pem:/etc/kubernetes/pki/oidc/ca.pem@server:0
 
 	@echo "🔐 Applying RBAC resources"
 	kubectl apply -f $(OIDC_DIR)/rbac.yaml
@@ -160,7 +175,7 @@ testacc: oidc-setup
 .PHONY: clean
 clean:
 	-docker rm -f dex
-	-kind delete cluster --name $(KIND_CLUSTER)
+	-k3d cluster delete oidc-e2e
 	-rm -rf $(TESTBUILD_DIR) $(DEX_SSL_DIR)
 	-rm -rf bin/
 
