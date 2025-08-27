@@ -634,7 +634,7 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 			})
 			return
 		}
-		// Other errors should be reported
+
 		resourceDesc := fmt.Sprintf("%s %s", obj.GetKind(), obj.GetName())
 		severity, title, detail := r.classifyK8sError(err, "Delete", resourceDesc)
 		if severity == "warning" {

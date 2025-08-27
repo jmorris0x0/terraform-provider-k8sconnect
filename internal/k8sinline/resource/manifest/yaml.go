@@ -159,7 +159,7 @@ func (r *manifestResource) cleanObjectForExport(obj *unstructured.Unstructured) 
 	// Remove only the fields that will definitely cause problems on re-apply
 	metadata := cleaned.Object["metadata"].(map[string]interface{})
 
-	// These fields MUST be removed or kubectl apply fails
+	// Must be removed or kubectl apply fails
 	delete(metadata, "uid")
 	delete(metadata, "resourceVersion")
 	delete(metadata, "generation")

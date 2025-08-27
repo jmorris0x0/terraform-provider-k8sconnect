@@ -35,15 +35,6 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		return
 	}
 
-	// TODO: Remove after debug
-	tflog.Info(ctx, "Parsed import ID", map[string]interface{}{
-		"context":   kubeContext,
-		"namespace": namespace,
-		"kind":      kind,
-		"name":      name,
-		"error":     err,
-	})
-
 	// Validate required parts
 	if kubeContext == "" {
 		resp.Diagnostics.AddError(

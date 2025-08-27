@@ -180,7 +180,7 @@ func (d *yamlSplitDataSource) Read(ctx context.Context, req datasource.ReadReque
 	resp.Diagnostics.Append(diags...)
 }
 
-// parseDocuments robustly splits and parses YAML documents from content
+// Splits and parses YAML documents from content
 func (d *yamlSplitDataSource) parseDocuments(content, sourceFile string) ([]DocumentInfo, error) {
 	// Split documents using smart separator detection
 	rawDocs := d.splitYAMLDocuments(content)
@@ -217,12 +217,8 @@ func (d *yamlSplitDataSource) parseDocuments(content, sourceFile string) ([]Docu
 	return documents, err
 }
 
-// splitYAMLDocuments intelligently splits YAML content on document separators
+// Splits YAML content on document separators
 func (d *yamlSplitDataSource) splitYAMLDocuments(content string) []string {
-	// Enhanced regex that handles:
-	// - Line start anchored separators
-	// - Optional whitespace and comments after ---
-	// - Both Unix and Windows line endings
 	separatorRegex := regexp.MustCompile(`(?m)^---\s*(?:#.*)?(?:\r?\n|$)`)
 
 	parts := separatorRegex.Split(content, -1)

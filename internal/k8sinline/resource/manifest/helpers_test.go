@@ -16,7 +16,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-// Helper function to create K8s client for verification
+// Create K8s client for verification
 func createK8sClient(t *testing.T, kubeconfigRaw string) kubernetes.Interface {
 	config, err := clientcmd.RESTConfigFromKubeConfig([]byte(kubeconfigRaw))
 	if err != nil {
@@ -67,7 +67,6 @@ func testAccCheckNamespaceDestroy(client kubernetes.Interface, name string) reso
 	}
 }
 
-// Helper functions
 func testAccCheckPodExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()
@@ -98,7 +97,6 @@ func testAccCheckPodDestroy(client kubernetes.Interface, namespace, name string)
 	}
 }
 
-// Helper functions for ConfigMap verification
 func testAccCheckConfigMapExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()
@@ -173,7 +171,6 @@ func testAccCheckConfigMapAnnotation(client kubernetes.Interface, namespace, nam
 	}
 }
 
-// Helper functions for PVC testing (since PVCs commonly have finalizers)
 func testAccCheckPVCExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()
@@ -204,7 +201,6 @@ func testAccCheckPVCDestroy(client kubernetes.Interface, namespace, name string)
 	}
 }
 
-// Helper functions for Deployment testing
 func testAccCheckDeploymentExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()
@@ -235,7 +231,6 @@ func testAccCheckDeploymentDestroy(client kubernetes.Interface, namespace, name 
 	}
 }
 
-// Helper functions for Service testing
 func testAccCheckServiceExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()
@@ -266,7 +261,6 @@ func testAccCheckServiceDestroy(client kubernetes.Interface, namespace, name str
 	}
 }
 
-// Helper function to write kubeconfig to a temporary file
 func writeKubeconfigToTempFile(t *testing.T, kubeconfigContent string) string {
 	tmpfile, err := os.CreateTemp("", "kubeconfig-import-*.yaml")
 	if err != nil {

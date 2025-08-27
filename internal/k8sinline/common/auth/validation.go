@@ -6,8 +6,7 @@ import (
 	"fmt"
 )
 
-// ValidateConnection validates the connection configuration.
-// It ensures exactly one connection mode is specified and all required fields are present.
+// Ensures exactly one connection mode is specified and all required fields are present.
 func ValidateConnection(ctx context.Context, conn ClusterConnectionModel) error {
 	// Check for inline mode (host-based)
 	hasInline := !conn.Host.IsNull()

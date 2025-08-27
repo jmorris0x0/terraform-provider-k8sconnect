@@ -453,8 +453,6 @@ spec:
   - name: nginx
     image: nginx:1.20`
 
-	// This would be a more complete integration test in a real scenario
-	// For now, we're testing the core logic components individually
 	d := &yamlSplitDataSource{}
 
 	docs, err := d.parseDocuments(content, "<test>")
