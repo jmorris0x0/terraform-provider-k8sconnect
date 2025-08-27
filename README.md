@@ -193,12 +193,12 @@ All `cluster_connection` fields are marked sensitive and won't appear in logs or
 
 ## Installation
 
-### From GitHub (Recommended)
+### From GitHub (Available Soon)
 ```hcl
 terraform {
   required_providers {
     k8sinline = {
-      source  = "github.com/jmorris0x0/terraform-provider-k8sinline"
+      source  = "jmorris0x0/k8sinline"
       version = ">= 0.1.0"
     }
   }
