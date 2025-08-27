@@ -3,6 +3,7 @@ package manifest
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -191,6 +192,18 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
+	// Add field ownership tracking
+	ownership := extractFieldOwnership(currentObj)
+	ownershipJSON, err := json.Marshal(ownership)
+	if err != nil {
+		tflog.Warn(ctx, "Failed to marshal field ownership", map[string]interface{}{
+			"error": err.Error(),
+		})
+		data.FieldOwnership = types.StringValue("{}")
+	} else {
+		data.FieldOwnership = types.StringValue(string(ownershipJSON))
+	}
+
 	// Project the current state
 	projection, err := projectFields(currentObj.Object, paths)
 	if err != nil {
@@ -273,6 +286,18 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		resp.Diagnostics.AddError("Failed to read resource",
 			fmt.Sprintf("Failed to read %s %s: %s", obj.GetKind(), obj.GetName(), err))
 		return
+	}
+
+	// Populate field ownership
+	ownership := extractFieldOwnership(currentObj)
+	ownershipJSON, err := json.Marshal(ownership)
+	if err != nil {
+		tflog.Warn(ctx, "Failed to marshal field ownership", map[string]interface{}{
+			"error": err.Error(),
+		})
+		data.FieldOwnership = types.StringValue("{}")
+	} else {
+		data.FieldOwnership = types.StringValue(string(ownershipJSON))
 	}
 
 	// Handle imported resources without annotations
@@ -493,6 +518,18 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read after update", fmt.Sprintf("Failed to read resource after update: %s", err))
 		return
+	}
+
+	// Add field ownership tracking
+	ownership := extractFieldOwnership(updatedObj)
+	ownershipJSON, err := json.Marshal(ownership)
+	if err != nil {
+		tflog.Warn(ctx, "Failed to marshal field ownership", map[string]interface{}{
+			"error": err.Error(),
+		})
+		plan.FieldOwnership = types.StringValue("{}")
+	} else {
+		plan.FieldOwnership = types.StringValue(string(ownershipJSON))
 	}
 
 	// Project the current state
