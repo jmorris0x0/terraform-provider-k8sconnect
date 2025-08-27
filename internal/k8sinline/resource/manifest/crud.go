@@ -251,86 +251,114 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 	// Parse the stored YAML to get resource info
 	obj, err := r.parseYAML(data.YAMLBody.ValueString())
 	if err != nil {
-		resp.Diagnostics.AddError("Invalid YAML in State", fmt.Sprintf("Failed to parse stored YAML: %s", err))
+		resp.Diagnostics.AddError("YAML Parse Failed", err.Error())
 		return
 	}
 
-	// Create K8s client
-	client, err := r.clientGetter(conn)
+	// Create K8s client using the proper factory method
+	client, err := r.clientFactory.GetClient(conn)
 	if err != nil {
-		resp.Diagnostics.AddError("Connection Failed", fmt.Sprintf("Failed to create Kubernetes client: %s", err))
+		resp.Diagnostics.AddError("Client Creation Failed", err.Error())
 		return
 	}
 
-	// Get GVR for the object
-	gvr, err := r.getGVR(ctx, client, obj)
+	// Get the GVR for this resource
+	gvr, err := client.GetGVR(ctx, obj)
 	if err != nil {
-		// If we can't determine resource type, resource might be gone
-		tflog.Info(ctx, "Failed to determine resource type during Read", map[string]interface{}{
-			"error": err.Error(),
-			"kind":  obj.GetKind(),
-		})
-		resp.State.RemoveResource(ctx)
+		resp.Diagnostics.AddError("GVR Resolution Failed", err.Error())
 		return
 	}
 
-	// Get current state from cluster
+	// Check if resource exists
 	currentObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
 	if err != nil {
 		if errors.IsNotFound(err) {
-			tflog.Info(ctx, "Resource not found, removing from state", map[string]interface{}{
-				"kind":      obj.GetKind(),
-				"name":      obj.GetName(),
-				"namespace": obj.GetNamespace(),
-			})
+			// Resource was deleted outside of Terraform
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		resp.Diagnostics.AddError("Failed to read resource", fmt.Sprintf("Failed to get resource from cluster: %s", err))
+		resp.Diagnostics.AddError("Failed to read resource",
+			fmt.Sprintf("Failed to read %s %s: %s", obj.GetKind(), obj.GetName(), err))
 		return
+	}
+
+	// Handle imported resources without annotations
+	if !data.ImportedWithoutAnnotations.IsNull() && data.ImportedWithoutAnnotations.ValueBool() {
+		// Set ownership annotation
+		r.setOwnershipAnnotation(currentObj, data.ID.ValueString())
+
+		// Apply the annotation
+		err = client.Apply(ctx, currentObj, k8sclient.ApplyOptions{
+			FieldManager: "k8sinline",
+			Force:        false,
+		})
+		if err != nil {
+			resp.Diagnostics.AddError("Failed to set ownership annotation",
+				fmt.Sprintf("Failed to update ownership annotation on imported resource: %s", err))
+			return
+		}
+
+		tflog.Info(ctx, "Set ownership annotation on imported resource", map[string]interface{}{
+			"kind": obj.GetKind(),
+			"name": obj.GetName(),
+			"id":   data.ID.ValueString(),
+		})
+
+		// Clear the flag
+		data.ImportedWithoutAnnotations = types.BoolNull()
 	}
 
 	// Verify ownership
 	currentID := r.getOwnershipID(currentObj)
-	expectedID := data.ID.ValueString()
-
-	if currentID != expectedID {
-		if currentID == "" {
-			// No annotations found - check if this is expected (post-import)
-			if !data.ImportedWithoutAnnotations.IsNull() && data.ImportedWithoutAnnotations.ValueBool() {
-				// Expected - resource was imported without annotations
-				tflog.Info(ctx, "resource imported without annotations, will be added on next apply",
-					map[string]interface{}{
-						"id":   data.ID.ValueString(),
-						"kind": obj.GetKind(),
-						"name": obj.GetName(),
-					})
-				// Don't error - just continue with the read
-			} else {
-				// This is drift - annotations were removed
-				resp.Diagnostics.AddError(
-					"Resource Ownership Lost",
-					fmt.Sprintf("The %s '%s' exists but is no longer managed by this Terraform resource. "+
-						"The ownership annotations have been removed. "+
-						"Use 'terraform import' to re-adopt this resource or delete it from your configuration.",
-						obj.GetKind(), obj.GetName()),
-				)
-				resp.State.RemoveResource(ctx)
-				return
-			}
-		}
-		resp.State.RemoveResource(ctx)
+	if currentID == "" {
+		resp.Diagnostics.AddError(
+			"Resource Not Managed",
+			fmt.Sprintf("The %s '%s' exists but is not managed by Terraform. "+
+				"The ownership annotations have been removed.",
+				obj.GetKind(), obj.GetName()),
+		)
 		return
 	}
 
-	// Resource exists and we own it - state remains unchanged
-	tflog.Trace(ctx, "Read completed successfully", map[string]interface{}{
-		"id":   data.ID.ValueString(),
-		"kind": obj.GetKind(),
-		"name": obj.GetName(),
+	if currentID != data.ID.ValueString() {
+		resp.Diagnostics.AddError(
+			"Resource Ownership Conflict",
+			fmt.Sprintf("The %s '%s' is now managed by a different Terraform resource (ID: %s).",
+				obj.GetKind(), obj.GetName(), currentID),
+		)
+		return
+	}
+
+	// CRITICAL FOR DRIFT DETECTION: Update managed state projection
+	// Extract paths from the stored YAML (what we're managing)
+	paths := extractFieldPaths(obj.Object, "")
+
+	// Project the current state to only include fields we manage
+	projection, err := projectFields(currentObj.Object, paths)
+	if err != nil {
+		resp.Diagnostics.AddError("Projection Failed",
+			fmt.Sprintf("Failed to project managed fields: %s", err))
+		return
+	}
+
+	// Convert projection to JSON for storage
+	projectionJSON, err := toJSON(projection)
+	if err != nil {
+		resp.Diagnostics.AddError("JSON Conversion Failed",
+			fmt.Sprintf("Failed to convert projection to JSON: %s", err))
+		return
+	}
+
+	// Update the projection in state - this is what enables drift detection
+	data.ManagedStateProjection = types.StringValue(projectionJSON)
+
+	tflog.Debug(ctx, "Updated managed state projection", map[string]interface{}{
+		"id":              data.ID.ValueString(),
+		"path_count":      len(paths),
+		"projection_size": len(projectionJSON),
 	})
 
-	// Set the state (unchanged)
+	// Set the refreshed state
 	diags = resp.State.Set(ctx, &data)
 	resp.Diagnostics.Append(diags...)
 }
@@ -435,11 +463,18 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
+	// Get force_conflicts setting
+	forceConflicts := false
+	if !plan.ForceConflicts.IsNull() {
+		forceConflicts = plan.ForceConflicts.ValueBool()
+	}
+
 	// Apply the updated manifest
 	err = client.Apply(ctx, obj, k8sclient.ApplyOptions{
 		FieldManager: "k8sinline",
-		Force:        false,
+		Force:        forceConflicts,
 	})
+
 	if err != nil {
 		resourceDesc := fmt.Sprintf("%s %s", obj.GetKind(), obj.GetName())
 		severity, title, detail := r.classifyK8sError(err, "Update", resourceDesc)

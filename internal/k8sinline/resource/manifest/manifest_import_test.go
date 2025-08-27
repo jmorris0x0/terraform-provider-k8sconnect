@@ -60,6 +60,7 @@ func TestAccManifestResource_Import(t *testing.T) {
 					"yaml_body",
 					"managed_state_projection",
 					"delete_protection",
+					"force_conflicts",
 				},
 			},
 		},
@@ -142,6 +143,7 @@ func TestAccManifestResource_ImportWithManagedFields(t *testing.T) {
 					"yaml_body",                    // Formatting and annotations differ
 					"managed_state_projection",     // Import includes extra K8s fields
 					"delete_protection",            // Only in import, not in config
+					"force_conflicts",
 				},
 			},
 		},

@@ -40,6 +40,7 @@ type manifestResourceModel struct {
 	DeleteProtection           types.Bool   `tfsdk:"delete_protection"`
 	DeleteTimeout              types.String `tfsdk:"delete_timeout"`
 	ForceDestroy               types.Bool   `tfsdk:"force_destroy"`
+	ForceConflicts             types.Bool   `tfsdk:"force_conflicts"`
 	ManagedStateProjection     types.String `tfsdk:"managed_state_projection"`
 	ImportedWithoutAnnotations types.Bool   `tfsdk:"imported_without_annotations"`
 }
@@ -188,6 +189,10 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 			"imported_without_annotations": schema.BoolAttribute{
 				Computed:    true,
 				Description: "Internal flag tracking if resource was imported without ownership annotations",
+			},
+			"force_conflicts": schema.BoolAttribute{
+				Optional:    true,
+				Description: "Force ownership of fields even when conflicting with other field managers. Default is false, which warns but doesn't override other controllers.",
 			},
 		},
 	}

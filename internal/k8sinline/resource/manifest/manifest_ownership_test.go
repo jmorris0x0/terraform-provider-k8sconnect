@@ -220,6 +220,7 @@ func TestAccManifestResource_OwnershipImport(t *testing.T) {
 					"yaml_body",
 					"managed_state_projection",
 					"delete_protection",
+					"force_conflicts",
 				},
 			},
 			// Step 3: Verify ownership annotations still exist after import
