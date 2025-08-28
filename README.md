@@ -24,7 +24,7 @@ Traditional providers force cluster configuration into the provider block; **k8s
 | Static provider configuration         | ❌ Provider config must be hardcoded at plan time                             | ✅ Use outputs, computed values, and loops dynamically                    |
 
 
-**Stop fighting Terraform's provider model. Start deploying to any cluster, from any module, in any order.**
+**Stop fighting (Terraform's provider model)[https://news.ycombinator.com/item?id=27434363]. Start deploying to any cluster, from any module, in any order.**
 
 ---
 
