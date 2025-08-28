@@ -17,10 +17,14 @@ Traditional providers force cluster configuration into the provider block; **k8s
 
 ## Why `k8sconnect`
 
-| Pain point                            | Conventional providers                                                      | **`k8sconnect`**                                                             |
+| Pain point                            | Conventional providers                                                      | **`k8sconnect`**                                                            |
 | ------------------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| Cluster‑first dependency hell         | ❌ Two-phase workflow: deploy cluster, then configure provider, then deploy apps | ✅ Single apply handles cluster creation and workloads together |
-| Multi‑cluster support                 | ❌ Requires provider aliases or separate states per cluster                  | ✅ Inline connection per resource — all clusters in one plan                 |
+| Cluster‑first dependency hell         | ❌ Two-phase workflow: deploy cluster, configure provider, then deploy apps | ✅ Single apply handles cluster creation and workloads together             |
+| Module & multi-cluster limits         | ❌ Providers at root only, requires aliases for multiple clusters                  | ✅ Self-contained resources work in any module, any cluster               |
+| Static provider configuration         | ❌ Provider config must be hardcoded at plan time                             | ✅ Use outputs, computed values, and loops dynamically                    |
+
+
+**Stop fighting Terraform's provider model. Start deploying to any cluster, from any module, in any order.**
 
 ---
 
