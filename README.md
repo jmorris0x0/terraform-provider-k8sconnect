@@ -4,7 +4,7 @@
 ![Security](https://github.com/jmorris0x0/terraform-provider-k8sconnect/actions/workflows/security.yml/badge.svg)
 ![Release](https://github.com/jmorris0x0/terraform-provider-k8sconnect/actions/workflows/release.yml/badge.svg)
 
-A Terraform provider for applying Kubernetes YAML manifests **with inline, per‑resource connection settings**.
+A modern Terraform provider for applying Kubernetes YAML manifests **with inline, per‑resource connection settings**.
 
 Traditional providers force cluster configuration into the provider block; **k8sconnect** pushes it down into each resource, freeing you to target *any* cluster from *any* module without aliases, workspaces, or wrapper hacks.
 
