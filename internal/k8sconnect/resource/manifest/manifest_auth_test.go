@@ -10,6 +10,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect"
+	testhelpers "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/test"
 )
 
 func TestAccManifestResource_TokenAuth(t *testing.T) {
@@ -24,7 +25,7 @@ func TestAccManifestResource_TokenAuth(t *testing.T) {
 		t.Skip("TF_ACC_K8S_TOKEN not set")
 	}
 
-	k8sClient := createK8sClient(t, raw)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -60,11 +61,11 @@ YAML
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test", "id"),
-					testAccCheckNamespaceExists(k8sClient, "acctest-token"),
+					testhelpers.CheckNamespaceExists(k8sClient, "acctest-token"),
 				),
 			},
 		},
-		CheckDestroy: testAccCheckNamespaceDestroy(k8sClient, "acctest-token"),
+		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, "acctest-token"),
 	})
 }
 
@@ -81,7 +82,7 @@ func TestAccManifestResource_ClientCertAuth(t *testing.T) {
 		t.Skip("TF_ACC_K8S_CLIENT_CERT and TF_ACC_K8S_CLIENT_KEY not set")
 	}
 
-	k8sClient := createK8sClient(t, raw)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -120,10 +121,10 @@ YAML
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test", "id"),
-					testAccCheckNamespaceExists(k8sClient, "acctest-cert"),
+					testhelpers.CheckNamespaceExists(k8sClient, "acctest-cert"),
 				),
 			},
 		},
-		CheckDestroy: testAccCheckNamespaceDestroy(k8sClient, "acctest-cert"),
+		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, "acctest-cert"),
 	})
 }

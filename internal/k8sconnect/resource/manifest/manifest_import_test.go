@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect"
+	testhelpers "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/test"
 )
 
 func TestAccManifestResource_Import(t *testing.T) {
@@ -22,7 +23,7 @@ func TestAccManifestResource_Import(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
-	k8sClient := createK8sClient(t, raw)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
 	namespaceName := "acctest-import-" + fmt.Sprintf("%d", time.Now().Unix())
 
 	resource.Test(t, resource.TestCase{
@@ -40,7 +41,7 @@ func TestAccManifestResource_Import(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_import", "id"),
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_import", "yaml_body"),
-					testAccCheckNamespaceExists(k8sClient, namespaceName),
+					testhelpers.CheckNamespaceExists(k8sClient, namespaceName),
 				),
 			},
 			// Step 2: Import the namespace
@@ -64,7 +65,7 @@ func TestAccManifestResource_Import(t *testing.T) {
 				},
 			},
 		},
-		CheckDestroy: testAccCheckNamespaceDestroy(k8sClient, namespaceName),
+		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, namespaceName),
 	})
 }
 
@@ -103,7 +104,7 @@ func TestAccManifestResource_ImportWithManagedFields(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
-	k8sClient := createK8sClient(t, raw)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
 	configMapName := "acctest-import-fields-" + fmt.Sprintf("%d", time.Now().Unix())
 	resourceName := "k8sconnect_manifest.test_import"
 
@@ -120,7 +121,7 @@ func TestAccManifestResource_ImportWithManagedFields(t *testing.T) {
 					"name": config.StringVariable(configMapName),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckConfigMapExists(k8sClient, "default", configMapName),
+					testhelpers.CheckConfigMapExists(k8sClient, "default", configMapName),
 					resource.TestCheckResourceAttrSet(resourceName, "id"),
 					resource.TestCheckResourceAttrSet(resourceName, "yaml_body"),
 					resource.TestCheckResourceAttrSet(resourceName, "managed_state_projection"),

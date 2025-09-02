@@ -12,6 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect"
+	testhelpers "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/test"
 )
 
 func TestAccManifestResource_Basic(t *testing.T) {
@@ -32,7 +33,7 @@ func TestAccManifestResource_Basic(t *testing.T) {
 	}
 
 	// Create Kubernetes client for verification
-	k8sClient := createK8sClient(t, raw)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -53,11 +54,11 @@ func TestAccManifestResource_Basic(t *testing.T) {
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_exec", "id"),
 
 					// ✅ Verify namespace actually exists in Kubernetes
-					testAccCheckNamespaceExists(k8sClient, "acctest-exec"),
+					testhelpers.CheckNamespaceExists(k8sClient, "acctest-exec"),
 				),
 			},
 		},
-		CheckDestroy: testAccCheckNamespaceDestroy(k8sClient, "acctest-exec"),
+		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, "acctest-exec"),
 	})
 }
 
@@ -112,7 +113,7 @@ func TestAccManifestResource_KubeconfigRaw(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
-	k8sClient := createK8sClient(t, raw)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -127,11 +128,11 @@ func TestAccManifestResource_KubeconfigRaw(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test_raw", "yaml_body", testNamespaceYAMLRaw),
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_raw", "id"),
-					testAccCheckNamespaceExists(k8sClient, "acctest-raw"),
+					testhelpers.CheckNamespaceExists(k8sClient, "acctest-raw"),
 				),
 			},
 		},
-		CheckDestroy: testAccCheckNamespaceDestroy(k8sClient, "acctest-raw"),
+		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, "acctest-raw"),
 	})
 }
 
@@ -184,7 +185,7 @@ func TestAccManifestResource_KubeconfigFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	k8sClient := createK8sClient(t, raw)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -199,11 +200,11 @@ func TestAccManifestResource_KubeconfigFile(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test_file", "yaml_body", testNamespaceYAMLFile),
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_file", "id"),
-					testAccCheckNamespaceExists(k8sClient, "acctest-file"),
+					testhelpers.CheckNamespaceExists(k8sClient, "acctest-file"),
 				),
 			},
 		},
-		CheckDestroy: testAccCheckNamespaceDestroy(k8sClient, "acctest-file"),
+		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, "acctest-file"),
 	})
 }
 
@@ -243,7 +244,7 @@ func TestAccManifestResource_Pod(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
-	k8sClient := createK8sClient(t, raw)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -258,11 +259,11 @@ func TestAccManifestResource_Pod(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test_pod", "yaml_body", testPodYAML),
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_pod", "id"),
-					testAccCheckPodExists(k8sClient, "default", "acctest-pod"),
+					testhelpers.CheckPodExists(k8sClient, "default", "acctest-pod"),
 				),
 			},
 		},
-		CheckDestroy: testAccCheckPodDestroy(k8sClient, "default", "acctest-pod"),
+		CheckDestroy: testhelpers.CheckPodDestroy(k8sClient, "default", "acctest-pod"),
 	})
 }
 
@@ -314,7 +315,7 @@ func TestAccManifestResource_DefaultNamespaceInference(t *testing.T) {
 		t.Skip("TF_ACC_KUBECONFIG_RAW not set, skipping")
 	}
 
-	k8sClient := createK8sClient(t, raw)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -330,11 +331,11 @@ func TestAccManifestResource_DefaultNamespaceInference(t *testing.T) {
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test_default_ns", "yaml_body", testConfigMapYAMLNoNamespace),
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_default_ns", "id"),
 					// Key test: ConfigMap with no namespace should end up in default
-					testAccCheckConfigMapExists(k8sClient, "default", "acctest-config"),
+					testhelpers.CheckConfigMapExists(k8sClient, "default", "acctest-config"),
 				),
 			},
 		},
-		CheckDestroy: testAccCheckConfigMapDestroy(k8sClient, "default", "acctest-config"),
+		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, "default", "acctest-config"),
 	})
 }
 
@@ -377,7 +378,7 @@ func TestAccManifestResource_DeferredAuthWithComputedEnvVars(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
-	k8sClient := createK8sClient(t, raw)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -398,7 +399,7 @@ func TestAccManifestResource_DeferredAuthWithComputedEnvVars(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					// Verify the manifest was created successfully
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_deferred_env", "id"),
-					testAccCheckConfigMapExists(k8sClient, "default", "test-deferred-auth-env"),
+					testhelpers.CheckConfigMapExists(k8sClient, "default", "test-deferred-auth-env"),
 					// Verify the random values made it into the exec env vars (not the YAML)
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_deferred_env", "cluster_connection.exec.env.TEST_SESSION_ID"),
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_deferred_env", "cluster_connection.exec.env.TEST_TRACE_ID"),
@@ -409,7 +410,7 @@ func TestAccManifestResource_DeferredAuthWithComputedEnvVars(t *testing.T) {
 				),
 			},
 		},
-		CheckDestroy: testAccCheckConfigMapDestroy(k8sClient, "default", "test-deferred-auth-env"),
+		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, "default", "test-deferred-auth-env"),
 	})
 }
 

@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect"
+	testhelpers "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/test"
 )
 
 func TestAccManifestResource_QuantityNormalization(t *testing.T) {
@@ -21,7 +22,7 @@ func TestAccManifestResource_QuantityNormalization(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
-	k8sClient := createK8sClient(t, raw)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -49,7 +50,7 @@ func TestAccManifestResource_QuantityNormalization(t *testing.T) {
 				ExpectNonEmptyPlan: false, // Verifies no drift from quantity normalization!
 			},
 		},
-		CheckDestroy: testAccCheckResourceQuotaDestroy(k8sClient, "default", "test-quantities"),
+		CheckDestroy: testhelpers.CheckResourceQuotaDestroy(k8sClient, "default", "test-quantities"),
 	})
 }
 
@@ -93,7 +94,7 @@ func TestAccManifestResource_PVCQuantityNormalization(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
-	k8sClient := createK8sClient(t, raw)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -107,7 +108,7 @@ func TestAccManifestResource_PVCQuantityNormalization(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_pvc_quantity", "id"),
-					testAccCheckPVCExists(k8sClient, "default", "test-pvc-quantity"),
+					testhelpers.CheckPVCExists(k8sClient, "default", "test-pvc-quantity"),
 				),
 			},
 			{
@@ -159,7 +160,7 @@ func TestAccManifestResource_ContainerResourcesNormalization(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
-	k8sClient := createK8sClient(t, raw)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -185,7 +186,7 @@ func TestAccManifestResource_ContainerResourcesNormalization(t *testing.T) {
 				ExpectNonEmptyPlan: false,
 			},
 		},
-		CheckDestroy: testAccCheckDeploymentDestroy(k8sClient, "default", "test-resources"),
+		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, "default", "test-resources"),
 	})
 }
 

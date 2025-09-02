@@ -2,7 +2,6 @@
 package manifest_test
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,11 +13,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/config"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
-	"github.com/hashicorp/terraform-plugin-testing/terraform"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect"
+	testhelpers "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/test"
 )
 
 func TestAccManifestResource_Ownership(t *testing.T) {
@@ -29,7 +27,7 @@ func TestAccManifestResource_Ownership(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
-	k8sClient := createK8sClient(t, raw)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -45,12 +43,12 @@ func TestAccManifestResource_Ownership(t *testing.T) {
 					// ID should be 12 hex characters
 					resource.TestMatchResourceAttr("k8sconnect_manifest.test_ownership", "id",
 						regexp.MustCompile("^[a-f0-9]{12}$")),
-					testAccCheckConfigMapExists(k8sClient, "default", "test-ownership"),
-					testAccCheckOwnershipAnnotations(k8sClient, "default", "test-ownership"),
+					testhelpers.CheckConfigMapExists(k8sClient, "default", "test-ownership"),
+					testhelpers.CheckOwnershipAnnotations(k8sClient, "default", "test-ownership"),
 				),
 			},
 		},
-		CheckDestroy: testAccCheckConfigMapDestroy(k8sClient, "default", "test-ownership"),
+		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, "default", "test-ownership"),
 	})
 }
 
@@ -85,7 +83,7 @@ func TestAccManifestResource_OwnershipConflict(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
-	k8sClient := createK8sClient(t, raw)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -99,8 +97,8 @@ func TestAccManifestResource_OwnershipConflict(t *testing.T) {
 					"raw": config.StringVariable(raw),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckConfigMapExists(k8sClient, "default", "test-conflict"),
-					testAccCheckOwnershipAnnotations(k8sClient, "default", "test-conflict"),
+					testhelpers.CheckConfigMapExists(k8sClient, "default", "test-conflict"),
+					testhelpers.CheckOwnershipAnnotations(k8sClient, "default", "test-conflict"),
 				),
 			},
 			// Try to create second resource managing same ConfigMap - should fail
@@ -112,7 +110,7 @@ func TestAccManifestResource_OwnershipConflict(t *testing.T) {
 				ExpectError: regexp.MustCompile("resource managed by different k8sconnect resource"),
 			},
 		},
-		CheckDestroy: testAccCheckConfigMapDestroy(k8sClient, "default", "test-conflict"),
+		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, "default", "test-conflict"),
 	})
 }
 
@@ -186,7 +184,7 @@ func TestAccManifestResource_OwnershipImport(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
-	k8sClient := createK8sClient(t, raw)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -202,7 +200,7 @@ func TestAccManifestResource_OwnershipImport(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestMatchResourceAttr("k8sconnect_manifest.import_test", "id",
 						regexp.MustCompile("^[a-f0-9]{12}$")),
-					testAccCheckOwnershipAnnotations(k8sClient, "default", "test-import-ownership"),
+					testhelpers.CheckOwnershipAnnotations(k8sClient, "default", "test-import-ownership"),
 				),
 			},
 			// Step 2: Import the ConfigMap
@@ -233,7 +231,7 @@ func TestAccManifestResource_OwnershipImport(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestMatchResourceAttr("k8sconnect_manifest.import_test", "id",
 						regexp.MustCompile("^[a-f0-9]{12}$")),
-					testAccCheckOwnershipAnnotations(k8sClient, "default", "test-import-ownership"),
+					testhelpers.CheckOwnershipAnnotations(k8sClient, "default", "test-import-ownership"),
 				),
 			},
 		},
@@ -263,27 +261,6 @@ YAML
   }
 }`
 
-// Helper to check ownership annotations exist
-func testAccCheckOwnershipAnnotations(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		cm, err := client.CoreV1().ConfigMaps(namespace).Get(context.Background(), name, metav1.GetOptions{})
-		if err != nil {
-			return fmt.Errorf("failed to get ConfigMap: %v", err)
-		}
-
-		annotations := cm.GetAnnotations()
-		if annotations == nil {
-			return fmt.Errorf("ConfigMap has no annotations")
-		}
-
-		if _, ok := annotations["k8sconnect.terraform.io/terraform-id"]; !ok {
-			return fmt.Errorf("ConfigMap missing ownership annotation k8sconnect.terraform.io/terraform-id")
-		}
-
-		return nil
-	}
-}
-
 func TestAccManifestResource_FieldManagerConflict(t *testing.T) {
 	t.Parallel()
 
@@ -292,7 +269,7 @@ func TestAccManifestResource_FieldManagerConflict(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
-	k8sClient := createK8sClient(t, raw)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
 	k8sClientset := k8sClient.(*kubernetes.Clientset)
 
 	resource.Test(t, resource.TestCase{
@@ -307,8 +284,8 @@ func TestAccManifestResource_FieldManagerConflict(t *testing.T) {
 					"raw": config.StringVariable(raw),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckDeploymentExists(k8sClient, "default", "field-conflict-test"),
-					testAccCheckDeploymentReplicaCount(k8sClientset, "default", "field-conflict-test", 2),
+					testhelpers.CheckDeploymentExists(k8sClient, "default", "field-conflict-test"),
+					testhelpers.CheckDeploymentReplicaCount(k8sClientset, "default", "field-conflict-test", 2),
 				),
 			},
 			// Step 2: Modify with kubectl to create field manager conflict
@@ -358,11 +335,11 @@ func TestAccManifestResource_FieldManagerConflict(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					// Now should be 4 because we forced
-					testAccCheckDeploymentReplicaCount(k8sClientset, "default", "field-conflict-test", 4),
+					testhelpers.CheckDeploymentReplicaCount(k8sClientset, "default", "field-conflict-test", 4),
 				),
 			},
 		},
-		CheckDestroy: testAccCheckDeploymentDestroy(k8sClient, "default", "field-conflict-test"),
+		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, "default", "field-conflict-test"),
 	})
 }
 
@@ -456,20 +433,4 @@ YAML
   force_conflicts = %t
 }
 `, forceConflicts)
-}
-
-// Helper function to check deployment replica count
-func testAccCheckDeploymentReplicaCount(client *kubernetes.Clientset, namespace, name string, expected int32) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		deployment, err := client.AppsV1().Deployments(namespace).Get(context.Background(), name, metav1.GetOptions{})
-		if err != nil {
-			return fmt.Errorf("failed to get deployment: %v", err)
-		}
-
-		if *deployment.Spec.Replicas != expected {
-			return fmt.Errorf("expected %d replicas, got %d", expected, *deployment.Spec.Replicas)
-		}
-
-		return nil
-	}
 }

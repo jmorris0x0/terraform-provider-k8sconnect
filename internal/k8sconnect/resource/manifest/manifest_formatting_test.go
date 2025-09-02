@@ -2,8 +2,6 @@
 package manifest_test
 
 import (
-	"context"
-	"fmt"
 	"os"
 	"testing"
 
@@ -11,11 +9,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/config"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
-	"github.com/hashicorp/terraform-plugin-testing/terraform"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect"
+	testhelpers "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/test"
 )
 
 func TestAccManifestResource_NoUpdateOnFormattingChanges(t *testing.T) {
@@ -26,7 +22,7 @@ func TestAccManifestResource_NoUpdateOnFormattingChanges(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
-	k8sClient := createK8sClient(t, raw)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -41,7 +37,7 @@ func TestAccManifestResource_NoUpdateOnFormattingChanges(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test", "id"),
-					testAccCheckConfigMapExists(k8sClient, "default", "formatting-test"),
+					testhelpers.CheckConfigMapExists(k8sClient, "default", "formatting-test"),
 				),
 			},
 			// Step 2: Add only comments - should show no changes
@@ -78,12 +74,12 @@ func TestAccManifestResource_NoUpdateOnFormattingChanges(t *testing.T) {
 					"raw": config.StringVariable(raw),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckConfigMapDataValue(k8sClient, "default", "formatting-test",
+					testhelpers.CheckConfigMapDataValue(k8sClient, "default", "formatting-test",
 						"key2", "value2-changed"),
 				),
 			},
 		},
-		CheckDestroy: testAccCheckConfigMapDestroy(k8sClient, "default", "formatting-test"),
+		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, "default", "formatting-test"),
 	})
 }
 
@@ -221,25 +217,3 @@ YAML
   }
 }
 `
-
-// Helper to check specific data value in ConfigMap
-func testAccCheckConfigMapDataValue(client kubernetes.Interface, namespace, name, key, expectedValue string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		cm, err := client.CoreV1().ConfigMaps(namespace).Get(context.Background(), name, metav1.GetOptions{})
-		if err != nil {
-			return fmt.Errorf("failed to get ConfigMap: %v", err)
-		}
-
-		actualValue, exists := cm.Data[key]
-		if !exists {
-			return fmt.Errorf("ConfigMap %s/%s missing data key %s", namespace, name, key)
-		}
-
-		if actualValue != expectedValue {
-			return fmt.Errorf("ConfigMap %s/%s data[%s] = %q, want %q",
-				namespace, name, key, actualValue, expectedValue)
-		}
-
-		return nil
-	}
-}

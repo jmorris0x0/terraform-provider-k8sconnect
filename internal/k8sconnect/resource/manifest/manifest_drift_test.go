@@ -16,6 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect"
+	testhelpers "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/test"
 )
 
 func TestAccManifestResource_DriftDetection(t *testing.T) {
@@ -26,7 +27,7 @@ func TestAccManifestResource_DriftDetection(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
-	k8sClient := createK8sClient(t, raw)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -42,11 +43,10 @@ func TestAccManifestResource_DriftDetection(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.drift_test", "id"),
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.drift_test", "managed_state_projection"),
-					testAccCheckConfigMapExists(k8sClient, "default", "drift-test-cm"),
+					testhelpers.CheckConfigMapExists(k8sClient, "default", "drift-test-cm"),
 				),
 			},
-			// Step 2: Modify ConfigMap outside of Terraform (simulating drift)
-			// Step 2: Modify ConfigMap outside of Terraform (simulating drift)
+			// Step 2: Modify ConfigMap outside of Terraform (simulatingulating drift)
 			{
 				PreConfig: func() {
 					ctx := context.Background()
@@ -104,18 +104,18 @@ func TestAccManifestResource_DriftDetection(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					// Verify ConfigMap is back to original state
-					testAccCheckConfigMapData(k8sClient, "default", "drift-test-cm", map[string]string{
+					testhelpers.CheckConfigMapData(k8sClient, "default", "drift-test-cm", map[string]string{
 						"key1": "value1",
 						"key2": "value2",
 						"key3": "value3",
 					}),
 					// Verify annotation is back to original
-					testAccCheckConfigMapAnnotation(k8sClient, "default", "drift-test-cm",
+					testhelpers.CheckConfigMapAnnotation(k8sClient, "default", "drift-test-cm",
 						"example.com/team", "backend-team"),
 				),
 			},
 		},
-		CheckDestroy: testAccCheckConfigMapDestroy(k8sClient, "default", "drift-test-cm"),
+		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, "default", "drift-test-cm"),
 	})
 }
 
@@ -157,7 +157,7 @@ func TestAccManifestResource_NoDriftWhenNoChanges(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
-	k8sClient := createK8sClient(t, raw)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -172,7 +172,7 @@ func TestAccManifestResource_NoDriftWhenNoChanges(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.no_drift", "id"),
-					testAccCheckConfigMapExists(k8sClient, "default", "no-drift-cm"),
+					testhelpers.CheckConfigMapExists(k8sClient, "default", "no-drift-cm"),
 				),
 			},
 			// Step 2: Run plan without any changes - should be empty
@@ -219,7 +219,7 @@ func TestAccManifestResource_NoDriftWhenNoChanges(t *testing.T) {
 				ExpectNonEmptyPlan: false, // Still no drift - we don't manage those fields!
 			},
 		},
-		CheckDestroy: testAccCheckConfigMapDestroy(k8sClient, "default", "no-drift-cm"),
+		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, "default", "no-drift-cm"),
 	})
 }
 
@@ -257,7 +257,7 @@ func TestAccManifestResource_DriftDetectionNestedStructures(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
-	k8sClient := createK8sClient(t, raw)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -272,7 +272,7 @@ func TestAccManifestResource_DriftDetectionNestedStructures(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.drift_deployment", "id"),
-					testAccCheckDeploymentExists(k8sClient, "default", "drift-test-deployment"),
+					testhelpers.CheckDeploymentExists(k8sClient, "default", "drift-test-deployment"),
 				),
 			},
 			// Step 2: Modify nested fields
@@ -307,7 +307,7 @@ func TestAccManifestResource_DriftDetectionNestedStructures(t *testing.T) {
 				ExpectNonEmptyPlan: true, // Should detect drift in image and replicas
 			},
 		},
-		CheckDestroy: testAccCheckDeploymentDestroy(k8sClient, "default", "drift-test-deployment"),
+		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, "default", "drift-test-deployment"),
 	})
 }
 
@@ -356,7 +356,7 @@ func TestAccManifestResource_DriftDetectionArrays(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
-	k8sClient := createK8sClient(t, raw)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -371,7 +371,7 @@ func TestAccManifestResource_DriftDetectionArrays(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.drift_service", "id"),
-					testAccCheckServiceExists(k8sClient, "default", "drift-test-service"),
+					testhelpers.CheckServiceExists(k8sClient, "default", "drift-test-service"),
 				),
 			},
 			// Step 2: Modify array elements
@@ -406,7 +406,7 @@ func TestAccManifestResource_DriftDetectionArrays(t *testing.T) {
 				ExpectNonEmptyPlan: true, // Should detect port change
 			},
 		},
-		CheckDestroy: testAccCheckServiceDestroy(k8sClient, "default", "drift-test-service"),
+		CheckDestroy: testhelpers.CheckServiceDestroy(k8sClient, "default", "drift-test-service"),
 	})
 }
 

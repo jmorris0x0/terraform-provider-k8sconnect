@@ -12,6 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect"
+	testhelpers "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/test"
 )
 
 // Test delete protection functionality
@@ -23,7 +24,7 @@ func TestAccManifestResource_DeleteProtection(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
-	k8sClient := createK8sClient(t, raw)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -39,7 +40,7 @@ func TestAccManifestResource_DeleteProtection(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test_protected", "delete_protection", "true"),
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_protected", "id"),
-					testAccCheckNamespaceExists(k8sClient, "acctest-protected"),
+					testhelpers.CheckNamespaceExists(k8sClient, "acctest-protected"),
 				),
 			},
 			// Step 2: Try to destroy - should fail due to protection
@@ -58,12 +59,12 @@ func TestAccManifestResource_DeleteProtection(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test_protected", "delete_protection", "false"),
-					testAccCheckNamespaceExists(k8sClient, "acctest-protected"),
+					testhelpers.CheckNamespaceExists(k8sClient, "acctest-protected"),
 				),
 			},
 			// Step 4: Now destroy should succeed
 		},
-		CheckDestroy: testAccCheckNamespaceDestroy(k8sClient, "acctest-protected"),
+		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, "acctest-protected"),
 	})
 }
 
@@ -121,7 +122,7 @@ func TestAccManifestResource_ConnectionChange(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
-	k8sClient := createK8sClient(t, raw)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -136,7 +137,7 @@ func TestAccManifestResource_ConnectionChange(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_conn_change", "id"),
-					testAccCheckNamespaceExists(k8sClient, "acctest-conn-change"),
+					testhelpers.CheckNamespaceExists(k8sClient, "acctest-conn-change"),
 					// TODO: Add check that ownership annotation exists on the K8s resource
 				),
 			},
@@ -149,7 +150,7 @@ func TestAccManifestResource_ConnectionChange(t *testing.T) {
 				ExpectError: regexp.MustCompile("connection change would move resource to a different cluster"),
 			},
 		},
-		CheckDestroy: testAccCheckNamespaceDestroy(k8sClient, "acctest-conn-change"),
+		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, "acctest-conn-change"),
 	})
 }
 
@@ -198,7 +199,7 @@ func TestAccManifestResource_ForceDestroy(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
-	k8sClient := createK8sClient(t, raw)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -213,11 +214,11 @@ func TestAccManifestResource_ForceDestroy(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test_force", "force_destroy", "true"),
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test_force", "delete_timeout", "30s"),
-					testAccCheckPVCExists(k8sClient, "default", "test-pvc-force"),
+					testhelpers.CheckPVCExists(k8sClient, "default", "test-pvc-force"),
 				),
 			},
 		},
-		CheckDestroy: testAccCheckPVCDestroy(k8sClient, "default", "test-pvc-force"),
+		CheckDestroy: testhelpers.CheckPVCDestroy(k8sClient, "default", "test-pvc-force"),
 	})
 }
 
@@ -260,7 +261,7 @@ func TestAccManifestResource_DeleteTimeout(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
-	k8sClient := createK8sClient(t, raw)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -274,11 +275,11 @@ func TestAccManifestResource_DeleteTimeout(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test_timeout", "delete_timeout", "2m"),
-					testAccCheckNamespaceExists(k8sClient, "acctest-timeout"),
+					testhelpers.CheckNamespaceExists(k8sClient, "acctest-timeout"),
 				),
 			},
 		},
-		CheckDestroy: testAccCheckNamespaceDestroy(k8sClient, "acctest-timeout"),
+		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, "acctest-timeout"),
 	})
 }
 

@@ -1,5 +1,5 @@
-// internal/k8sconnect/resource/manifest/helpers_test.go
-package manifest_test
+// internal/k8sconnect/common/test/helpers.go
+package test
 
 import (
 	"context"
@@ -17,7 +17,7 @@ import (
 )
 
 // Create K8s client for verification
-func createK8sClient(t *testing.T, kubeconfigRaw string) kubernetes.Interface {
+func CreateK8sClient(t *testing.T, kubeconfigRaw string) kubernetes.Interface {
 	config, err := clientcmd.RESTConfigFromKubeConfig([]byte(kubeconfigRaw))
 	if err != nil {
 		t.Fatalf("Failed to create kubeconfig: %v", err)
@@ -32,7 +32,7 @@ func createK8sClient(t *testing.T, kubeconfigRaw string) kubernetes.Interface {
 }
 
 // Check function to verify namespace exists in K8s
-func testAccCheckNamespaceExists(client kubernetes.Interface, name string) resource.TestCheckFunc {
+func CheckNamespaceExists(client kubernetes.Interface, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()
 
@@ -47,7 +47,7 @@ func testAccCheckNamespaceExists(client kubernetes.Interface, name string) resou
 }
 
 // Check function to verify namespace is cleaned up
-func testAccCheckNamespaceDestroy(client kubernetes.Interface, name string) resource.TestCheckFunc {
+func CheckNamespaceDestroy(client kubernetes.Interface, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()
 		for i := 0; i < 10; i++ {
@@ -67,7 +67,7 @@ func testAccCheckNamespaceDestroy(client kubernetes.Interface, name string) reso
 	}
 }
 
-func testAccCheckPodExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+func CheckPodExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()
 		_, err := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
@@ -79,7 +79,7 @@ func testAccCheckPodExists(client kubernetes.Interface, namespace, name string) 
 	}
 }
 
-func testAccCheckPodDestroy(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+func CheckPodDestroy(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()
 		for i := 0; i < 15; i++ {
@@ -97,7 +97,7 @@ func testAccCheckPodDestroy(client kubernetes.Interface, namespace, name string)
 	}
 }
 
-func testAccCheckConfigMapExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+func CheckConfigMapExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()
 		_, err := client.CoreV1().ConfigMaps(namespace).Get(ctx, name, metav1.GetOptions{})
@@ -109,7 +109,7 @@ func testAccCheckConfigMapExists(client kubernetes.Interface, namespace, name st
 	}
 }
 
-func testAccCheckConfigMapDestroy(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+func CheckConfigMapDestroy(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()
 		for i := 0; i < 10; i++ {
@@ -127,7 +127,7 @@ func testAccCheckConfigMapDestroy(client kubernetes.Interface, namespace, name s
 	}
 }
 
-func testAccCheckConfigMapData(client kubernetes.Interface, namespace, name string, expectedData map[string]string) resource.TestCheckFunc {
+func CheckConfigMapData(client kubernetes.Interface, namespace, name string, expectedData map[string]string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()
 		cm, err := client.CoreV1().ConfigMaps(namespace).Get(ctx, name, metav1.GetOptions{})
@@ -150,7 +150,7 @@ func testAccCheckConfigMapData(client kubernetes.Interface, namespace, name stri
 	}
 }
 
-func testAccCheckConfigMapAnnotation(client kubernetes.Interface, namespace, name, annotationKey, expectedValue string) resource.TestCheckFunc {
+func CheckConfigMapAnnotation(client kubernetes.Interface, namespace, name, annotationKey, expectedValue string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()
 		cm, err := client.CoreV1().ConfigMaps(namespace).Get(ctx, name, metav1.GetOptions{})
@@ -171,7 +171,7 @@ func testAccCheckConfigMapAnnotation(client kubernetes.Interface, namespace, nam
 	}
 }
 
-func testAccCheckPVCExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+func CheckPVCExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()
 		_, err := client.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, name, metav1.GetOptions{})
@@ -183,7 +183,7 @@ func testAccCheckPVCExists(client kubernetes.Interface, namespace, name string) 
 	}
 }
 
-func testAccCheckPVCDestroy(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+func CheckPVCDestroy(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()
 		for i := 0; i < 20; i++ { // Longer wait for PVCs
@@ -201,7 +201,7 @@ func testAccCheckPVCDestroy(client kubernetes.Interface, namespace, name string)
 	}
 }
 
-func testAccCheckDeploymentExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+func CheckDeploymentExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()
 		_, err := client.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
@@ -213,7 +213,7 @@ func testAccCheckDeploymentExists(client kubernetes.Interface, namespace, name s
 	}
 }
 
-func testAccCheckDeploymentDestroy(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+func CheckDeploymentDestroy(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()
 		for i := 0; i < 15; i++ {
@@ -231,7 +231,7 @@ func testAccCheckDeploymentDestroy(client kubernetes.Interface, namespace, name 
 	}
 }
 
-func testAccCheckServiceExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+func CheckServiceExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()
 		_, err := client.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
@@ -243,7 +243,7 @@ func testAccCheckServiceExists(client kubernetes.Interface, namespace, name stri
 	}
 }
 
-func testAccCheckServiceDestroy(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+func CheckServiceDestroy(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()
 		for i := 0; i < 10; i++ {
@@ -261,7 +261,7 @@ func testAccCheckServiceDestroy(client kubernetes.Interface, namespace, name str
 	}
 }
 
-func writeKubeconfigToTempFile(t *testing.T, kubeconfigContent string) string {
+func WriteKubeconfigToTempFile(t *testing.T, kubeconfigContent string) string {
 	tmpfile, err := os.CreateTemp("", "kubeconfig-import-*.yaml")
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
@@ -281,7 +281,7 @@ func writeKubeconfigToTempFile(t *testing.T, kubeconfigContent string) string {
 	return tmpfile.Name()
 }
 
-func testAccCheckResourceQuotaDestroy(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+func CheckResourceQuotaDestroy(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()
 		_, err := client.CoreV1().ResourceQuotas(namespace).Get(ctx, name, metav1.GetOptions{})
@@ -293,5 +293,64 @@ func testAccCheckResourceQuotaDestroy(client kubernetes.Interface, namespace, na
 			return fmt.Errorf("unexpected error checking ResourceQuota: %v", err)
 		}
 		return fmt.Errorf("ResourceQuota %s/%s still exists after deletion", namespace, name)
+	}
+}
+
+// Helper to check specific data value in ConfigMap
+func CheckConfigMapDataValue(client kubernetes.Interface, namespace, name, key, expectedValue string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		cm, err := client.CoreV1().ConfigMaps(namespace).Get(context.Background(), name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to get ConfigMap: %v", err)
+		}
+
+		actualValue, exists := cm.Data[key]
+		if !exists {
+			return fmt.Errorf("ConfigMap %s/%s missing data key %s", namespace, name, key)
+		}
+
+		if actualValue != expectedValue {
+			return fmt.Errorf("ConfigMap %s/%s data[%s] = %q, want %q",
+				namespace, name, key, actualValue, expectedValue)
+		}
+
+		return nil
+	}
+}
+
+// Helper to check ownership annotations exist
+func CheckOwnershipAnnotations(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		cm, err := client.CoreV1().ConfigMaps(namespace).Get(context.Background(), name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to get ConfigMap: %v", err)
+		}
+
+		annotations := cm.GetAnnotations()
+		if annotations == nil {
+			return fmt.Errorf("ConfigMap has no annotations")
+		}
+
+		if _, ok := annotations["k8sconnect.terraform.io/terraform-id"]; !ok {
+			return fmt.Errorf("ConfigMap missing ownership annotation k8sconnect.terraform.io/terraform-id")
+		}
+
+		return nil
+	}
+}
+
+// Helper function to check deployment replica count
+func CheckDeploymentReplicaCount(client *kubernetes.Clientset, namespace, name string, expected int32) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		deployment, err := client.AppsV1().Deployments(namespace).Get(context.Background(), name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to get deployment: %v", err)
+		}
+
+		if *deployment.Spec.Replicas != expected {
+			return fmt.Errorf("expected %d replicas, got %d", expected, *deployment.Spec.Replicas)
+		}
+
+		return nil
 	}
 }
