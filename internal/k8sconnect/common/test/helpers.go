@@ -354,3 +354,35 @@ func CheckDeploymentReplicaCount(client *kubernetes.Clientset, namespace, name s
 		return nil
 	}
 }
+
+// Add these functions to internal/k8sconnect/common/test/helpers.go
+
+func CheckStatefulSetExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		_, err := client.AppsV1().StatefulSets(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("statefulset %s/%s does not exist: %v", namespace, name, err)
+		}
+		fmt.Printf("✅ Verified statefulset %s/%s exists in Kubernetes\n", namespace, name)
+		return nil
+	}
+}
+
+func CheckStatefulSetDestroy(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		for i := 0; i < 20; i++ { // StatefulSets can take longer to delete due to ordered pod termination
+			_, err := client.AppsV1().StatefulSets(namespace).Get(ctx, name, metav1.GetOptions{})
+			if err != nil {
+				if strings.Contains(err.Error(), "not found") {
+					fmt.Printf("✅ Verified statefulset %s/%s was deleted\n", namespace, name)
+					return nil
+				}
+				return fmt.Errorf("unexpected error checking statefulset: %v", err)
+			}
+			time.Sleep(2 * time.Second)
+		}
+		return fmt.Errorf("statefulset %s/%s still exists after deletion", namespace, name)
+	}
+}
