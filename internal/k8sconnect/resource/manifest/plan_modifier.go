@@ -136,12 +136,13 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 		}
 	}
 
-	// Handle status field based on track_status setting
-	if plannedData.TrackStatus.IsNull() || !plannedData.TrackStatus.ValueBool() {
-		// Not tracking status - status should always be null
+	if !plannedData.WaitFor.IsNull() {
+		// If wait_for is configured, leave status as unknown - it will be populated during Read/Update
+		// Don't set it to null here
+	} else {
+		// No wait_for, so status should be null
 		plannedData.Status = types.DynamicNull()
 	}
-	// If tracking is enabled, leave status as unknown - it will be populated during Read/Update
 
 	// Final plan set
 	diags = resp.Plan.Set(ctx, &plannedData)

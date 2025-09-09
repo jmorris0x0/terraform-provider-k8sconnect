@@ -178,8 +178,8 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	// Only populate status if track_status is true
-	if !data.TrackStatus.IsNull() && data.TrackStatus.ValueBool() {
+	// Check if we should track status (when wait_for is configured)
+	if !data.WaitFor.IsNull() {
 		if statusRaw, found, _ := unstructured.NestedMap(currentObj.Object, "status"); found && len(statusRaw) > 0 {
 			statusValue, err := common.ConvertToAttrValue(ctx, statusRaw)
 			if err != nil {
@@ -295,8 +295,8 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	// Only populate status if track_status is true
-	if !data.TrackStatus.IsNull() && data.TrackStatus.ValueBool() {
+	// Only populate status if wait_for is configured
+	if !data.WaitFor.IsNull() {
 		if statusRaw, found, _ := unstructured.NestedMap(currentObj.Object, "status"); found && len(statusRaw) > 0 {
 			statusValue, err := common.ConvertToAttrValue(ctx, statusRaw)
 			if err != nil {
@@ -488,8 +488,8 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	// Only populate status if track_status is true
-	if !plan.TrackStatus.IsNull() && plan.TrackStatus.ValueBool() {
+	// Only populate status if wait_for is configured
+	if !plan.WaitFor.IsNull() {
 		if statusRaw, found, _ := unstructured.NestedMap(currentObj.Object, "status"); found && len(statusRaw) > 0 {
 			statusValue, err := common.ConvertToAttrValue(ctx, statusRaw)
 			if err != nil {

@@ -26,6 +26,7 @@ Applies a single‑document Kubernetes YAML manifest to a cluster, with per‑re
 - `delete_timeout` (String) How long to wait for a resource to be deleted before considering the deletion failed. Defaults to 300s (5 minutes).
 - `force_conflicts` (Boolean) Force field manager conflicts during server-side apply. When false (default), operations will fail if another field manager owns the field. When true, forcibly takes ownership of conflicting fields.
 - `force_destroy` (Boolean) Force destroy resources that have finalizers and are stuck in 'Terminating' state. This removes finalizers before deletion.
+- `wait_for` (Attributes) Wait for resource to reach desired state during apply. Automatically enables status tracking. (see [below for nested schema](#nestedatt--wait_for))
 
 ### Read-Only
 
@@ -64,3 +65,16 @@ Optional:
 
 - `args` (List of String) Arguments to pass when executing the plugin.
 - `env` (Map of String) Environment variables to set when executing the plugin.
+
+
+
+<a id="nestedatt--wait_for"></a>
+### Nested Schema for `wait_for`
+
+Optional:
+
+- `condition` (String) Condition type that must be True. Example: 'Ready'
+- `field` (String) JSONPath to field that must exist/be non-empty. Example: 'status.loadBalancer.ingress'
+- `field_value` (Map of String) Map of JSONPath to expected value. Example: {'status.phase': 'Running'}
+- `rollout` (Boolean) Wait for Deployment/StatefulSet/DaemonSet rollout. Auto-enabled for these types unless set to false.
+- `timeout` (String) Maximum time to wait. Defaults to 10m. Format: '30s', '5m', '1h'

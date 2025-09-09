@@ -7,8 +7,12 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	//"github.com/hashicorp/terraform-plugin-framework/resource/schema/dynamicplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework-validators/mapvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
@@ -45,8 +49,16 @@ type manifestResourceModel struct {
 	ForceConflicts             types.Bool    `tfsdk:"force_conflicts"`
 	ManagedStateProjection     types.String  `tfsdk:"managed_state_projection"`
 	ImportedWithoutAnnotations types.Bool    `tfsdk:"imported_without_annotations"`
-	TrackStatus                types.Bool    `tfsdk:"track_status"`
+	WaitFor                    types.Object  `tfsdk:"wait_for"`
 	Status                     types.Dynamic `tfsdk:"status"`
+}
+
+type waitForModel struct {
+	Field      types.String `tfsdk:"field"`
+	FieldValue types.Map    `tfsdk:"field_value"`
+	Condition  types.String `tfsdk:"condition"`
+	Rollout    types.Bool   `tfsdk:"rollout"`
+	Timeout    types.String `tfsdk:"timeout"`
 }
 
 // Creates a manifest resource with custom client getter
@@ -205,13 +217,51 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 			"status": schema.DynamicAttribute{
 				Computed:    true,
 				Description: "Status subresource from the live cluster state. Contains conditions, phase, and resource-specific fields like loadBalancer for Services.",
-				//PlanModifiers: []planmodifier.Dynamic{
-				//	dynamicplanmodifier.UseStateForUnknown(),
-				//},
 			},
-			"track_status": schema.BoolAttribute{
+			"wait_for": schema.SingleNestedAttribute{
 				Optional:    true,
-				Description: "Enable tracking of resource status. When true, status changes will appear in plans. Useful for accessing fields like LoadBalancer URLs. Defaults to false.",
+				Description: "Wait for resource to reach desired state during apply. Automatically enables status tracking.",
+				Attributes: map[string]schema.Attribute{
+					"field": schema.StringAttribute{
+						Optional:    true,
+						Description: "JSONPath to field that must exist/be non-empty. Example: 'status.loadBalancer.ingress'",
+						Validators: []validator.String{
+							stringvalidator.ConflictsWith(
+								path.MatchRelative().AtParent().AtName("field_value"),
+								path.MatchRelative().AtParent().AtName("condition"),
+							),
+						},
+					},
+					"field_value": schema.MapAttribute{
+						Optional:    true,
+						ElementType: types.StringType,
+						Description: "Map of JSONPath to expected value. Example: {'status.phase': 'Running'}",
+						Validators: []validator.Map{
+							mapvalidator.ConflictsWith(
+								path.MatchRelative().AtParent().AtName("field"),
+								path.MatchRelative().AtParent().AtName("condition"),
+							),
+						},
+					},
+					"condition": schema.StringAttribute{
+						Optional:    true,
+						Description: "Condition type that must be True. Example: 'Ready'",
+						Validators: []validator.String{
+							stringvalidator.ConflictsWith(
+								path.MatchRelative().AtParent().AtName("field"),
+								path.MatchRelative().AtParent().AtName("field_value"),
+							),
+						},
+					},
+					"rollout": schema.BoolAttribute{
+						Optional:    true,
+						Description: "Wait for Deployment/StatefulSet/DaemonSet rollout. Auto-enabled for these types unless set to false.",
+					},
+					"timeout": schema.StringAttribute{
+						Optional:    true,
+						Description: "Maximum time to wait. Defaults to 10m. Format: '30s', '5m', '1h'",
+					},
+				},
 			},
 		},
 	}
