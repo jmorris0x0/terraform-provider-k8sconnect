@@ -44,6 +44,7 @@ type manifestResourceModel struct {
 	ForceConflicts             types.Bool    `tfsdk:"force_conflicts"`
 	ManagedStateProjection     types.String  `tfsdk:"managed_state_projection"`
 	ImportedWithoutAnnotations types.Bool    `tfsdk:"imported_without_annotations"`
+	TrackStatus                types.Bool    `tfsdk:"track_status"`
 	Status                     types.Dynamic `tfsdk:"status"`
 }
 
@@ -203,6 +204,13 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 			"status": schema.DynamicAttribute{
 				Computed:    true,
 				Description: "Status subresource from the live cluster state. Contains conditions, phase, and resource-specific fields like loadBalancer for Services.",
+				PlanModifiers: []planmodifier.Dynamic{
+					dynamicplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"track_status": schema.BoolAttribute{
+				Optional:    true,
+				Description: "Enable tracking of resource status. When true, status changes will appear in plans. Useful for accessing fields like LoadBalancer URLs. Defaults to false.",
 			},
 		},
 	}

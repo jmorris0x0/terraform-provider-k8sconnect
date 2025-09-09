@@ -72,6 +72,8 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
+
+  track_status = true
 }
 
 output "namespace_ready" {

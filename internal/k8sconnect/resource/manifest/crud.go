@@ -12,59 +12,41 @@ import (
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/k8sclient"
+
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
 func (r *manifestResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var data manifestResourceModel
 
-	diags := req.Config.Get(ctx, &data)
+	diags := req.Plan.Get(ctx, &data)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	// Check if cluster connection is ready (handles unknown values during planning)
-	// Note: Now we need to check if we have ANY connection (resource OR provider level)
-	if !data.ClusterConnection.IsNull() && !r.isConnectionReady(data.ClusterConnection) {
-		resp.Diagnostics.AddError(
-			"Cluster Connection Not Ready",
-			"Cluster connection contains unknown values. This usually happens during planning when dependencies are not yet resolved.",
-		)
-		return
-	}
-
-	// Try to resolve connection (resource level or provider level)
+	// Get effective connection (resource-level or provider-level)
 	var effectiveConn auth.ClusterConnectionModel
 
 	if r.connResolver != nil {
-		// We have a resolver, use it to get effective connection
-		var resourceConn *auth.ClusterConnectionModel
-
-		// Convert resource-level connection if present
-		if !data.ClusterConnection.IsNull() && !data.ClusterConnection.IsUnknown() {
-			conn, err := r.convertObjectToConnectionModel(ctx, data.ClusterConnection)
-			if err != nil {
-				resp.Diagnostics.AddError("Connection Conversion Failed", err.Error())
-				return
-			}
-			resourceConn = &conn
+		// Use resolver for flexible connection handling
+		resourceConn, err := r.convertObjectToConnectionModel(ctx, data.ClusterConnection)
+		if err != nil && !data.ClusterConnection.IsNull() {
+			resp.Diagnostics.AddError("Invalid Connection", err.Error())
+			return
 		}
 
-		// Resolve effective connection
-		resolvedConn, err := r.connResolver.ResolveConnection(resourceConn)
+		resolvedConn, err := r.connResolver.ResolveConnection(&resourceConn)
 		if err != nil {
-			resp.Diagnostics.AddError("No Cluster Connection Available",
-				fmt.Sprintf("%s\n\nYou can configure a connection either at the provider level or in the resource's cluster_connection block.", err.Error()))
+			resp.Diagnostics.AddError("No Connection Available",
+				fmt.Sprintf("No connection configured. Either set cluster_connection on the resource or configure a provider-level connection: %s", err.Error()))
 			return
 		}
 		effectiveConn = resolvedConn
 
 		// IMPORTANT: If using provider connection, store it in state
-		if resourceConn == nil {
+		if data.ClusterConnection.IsNull() {
 			// Resource is using provider-level connection
 			// We need to store it to prevent accidental cluster switches
 			connObj, err := r.convertConnectionToObject(ctx, effectiveConn)
@@ -196,16 +178,24 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	// Extract status
-	if statusRaw, found, _ := unstructured.NestedMap(currentObj.Object, "status"); found && len(statusRaw) > 0 {
-		statusValue, err := common.ConvertToAttrValue(ctx, statusRaw)
-		if err != nil {
-			tflog.Warn(ctx, "Failed to convert status", map[string]interface{}{"error": err.Error()})
-			data.Status = types.DynamicNull()
+	// Only populate status if track_status is true
+	if !data.TrackStatus.IsNull() && data.TrackStatus.ValueBool() {
+		if statusRaw, found, _ := unstructured.NestedMap(currentObj.Object, "status"); found && len(statusRaw) > 0 {
+			statusValue, err := common.ConvertToAttrValue(ctx, statusRaw)
+			if err != nil {
+				tflog.Warn(ctx, "Failed to convert status", map[string]interface{}{"error": err.Error()})
+				data.Status = types.DynamicNull()
+			} else {
+				data.Status = types.DynamicValue(statusValue)
+			}
 		} else {
+			// No status from K8s but tracking enabled - set empty map
+			emptyStatus := map[string]interface{}{}
+			statusValue, _ := common.ConvertToAttrValue(ctx, emptyStatus)
 			data.Status = types.DynamicValue(statusValue)
 		}
 	} else {
+		// Not tracking status
 		data.Status = types.DynamicNull()
 	}
 
@@ -305,16 +295,24 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	// Extract status
-	if statusRaw, found, _ := unstructured.NestedMap(currentObj.Object, "status"); found && len(statusRaw) > 0 {
-		statusValue, err := common.ConvertToAttrValue(ctx, statusRaw)
-		if err != nil {
-			tflog.Warn(ctx, "Failed to convert status", map[string]interface{}{"error": err.Error()})
-			data.Status = types.DynamicNull()
+	// Only populate status if track_status is true
+	if !data.TrackStatus.IsNull() && data.TrackStatus.ValueBool() {
+		if statusRaw, found, _ := unstructured.NestedMap(currentObj.Object, "status"); found && len(statusRaw) > 0 {
+			statusValue, err := common.ConvertToAttrValue(ctx, statusRaw)
+			if err != nil {
+				tflog.Warn(ctx, "Failed to convert status", map[string]interface{}{"error": err.Error()})
+				data.Status = types.DynamicNull()
+			} else {
+				data.Status = types.DynamicValue(statusValue)
+			}
 		} else {
+			// No status from K8s but tracking enabled - set empty map
+			emptyStatus := map[string]interface{}{}
+			statusValue, _ := common.ConvertToAttrValue(ctx, emptyStatus)
 			data.Status = types.DynamicValue(statusValue)
 		}
 	} else {
+		// Not tracking status
 		data.Status = types.DynamicNull()
 	}
 
@@ -425,106 +423,38 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	// Parse the YAML
+	// Parse YAML
 	obj, err := r.parseYAML(plan.YAMLBody.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Invalid YAML", fmt.Sprintf("Failed to parse YAML: %s", err))
 		return
 	}
 
-	// Ensure the resource has our ownership annotation with the correct ID
-	r.setOwnershipAnnotation(obj, state.ID.ValueString())
-
 	// Create K8s client
-	client, err := r.clientGetter(conn)
+	client, err := r.clientFactory.GetClient(conn)
 	if err != nil {
 		resp.Diagnostics.AddError("Connection Failed", fmt.Sprintf("Failed to create Kubernetes client: %s", err))
 		return
 	}
 
 	// Get GVR for the object
-	gvr, err := r.getGVR(ctx, client, obj)
+	gvr, err := client.GetGVR(ctx, obj)
 	if err != nil {
 		resp.Diagnostics.AddError("Resource Discovery Failed",
 			fmt.Sprintf("Failed to determine resource type: %s", err))
 		return
 	}
 
-	// Verify the resource still exists and we own it
-	currentObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
-	if err != nil {
-		if errors.IsNotFound(err) {
-			resp.Diagnostics.AddError(
-				"Resource Not Found",
-				fmt.Sprintf("The %s '%s' no longer exists in the cluster. It may have been deleted outside of Terraform.",
-					obj.GetKind(), obj.GetName()),
-			)
-			return
-		}
-		resp.Diagnostics.AddError("Failed to check resource", fmt.Sprintf("Failed to get current resource state: %s", err))
-		return
-	}
+	// Preserve the ID and ownership from current state
+	r.setOwnershipAnnotation(obj, state.ID.ValueString())
 
-	// Verify ownership
-	currentID := r.getOwnershipID(currentObj)
-	if currentID != state.ID.ValueString() {
-		if currentID == "" {
-			resp.Diagnostics.AddError(
-				"Resource Ownership Lost",
-				fmt.Sprintf("The %s '%s' is no longer managed by Terraform. The ownership annotations have been removed.",
-					obj.GetKind(), obj.GetName()),
-			)
-		} else {
-			resp.Diagnostics.AddError(
-				"Resource Ownership Conflict",
-				fmt.Sprintf("The %s '%s' is now managed by a different Terraform resource (ID: %s).",
-					obj.GetKind(), obj.GetName(), currentID),
-			)
-		}
-		return
-	}
-
-	// Get force_conflicts setting
+	// Determine if we should force conflicts
 	forceConflicts := false
 	if !plan.ForceConflicts.IsNull() {
 		forceConflicts = plan.ForceConflicts.ValueBool()
 	}
 
-	// Handle imported resources that need ownership annotation
-	if !state.ImportedWithoutAnnotations.IsNull() && state.ImportedWithoutAnnotations.ValueBool() {
-		// For imported resources, we need to add our ownership annotation using patch
-		annotationPatch := map[string]interface{}{
-			"metadata": map[string]interface{}{
-				"annotations": map[string]interface{}{
-					OwnershipAnnotation: state.ID.ValueString(),
-				},
-			},
-		}
-
-		patchData, err := json.Marshal(annotationPatch)
-		if err != nil {
-			resp.Diagnostics.AddError("Failed to create patch", err.Error())
-			return
-		}
-
-		_, err = client.Patch(ctx, gvr, obj.GetNamespace(), obj.GetName(),
-			k8stypes.StrategicMergePatchType, patchData, metav1.PatchOptions{
-				FieldManager: "k8sconnect",
-			})
-		if err != nil {
-			resp.Diagnostics.AddError("Failed to add ownership annotation",
-				fmt.Sprintf("Could not add ownership annotation to imported resource: %s", err))
-			return
-		}
-
-		tflog.Info(ctx, "Added ownership annotation to imported resource using patch", map[string]interface{}{
-			"kind": obj.GetKind(),
-			"name": obj.GetName(),
-			"id":   state.ID.ValueString(),
-		})
-	}
-
-	// Apply the updated manifest
+	// Apply the update
 	err = client.Apply(ctx, obj, k8sclient.ApplyOptions{
 		FieldManager: "k8sconnect",
 		Force:        forceConflicts,
@@ -552,26 +482,35 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 	paths := extractFieldPaths(obj.Object, "")
 
 	// Get the current state after apply
-	updatedObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
+	currentObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read after update", fmt.Sprintf("Failed to read resource after update: %s", err))
 		return
 	}
 
-	if statusRaw, found, _ := unstructured.NestedMap(updatedObj.Object, "status"); found && len(statusRaw) > 0 {
-		statusValue, err := common.ConvertToAttrValue(ctx, statusRaw)
-		if err != nil {
-			tflog.Warn(ctx, "Failed to convert status", map[string]interface{}{"error": err.Error()})
-			plan.Status = types.DynamicNull()
+	// Only populate status if track_status is true
+	if !plan.TrackStatus.IsNull() && plan.TrackStatus.ValueBool() {
+		if statusRaw, found, _ := unstructured.NestedMap(currentObj.Object, "status"); found && len(statusRaw) > 0 {
+			statusValue, err := common.ConvertToAttrValue(ctx, statusRaw)
+			if err != nil {
+				tflog.Warn(ctx, "Failed to convert status", map[string]interface{}{"error": err.Error()})
+				plan.Status = types.DynamicNull()
+			} else {
+				plan.Status = types.DynamicValue(statusValue)
+			}
 		} else {
+			// No status from K8s but tracking enabled - set empty map
+			emptyStatus := map[string]interface{}{}
+			statusValue, _ := common.ConvertToAttrValue(ctx, emptyStatus)
 			plan.Status = types.DynamicValue(statusValue)
 		}
 	} else {
+		// Not tracking status
 		plan.Status = types.DynamicNull()
 	}
 
 	// Add field ownership tracking
-	ownership := extractFieldOwnership(updatedObj)
+	ownership := extractFieldOwnership(currentObj)
 	ownershipJSON, err := json.Marshal(ownership)
 	if err != nil {
 		tflog.Warn(ctx, "Failed to marshal field ownership", map[string]interface{}{
@@ -583,7 +522,7 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 
 	// Project the current state
-	projection, err := projectFields(updatedObj.Object, paths)
+	projection, err := projectFields(currentObj.Object, paths)
 	if err != nil {
 		resp.Diagnostics.AddError("Projection Failed", fmt.Sprintf("Failed to project managed fields: %s", err))
 		return
