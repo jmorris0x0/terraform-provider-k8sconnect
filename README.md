@@ -148,6 +148,7 @@ The `yaml_split` data source creates stable IDs like `deployment.my-app.nginx` a
 - ✅ **Server-side apply only** - No client-side logic, uses Kubernetes' native conflict resolution
 - ✅ **Accurate drift detection** - Dry-run ensures diffs always show exactly what will change
 - ✅ **Ownership tracking** - Prevents conflicts between Terraform states and unmanaged resources
+- ✅ **Status tracking** - Optional access to resource status fields (LoadBalancer IPs, conditions, etc.)
 
 ---
 
