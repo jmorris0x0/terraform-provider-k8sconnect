@@ -9,10 +9,12 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/k8sclient"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
@@ -194,6 +196,19 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
+	// Extract status
+	if statusRaw, found, _ := unstructured.NestedMap(currentObj.Object, "status"); found && len(statusRaw) > 0 {
+		statusValue, err := common.ConvertToAttrValue(ctx, statusRaw)
+		if err != nil {
+			tflog.Warn(ctx, "Failed to convert status", map[string]interface{}{"error": err.Error()})
+			data.Status = types.DynamicNull()
+		} else {
+			data.Status = types.DynamicValue(statusValue)
+		}
+	} else {
+		data.Status = types.DynamicNull()
+	}
+
 	// Add field ownership tracking
 	ownership := extractFieldOwnership(currentObj)
 	ownershipJSON, err := json.Marshal(ownership)
@@ -288,6 +303,19 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		resp.Diagnostics.AddError("Failed to read resource",
 			fmt.Sprintf("Failed to read %s %s: %s", obj.GetKind(), obj.GetName(), err))
 		return
+	}
+
+	// Extract status
+	if statusRaw, found, _ := unstructured.NestedMap(currentObj.Object, "status"); found && len(statusRaw) > 0 {
+		statusValue, err := common.ConvertToAttrValue(ctx, statusRaw)
+		if err != nil {
+			tflog.Warn(ctx, "Failed to convert status", map[string]interface{}{"error": err.Error()})
+			data.Status = types.DynamicNull()
+		} else {
+			data.Status = types.DynamicValue(statusValue)
+		}
+	} else {
+		data.Status = types.DynamicNull()
 	}
 
 	// Populate field ownership
@@ -528,6 +556,18 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read after update", fmt.Sprintf("Failed to read resource after update: %s", err))
 		return
+	}
+
+	if statusRaw, found, _ := unstructured.NestedMap(updatedObj.Object, "status"); found && len(statusRaw) > 0 {
+		statusValue, err := common.ConvertToAttrValue(ctx, statusRaw)
+		if err != nil {
+			tflog.Warn(ctx, "Failed to convert status", map[string]interface{}{"error": err.Error()})
+			plan.Status = types.DynamicNull()
+		} else {
+			plan.Status = types.DynamicValue(statusValue)
+		}
+	} else {
+		plan.Status = types.DynamicNull()
 	}
 
 	// Add field ownership tracking

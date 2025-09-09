@@ -34,19 +34,20 @@ type manifestResource struct {
 }
 
 type manifestResourceModel struct {
-	ID                         types.String `tfsdk:"id"`
-	YAMLBody                   types.String `tfsdk:"yaml_body"`
-	ClusterConnection          types.Object `tfsdk:"cluster_connection"`
-	DeleteProtection           types.Bool   `tfsdk:"delete_protection"`
-	DeleteTimeout              types.String `tfsdk:"delete_timeout"`
-	FieldOwnership             types.String `tfsdk:"field_ownership"`
-	ForceDestroy               types.Bool   `tfsdk:"force_destroy"`
-	ForceConflicts             types.Bool   `tfsdk:"force_conflicts"`
-	ManagedStateProjection     types.String `tfsdk:"managed_state_projection"`
-	ImportedWithoutAnnotations types.Bool   `tfsdk:"imported_without_annotations"`
+	ID                         types.String  `tfsdk:"id"`
+	YAMLBody                   types.String  `tfsdk:"yaml_body"`
+	ClusterConnection          types.Object  `tfsdk:"cluster_connection"`
+	DeleteProtection           types.Bool    `tfsdk:"delete_protection"`
+	DeleteTimeout              types.String  `tfsdk:"delete_timeout"`
+	FieldOwnership             types.String  `tfsdk:"field_ownership"`
+	ForceDestroy               types.Bool    `tfsdk:"force_destroy"`
+	ForceConflicts             types.Bool    `tfsdk:"force_conflicts"`
+	ManagedStateProjection     types.String  `tfsdk:"managed_state_projection"`
+	ImportedWithoutAnnotations types.Bool    `tfsdk:"imported_without_annotations"`
+	Status                     types.Dynamic `tfsdk:"status"`
 }
 
-// NewManifestResourceWithClientGetter creates a manifest resource with custom client getter
+// Creates a manifest resource with custom client getter
 func NewManifestResourceWithClientGetter(getter ClientGetter) resource.Resource {
 	return &manifestResource{
 		clientGetter: getter,
@@ -198,6 +199,10 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 			"field_ownership": schema.StringAttribute{
 				Computed:    true,
 				Description: "Internal tracking of field ownership by different controllers",
+			},
+			"status": schema.DynamicAttribute{
+				Computed:    true,
+				Description: "Status subresource from the live cluster state. Contains conditions, phase, and resource-specific fields like loadBalancer for Services.",
 			},
 		},
 	}
