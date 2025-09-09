@@ -138,18 +138,10 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 
 	// Handle status field based on track_status setting
 	if plannedData.TrackStatus.IsNull() || !plannedData.TrackStatus.ValueBool() {
-		// Not tracking status - preserve null status from state to avoid showing changes
-		if !req.State.Raw.IsNull() {
-			var stateData manifestResourceModel
-			diags := req.State.Get(ctx, &stateData)
-			if !diags.HasError() {
-				plannedData.Status = stateData.Status
-			}
-		} else {
-			// No state yet (create), status should be null
-			plannedData.Status = types.DynamicNull()
-		}
+		// Not tracking status - status should always be null
+		plannedData.Status = types.DynamicNull()
 	}
+	// If tracking is enabled, leave status as unknown - it will be populated during Read/Update
 
 	// Final plan set
 	diags = resp.Plan.Set(ctx, &plannedData)
