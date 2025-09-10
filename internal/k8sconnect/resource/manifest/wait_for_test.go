@@ -43,7 +43,7 @@ func TestAccManifestResource_NoWaitNoStatus(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckConfigMapExists(k8sClient, "default", cmName),
 					// Status should not be set (null) when no wait_for
-					resource.TestCheckNoResourceAttr("k8sconnect_manifest.test", "status"),
+					resource.TestCheckNoResourceAttr("k8sconnect_manifest.test", "status", ""),
 				),
 			},
 			// Step 2: Re-apply with formatting changes only - should show no drift
@@ -341,7 +341,7 @@ func TestAccManifestResource_WaitForPVCBinding(t *testing.T) {
 					// Should have waited for Bound status
 					resource.TestCheckResourceAttr("k8sconnect_manifest.pvc", "status.phase", "Bound"),
 					// Should have volume name populated
-					resource.TestCheckResourceAttrSet("k8sconnect_manifest.pvc", "status.volumeName"),
+					resource.TestCheckResourceAttrSet("k8sconnect_manifest.pvc", "status.volume_name"),
 					// Check output
 					resource.TestCheckOutput("pvc_bound", "true"),
 				),
@@ -418,7 +418,7 @@ output "pvc_bound" {
 }
 
 output "volume_name" {
-  value = k8sconnect_manifest.pvc.status.volumeName
+  value = k8sconnect_manifest.pvc.status.volume_name
 }
 `, name, name, name)
 }
@@ -523,7 +523,7 @@ func TestAccManifestResource_DisableAutoRollout(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckDeploymentExists(k8sClient, "default", deployName),
 					// Should NOT have status because rollout waiting was disabled
-					resource.TestCheckNoResourceAttr("k8sconnect_manifest.test", "status"),
+					resource.TestCheckNoResourceAttr("k8sconnect_manifest.test", "status", ""),
 				),
 			},
 		},

@@ -42,7 +42,6 @@ func (r *manifestResource) waitForResource(ctx context.Context, client k8sclient
 		if err := r.waitForRollout(ctx, client, gvr, obj, timeout); err != nil {
 			return fmt.Errorf("rollout wait failed: %w", err)
 		}
-		return nil
 	}
 
 	// Handle explicit rollout=true
