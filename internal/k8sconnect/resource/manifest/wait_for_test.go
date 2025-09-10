@@ -3,8 +3,10 @@
 package manifest_test
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +14,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/config"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect"
 	testhelpers "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/test"
@@ -898,7 +903,6 @@ YAML
 }
 
 // TestAccManifestResource_StatusStability verifies status remains stable across plans
-// CRITICAL test for the firewall/LoadBalancer use case
 func TestAccManifestResource_StatusStability(t *testing.T) {
 	t.Parallel()
 
@@ -947,11 +951,8 @@ func TestAccManifestResource_StatusStability(t *testing.T) {
 					// Verify the label was actually updated
 					func(s *terraform.State) error {
 						// This ensures the update actually happened
-						deploy, err := k8sClient.Get(ctx, schema.GroupVersionResource{
-							Group:    "apps",
-							Version:  "v1",
-							Resource: "deployments",
-						}, "default", deployName)
+						ctx := context.Background()
+						deploy, err := k8sClient.AppsV1().Deployments("default").Get(ctx, deployName, metav1.GetOptions{})
 						if err != nil {
 							return fmt.Errorf("failed to get deployment: %v", err)
 						}
