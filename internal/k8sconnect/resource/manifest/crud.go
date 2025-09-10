@@ -565,10 +565,10 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	// Handle status based on whether we actually waited and configuration
+	// Handle status based on whether we should track it
+	// The plan modifier has already set the expectation, so we follow that
 	if shouldWait {
-		// We waited, so populate/update status from current state
-		fmt.Printf("Branch: shouldWait=true, updating from currentObj\n")
+		// We waited, so populate/update status
 		if statusRaw, found, _ := unstructured.NestedMap(currentObj.Object, "status"); found && len(statusRaw) > 0 {
 			statusValue, err := common.ConvertToAttrValue(ctx, statusRaw)
 			if err != nil {
@@ -586,47 +586,43 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 			statusValue, _ := common.ConvertToAttrValue(ctx, emptyStatus)
 			plan.Status = types.DynamicValue(statusValue)
 		}
-	} else if !state.Status.IsNull() {
-		fmt.Printf("Branch: shouldWait=false, state has status\n")
-		// Status existed before and we didn't wait - decide whether to preserve or clear
+	} else if !state.Status.IsNull() && plan.WaitFor.IsNull() {
+		// wait_for was completely removed - the plan modifier should have handled this
+		// but we ensure status is cleared properly
+		plan.Status = types.DynamicNull()
+		tflog.Info(ctx, "Clearing status - wait_for was removed", map[string]interface{}{
+			"resource": fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName()),
+		})
+	} else if !state.Status.IsNull() && !plan.WaitFor.IsNull() {
+		// wait_for exists but may have no actual conditions
+		// Check if we should clear status
+		var waitConfig waitForModel
+		diags := plan.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
+		if !diags.HasError() {
+			hasWaitConditions := (!waitConfig.Field.IsNull() && waitConfig.Field.ValueString() != "") ||
+				!waitConfig.FieldValue.IsNull() ||
+				(!waitConfig.Condition.IsNull() && waitConfig.Condition.ValueString() != "") ||
+				(!waitConfig.Rollout.IsNull() && waitConfig.Rollout.ValueBool())
 
-		// Re-check if wait_for has actual conditions
-		var hasWaitConditions bool
-		if !plan.WaitFor.IsNull() {
-			var waitConfig waitForModel
-			diags := plan.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
-			if !diags.HasError() {
-				hasWaitConditions = (!waitConfig.Field.IsNull() && waitConfig.Field.ValueString() != "") ||
-					!waitConfig.FieldValue.IsNull() ||
-					(!waitConfig.Condition.IsNull() && waitConfig.Condition.ValueString() != "") ||
-					(!waitConfig.Rollout.IsNull() && waitConfig.Rollout.ValueBool())
+			if !hasWaitConditions {
+				// Empty wait_for block - clear status
+				plan.Status = types.DynamicNull()
+				tflog.Info(ctx, "Clearing status - wait_for has no active conditions", map[string]interface{}{
+					"resource": fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName()),
+				})
+			} else {
+				// This shouldn't happen as shouldWait would be true
+				// But preserve existing status for safety
+				plan.Status = state.Status
 			}
-		}
-
-		fmt.Printf("hasWaitConditions: %v\n", hasWaitConditions)
-
-		if hasWaitConditions {
-			fmt.Printf("PRESERVING status from state\n")
-			// wait_for has actual conditions - PRESERVE the existing status
-			plan.Status = state.Status
-			tflog.Info(ctx, "Preserving existing status - wait_for still configured with conditions", map[string]interface{}{
-				"resource": fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName()),
-			})
 		} else {
-			fmt.Printf("CLEARING status (no wait conditions)\n")
-			// wait_for was removed or has no conditions - clear the status
-			plan.Status = types.DynamicNull()
-			tflog.Info(ctx, "Clearing status - wait_for removed or has no conditions", map[string]interface{}{
-				"resource": fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName()),
-			})
+			// Can't parse wait_for, preserve status
+			plan.Status = state.Status
 		}
 	} else {
 		// No previous status and no waiting - keep status null
-		fmt.Printf("Branch: no previous status, keeping null\n")
 		plan.Status = types.DynamicNull()
 	}
-
-	fmt.Printf("=== FINAL: plan.Status.IsNull=%v ===\n", plan.Status.IsNull())
 
 	// Add field ownership tracking
 	ownership := extractFieldOwnership(currentObj)

@@ -138,11 +138,40 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 
 		// This is an UPDATE operation
 		if !resp.Diagnostics.HasError() {
+			// Handle status field planning based on wait_for configuration
 			if !stateData.Status.IsNull() {
-				// CRITICAL: Always preserve existing status for stability
-				// This is essential for dependent resources (firewalls, DNS, etc.)
-				plannedData.Status = stateData.Status
-				tflog.Debug(ctx, "UPDATE: Preserving existing status from state for stability")
+				// We have existing status - check what should happen to it
+				if plannedData.WaitFor.IsNull() {
+					// wait_for was completely removed - status should be cleared
+					plannedData.Status = types.DynamicNull()
+					tflog.Debug(ctx, "UPDATE: wait_for removed, status will be cleared")
+				} else {
+					// wait_for still exists - check if it has actual conditions
+					var waitConfig waitForModel
+					diags := plannedData.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
+
+					if diags.HasError() {
+						// Can't parse wait_for, preserve status for stability
+						plannedData.Status = stateData.Status
+						tflog.Debug(ctx, "UPDATE: Cannot parse wait_for, preserving status")
+					} else {
+						// Check if ANY actual wait condition is configured
+						hasWaitConditions := (!waitConfig.Field.IsNull() && waitConfig.Field.ValueString() != "") ||
+							!waitConfig.FieldValue.IsNull() ||
+							(!waitConfig.Condition.IsNull() && waitConfig.Condition.ValueString() != "") ||
+							(!waitConfig.Rollout.IsNull() && waitConfig.Rollout.ValueBool())
+
+						if hasWaitConditions {
+							// Real wait conditions exist - preserve status (it will be updated after waiting)
+							plannedData.Status = stateData.Status
+							tflog.Debug(ctx, "UPDATE: wait_for has actual conditions, preserving status for update")
+						} else {
+							// Empty wait_for block - clear status
+							plannedData.Status = types.DynamicNull()
+							tflog.Debug(ctx, "UPDATE: wait_for has no actual conditions, status will be cleared")
+						}
+					}
+				}
 			} else if !plannedData.WaitFor.IsNull() {
 				// No existing status, but wait_for is configured
 				var waitConfig waitForModel
