@@ -7,12 +7,14 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
@@ -50,6 +52,9 @@ type K8sClient interface {
 	GetGVRFromKind(ctx context.Context, kind, namespace, name string) (schema.GroupVersionResource, *unstructured.Unstructured, error)
 
 	Patch(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string, patchType types.PatchType, data []byte, options metav1.PatchOptions) (*unstructured.Unstructured, error)
+
+	// Watch returns a watcher that handles reconnection automatically
+	Watch(ctx context.Context, gvr schema.GroupVersionResource, namespace string, opts metav1.ListOptions) (watch.Interface, error)
 }
 
 // ApplyOptions holds options for server-side apply operations.
@@ -63,6 +68,18 @@ type ApplyOptions struct {
 type DeleteOptions struct {
 	GracePeriodSeconds *int64
 	PropagationPolicy  *metav1.DeletionPropagation
+}
+
+// resilientWatcher wraps a watch.Interface and handles reconnection
+type resilientWatcher struct {
+	ctx       context.Context
+	client    *DynamicK8sClient
+	gvr       schema.GroupVersionResource
+	namespace string
+	opts      metav1.ListOptions
+
+	resultChan chan watch.Event
+	stopCh     chan struct{}
 }
 
 // ===================== DynamicK8sClient =====================
@@ -552,6 +569,82 @@ func (d *DynamicK8sClient) Patch(ctx context.Context, gvr schema.GroupVersionRes
 	}
 
 	return result, err
+}
+
+func (c *DynamicK8sClient) Watch(ctx context.Context, gvr schema.GroupVersionResource, namespace string, opts metav1.ListOptions) (watch.Interface, error) {
+	rw := &resilientWatcher{
+		ctx:        ctx,
+		client:     c,
+		gvr:        gvr,
+		namespace:  namespace,
+		opts:       opts,
+		resultChan: make(chan watch.Event),
+		stopCh:     make(chan struct{}),
+	}
+
+	go rw.run()
+	return rw, nil
+}
+
+func (rw *resilientWatcher) run() {
+	defer close(rw.resultChan)
+
+	for {
+		select {
+		case <-rw.ctx.Done():
+			return
+		case <-rw.stopCh:
+			return
+		default:
+			// Create the actual watch
+			var watcher watch.Interface
+			var err error
+
+			if rw.namespace != "" {
+				watcher, err = rw.client.client.Resource(rw.gvr).Namespace(rw.namespace).Watch(rw.ctx, rw.opts)
+			} else {
+				watcher, err = rw.client.client.Resource(rw.gvr).Watch(rw.ctx, rw.opts)
+			}
+
+			if err != nil {
+				// Send error event and retry
+				rw.resultChan <- watch.Event{Type: watch.Error, Object: &metav1.Status{Message: err.Error()}}
+				time.Sleep(2 * time.Second)
+				continue
+			}
+
+			// Forward events until watch closes
+			for event := range watcher.ResultChan() {
+				select {
+				case rw.resultChan <- event:
+					// Update resource version for reconnection
+					if event.Type != watch.Error {
+						if obj, ok := event.Object.(*unstructured.Unstructured); ok {
+							rw.opts.ResourceVersion = obj.GetResourceVersion()
+						}
+					}
+				case <-rw.stopCh:
+					watcher.Stop()
+					return
+				case <-rw.ctx.Done():
+					watcher.Stop()
+					return
+				}
+			}
+
+			// Watch closed, will reconnect
+			watcher.Stop()
+			time.Sleep(time.Second) // Brief pause before reconnect
+		}
+	}
+}
+
+func (rw *resilientWatcher) Stop() {
+	close(rw.stopCh)
+}
+
+func (rw *resilientWatcher) ResultChan() <-chan watch.Event {
+	return rw.resultChan
 }
 
 // Interface assertion to ensure DynamicK8sClient satisfies K8sClient

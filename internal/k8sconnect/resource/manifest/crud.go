@@ -8,6 +8,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
@@ -171,7 +172,33 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 	// Extract paths from what we applied
 	paths := extractFieldPaths(obj.Object, "")
 
-	// Get the current state after apply
+	// Handle wait_for if configured
+	if !data.WaitFor.IsNull() {
+		var waitConfig waitForModel
+		diags := data.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
+		if !diags.HasError() {
+			tflog.Info(ctx, "Executing wait_for conditions", map[string]interface{}{
+				"resource": fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName()),
+			})
+
+			if err := r.waitForResource(ctx, client, gvr, obj, waitConfig); err != nil {
+				// Log warning but don't fail the resource creation
+				resp.Diagnostics.AddWarning(
+					"Wait Condition Not Met",
+					fmt.Sprintf("Resource created successfully but wait condition failed: %s\n\n"+
+						"The resource has been created in the cluster. You may need to manually verify its status.",
+						err.Error()),
+				)
+			}
+		} else {
+			resp.Diagnostics.AddWarning(
+				"Invalid wait_for Configuration",
+				fmt.Sprintf("Could not parse wait_for configuration: %s", diags.Errors()),
+			)
+		}
+	}
+
+	// Get the current state after apply (and after waiting if configured)
 	currentObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read after create", fmt.Sprintf("Failed to read resource after creation: %s", err))
@@ -481,7 +508,33 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 	// Extract paths from what we applied
 	paths := extractFieldPaths(obj.Object, "")
 
-	// Get the current state after apply
+	// Handle wait_for if configured
+	if !plan.WaitFor.IsNull() {
+		var waitConfig waitForModel
+		diags := plan.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
+		if !diags.HasError() {
+			tflog.Info(ctx, "Executing wait_for conditions", map[string]interface{}{
+				"resource": fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName()),
+			})
+
+			if err := r.waitForResource(ctx, client, gvr, obj, waitConfig); err != nil {
+				// Log warning but don't fail the resource update
+				resp.Diagnostics.AddWarning(
+					"Wait Condition Not Met",
+					fmt.Sprintf("Resource updated successfully but wait condition failed: %s\n\n"+
+						"The resource has been updated in the cluster. You may need to manually verify its status.",
+						err.Error()),
+				)
+			}
+		} else {
+			resp.Diagnostics.AddWarning(
+				"Invalid wait_for Configuration",
+				fmt.Sprintf("Could not parse wait_for configuration: %s", diags.Errors()),
+			)
+		}
+	}
+
+	// Get the current state after apply (and after waiting if configured)
 	currentObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read after update", fmt.Sprintf("Failed to read resource after update: %s", err))

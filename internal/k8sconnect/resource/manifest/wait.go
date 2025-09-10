@@ -4,10 +4,8 @@ package manifest
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
-	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -15,17 +13,8 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/util/jsonpath"
 
-	k8sclient "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/client"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/k8sclient"
 )
-
-// waitForModel represents the wait_for configuration
-type waitForModel struct {
-	Field      types.String `tfsdk:"field"`
-	FieldValue types.Map    `tfsdk:"field_value"`
-	Condition  types.String `tfsdk:"condition"`
-	Rollout    types.Bool   `tfsdk:"rollout"`
-	Timeout    types.String `tfsdk:"timeout"`
-}
 
 // waitForResource waits for resource to meet configured conditions
 func (r *manifestResource) waitForResource(ctx context.Context, client k8sclient.K8sClient,
@@ -135,7 +124,7 @@ func (r *manifestResource) waitForField(ctx context.Context, client k8sclient.K8
 		return fmt.Errorf("invalid field path %q: %w", fieldPath, err)
 	}
 
-	// Check current state first
+	// Check current state first and get ResourceVersion
 	current, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
 	if err == nil {
 		results, err := jp.FindResults(current.Object)
@@ -147,55 +136,62 @@ func (r *manifestResource) waitForField(ctx context.Context, client k8sclient.K8
 				return nil
 			}
 		}
-	}
 
-	// Use watch API for efficiency
-	watcher, err := client.Watch(ctx, gvr, obj.GetNamespace(), metav1.ListOptions{
-		FieldSelector: fmt.Sprintf("metadata.name=%s", obj.GetName()),
-	})
-	if err != nil {
-		// Fallback to polling if watch is not supported
-		tflog.Warn(ctx, "Watch not supported, falling back to polling", map[string]interface{}{
-			"error": err.Error(),
-		})
-		return r.pollForField(ctx, client, gvr, obj, jp, fieldPath, timeout)
-	}
-	defer watcher.Stop()
+		// Start watch from current ResourceVersion to avoid race
+		opts := metav1.ListOptions{
+			FieldSelector:   fmt.Sprintf("metadata.name=%s", obj.GetName()),
+			ResourceVersion: current.GetResourceVersion(),
+		}
 
-	timeoutCh := time.After(timeout)
+		watcher, err := client.Watch(ctx, gvr, obj.GetNamespace(), opts)
+		if err != nil {
+			tflog.Warn(ctx, "Watch not supported, falling back to polling", map[string]interface{}{
+				"error": err.Error(),
+			})
+			return r.pollForField(ctx, client, gvr, obj, jp, fieldPath, timeout)
+		}
+		defer watcher.Stop()
 
-	// Watch for changes
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-timeoutCh:
-			return fmt.Errorf("timeout after %v waiting for field %q to be populated", timeout, fieldPath)
-		case event := <-watcher.ResultChan():
-			if event.Type == watch.Error {
-				// If watch fails, fall back to polling
-				tflog.Warn(ctx, "Watch error, falling back to polling", map[string]interface{}{
-					"error": fmt.Sprintf("%v", event.Object),
-				})
-				return r.pollForField(ctx, client, gvr, obj, jp, fieldPath, timeout)
-			}
+		timeoutCh := time.After(timeout)
 
-			if event.Type == watch.Modified || event.Type == watch.Added {
-				current := event.Object.(*unstructured.Unstructured)
-				results, err := jp.FindResults(current.Object)
-				if err == nil && len(results) > 0 && len(results[0]) > 0 {
-					val := results[0][0].Interface()
-					if !isEmptyValue(val) {
-						tflog.Info(ctx, "Field is now populated", map[string]interface{}{
-							"field": fieldPath,
-							"value": fmt.Sprintf("%v", val),
-						})
-						return nil
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-timeoutCh:
+				return fmt.Errorf("timeout after %v waiting for field %q to be populated", timeout, fieldPath)
+			case event, ok := <-watcher.ResultChan():
+				if !ok {
+					return fmt.Errorf("watch ended unexpectedly")
+				}
+
+				if event.Type == watch.Error {
+					tflog.Warn(ctx, "Watch error, falling back to polling", map[string]interface{}{
+						"error": fmt.Sprintf("%v", event.Object),
+					})
+					return r.pollForField(ctx, client, gvr, obj, jp, fieldPath, timeout)
+				}
+
+				if event.Type == watch.Modified || event.Type == watch.Added {
+					current := event.Object.(*unstructured.Unstructured)
+					results, err := jp.FindResults(current.Object)
+					if err == nil && len(results) > 0 && len(results[0]) > 0 {
+						val := results[0][0].Interface()
+						if !isEmptyValue(val) {
+							tflog.Info(ctx, "Field is now populated", map[string]interface{}{
+								"field": fieldPath,
+								"value": fmt.Sprintf("%v", val),
+							})
+							return nil
+						}
 					}
 				}
 			}
 		}
 	}
+
+	// If we can't get current state, fall back to polling
+	return r.pollForField(ctx, client, gvr, obj, jp, fieldPath, timeout)
 }
 
 // pollForField falls back to polling when watch is not available
@@ -281,12 +277,16 @@ func (r *manifestResource) waitForFieldValues(ctx context.Context, client k8scli
 		return nil
 	}
 
-	// Try watch first
-	watcher, err := client.Watch(ctx, gvr, obj.GetNamespace(), metav1.ListOptions{
+	// Set up watch with ResourceVersion if we got current state
+	opts := metav1.ListOptions{
 		FieldSelector: fmt.Sprintf("metadata.name=%s", obj.GetName()),
-	})
+	}
+	if current != nil {
+		opts.ResourceVersion = current.GetResourceVersion()
+	}
+
+	watcher, err := client.Watch(ctx, gvr, obj.GetNamespace(), opts)
 	if err != nil {
-		// Fallback to polling
 		return r.pollForFieldValues(ctx, client, gvr, obj, checkFields, fieldValues, timeout)
 	}
 	defer watcher.Stop()
@@ -299,9 +299,12 @@ func (r *manifestResource) waitForFieldValues(ctx context.Context, client k8scli
 			return ctx.Err()
 		case <-timeoutCh:
 			return fmt.Errorf("timeout after %v waiting for field values %v", timeout, fieldValues)
-		case event := <-watcher.ResultChan():
+		case event, ok := <-watcher.ResultChan():
+			if !ok {
+				return fmt.Errorf("watch ended unexpectedly")
+			}
+
 			if event.Type == watch.Error {
-				// Fall back to polling
 				return r.pollForFieldValues(ctx, client, gvr, obj, checkFields, fieldValues, timeout)
 			}
 
@@ -388,10 +391,15 @@ func (r *manifestResource) waitForCondition(ctx context.Context, client k8sclien
 		return nil
 	}
 
-	// Try watch
-	watcher, err := client.Watch(ctx, gvr, obj.GetNamespace(), metav1.ListOptions{
+	// Set up watch with ResourceVersion
+	opts := metav1.ListOptions{
 		FieldSelector: fmt.Sprintf("metadata.name=%s", obj.GetName()),
-	})
+	}
+	if current != nil {
+		opts.ResourceVersion = current.GetResourceVersion()
+	}
+
+	watcher, err := client.Watch(ctx, gvr, obj.GetNamespace(), opts)
 	if err != nil {
 		return r.pollForCondition(ctx, client, gvr, obj, checkCondition, conditionType, timeout)
 	}
@@ -405,7 +413,11 @@ func (r *manifestResource) waitForCondition(ctx context.Context, client k8sclien
 			return ctx.Err()
 		case <-timeoutCh:
 			return fmt.Errorf("timeout after %v waiting for condition %q", timeout, conditionType)
-		case event := <-watcher.ResultChan():
+		case event, ok := <-watcher.ResultChan():
+			if !ok {
+				return fmt.Errorf("watch ended unexpectedly")
+			}
+
 			if event.Type == watch.Error {
 				return r.pollForCondition(ctx, client, gvr, obj, checkCondition, conditionType, timeout)
 			}
@@ -581,53 +593,63 @@ func (r *manifestResource) waitWithCheck(ctx context.Context, client k8sclient.K
 			})
 			return nil
 		}
-	}
 
-	// Try watch
-	watcher, err := client.Watch(ctx, gvr, obj.GetNamespace(), metav1.ListOptions{
-		FieldSelector: fmt.Sprintf("metadata.name=%s", obj.GetName()),
-	})
-	if err != nil {
-		return r.pollWithCheck(ctx, client, gvr, obj, checkFunc, waitType, timeout)
-	}
-	defer watcher.Stop()
+		// Set up watch with ResourceVersion
+		opts := metav1.ListOptions{
+			FieldSelector:   fmt.Sprintf("metadata.name=%s", obj.GetName()),
+			ResourceVersion: current.GetResourceVersion(),
+		}
 
-	timeoutCh := time.After(timeout)
+		watcher, err := client.Watch(ctx, gvr, obj.GetNamespace(), opts)
+		if err != nil {
+			return r.pollWithCheck(ctx, client, gvr, obj, checkFunc, waitType, timeout)
+		}
+		defer watcher.Stop()
 
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-timeoutCh:
-			// Get final status for error message
-			current, _ := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
-			if current != nil {
-				_, reason := checkFunc(current)
-				return fmt.Errorf("timeout after %v waiting for %s: %s", timeout, waitType, reason)
-			}
-			return fmt.Errorf("timeout after %v waiting for %s", timeout, waitType)
-		case event := <-watcher.ResultChan():
-			if event.Type == watch.Error {
-				return r.pollWithCheck(ctx, client, gvr, obj, checkFunc, waitType, timeout)
-			}
+		timeoutCh := time.After(timeout)
 
-			if event.Type == watch.Modified || event.Type == watch.Added {
-				current := event.Object.(*unstructured.Unstructured)
-				if ready, reason := checkFunc(current); ready {
-					tflog.Info(ctx, "Now ready", map[string]interface{}{
-						"type":     waitType,
-						"resource": fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName()),
-					})
-					return nil
-				} else {
-					tflog.Debug(ctx, "Not ready yet", map[string]interface{}{
-						"type":   waitType,
-						"reason": reason,
-					})
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-timeoutCh:
+				// Get final status for error message
+				current, _ := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
+				if current != nil {
+					_, reason := checkFunc(current)
+					return fmt.Errorf("timeout after %v waiting for %s: %s", timeout, waitType, reason)
+				}
+				return fmt.Errorf("timeout after %v waiting for %s", timeout, waitType)
+			case event, ok := <-watcher.ResultChan():
+				if !ok {
+					return fmt.Errorf("watch ended unexpectedly")
+				}
+
+				if event.Type == watch.Error {
+					return r.pollWithCheck(ctx, client, gvr, obj, checkFunc, waitType, timeout)
+				}
+
+				if event.Type == watch.Modified || event.Type == watch.Added {
+					current := event.Object.(*unstructured.Unstructured)
+					if ready, reason := checkFunc(current); ready {
+						tflog.Info(ctx, "Now ready", map[string]interface{}{
+							"type":     waitType,
+							"resource": fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName()),
+						})
+						return nil
+					} else {
+						tflog.Debug(ctx, "Not ready yet", map[string]interface{}{
+							"type":   waitType,
+							"reason": reason,
+						})
+					}
 				}
 			}
 		}
 	}
+
+	// If we can't get current state, fall back to polling
+	return r.pollWithCheck(ctx, client, gvr, obj, checkFunc, waitType, timeout)
 }
 
 // pollWithCheck polls using a check function when watch is not available
