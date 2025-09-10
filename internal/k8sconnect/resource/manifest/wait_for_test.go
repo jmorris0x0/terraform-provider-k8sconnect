@@ -343,10 +343,10 @@ func TestAccManifestResource_WaitForPVCBinding(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckPVCExists(k8sClient, "default", pvcName),
-					// Should have waited for Bound status
+					// Verify the PVC is bound
 					resource.TestCheckResourceAttr("k8sconnect_manifest.pvc", "status.phase", "Bound"),
-					// Should have volume name populated
-					resource.TestCheckResourceAttrSet("k8sconnect_manifest.pvc", "status.volumeName"),
+					// Verify we have capacity set
+					resource.TestCheckResourceAttr("k8sconnect_manifest.pvc", "status.capacity.storage", "1Gi"),
 					// Check output
 					resource.TestCheckOutput("pvc_bound", "true"),
 				),
@@ -422,14 +422,10 @@ output "pvc_bound" {
   value = k8sconnect_manifest.pvc.status.phase == "Bound"
 }
 
-output "volume_name" {
-  value = k8sconnect_manifest.pvc.status.volumeName
-}
 `, name, name, name)
 }
 
 // TestAccManifestResource_ExplicitRollout tests EXPLICIT rollout waiting for Deployments
-// RENAMED from AutoRollout - now requires explicit wait_for
 func TestAccManifestResource_ExplicitRollout(t *testing.T) {
 	t.Parallel()
 

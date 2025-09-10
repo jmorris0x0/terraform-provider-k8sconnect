@@ -172,27 +172,34 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 	// Extract paths from what we applied
 	paths := extractFieldPaths(obj.Object, "")
 
-	// Track if any waiting occurred
-	waitingOccurred := false
+	// FIXED: Determine if we should wait (check actual conditions, not just presence of wait_for)
+	shouldWait := false
+	var waitConfig waitForModel
 
-	// Handle wait_for if configured
 	if !data.WaitFor.IsNull() {
-		var waitConfig waitForModel
 		diags := data.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
 		if !diags.HasError() {
-			waitingOccurred = true
-			tflog.Info(ctx, "Executing wait_for conditions", map[string]interface{}{
-				"resource": fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName()),
-			})
+			// Check if ANY actual wait condition is configured
+			hasWaitConditions := (!waitConfig.Field.IsNull() && waitConfig.Field.ValueString() != "") ||
+				!waitConfig.FieldValue.IsNull() ||
+				(!waitConfig.Condition.IsNull() && waitConfig.Condition.ValueString() != "") ||
+				(!waitConfig.Rollout.IsNull() && waitConfig.Rollout.ValueBool())
 
-			if err := r.waitForResource(ctx, client, gvr, obj, waitConfig); err != nil {
-				// Log warning but don't fail the resource creation
-				resp.Diagnostics.AddWarning(
-					"Wait Condition Not Met",
-					fmt.Sprintf("Resource created successfully but wait condition failed: %s\n\n"+
-						"The resource has been created in the cluster. You may need to manually verify its status.",
-						err.Error()),
-				)
+			if hasWaitConditions {
+				shouldWait = true
+				tflog.Info(ctx, "Executing wait_for conditions", map[string]interface{}{
+					"resource": fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName()),
+				})
+
+				if err := r.waitForResource(ctx, client, gvr, obj, waitConfig); err != nil {
+					// Log warning but don't fail the resource creation
+					resp.Diagnostics.AddWarning(
+						"Wait Condition Not Met",
+						fmt.Sprintf("Resource created successfully but wait condition failed: %s\n\n"+
+							"The resource has been created in the cluster. You may need to manually verify its status.",
+							err.Error()),
+					)
+				}
 			}
 		} else {
 			resp.Diagnostics.AddWarning(
@@ -209,8 +216,8 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	// Check if we should track status (when any waiting occurred)
-	if waitingOccurred {
+	// FIXED: Handle status based on whether we actually waited
+	if shouldWait {
 		if statusRaw, found, _ := unstructured.NestedMap(currentObj.Object, "status"); found && len(statusRaw) > 0 {
 			statusValue, err := common.ConvertToAttrValue(ctx, statusRaw)
 			if err != nil {
@@ -220,13 +227,13 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 				data.Status = types.DynamicValue(statusValue)
 			}
 		} else {
-			// No status from K8s but tracking enabled - set empty map
+			// No status from K8s but we waited - set empty map
 			emptyStatus := map[string]interface{}{}
 			statusValue, _ := common.ConvertToAttrValue(ctx, emptyStatus)
 			data.Status = types.DynamicValue(statusValue)
 		}
 	} else {
-		// Not tracking status
+		// Not waiting - status should be null
 		data.Status = types.DynamicNull()
 	}
 
