@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -200,23 +199,6 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 				"Invalid wait_for Configuration",
 				fmt.Sprintf("Could not parse wait_for configuration: %s", diags.Errors()),
 			)
-		}
-	} else {
-		// Check for auto-rollout when no explicit wait_for is configured
-		emptyWaitConfig := waitForModel{}
-		if shouldAutoWaitRollout(obj, emptyWaitConfig) {
-			waitingOccurred = true
-			timeout := 10 * time.Minute
-			tflog.Info(ctx, "Auto-rollout waiting for resource", map[string]interface{}{
-				"kind": obj.GetKind(),
-				"name": obj.GetName(),
-			})
-			if err := r.waitForRollout(ctx, client, gvr, obj, timeout); err != nil {
-				resp.Diagnostics.AddWarning(
-					"Auto-Rollout Wait Failed",
-					fmt.Sprintf("Resource created successfully but automatic rollout waiting failed: %s", err.Error()),
-				)
-			}
 		}
 	}
 
@@ -559,23 +541,6 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 				"Invalid wait_for Configuration",
 				fmt.Sprintf("Could not parse wait_for configuration: %s", diags.Errors()),
 			)
-		}
-	} else {
-		// Check for auto-rollout when no explicit wait_for is configured
-		emptyWaitConfig := waitForModel{}
-		if shouldAutoWaitRollout(obj, emptyWaitConfig) {
-			waitingOccurred = true
-			timeout := 10 * time.Minute
-			tflog.Info(ctx, "Auto-rollout waiting for resource", map[string]interface{}{
-				"kind": obj.GetKind(),
-				"name": obj.GetName(),
-			})
-			if err := r.waitForRollout(ctx, client, gvr, obj, timeout); err != nil {
-				resp.Diagnostics.AddWarning(
-					"Auto-Rollout Wait Failed",
-					fmt.Sprintf("Resource updated successfully but automatic rollout waiting failed: %s", err.Error()),
-				)
-			}
 		}
 	}
 

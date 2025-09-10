@@ -10,6 +10,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/k8sclient"
 )
@@ -134,14 +135,71 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 				r.checkFieldOwnershipConflicts(ctx, req, resp)
 			}
 		}
-	}
 
-	if !plannedData.WaitFor.IsNull() {
-		// If wait_for is configured, leave status as unknown - it will be populated during Read/Update
-		// Don't set it to null here
+		// SIMPLIFIED OPTION C - Status field handling
+		// Preserve existing status for stability (critical for dependent resources)
+		if !resp.Diagnostics.HasError() && !stateData.Status.IsNull() {
+			plannedData.Status = stateData.Status
+			tflog.Debug(ctx, "Preserving existing status from state for stability")
+		} else if !plannedData.WaitFor.IsNull() {
+			// Parse wait_for to check if actual wait conditions are configured
+			var waitConfig waitForModel
+			diags := plannedData.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
+
+			if diags.HasError() {
+				// Can't parse wait_for, be conservative and mark as unknown
+				plannedData.Status = types.DynamicUnknown()
+				tflog.Debug(ctx, "Cannot parse wait_for, marking status as unknown")
+			} else {
+				// Check if ANY actual wait condition is configured
+				hasWaitConditions := (!waitConfig.Field.IsNull() && waitConfig.Field.ValueString() != "") ||
+					!waitConfig.FieldValue.IsNull() ||
+					(!waitConfig.Condition.IsNull() && waitConfig.Condition.ValueString() != "") ||
+					(!waitConfig.Rollout.IsNull() && waitConfig.Rollout.ValueBool())
+
+				if hasWaitConditions {
+					plannedData.Status = types.DynamicUnknown()
+					tflog.Debug(ctx, "wait_for has actual conditions, marking status as unknown")
+				} else {
+					// Empty wait_for or only timeout/rollout=false
+					plannedData.Status = types.DynamicNull()
+					tflog.Debug(ctx, "wait_for has no actual conditions, status will be null")
+				}
+			}
+		} else {
+			// No wait_for configured at all
+			plannedData.Status = types.DynamicNull()
+			tflog.Debug(ctx, "No wait_for configured, status will be null")
+		}
 	} else {
-		// No wait_for, so status should be null
-		plannedData.Status = types.DynamicNull()
+		// No state exists (create operation)
+		if !plannedData.WaitFor.IsNull() {
+			// Parse wait_for to check if actual wait conditions are configured
+			var waitConfig waitForModel
+			diags := plannedData.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
+
+			if diags.HasError() {
+				plannedData.Status = types.DynamicUnknown()
+				tflog.Debug(ctx, "New resource: Cannot parse wait_for, marking status as unknown")
+			} else {
+				// Check if ANY actual wait condition is configured
+				hasWaitConditions := (!waitConfig.Field.IsNull() && waitConfig.Field.ValueString() != "") ||
+					!waitConfig.FieldValue.IsNull() ||
+					(!waitConfig.Condition.IsNull() && waitConfig.Condition.ValueString() != "") ||
+					(!waitConfig.Rollout.IsNull() && waitConfig.Rollout.ValueBool())
+
+				if hasWaitConditions {
+					plannedData.Status = types.DynamicUnknown()
+					tflog.Debug(ctx, "New resource: wait_for has actual conditions, marking status as unknown")
+				} else {
+					plannedData.Status = types.DynamicNull()
+					tflog.Debug(ctx, "New resource: wait_for has no actual conditions, status will be null")
+				}
+			}
+		} else {
+			plannedData.Status = types.DynamicNull()
+			tflog.Debug(ctx, "New resource: No wait_for configured, status will be null")
+		}
 	}
 
 	// Final plan set
@@ -340,24 +398,20 @@ func addConflictWarning(resp *resource.ModifyPlanResponse, conflicts []FieldConf
 		message += "\nTo resolve this conflict do one of the following:\n" +
 			"1. Remove the conflicting fields from your Terraform configuration\n" +
 			"2. Set 'force_conflicts = true' to override (may cause persistent conflicts)\n" +
-			"3. Ensure only one controller manages these fields"
-		resp.Diagnostics.AddWarning("Field Ownership Conflicts - Apply Will Fail", message)
+			"3. Use a different field_manager name to take ownership"
+		resp.Diagnostics.AddWarning("Field Ownership Conflicts Detected", message)
 	}
 }
 
 // formatValue formats a value for display in conflict messages
-func formatValue(v interface{}) string {
-	if v == nil {
+func formatValue(val interface{}) string {
+	if val == nil {
 		return "<removed>"
 	}
-	switch val := v.(type) {
-	case string:
-		return fmt.Sprintf("%q", val)
-	case []interface{}:
-		return fmt.Sprintf("[%d items]", len(val))
-	case map[string]interface{}:
-		return fmt.Sprintf("{%d fields}", len(val))
-	default:
-		return fmt.Sprint(v)
+	// Truncate long values
+	str := fmt.Sprintf("%v", val)
+	if len(str) > 50 {
+		return str[:47] + "..."
 	}
+	return str
 }

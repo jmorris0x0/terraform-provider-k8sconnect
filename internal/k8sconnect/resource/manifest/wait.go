@@ -33,16 +33,7 @@ func (r *manifestResource) waitForResource(ctx context.Context, client k8sclient
 		}
 	}
 
-	// Check if we should auto-enable rollout waiting
-	if shouldAutoWaitRollout(obj, waitConfig) {
-		tflog.Info(ctx, "Auto-enabled rollout waiting", map[string]interface{}{
-			"kind": obj.GetKind(),
-			"name": obj.GetName(),
-		})
-		if err := r.waitForRollout(ctx, client, gvr, obj, timeout); err != nil {
-			return fmt.Errorf("rollout wait failed: %w", err)
-		}
-	}
+	// REMOVED: Auto-rollout check - no longer needed
 
 	// Handle explicit rollout=true
 	if !waitConfig.Rollout.IsNull() && waitConfig.Rollout.ValueBool() {
@@ -88,29 +79,14 @@ func (r *manifestResource) waitForResource(ctx context.Context, client k8sclient
 		return r.waitForCondition(ctx, client, gvr, obj, waitConfig.Condition.ValueString(), timeout)
 	}
 
+	// No wait conditions configured
 	return nil
 }
 
 // shouldAutoWaitRollout determines if we should automatically wait for rollout
 func shouldAutoWaitRollout(obj *unstructured.Unstructured, waitConfig waitForModel) bool {
-	// If rollout is explicitly set to false, don't auto-wait
-	if !waitConfig.Rollout.IsNull() && !waitConfig.Rollout.ValueBool() {
-		return false
-	}
-
-	// If any other wait condition is set, don't auto-enable rollout
-	if !waitConfig.Field.IsNull() || !waitConfig.FieldValue.IsNull() || !waitConfig.Condition.IsNull() {
-		return false
-	}
-
-	// If rollout is explicitly true, it will be handled separately
-	if !waitConfig.Rollout.IsNull() && waitConfig.Rollout.ValueBool() {
-		return false
-	}
-
-	// Auto-enable only for known types with no other wait config
-	kind := obj.GetKind()
-	return kind == "Deployment" || kind == "StatefulSet" || kind == "DaemonSet"
+	// Only wait for rollout if explicitly configured
+	return false
 }
 
 // waitForField waits for a field to exist and be non-empty
