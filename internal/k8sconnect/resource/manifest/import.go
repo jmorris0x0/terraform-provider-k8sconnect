@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -246,6 +247,14 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		DeleteProtection:           types.BoolValue(false),
 		ManagedStateProjection:     types.StringValue(projectionJSON),
 		ImportedWithoutAnnotations: types.BoolValue(true),
+		WaitFor: types.ObjectNull(map[string]attr.Type{
+			"condition":   types.StringType,
+			"field":       types.StringType,
+			"field_value": types.MapType{ElemType: types.StringType},
+			"rollout":     types.BoolType,
+			"timeout":     types.StringType,
+		}),
+		Status: types.DynamicNull(),
 	}
 
 	diags := resp.State.Set(ctx, &importedData)
