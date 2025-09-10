@@ -514,27 +514,34 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 	// Extract paths from what we applied
 	paths := extractFieldPaths(obj.Object, "")
 
-	// Track if any waiting occurred
-	waitingOccurred := false
+	// Determine if we should wait (check actual conditions, not just presence of wait_for)
+	shouldWait := false
+	var waitConfig waitForModel
 
-	// Handle wait_for if configured
 	if !plan.WaitFor.IsNull() {
-		var waitConfig waitForModel
 		diags := plan.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
 		if !diags.HasError() {
-			waitingOccurred = true
-			tflog.Info(ctx, "Executing wait_for conditions", map[string]interface{}{
-				"resource": fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName()),
-			})
+			// Check if ANY actual wait condition is configured
+			hasWaitConditions := (!waitConfig.Field.IsNull() && waitConfig.Field.ValueString() != "") ||
+				!waitConfig.FieldValue.IsNull() ||
+				(!waitConfig.Condition.IsNull() && waitConfig.Condition.ValueString() != "") ||
+				(!waitConfig.Rollout.IsNull() && waitConfig.Rollout.ValueBool())
 
-			if err := r.waitForResource(ctx, client, gvr, obj, waitConfig); err != nil {
-				// Log warning but don't fail the resource update
-				resp.Diagnostics.AddWarning(
-					"Wait Condition Not Met",
-					fmt.Sprintf("Resource updated successfully but wait condition failed: %s\n\n"+
-						"The resource has been updated in the cluster. You may need to manually verify its status.",
-						err.Error()),
-				)
+			if hasWaitConditions {
+				shouldWait = true
+				tflog.Info(ctx, "Executing wait_for conditions", map[string]interface{}{
+					"resource": fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName()),
+				})
+
+				if err := r.waitForResource(ctx, client, gvr, obj, waitConfig); err != nil {
+					// Log warning but don't fail the resource update
+					resp.Diagnostics.AddWarning(
+						"Wait Condition Not Met",
+						fmt.Sprintf("Resource updated successfully but wait condition failed: %s\n\n"+
+							"The resource has been updated in the cluster. You may need to manually verify its status.",
+							err.Error()),
+					)
+				}
 			}
 		} else {
 			resp.Diagnostics.AddWarning(
@@ -551,8 +558,13 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	// Only populate status if any waiting occurred
-	if waitingOccurred {
+	// FIXED: Handle status based on three scenarios
+	// 1. If we waited, populate status
+	// 2. If status existed before and we're still configured to track it (wait_for exists with conditions), update it
+	// 3. If wait_for was removed (no wait_for or empty wait_for), clear status
+
+	if shouldWait {
+		// We waited, so populate/update status
 		if statusRaw, found, _ := unstructured.NestedMap(currentObj.Object, "status"); found && len(statusRaw) > 0 {
 			statusValue, err := common.ConvertToAttrValue(ctx, statusRaw)
 			if err != nil {
@@ -560,15 +572,34 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 				plan.Status = types.DynamicNull()
 			} else {
 				plan.Status = types.DynamicValue(statusValue)
+				tflog.Debug(ctx, "Status populated after waiting", map[string]interface{}{
+					"resource": fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName()),
+				})
 			}
 		} else {
-			// No status from K8s but tracking enabled - set empty map
+			// No status from K8s but we waited - set empty map
 			emptyStatus := map[string]interface{}{}
 			statusValue, _ := common.ConvertToAttrValue(ctx, emptyStatus)
 			plan.Status = types.DynamicValue(statusValue)
 		}
+	} else if !state.Status.IsNull() {
+		// Status existed before - check if we should keep it or clear it
+		if !plan.WaitFor.IsNull() {
+			// wait_for exists but has no actual conditions (empty wait_for block)
+			// Clear the status since waiting is effectively disabled
+			plan.Status = types.DynamicNull()
+			tflog.Info(ctx, "Clearing status - wait_for has no active conditions", map[string]interface{}{
+				"resource": fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName()),
+			})
+		} else {
+			// wait_for was completely removed - clear the status
+			plan.Status = types.DynamicNull()
+			tflog.Info(ctx, "Clearing status - wait_for was removed", map[string]interface{}{
+				"resource": fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName()),
+			})
+		}
 	} else {
-		// Not tracking status
+		// No previous status and no waiting - keep status null
 		plan.Status = types.DynamicNull()
 	}
 

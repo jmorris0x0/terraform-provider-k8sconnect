@@ -801,7 +801,7 @@ YAML
 `, name, name, name, name)
 }
 
-// TestAccManifestResource_EmptyWaitForNoStatus verifies empty wait_for block doesn't trigger waiting
+// TestAccManifestResource_EmptyWaitForNoStatus verifies empty wait_for block doesn't trigger waiting or status population
 func TestAccManifestResource_EmptyWaitForNoStatus(t *testing.T) {
 	t.Parallel()
 
@@ -825,8 +825,29 @@ func TestAccManifestResource_EmptyWaitForNoStatus(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckDeploymentExists(k8sClient, "default", deployName),
-					// Should NOT have status with empty wait_for block
-					resource.TestCheckNoResourceAttr("k8sconnect_manifest.test", "status"),
+					// Custom check for null status - can't use TestCheckNoResourceAttr for dynamic attributes
+					func(s *terraform.State) error {
+						rs, ok := s.RootModule().Resources["k8sconnect_manifest.test"]
+						if !ok {
+							return fmt.Errorf("Resource k8sconnect_manifest.test not found")
+						}
+
+						// Check if status exists in attributes
+						for key := range rs.Primary.Attributes {
+							if strings.HasPrefix(key, "status.") || key == "status" {
+								// Log what we found for debugging
+								return fmt.Errorf("Expected status to be null, but found attribute: %s = %s",
+									key, rs.Primary.Attributes[key])
+							}
+						}
+
+						// Also check the raw state for status
+						if statusVal, exists := rs.Primary.Attributes["status"]; exists && statusVal != "" {
+							return fmt.Errorf("Expected status to be null, but it exists with value: %s", statusVal)
+						}
+
+						return nil
+					},
 				),
 			},
 		},
@@ -905,6 +926,8 @@ func TestAccManifestResource_StatusStability(t *testing.T) {
 					// Status should be populated
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.replicas", "2"),
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.readyReplicas", "2"),
+					// Store the observedGeneration for comparison (but we won't require it to be unchanged)
+					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test", "status.observedGeneration"),
 				),
 			},
 			// Step 2: Add a label (unrelated change) - status should remain stable
@@ -915,9 +938,31 @@ func TestAccManifestResource_StatusStability(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckDeploymentExists(k8sClient, "default", deployName),
-					// Status should still be populated with same values
+					// Critical status values should be preserved
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.replicas", "2"),
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.readyReplicas", "2"),
+					// observedGeneration may increment (that's normal K8s behavior)
+					// The important thing is that status is not null/unknown
+					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test", "status.observedGeneration"),
+					// Verify the label was actually updated
+					func(s *terraform.State) error {
+						// This ensures the update actually happened
+						deploy, err := k8sClient.Get(ctx, schema.GroupVersionResource{
+							Group:    "apps",
+							Version:  "v1",
+							Resource: "deployments",
+						}, "default", deployName)
+						if err != nil {
+							return fmt.Errorf("failed to get deployment: %v", err)
+						}
+
+						labels := deploy.GetLabels()
+						if labels["test-label"] != "updated" {
+							return fmt.Errorf("expected label 'test-label' to be 'updated', got '%s'", labels["test-label"])
+						}
+
+						return nil
+					},
 				),
 			},
 		},
