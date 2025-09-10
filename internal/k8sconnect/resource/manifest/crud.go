@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -172,11 +173,15 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 	// Extract paths from what we applied
 	paths := extractFieldPaths(obj.Object, "")
 
+	// Track if any waiting occurred
+	waitingOccurred := false
+
 	// Handle wait_for if configured
 	if !data.WaitFor.IsNull() {
 		var waitConfig waitForModel
 		diags := data.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
 		if !diags.HasError() {
+			waitingOccurred = true
 			tflog.Info(ctx, "Executing wait_for conditions", map[string]interface{}{
 				"resource": fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName()),
 			})
@@ -196,6 +201,23 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 				fmt.Sprintf("Could not parse wait_for configuration: %s", diags.Errors()),
 			)
 		}
+	} else {
+		// Check for auto-rollout when no explicit wait_for is configured
+		emptyWaitConfig := waitForModel{}
+		if shouldAutoWaitRollout(obj, emptyWaitConfig) {
+			waitingOccurred = true
+			timeout := 10 * time.Minute
+			tflog.Info(ctx, "Auto-rollout waiting for resource", map[string]interface{}{
+				"kind": obj.GetKind(),
+				"name": obj.GetName(),
+			})
+			if err := r.waitForRollout(ctx, client, gvr, obj, timeout); err != nil {
+				resp.Diagnostics.AddWarning(
+					"Auto-Rollout Wait Failed",
+					fmt.Sprintf("Resource created successfully but automatic rollout waiting failed: %s", err.Error()),
+				)
+			}
+		}
 	}
 
 	// Get the current state after apply (and after waiting if configured)
@@ -205,8 +227,8 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	// Check if we should track status (when wait_for is configured)
-	if !data.WaitFor.IsNull() {
+	// Check if we should track status (when any waiting occurred)
+	if waitingOccurred {
 		if statusRaw, found, _ := unstructured.NestedMap(currentObj.Object, "status"); found && len(statusRaw) > 0 {
 			statusValue, err := common.ConvertToAttrValue(ctx, statusRaw)
 			if err != nil {
@@ -322,8 +344,9 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	// Only populate status if wait_for is configured
-	if !data.WaitFor.IsNull() {
+	// Key logic: preserve status if it was already set, otherwise check if it should be set
+	if !data.Status.IsNull() {
+		// Status was previously populated, keep it updated
 		if statusRaw, found, _ := unstructured.NestedMap(currentObj.Object, "status"); found && len(statusRaw) > 0 {
 			statusValue, err := common.ConvertToAttrValue(ctx, statusRaw)
 			if err != nil {
@@ -333,13 +356,14 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 				data.Status = types.DynamicValue(statusValue)
 			}
 		} else {
-			// No status from K8s but tracking enabled - set empty map
+			// Status was tracked but K8s has no status - keep tracking with empty map
 			emptyStatus := map[string]interface{}{}
 			statusValue, _ := common.ConvertToAttrValue(ctx, emptyStatus)
 			data.Status = types.DynamicValue(statusValue)
 		}
 	} else {
-		// Not tracking status
+		// Status was not previously set - keep it null
+		// We don't start tracking status in Read, only in Create/Update when waiting occurs
 		data.Status = types.DynamicNull()
 	}
 
@@ -508,11 +532,15 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 	// Extract paths from what we applied
 	paths := extractFieldPaths(obj.Object, "")
 
+	// Track if any waiting occurred
+	waitingOccurred := false
+
 	// Handle wait_for if configured
 	if !plan.WaitFor.IsNull() {
 		var waitConfig waitForModel
 		diags := plan.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
 		if !diags.HasError() {
+			waitingOccurred = true
 			tflog.Info(ctx, "Executing wait_for conditions", map[string]interface{}{
 				"resource": fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName()),
 			})
@@ -532,6 +560,23 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 				fmt.Sprintf("Could not parse wait_for configuration: %s", diags.Errors()),
 			)
 		}
+	} else {
+		// Check for auto-rollout when no explicit wait_for is configured
+		emptyWaitConfig := waitForModel{}
+		if shouldAutoWaitRollout(obj, emptyWaitConfig) {
+			waitingOccurred = true
+			timeout := 10 * time.Minute
+			tflog.Info(ctx, "Auto-rollout waiting for resource", map[string]interface{}{
+				"kind": obj.GetKind(),
+				"name": obj.GetName(),
+			})
+			if err := r.waitForRollout(ctx, client, gvr, obj, timeout); err != nil {
+				resp.Diagnostics.AddWarning(
+					"Auto-Rollout Wait Failed",
+					fmt.Sprintf("Resource updated successfully but automatic rollout waiting failed: %s", err.Error()),
+				)
+			}
+		}
 	}
 
 	// Get the current state after apply (and after waiting if configured)
@@ -541,8 +586,8 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	// Only populate status if wait_for is configured
-	if !plan.WaitFor.IsNull() {
+	// Only populate status if any waiting occurred
+	if waitingOccurred {
 		if statusRaw, found, _ := unstructured.NestedMap(currentObj.Object, "status"); found && len(statusRaw) > 0 {
 			statusValue, err := common.ConvertToAttrValue(ctx, statusRaw)
 			if err != nil {
