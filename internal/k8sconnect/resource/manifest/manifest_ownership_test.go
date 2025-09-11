@@ -307,7 +307,6 @@ func TestAccManifestResource_FieldManagerConflict(t *testing.T) {
 				ExpectError: regexp.MustCompile(`Field Manager Conflict`),
 			},
 
-			// You could also add a new step to verify the plan warning:
 			// Step 2b: Plan-only to check warning
 			{
 				Config: testAccManifestConfig_FieldConflictUpdate(false), // Try to change back to 4 replicas
