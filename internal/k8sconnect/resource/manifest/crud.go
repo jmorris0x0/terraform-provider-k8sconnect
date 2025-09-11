@@ -33,21 +33,52 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 	}
 
 	// Check if resource already exists
-	existing, err := rc.Client.Get(ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName())
-	if err == nil && existing != nil {
-		resp.Diagnostics.AddError(
-			"Resource Already Exists",
-			fmt.Sprintf("%s %s/%s already exists in namespace %s",
-				rc.Object.GetKind(),
-				rc.Object.GetAPIVersion(),
-				rc.Object.GetName(),
-				rc.Object.GetNamespace()),
-		)
+	existingObj, err := rc.Client.Get(ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName())
+	if err == nil {
+		// Resource exists - check ownership
+		existingID := r.getOwnershipID(existingObj)
+		if existingID != "" {
+			// Check if this is our resource (imported or previously created)
+			if existingID == data.ID.ValueString() {
+				// This is our resource - treat as update
+				tflog.Info(ctx, "resource already owned by this state, treating as update", map[string]interface{}{
+					"kind": rc.Object.GetKind(),
+					"name": rc.Object.GetName(),
+					"id":   existingID,
+				})
+				// Continue with the create logic which will act as an update
+			} else {
+				// Different ID - owned by another state
+				resp.Diagnostics.AddError(
+					"Resource Already Managed",
+					fmt.Sprintf("resource managed by different k8sconnect resource (Terraform ID: %s)", existingID),
+				)
+				return
+			}
+		} else {
+			// Resource exists but not managed - we can take ownership
+			tflog.Info(ctx, "adopting unmanaged resource", map[string]interface{}{
+				"kind": rc.Object.GetKind(),
+				"name": rc.Object.GetName(),
+			})
+		}
+	} else if !errors.IsNotFound(err) {
+		// Real error checking if resource exists
+		resp.Diagnostics.AddError("Existence Check Failed",
+			fmt.Sprintf("Failed to check if resource exists: %s", err))
 		return
 	}
 
-	// Generate ID and set ownership
-	data.ID = types.StringValue(r.generateID())
+	// Only generate new ID if we don't already have one
+	var id string
+	if data.ID.IsNull() || data.ID.ValueString() == "" {
+		id = r.generateID()
+	} else {
+		// Use existing ID (from import or previous apply)
+		id = data.ID.ValueString()
+	}
+
+	data.ID = types.StringValue(id)
 	r.setOwnershipAnnotation(rc.Object, data.ID.ValueString())
 
 	// Apply with Force=false
