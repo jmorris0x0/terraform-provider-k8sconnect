@@ -1,0 +1,269 @@
+// internal/k8sconnect/resource/manifest/pipeline.go
+package manifest
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
+)
+
+// ResourceContext contains everything needed for any CRUD operation
+type ResourceContext struct {
+	Ctx        context.Context
+	Data       *manifestResourceModel
+	Connection auth.ClusterConnectionModel
+	Client     k8sclient.K8sClient
+	Object     *unstructured.Unstructured
+	GVR        schema.GroupVersionResource
+}
+
+// OperationPipeline orchestrates common patterns across CRUD operations
+type OperationPipeline struct {
+	resource *manifestResource
+}
+
+// NewOperationPipeline creates a new pipeline instance
+func NewOperationPipeline(r *manifestResource) *OperationPipeline {
+	return &OperationPipeline{resource: r}
+}
+
+// PrepareContext sets up the ResourceContext with all common elements
+func (p *OperationPipeline) PrepareContext(
+	ctx context.Context,
+	data *manifestResourceModel,
+	requireConnection bool,
+) (*ResourceContext, error) {
+
+	rc := &ResourceContext{
+		Ctx:  ctx,
+		Data: data,
+	}
+
+	// Step 1: Resolve connection (handles provider fallback)
+	conn, err := p.resolveEffectiveConnection(ctx, data, requireConnection)
+	if err != nil {
+		return nil, err
+	}
+	rc.Connection = conn
+
+	// Step 2: Parse YAML (if present)
+	if !data.YAMLBody.IsNull() && data.YAMLBody.ValueString() != "" {
+		obj, err := p.resource.parseYAML(data.YAMLBody.ValueString())
+		if err != nil {
+			return nil, fmt.Errorf("invalid YAML: %w", err)
+		}
+		rc.Object = obj
+	}
+
+	// Step 3: Create client (if we have a connection)
+	if !p.isConnectionEmpty(conn) {
+		client, err := p.resource.clientFactory.GetClient(conn)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Kubernetes client: %w", err)
+		}
+		rc.Client = client
+
+		// Step 4: Get GVR (if we have an object)
+		if rc.Object != nil {
+			gvr, err := client.GetGVR(ctx, rc.Object)
+			if err != nil {
+				return nil, fmt.Errorf("failed to determine resource type: %w", err)
+			}
+			rc.GVR = gvr
+		}
+	}
+
+	return rc, nil
+}
+
+// resolveEffectiveConnection handles connection resolution with provider fallback
+func (p *OperationPipeline) resolveEffectiveConnection(
+	ctx context.Context,
+	data *manifestResourceModel,
+	requireConnection bool,
+) (auth.ClusterConnectionModel, error) {
+
+	// Use resolver if available (supports provider-level connections)
+	if p.resource.connResolver != nil {
+		// Convert types.Object to ClusterConnectionModel first
+		resourceConn, err := p.resource.convertObjectToConnectionModel(ctx, data.ClusterConnection)
+		if err != nil && !data.ClusterConnection.IsNull() {
+			return auth.ClusterConnectionModel{}, fmt.Errorf("invalid connection: %w", err)
+		}
+
+		resolvedConn, err := p.resource.connResolver.ResolveConnection(&resourceConn)
+
+		if err != nil && requireConnection {
+			return auth.ClusterConnectionModel{}, fmt.Errorf(
+				"no cluster connection configured. "+
+					"Either set cluster_connection on the resource or configure a provider-level connection: %w", err)
+		}
+
+		// Store provider connection in state if that's what we're using
+		if data.ClusterConnection.IsNull() && !p.isConnectionEmpty(resolvedConn) {
+			connObj, err := p.resource.convertConnectionToObject(ctx, resolvedConn)
+			if err != nil {
+				return auth.ClusterConnectionModel{}, fmt.Errorf("failed to store connection: %w", err)
+			}
+			data.ClusterConnection = connObj
+			tflog.Info(ctx, "using provider-level connection, storing in resource state")
+		}
+
+		return resolvedConn, nil
+	}
+
+	// Legacy behavior (no resolver)
+	if data.ClusterConnection.IsNull() {
+		if requireConnection {
+			return auth.ClusterConnectionModel{}, fmt.Errorf(
+				"cluster_connection is required when provider-level connection is not configured")
+		}
+		return auth.ClusterConnectionModel{}, nil
+	}
+
+	return p.resource.convertObjectToConnectionModel(ctx, data.ClusterConnection)
+}
+
+// ExecuteWait handles wait conditions
+func (p *OperationPipeline) ExecuteWait(rc *ResourceContext) error {
+	if rc.Data.WaitFor.IsNull() {
+		return nil
+	}
+
+	var waitConfig waitForModel
+	diags := rc.Data.WaitFor.As(rc.Ctx, &waitConfig, basetypes.ObjectAsOptions{})
+	if diags.HasError() {
+		return fmt.Errorf("invalid wait_for configuration: %s", diags.Errors())
+	}
+
+	// Check if we have actual conditions
+	if !p.hasActiveWaitConditions(waitConfig) {
+		tflog.Debug(rc.Ctx, "wait_for configured but no active conditions")
+		return nil
+	}
+
+	// Execute the wait
+	return p.resource.waitForResource(rc.Ctx, rc.Client, rc.GVR, rc.Object, waitConfig)
+}
+
+// hasActiveWaitConditions checks if there are real conditions to wait for
+func (p *OperationPipeline) hasActiveWaitConditions(waitConfig waitForModel) bool {
+	return (!waitConfig.Field.IsNull() && waitConfig.Field.ValueString() != "") ||
+		!waitConfig.FieldValue.IsNull() ||
+		(!waitConfig.Condition.IsNull() && waitConfig.Condition.ValueString() != "") ||
+		(!waitConfig.Rollout.IsNull() && waitConfig.Rollout.ValueBool())
+}
+
+// UpdateStatus updates the status field based on wait results
+func (p *OperationPipeline) UpdateStatus(rc *ResourceContext, waited bool) error {
+	// No wait = no status
+	if !waited {
+		rc.Data.Status = types.DynamicNull()
+		return nil
+	}
+
+	// Get current state from cluster
+	currentObj, err := rc.Client.Get(rc.Ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName())
+	if err != nil {
+		tflog.Warn(rc.Ctx, "Failed to read after wait", map[string]interface{}{"error": err.Error()})
+		rc.Data.Status = types.DynamicNull()
+		return nil
+	}
+
+	// Extract and convert status
+	if statusRaw, found, _ := unstructured.NestedMap(currentObj.Object, "status"); found && len(statusRaw) > 0 {
+		statusValue, err := common.ConvertToAttrValue(rc.Ctx, statusRaw)
+		if err != nil {
+			tflog.Warn(rc.Ctx, "Failed to convert status", map[string]interface{}{"error": err.Error()})
+			rc.Data.Status = types.DynamicNull()
+		} else {
+			rc.Data.Status = types.DynamicValue(statusValue)
+		}
+	} else {
+		// No status but we waited - set empty map
+		emptyStatus := map[string]interface{}{}
+		statusValue, _ := common.ConvertToAttrValue(rc.Ctx, emptyStatus)
+		rc.Data.Status = types.DynamicValue(statusValue)
+	}
+
+	return nil
+}
+
+// UpdateProjection updates managed state projection and field ownership
+func (p *OperationPipeline) UpdateProjection(rc *ResourceContext) error {
+	// Get current state
+	currentObj, err := rc.Client.Get(rc.Ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName())
+	if err != nil {
+		return fmt.Errorf("failed to read for projection: %w", err)
+	}
+
+	// Extract paths from desired state
+	paths := extractFieldPaths(rc.Object.Object, "")
+
+	// Create projection
+	projection, err := projectFields(currentObj.Object, paths)
+	if err != nil {
+		return fmt.Errorf("failed to project fields: %w", err)
+	}
+
+	// Convert to JSON
+	projectionJSON, err := toJSON(projection)
+	if err != nil {
+		return fmt.Errorf("failed to convert projection: %w", err)
+	}
+
+	rc.Data.ManagedStateProjection = types.StringValue(projectionJSON)
+
+	// Update field ownership
+	ownership := extractFieldOwnership(currentObj)
+	ownershipJSON, err := json.Marshal(ownership)
+	if err != nil {
+		tflog.Warn(rc.Ctx, "Failed to marshal field ownership", map[string]interface{}{"error": err.Error()})
+		rc.Data.FieldOwnership = types.StringValue("{}")
+	} else {
+		rc.Data.FieldOwnership = types.StringValue(string(ownershipJSON))
+	}
+
+	// Clear ImportedWithoutAnnotations after first update (it's only used during import)
+	if !rc.Data.ImportedWithoutAnnotations.IsNull() && rc.Data.ImportedWithoutAnnotations.ValueBool() {
+		// This was an import, but now we've updated the annotations
+		rc.Data.ImportedWithoutAnnotations = types.BoolNull()
+	} else if rc.Data.ImportedWithoutAnnotations.IsUnknown() {
+		// Not an import, set to null
+		rc.Data.ImportedWithoutAnnotations = types.BoolNull()
+	}
+
+	return nil
+}
+
+// isConnectionEmpty checks if connection is empty
+func (p *OperationPipeline) isConnectionEmpty(conn auth.ClusterConnectionModel) bool {
+	return conn.Host.IsNull() &&
+		conn.KubeconfigFile.IsNull() &&
+		conn.KubeconfigRaw.IsNull() &&
+		(conn.Exec == nil || conn.Exec.APIVersion.IsNull())
+}
+
+// isFieldConflictError checks if error is a field manager conflict
+func isFieldConflictError(err error) bool {
+	// Check if error message indicates field manager conflict
+	return err != nil &&
+		(containsString(err.Error(), "field manager") ||
+			containsString(err.Error(), "conflict"))
+}
+
+func containsString(s, substr string) bool {
+	return len(s) >= len(substr) &&
+		(s == substr || len(s) > 0 && len(substr) > 0 &&
+			(s[0:len(substr)] == substr || containsString(s[1:], substr)))
+}
