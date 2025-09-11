@@ -67,7 +67,18 @@ func (p *OperationPipeline) PrepareContext(
 
 	// Step 3: Create client (if we have a connection)
 	if !p.isConnectionEmpty(conn) {
-		client, err := p.resource.clientFactory.GetClient(conn)
+		// Try clientFactory first, fall back to clientGetter
+		var client k8sclient.K8sClient
+		var err error
+
+		if p.resource.clientFactory != nil {
+			client, err = p.resource.clientFactory.GetClient(conn)
+		} else if p.resource.clientGetter != nil {
+			client, err = p.resource.clientGetter(conn)
+		} else {
+			return nil, fmt.Errorf("no client factory or getter configured")
+		}
+
 		if err != nil {
 			return nil, fmt.Errorf("failed to create Kubernetes client: %w", err)
 		}
@@ -96,9 +107,13 @@ func (p *OperationPipeline) resolveEffectiveConnection(
 	// Use resolver if available (supports provider-level connections)
 	if p.resource.connResolver != nil {
 		// Convert types.Object to ClusterConnectionModel first
-		resourceConn, err := p.resource.convertObjectToConnectionModel(ctx, data.ClusterConnection)
-		if err != nil && !data.ClusterConnection.IsNull() {
-			return auth.ClusterConnectionModel{}, fmt.Errorf("invalid connection: %w", err)
+		var resourceConn auth.ClusterConnectionModel
+		if !data.ClusterConnection.IsNull() {
+			var err error
+			resourceConn, err = p.resource.convertObjectToConnectionModel(ctx, data.ClusterConnection)
+			if err != nil {
+				return auth.ClusterConnectionModel{}, fmt.Errorf("invalid connection: %w", err)
+			}
 		}
 
 		resolvedConn, err := p.resource.connResolver.ResolveConnection(&resourceConn)

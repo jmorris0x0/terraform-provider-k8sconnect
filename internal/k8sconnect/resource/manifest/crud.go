@@ -3,6 +3,7 @@ package manifest
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -100,37 +101,129 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	// Use pipeline for setup
-	pipeline := NewOperationPipeline(r)
-	rc, err := pipeline.PrepareContext(ctx, &data, false)
+	// Check if connection is ready (same as original)
+	if !r.isConnectionReady(data.ClusterConnection) {
+		tflog.Info(ctx, "Skipping Read due to unknown connection values")
+		return
+	}
+
+	// Get connection from state (same as original)
+	conn, err := r.convertObjectToConnectionModel(ctx, data.ClusterConnection)
 	if err != nil {
-		tflog.Info(ctx, "Skipping Read", map[string]interface{}{"reason": err.Error()})
+		resp.Diagnostics.AddError("Connection Conversion Failed", err.Error())
+		return
+	}
+
+	// Parse the stored YAML to get resource info (same as original)
+	obj, err := r.parseYAML(data.YAMLBody.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("YAML Parse Failed", err.Error())
+		return
+	}
+
+	// Create K8s client (matching original)
+	var client k8sclient.K8sClient
+	if r.clientFactory != nil {
+		client, err = r.clientFactory.GetClient(conn)
+	} else if r.clientGetter != nil {
+		client, err = r.clientGetter(conn)
+	} else {
+		resp.Diagnostics.AddError("No Client Factory", "No client factory or getter configured")
+		return
+	}
+	if err != nil {
+		resp.Diagnostics.AddError("Client Creation Failed", err.Error())
+		return
+	}
+
+	// Get the GVR for this resource (same as original)
+	gvr, err := client.GetGVR(ctx, obj)
+	if err != nil {
+		resp.Diagnostics.AddError("GVR Resolution Failed", err.Error())
 		return
 	}
 
 	// Check if resource exists
-	currentObj, err := rc.Client.Get(ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName())
+	currentObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
 	if err != nil {
 		if errors.IsNotFound(err) {
-			tflog.Info(ctx, "Resource not found, removing from state")
+			tflog.Info(ctx, "Resource not found, removing from state",
+				map[string]interface{}{
+					"id":        data.ID.ValueString(),
+					"kind":      obj.GetKind(),
+					"name":      obj.GetName(),
+					"namespace": obj.GetNamespace(),
+				})
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		resp.Diagnostics.AddError("Read Failed", err.Error())
+		resp.Diagnostics.AddError("Failed to Get Resource",
+			fmt.Sprintf("Failed to read %s %s: %s", obj.GetKind(), obj.GetName(), err))
 		return
 	}
 
-	// Update YAML with current state
-	yamlBytes, err := r.objectToYAML(currentObj)
+	// Check ownership (same as original)
+	currentID := r.getOwnershipID(currentObj)
+	if currentID == "" {
+		resp.Diagnostics.AddWarning(
+			"Resource Ownership Lost",
+			fmt.Sprintf("The %s '%s' is no longer marked as managed by Terraform.\n"+
+				"The ownership annotations have been removed.",
+				obj.GetKind(), obj.GetName()),
+		)
+		return
+	}
+
+	if currentID != data.ID.ValueString() {
+		resp.Diagnostics.AddError(
+			"Resource Ownership Conflict",
+			fmt.Sprintf("The %s '%s' is now managed by a different Terraform resource (ID: %s).",
+				obj.GetKind(), obj.GetName(), currentID),
+		)
+		return
+	}
+
+	// Extract paths from the stored YAML (what we're managing)
+	paths := extractFieldPaths(obj.Object, "")
+
+	// Project the current state to only include fields we manage
+	projection, err := projectFields(currentObj.Object, paths)
 	if err != nil {
-		resp.Diagnostics.AddError("YAML Conversion Failed", err.Error())
+		resp.Diagnostics.AddError("Projection Failed",
+			fmt.Sprintf("Failed to project managed fields: %s", err))
 		return
 	}
-	data.YAMLBody = types.StringValue(string(yamlBytes))
 
-	// For Read, we should NOT update projection/ownership - just preserve what's in state
-	// The projection and field ownership should only change during Create/Update operations
+	// Convert projection to JSON for storage
+	projectionJSON, err := toJSON(projection)
+	if err != nil {
+		resp.Diagnostics.AddError("JSON Conversion Failed",
+			fmt.Sprintf("Failed to convert projection to JSON: %s", err))
+		return
+	}
 
+	// Update the projection in state - this is what enables drift detection
+	data.ManagedStateProjection = types.StringValue(projectionJSON)
+
+	// The original Read ALSO updates field_ownership - needed for imports
+	ownership := extractFieldOwnership(currentObj)
+	ownershipJSON, err := json.Marshal(ownership)
+	if err != nil {
+		tflog.Warn(ctx, "Failed to marshal field ownership", map[string]interface{}{
+			"error": err.Error(),
+		})
+		data.FieldOwnership = types.StringValue("{}")
+	} else {
+		data.FieldOwnership = types.StringValue(string(ownershipJSON))
+	}
+
+	tflog.Debug(ctx, "Updated managed state projection", map[string]interface{}{
+		"id":              data.ID.ValueString(),
+		"path_count":      len(paths),
+		"projection_size": len(projectionJSON),
+	})
+
+	// Set the refreshed state - only projection was updated
 	diags = resp.State.Set(ctx, &data)
 	resp.Diagnostics.Append(diags...)
 }
@@ -280,14 +373,14 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 		return
 	}
 
-	// Delete the resource
+	// Delete with empty options (original signature requires it)
 	err = rc.Client.Delete(ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName(), k8sclient.DeleteOptions{})
 	if err != nil && !errors.IsNotFound(err) {
 		resp.Diagnostics.AddError("Deletion Failed", err.Error())
 		return
 	}
 
-	// Wait for deletion if not force destroy
+	// Handle force destroy and timeout AFTER delete
 	if !forceDestroy {
 		err = r.waitForDeletion(ctx, rc.Client, rc.GVR, rc.Object, timeout)
 		if err != nil {
@@ -295,19 +388,11 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 			return
 		}
 	} else {
-		// Force destroy - remove finalizers
+		// Force destroy - try to remove finalizers if deletion is stuck
 		if err := r.forceDestroy(ctx, rc.Client, rc.GVR, rc.Object, resp); err != nil {
-			resp.Diagnostics.AddError("Force Destroy Failed", err.Error())
-			return
+			tflog.Warn(ctx, "Force destroy encountered issues", map[string]interface{}{"error": err.Error()})
+			// Don't fail - resource might already be gone
 		}
-	}
-	if err != nil {
-		if errors.IsNotFound(err) {
-			tflog.Info(ctx, "Resource not found, treating as deleted")
-			return
-		}
-		resp.Diagnostics.AddError("Deletion Failed", err.Error())
-		return
 	}
 
 	tflog.Info(ctx, "Resource deleted", map[string]interface{}{
