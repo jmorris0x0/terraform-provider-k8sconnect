@@ -1,4 +1,4 @@
-// internal/k8sconnect/k8sclient/stub.go
+// internal/k8sconnect/common/k8sclient/stub.go
 package k8sclient
 
 import (

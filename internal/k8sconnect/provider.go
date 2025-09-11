@@ -12,9 +12,9 @@ import (
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
-	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/client"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/factory"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/datasource/yaml_split"
-	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/k8sclient"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 	manifestres "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/resource/manifest"
 )
 
@@ -33,14 +33,14 @@ type k8sconnectProviderModel struct {
 type k8sconnectProvider struct {
 	// Connection resolver and client factory
 	connectionResolver *auth.ConnectionResolver
-	clientFactory      client.ClientFactory
+	clientFactory      factory.ClientFactory
 }
 
 // New returns a factory for k8sconnectProvider
 func New() provider.Provider {
 	return &k8sconnectProvider{
 		connectionResolver: auth.NewConnectionResolver(),
-		clientFactory:      client.NewCachedClientFactory(),
+		clientFactory:      factory.NewCachedClientFactory(),
 	}
 }
 

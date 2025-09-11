@@ -1,5 +1,5 @@
-// internal/k8sconnect/common/client/factory_test.go
-package client
+// internal/k8sconnect/common/factory/factory_test.go
+package factory
 
 import (
 	"testing"

@@ -17,8 +17,8 @@ import (
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
-	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/client"
-	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/k8sclient"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/factory"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 )
 
 var _ resource.Resource = (*manifestResource)(nil)
@@ -35,7 +35,7 @@ type manifestResource struct {
 
 	// New fields for connection config
 	connResolver  *auth.ConnectionResolver
-	clientFactory client.ClientFactory
+	clientFactory factory.ClientFactory
 }
 
 type manifestResourceModel struct {

@@ -1,5 +1,5 @@
-// internal/k8sconnect/common/client/factory.go
-package client
+// internal/k8sconnect/common/factory/factory.go
+package factory
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
-	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/k8sclient"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 )
 
 // ClientFactory handles creation and caching of K8s clients
