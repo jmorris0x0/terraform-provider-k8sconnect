@@ -152,7 +152,7 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	// Create K8s client (matching original)
+	// Create K8s client
 	var client k8sclient.K8sClient
 	if r.clientFactory != nil {
 		client, err = r.clientFactory.GetClient(conn)
@@ -193,7 +193,7 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	// Check ownership (same as original)
+	// Check ownership
 	currentID := r.getOwnershipID(currentObj)
 	if currentID == "" {
 		resp.Diagnostics.AddWarning(
