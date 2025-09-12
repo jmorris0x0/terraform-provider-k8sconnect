@@ -17,11 +17,11 @@ Applies a single‑document Kubernetes YAML manifest to a cluster, with per‑re
 
 ### Required
 
+- `cluster_connection` (Attributes) Cluster connection configuration for this resource. If not specified, uses the provider-level connection. (see [below for nested schema](#nestedatt--cluster_connection))
 - `yaml_body` (String) UTF‑8 encoded, single‑document Kubernetes YAML. Multi‑doc files will fail validation.
 
 ### Optional
 
-- `cluster_connection` (Attributes) Cluster connection configuration for this resource. If not specified, uses the provider-level connection. (see [below for nested schema](#nestedatt--cluster_connection))
 - `delete_protection` (Boolean) Prevent accidental deletion of the resource. If set to true, the resource cannot be deleted unless this field is set to false.
 - `delete_timeout` (String) How long to wait for a resource to be deleted before considering the deletion failed. Defaults to 300s (5 minutes).
 - `force_conflicts` (Boolean) Force field manager conflicts during server-side apply. When false (default), operations will fail if another field manager owns the field. When true, forcibly takes ownership of conflicting fields.

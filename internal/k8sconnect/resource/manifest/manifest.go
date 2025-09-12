@@ -7,7 +7,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 
-	//"github.com/hashicorp/terraform-plugin-framework/resource/schema/dynamicplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework-validators/mapvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -16,7 +15,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
-	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/factory"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
@@ -32,10 +30,7 @@ var _ resource.ResourceWithConfigure = (*manifestResource)(nil)
 type ClientGetter func(auth.ClusterConnectionModel) (k8sclient.K8sClient, error)
 
 type manifestResource struct {
-	clientGetter ClientGetter // Keep for backward compatibility
-
-	// New fields for connection config
-	connResolver  *auth.ConnectionResolver
+	clientGetter  ClientGetter // Keep for now
 	clientFactory factory.ClientFactory
 }
 
@@ -79,19 +74,18 @@ func (r *manifestResource) Configure(ctx context.Context, req resource.Configure
 		return
 	}
 
-	// Try to get connection config
-	connectionConfig, ok := req.ProviderData.(*common.ConnectionConfig)
+	// Try to get client factory directly (no more ConnectionConfig)
+	clientFactory, ok := req.ProviderData.(factory.ClientFactory)
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Unexpected Provider Data Type",
-			"Expected *common.ConnectionConfig but got something else. This is a provider bug.",
+			"Expected factory.ClientFactory but got something else. This is a provider bug.",
 		)
 		return
 	}
 
-	// Store the components
-	r.connResolver = connectionConfig.ConnectionResolver
-	r.clientFactory = connectionConfig.ClientFactory
+	// Store the client factory
+	r.clientFactory = clientFactory
 
 	// For backward compatibility, create a clientGetter that uses the factory
 	r.clientGetter = func(conn auth.ClusterConnectionModel) (k8sclient.K8sClient, error) {
@@ -115,7 +109,7 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 				Description: "UTF‑8 encoded, single‑document Kubernetes YAML. Multi‑doc files will fail validation.",
 			},
 			"cluster_connection": schema.SingleNestedAttribute{
-				Optional:    true, // Changed from Required to Optional
+				Required:    true,
 				Description: "Cluster connection configuration for this resource. If not specified, uses the provider-level connection.",
 				Attributes: map[string]schema.Attribute{
 					"host": schema.StringAttribute{

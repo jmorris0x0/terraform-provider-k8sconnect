@@ -270,26 +270,6 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	// Validate connection change
-	if r.connResolver != nil && !state.ClusterConnection.Equal(plan.ClusterConnection) {
-		oldConn, err := r.convertObjectToConnectionModel(ctx, state.ClusterConnection)
-		if err != nil {
-			resp.Diagnostics.AddError("Failed to parse old connection", err.Error())
-			return
-		}
-
-		newConn, err := r.convertObjectToConnectionModel(ctx, plan.ClusterConnection)
-		if err != nil {
-			resp.Diagnostics.AddError("Failed to parse new connection", err.Error())
-			return
-		}
-
-		if err := r.connResolver.ValidateConnectionChange(oldConn, newConn); err != nil {
-			resp.Diagnostics.AddError("Connection Change Blocked", err.Error())
-			return
-		}
-	}
-
 	// Use pipeline for setup
 	pipeline := NewOperationPipeline(r)
 	rc, err := pipeline.PrepareContext(ctx, &plan, true)

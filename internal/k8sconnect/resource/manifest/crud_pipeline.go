@@ -97,56 +97,29 @@ func (p *OperationPipeline) PrepareContext(
 	return rc, nil
 }
 
-// resolveEffectiveConnection handles connection resolution with provider fallback
+// resolveEffectiveConnection now just gets the connection from the resource data
 func (p *OperationPipeline) resolveEffectiveConnection(
 	ctx context.Context,
 	data *manifestResourceModel,
 	requireConnection bool,
 ) (auth.ClusterConnectionModel, error) {
 
-	// Use resolver if available (supports provider-level connections)
-	if p.resource.connResolver != nil {
-		// Convert types.Object to ClusterConnectionModel first
-		var resourceConn auth.ClusterConnectionModel
-		if !data.ClusterConnection.IsNull() {
-			var err error
-			resourceConn, err = p.resource.convertObjectToConnectionModel(ctx, data.ClusterConnection)
-			if err != nil {
-				return auth.ClusterConnectionModel{}, fmt.Errorf("invalid connection: %w", err)
-			}
-		}
-
-		resolvedConn, err := p.resource.connResolver.ResolveConnection(&resourceConn)
-
-		if err != nil && requireConnection {
-			return auth.ClusterConnectionModel{}, fmt.Errorf(
-				"no cluster connection configured. "+
-					"Either set cluster_connection on the resource or configure a provider-level connection: %w", err)
-		}
-
-		// Store provider connection in state if that's what we're using
-		if data.ClusterConnection.IsNull() && !p.isConnectionEmpty(resolvedConn) {
-			connObj, err := p.resource.convertConnectionToObject(ctx, resolvedConn)
-			if err != nil {
-				return auth.ClusterConnectionModel{}, fmt.Errorf("failed to store connection: %w", err)
-			}
-			data.ClusterConnection = connObj
-			tflog.Info(ctx, "using provider-level connection, storing in resource state")
-		}
-
-		return resolvedConn, nil
-	}
-
-	// Legacy behavior (no resolver)
-	if data.ClusterConnection.IsNull() {
+	// Connection is always required from the resource now
+	if data.ClusterConnection.IsNull() || data.ClusterConnection.IsUnknown() {
 		if requireConnection {
 			return auth.ClusterConnectionModel{}, fmt.Errorf(
-				"cluster_connection is required when provider-level connection is not configured")
+				"cluster_connection is required")
 		}
 		return auth.ClusterConnectionModel{}, nil
 	}
 
-	return p.resource.convertObjectToConnectionModel(ctx, data.ClusterConnection)
+	// Convert the connection object to our model
+	conn, err := p.resource.convertObjectToConnectionModel(ctx, data.ClusterConnection)
+	if err != nil {
+		return auth.ClusterConnectionModel{}, fmt.Errorf("invalid connection: %w", err)
+	}
+
+	return conn, nil
 }
 
 // ExecuteWait handles wait conditions

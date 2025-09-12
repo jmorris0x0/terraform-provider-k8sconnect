@@ -33,8 +33,6 @@ func (r *manifestResource) waitForResource(ctx context.Context, client k8sclient
 		}
 	}
 
-	// REMOVED: Auto-rollout check - no longer needed
-
 	// Handle explicit rollout=true
 	if !waitConfig.Rollout.IsNull() && waitConfig.Rollout.ValueBool() {
 		tflog.Info(ctx, "Explicit rollout waiting", map[string]interface{}{

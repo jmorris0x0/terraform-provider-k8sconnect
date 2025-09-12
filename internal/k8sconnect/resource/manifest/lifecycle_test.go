@@ -155,17 +155,20 @@ func TestAccManifestResource_ConnectionChange(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_conn_change", "id"),
 					testhelpers.CheckNamespaceExists(k8sClient, ns),
-					// TODO: Add check that ownership annotation exists on the K8s resource
 				),
 			},
-			// Step 2: Change connection method (same cluster)
+			// Step 2: Change connection method (same cluster) - should succeed now!
 			{
 				Config: testAccManifestConfigConnectionChange2(ns),
 				ConfigVariables: config.Variables{
 					"raw":       config.StringVariable(raw),
 					"namespace": config.StringVariable(ns),
 				},
-				ExpectError: regexp.MustCompile("connection change would move resource to a different cluster"),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_conn_change", "id"),
+					testhelpers.CheckNamespaceExists(k8sClient, ns),
+					// Connection change should succeed - resource still exists
+				),
 			},
 		},
 		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, ns),
