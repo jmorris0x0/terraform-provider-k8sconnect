@@ -4,7 +4,6 @@ package test
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -259,26 +258,6 @@ func CheckServiceDestroy(client kubernetes.Interface, namespace, name string) re
 		}
 		return fmt.Errorf("service %s/%s still exists after deletion", namespace, name)
 	}
-}
-
-func WriteKubeconfigToTempFile(t *testing.T, kubeconfigContent string) string {
-	tmpfile, err := os.CreateTemp("", "kubeconfig-import-*.yaml")
-	if err != nil {
-		t.Fatalf("Failed to create temp file: %v", err)
-	}
-
-	if _, err := tmpfile.Write([]byte(kubeconfigContent)); err != nil {
-		tmpfile.Close()
-		os.Remove(tmpfile.Name())
-		t.Fatalf("Failed to write kubeconfig: %v", err)
-	}
-
-	if err := tmpfile.Close(); err != nil {
-		os.Remove(tmpfile.Name())
-		t.Fatalf("Failed to close temp file: %v", err)
-	}
-
-	return tmpfile.Name()
 }
 
 func CheckResourceQuotaDestroy(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {

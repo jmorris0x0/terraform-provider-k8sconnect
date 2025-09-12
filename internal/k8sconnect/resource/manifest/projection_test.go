@@ -469,28 +469,3 @@ func TestProjection_QuantityNormalization(t *testing.T) {
 		t.Error("projection should not include status")
 	}
 }
-
-// Helper function to check if a slice contains a string
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
-}
-
-// Helper function to compare string slices
-func equalStringSlices(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	sort.Strings(a)
-	sort.Strings(b)
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}

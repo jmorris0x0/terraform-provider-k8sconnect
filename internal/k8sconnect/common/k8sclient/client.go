@@ -111,34 +111,6 @@ func NewDynamicK8sClient(config *rest.Config) (*DynamicK8sClient, error) {
 	}, nil
 }
 
-// NewDynamicK8sClientFromKubeconfig creates a client from kubeconfig bytes and context.
-func NewDynamicK8sClientFromKubeconfig(kubeconfigData []byte, context string) (*DynamicK8sClient, error) {
-	config, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse kubeconfig: %w", err)
-	}
-
-	if context != "" {
-		// Load kubeconfig and set context
-		clientConfig, err := clientcmd.Load(kubeconfigData)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load kubeconfig: %w", err)
-		}
-
-		if _, exists := clientConfig.Contexts[context]; !exists {
-			return nil, fmt.Errorf("context %q not found in kubeconfig", context)
-		}
-
-		clientConfig.CurrentContext = context
-		config, err = clientcmd.NewDefaultClientConfig(*clientConfig, &clientcmd.ConfigOverrides{}).ClientConfig()
-		if err != nil {
-			return nil, fmt.Errorf("failed to build config for context %q: %w", context, err)
-		}
-	}
-
-	return NewDynamicK8sClient(config)
-}
-
 // NewDynamicK8sClientFromKubeconfigFile creates a client from a kubeconfig file path.
 func NewDynamicK8sClientFromKubeconfigFile(kubeconfigPath, context string) (*DynamicK8sClient, error) {
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
