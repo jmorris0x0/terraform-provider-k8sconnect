@@ -16,6 +16,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect"
 	testhelpers "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/test"
@@ -347,26 +348,21 @@ func TestAccManifestResource_DriftDetectionNestedStructures(t *testing.T) {
 			{
 				PreConfig: func() {
 					ctx := context.Background()
-					dep, err := k8sClient.AppsV1().Deployments(ns).Get(ctx, deployName, metav1.GetOptions{})
-					if err != nil {
-						t.Fatalf("Failed to get Deployment: %v", err)
-					}
 
-					// Modify container image
-					dep.Spec.Template.Spec.Containers[0].Image = "nginx:1.22"
-					// Modify replicas
-					replicas := int32(5)
-					dep.Spec.Replicas = &replicas
-					// Add an env var
-					dep.Spec.Template.Spec.Containers[0].Env = append(dep.Spec.Template.Spec.Containers[0].Env,
-						v1.EnvVar{Name: "ADDED_VAR", Value: "added"})
-
-					_, err = k8sClient.AppsV1().Deployments(ns).Update(ctx, dep, metav1.UpdateOptions{})
+					_, err := k8sClient.AppsV1().Deployments(ns).Patch(
+						ctx, deployName,
+						types.StrategicMergePatchType,
+						[]byte(driftTestDeploymentPatch),
+						metav1.PatchOptions{
+							FieldManager: "external-controller",
+						},
+					)
 					if err != nil {
-						t.Fatalf("Failed to update Deployment: %v", err)
+						t.Fatalf("Failed to patch Deployment: %v", err)
 					}
-					t.Log("✅ Modified Deployment nested fields")
+					t.Log("✅ Modified Deployment using patch (deterministic)")
 				},
+
 				Config: testAccManifestConfigDriftDetectionDeployment(ns, deployName),
 				ConfigVariables: config.Variables{
 					"raw":         config.StringVariable(raw),
@@ -380,6 +376,20 @@ func TestAccManifestResource_DriftDetectionNestedStructures(t *testing.T) {
 		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, ns, deployName),
 	})
 }
+
+const driftTestDeploymentPatch = `{
+	"spec": {
+		"replicas": 5,
+		"template": {
+			"spec": {
+				"containers": [{
+					"name": "nginx",
+					"image": "nginx:1.22"
+				}]
+			}
+		}
+	}
+}`
 
 func testAccManifestConfigDriftDetectionDeployment(namespace, deployName string) string {
 	return fmt.Sprintf(`
