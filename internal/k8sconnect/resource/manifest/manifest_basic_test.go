@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
@@ -32,6 +33,8 @@ func TestAccManifestResource_Basic(t *testing.T) {
 		t.Fatal("TF_ACC_K8S_HOST, TF_ACC_K8S_CA, TF_ACC_K8S_CMD and TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("basic-exec-ns-%d", time.Now().UnixNano()%1000000)
+
 	// Create Kubernetes client for verification
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
@@ -41,34 +44,38 @@ func TestAccManifestResource_Basic(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				Config: testAccManifestConfigBasic,
+				Config: testAccManifestConfigBasic(ns),
 				ConfigVariables: config.Variables{
-					"host": config.StringVariable(host),
-					"ca":   config.StringVariable(ca),
-					"cmd":  config.StringVariable(cmd),
-					"raw":  config.StringVariable(raw),
+					"host":      config.StringVariable(host),
+					"ca":        config.StringVariable(ca),
+					"cmd":       config.StringVariable(cmd),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					// ✅ Verify Terraform state
-					resource.TestCheckResourceAttr("k8sconnect_manifest.test_exec", "yaml_body", testNamespaceYAML),
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test_exec", "yaml_body", testNamespaceYAML(ns)),
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_exec", "id"),
 
 					// ✅ Verify namespace actually exists in Kubernetes
-					testhelpers.CheckNamespaceExists(k8sClient, "acctest-exec"),
+					testhelpers.CheckNamespaceExists(k8sClient, ns),
 				),
 			},
 		},
-		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, "acctest-exec"),
+		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, ns),
 	})
 }
 
-const testNamespaceYAML = `apiVersion: v1
+func testNamespaceYAML(namespace string) string {
+	return fmt.Sprintf(`apiVersion: v1
 kind: Namespace
 metadata:
-  name: acctest-exec
-`
+  name: %s
+`, namespace)
+}
 
-const testAccManifestConfigBasic = `
+func testAccManifestConfigBasic(namespace string) string {
+	return fmt.Sprintf(`
 variable "host" {
   type = string
 }
@@ -81,6 +88,9 @@ variable "cmd" {
 variable "raw" {
   type = string
 }
+variable "namespace" {
+  type = string
+}
 
 provider "k8sconnect" {}
 
@@ -89,7 +99,7 @@ resource "k8sconnect_manifest" "test_exec" {
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: acctest-exec
+  name: %s
 YAML
 
   cluster_connection = {
@@ -103,7 +113,8 @@ YAML
     }
   }
 }
-`
+`, namespace)
+}
 
 func TestAccManifestResource_KubeconfigRaw(t *testing.T) {
 	t.Parallel()
@@ -113,6 +124,7 @@ func TestAccManifestResource_KubeconfigRaw(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("kubeconfig-raw-ns-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
@@ -121,29 +133,36 @@ func TestAccManifestResource_KubeconfigRaw(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				Config: testAccManifestConfigKubeconfigRaw,
+				Config: testAccManifestConfigKubeconfigRaw(ns),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("k8sconnect_manifest.test_raw", "yaml_body", testNamespaceYAMLRaw),
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test_raw", "yaml_body", testNamespaceYAMLRaw(ns)),
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_raw", "id"),
-					testhelpers.CheckNamespaceExists(k8sClient, "acctest-raw"),
+					testhelpers.CheckNamespaceExists(k8sClient, ns),
 				),
 			},
 		},
-		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, "acctest-raw"),
+		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, ns),
 	})
 }
 
-const testNamespaceYAMLRaw = `apiVersion: v1
+func testNamespaceYAMLRaw(namespace string) string {
+	return fmt.Sprintf(`apiVersion: v1
 kind: Namespace
 metadata:
-  name: acctest-raw
-`
+  name: %s
+`, namespace)
+}
 
-const testAccManifestConfigKubeconfigRaw = `
+func testAccManifestConfigKubeconfigRaw(namespace string) string {
+	return fmt.Sprintf(`
 variable "raw" {
+  type = string
+}
+variable "namespace" {
   type = string
 }
 
@@ -154,14 +173,15 @@ resource "k8sconnect_manifest" "test_raw" {
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: acctest-raw
+  name: %s
 YAML
 
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
 }
-`
+`, namespace)
+}
 
 func TestAccManifestResource_KubeconfigFile(t *testing.T) {
 	t.Parallel()
@@ -185,6 +205,7 @@ func TestAccManifestResource_KubeconfigFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	ns := fmt.Sprintf("kubeconfig-file-ns-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
@@ -193,29 +214,36 @@ func TestAccManifestResource_KubeconfigFile(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				Config: testAccManifestConfigKubeconfigFile,
+				Config: testAccManifestConfigKubeconfigFile(ns),
 				ConfigVariables: config.Variables{
 					"kubeconfig_path": config.StringVariable(tmpfile.Name()),
+					"namespace":       config.StringVariable(ns),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("k8sconnect_manifest.test_file", "yaml_body", testNamespaceYAMLFile),
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test_file", "yaml_body", testNamespaceYAMLFile(ns)),
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_file", "id"),
-					testhelpers.CheckNamespaceExists(k8sClient, "acctest-file"),
+					testhelpers.CheckNamespaceExists(k8sClient, ns),
 				),
 			},
 		},
-		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, "acctest-file"),
+		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, ns),
 	})
 }
 
-const testNamespaceYAMLFile = `apiVersion: v1
+func testNamespaceYAMLFile(namespace string) string {
+	return fmt.Sprintf(`apiVersion: v1
 kind: Namespace
 metadata:
-  name: acctest-file
-`
+  name: %s
+`, namespace)
+}
 
-const testAccManifestConfigKubeconfigFile = `
+func testAccManifestConfigKubeconfigFile(namespace string) string {
+	return fmt.Sprintf(`
 variable "kubeconfig_path" {
+  type = string
+}
+variable "namespace" {
   type = string
 }
 
@@ -226,14 +254,15 @@ resource "k8sconnect_manifest" "test_file" {
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: acctest-file
+  name: %s
 YAML
 
   cluster_connection = {
     kubeconfig_file = var.kubeconfig_path
   }
 }
-`
+`, namespace)
+}
 
 // Test different resource types
 func TestAccManifestResource_Pod(t *testing.T) {
@@ -244,6 +273,8 @@ func TestAccManifestResource_Pod(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("pod-test-ns-%d", time.Now().UnixNano()%1000000)
+	podName := fmt.Sprintf("test-pod-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
@@ -252,47 +283,71 @@ func TestAccManifestResource_Pod(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				Config: testAccManifestConfigPod,
+				Config: testAccManifestConfigPod(ns, podName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"pod_name":  config.StringVariable(podName),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("k8sconnect_manifest.test_pod", "yaml_body", testPodYAML),
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test_pod", "yaml_body", testPodYAML(ns, podName)),
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_pod", "id"),
-					testhelpers.CheckPodExists(k8sClient, "default", "acctest-pod"),
+					testhelpers.CheckPodExists(k8sClient, ns, podName),
 				),
 			},
 		},
-		CheckDestroy: testhelpers.CheckPodDestroy(k8sClient, "default", "acctest-pod"),
+		CheckDestroy: testhelpers.CheckPodDestroy(k8sClient, ns, podName),
 	})
 }
 
-const testPodYAML = `apiVersion: v1
+func testPodYAML(namespace, podName string) string {
+	return fmt.Sprintf(`apiVersion: v1
 kind: Pod
 metadata:
-  name: acctest-pod
-  namespace: default
+  name: %s
+  namespace: %s
 spec:
   containers:
   - name: test
     image: busybox:1.35
     command: ["sleep", "3600"]
-`
+`, podName, namespace)
+}
 
-const testAccManifestConfigPod = `
+func testAccManifestConfigPod(namespace, podName string) string {
+	return fmt.Sprintf(`
 variable "raw" {
+  type = string
+}
+variable "namespace" {
+  type = string
+}
+variable "pod_name" {
   type = string
 }
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "test_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "test_pod" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Pod
 metadata:
-  name: acctest-pod
-  namespace: default
+  name: %s
+  namespace: %s
 spec:
   containers:
   - name: test
@@ -303,8 +358,11 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
+  
+  depends_on = [k8sconnect_manifest.test_namespace]
 }
-`
+`, namespace, podName, namespace)
+}
 
 // Alternative: Test namespace inference with ConfigMap (simpler than Pod)
 func TestAccManifestResource_DefaultNamespaceInference(t *testing.T) {
@@ -315,6 +373,7 @@ func TestAccManifestResource_DefaultNamespaceInference(t *testing.T) {
 		t.Skip("TF_ACC_KUBECONFIG_RAW not set, skipping")
 	}
 
+	cmName := fmt.Sprintf("acctest-config-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
@@ -323,32 +382,39 @@ func TestAccManifestResource_DefaultNamespaceInference(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				Config: testAccManifestConfigDefaultNamespace,
+				Config: testAccManifestConfigDefaultNamespace(cmName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":     config.StringVariable(raw),
+					"cm_name": config.StringVariable(cmName),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("k8sconnect_manifest.test_default_ns", "yaml_body", testConfigMapYAMLNoNamespace),
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test_default_ns", "yaml_body", testConfigMapYAMLNoNamespace(cmName)),
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_default_ns", "id"),
 					// Key test: ConfigMap with no namespace should end up in default
-					testhelpers.CheckConfigMapExists(k8sClient, "default", "acctest-config"),
+					testhelpers.CheckConfigMapExists(k8sClient, "default", cmName),
 				),
 			},
 		},
-		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, "default", "acctest-config"),
+		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, "default", cmName),
 	})
 }
 
-const testConfigMapYAMLNoNamespace = `apiVersion: v1
+func testConfigMapYAMLNoNamespace(cmName string) string {
+	return fmt.Sprintf(`apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: acctest-config
+  name: %s
 data:
   key1: value1
-`
+`, cmName)
+}
 
-const testAccManifestConfigDefaultNamespace = `
+func testAccManifestConfigDefaultNamespace(cmName string) string {
+	return fmt.Sprintf(`
 variable "raw" {
+  type = string
+}
+variable "cm_name" {
   type = string
 }
 
@@ -359,7 +425,7 @@ resource "k8sconnect_manifest" "test_default_ns" {
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: acctest-config
+  name: %s
 data:
   key1: value1
 YAML
@@ -368,7 +434,8 @@ YAML
     kubeconfig_raw = var.raw
   }
 }
-`
+`, cmName)
+}
 
 func TestAccManifestResource_DeferredAuthWithComputedEnvVars(t *testing.T) {
 	t.Parallel()
@@ -378,6 +445,8 @@ func TestAccManifestResource_DeferredAuthWithComputedEnvVars(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("deferred-auth-ns-%d", time.Now().UnixNano()%1000000)
+	cmName := fmt.Sprintf("deferred-auth-cm-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
@@ -392,14 +461,16 @@ func TestAccManifestResource_DeferredAuthWithComputedEnvVars(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				Config: testAccManifestConfigDeferredAuthWithExecEnv,
+				Config: testAccManifestConfigDeferredAuthWithExecEnv(ns, cmName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"cm_name":   config.StringVariable(cmName),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					// Verify the manifest was created successfully
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_deferred_env", "id"),
-					testhelpers.CheckConfigMapExists(k8sClient, "default", "test-deferred-auth-env"),
+					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
 					// Verify the random values made it into the exec env vars (not the YAML)
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_deferred_env", "cluster_connection.exec.env.TEST_SESSION_ID"),
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_deferred_env", "cluster_connection.exec.env.TEST_TRACE_ID"),
@@ -410,12 +481,19 @@ func TestAccManifestResource_DeferredAuthWithComputedEnvVars(t *testing.T) {
 				),
 			},
 		},
-		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, "default", "test-deferred-auth-env"),
+		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, ns, cmName),
 	})
 }
 
-const testAccManifestConfigDeferredAuthWithExecEnv = `
+func testAccManifestConfigDeferredAuthWithExecEnv(namespace, cmName string) string {
+	return fmt.Sprintf(`
 variable "raw" {
+  type = string
+}
+variable "namespace" {
+  type = string
+}
+variable "cm_name" {
   type = string
 }
 
@@ -427,13 +505,26 @@ resource "random_string" "session_id" {
 
 resource "random_uuid" "trace_id" {}
 
+resource "k8sconnect_manifest" "test_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
+
 resource "k8sconnect_manifest" "test_deferred_env" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: test-deferred-auth-env
-  namespace: default
+  name: %s
+  namespace: %s
 data:
   test: "auth-was-deferred"
   # Don't put unknown values in the YAML - that's not what we're testing
@@ -458,5 +549,8 @@ YAML
       }
     }
   }
+  
+  depends_on = [k8sconnect_manifest.test_namespace]
 }
-`
+`, namespace, cmName, namespace)
+}

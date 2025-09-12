@@ -1,4 +1,4 @@
-// internal/k8sconnect/resource/manifest/pipeline.go
+// internal/k8sconnect/resource/manifest/crud_pipeline.go
 package manifest
 
 import (

@@ -24,7 +24,7 @@ func TestAccManifestResource_Import(t *testing.T) {
 	}
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
-	namespaceName := "acctest-import-" + fmt.Sprintf("%d", time.Now().Unix())
+	namespaceName := fmt.Sprintf("import-ns-%d", time.Now().UnixNano()%1000000)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -33,7 +33,7 @@ func TestAccManifestResource_Import(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create namespace with Terraform
 			{
-				Config: testAccManifestConfigImport,
+				Config: testAccManifestConfigImport(namespaceName),
 				ConfigVariables: config.Variables{
 					"raw":            config.StringVariable(raw),
 					"namespace_name": config.StringVariable(namespaceName),
@@ -46,7 +46,7 @@ func TestAccManifestResource_Import(t *testing.T) {
 			},
 			// Step 2: Import the namespace
 			{
-				Config: testAccManifestConfigImport,
+				Config: testAccManifestConfigImport(namespaceName),
 				ConfigVariables: config.Variables{
 					"raw":            config.StringVariable(raw),
 					"namespace_name": config.StringVariable(namespaceName),
@@ -69,7 +69,8 @@ func TestAccManifestResource_Import(t *testing.T) {
 	})
 }
 
-const testAccManifestConfigImport = `
+func testAccManifestConfigImport(namespaceName string) string {
+	return fmt.Sprintf(`
 variable "raw" {
   type = string
 }
@@ -84,7 +85,7 @@ resource "k8sconnect_manifest" "test_import" {
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: ${var.namespace_name}
+  name: %s
   labels:
     test: import
     created-by: terraform-test
@@ -94,7 +95,8 @@ YAML
     kubeconfig_raw = var.raw
   }
 }
-`
+`, namespaceName)
+}
 
 func TestAccManifestResource_ImportWithManagedFields(t *testing.T) {
 	t.Parallel()
@@ -105,7 +107,8 @@ func TestAccManifestResource_ImportWithManagedFields(t *testing.T) {
 	}
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
-	configMapName := "acctest-import-fields-" + fmt.Sprintf("%d", time.Now().Unix())
+	ns := fmt.Sprintf("import-fields-ns-%d", time.Now().UnixNano()%1000000)
+	configMapName := fmt.Sprintf("import-fields-cm-%d", time.Now().UnixNano()%1000000)
 	resourceName := "k8sconnect_manifest.test_import"
 
 	resource.Test(t, resource.TestCase{
@@ -115,13 +118,14 @@ func TestAccManifestResource_ImportWithManagedFields(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create resource with Terraform
 			{
-				Config: testAccManifestConfigImportWithFields,
+				Config: testAccManifestConfigImportWithFields(ns, configMapName),
 				ConfigVariables: config.Variables{
-					"raw":  config.StringVariable(raw),
-					"name": config.StringVariable(configMapName),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"name":      config.StringVariable(configMapName),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					testhelpers.CheckConfigMapExists(k8sClient, "default", configMapName),
+					testhelpers.CheckConfigMapExists(k8sClient, ns, configMapName),
 					resource.TestCheckResourceAttrSet(resourceName, "id"),
 					resource.TestCheckResourceAttrSet(resourceName, "yaml_body"),
 					resource.TestCheckResourceAttrSet(resourceName, "managed_state_projection"),
@@ -129,14 +133,15 @@ func TestAccManifestResource_ImportWithManagedFields(t *testing.T) {
 			},
 			// Step 2: Import the same resource
 			{
-				Config: testAccManifestConfigImportWithFields,
+				Config: testAccManifestConfigImportWithFields(ns, configMapName),
 				ConfigVariables: config.Variables{
-					"raw":  config.StringVariable(raw),
-					"name": config.StringVariable(configMapName),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"name":      config.StringVariable(configMapName),
 				},
 				ResourceName:      resourceName,
 				ImportState:       true,
-				ImportStateId:     fmt.Sprintf("k3d-oidc-e2e/default/ConfigMap/%s", configMapName),
+				ImportStateId:     fmt.Sprintf("k3d-oidc-e2e/%s/ConfigMap/%s", ns, configMapName),
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
 					"imported_without_annotations", // This field is set during import
@@ -151,8 +156,12 @@ func TestAccManifestResource_ImportWithManagedFields(t *testing.T) {
 	})
 }
 
-const testAccManifestConfigImportWithFields = `
+func testAccManifestConfigImportWithFields(namespace, name string) string {
+	return fmt.Sprintf(`
 variable "raw" {
+  type = string
+}
+variable "namespace" {
   type = string
 }
 variable "name" {
@@ -161,13 +170,26 @@ variable "name" {
 
 provider "k8sconnect" {}
 
+resource "k8sconnect_manifest" "import_namespace" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: %s
+  YAML
+  
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
+
 resource "k8sconnect_manifest" "test_import" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: ConfigMap
     metadata:
-      name: ${var.name}
-      namespace: default
+      name: %s
+      namespace: %s
       labels:
         test: import
         created-by: terraform-test
@@ -182,5 +204,8 @@ resource "k8sconnect_manifest" "test_import" {
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
+  
+  depends_on = [k8sconnect_manifest.import_namespace]
 }
-`
+`, namespace, name, namespace)
+}

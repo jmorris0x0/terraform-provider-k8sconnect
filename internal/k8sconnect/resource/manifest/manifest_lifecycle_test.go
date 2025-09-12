@@ -2,9 +2,11 @@
 package manifest_test
 
 import (
+	"fmt"
 	"os"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
@@ -24,6 +26,7 @@ func TestAccManifestResource_DeleteProtection(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("delete-protected-ns-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
@@ -33,19 +36,20 @@ func TestAccManifestResource_DeleteProtection(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create resource with delete protection enabled
 			{
-				Config: testAccManifestConfigDeleteProtectionEnabled,
+				Config: testAccManifestConfigDeleteProtectionEnabled(ns),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test_protected", "delete_protection", "true"),
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_protected", "id"),
-					testhelpers.CheckNamespaceExists(k8sClient, "acctest-protected"),
+					testhelpers.CheckNamespaceExists(k8sClient, ns),
 				),
 			},
 			// Step 2: Try to destroy - should fail due to protection
 			{
-				Config: testAccManifestConfigDeleteProtectionProviderOnly,
+				Config: testAccManifestConfigDeleteProtectionProviderOnly(),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
@@ -53,23 +57,28 @@ func TestAccManifestResource_DeleteProtection(t *testing.T) {
 			},
 			// Step 3: Disable protection
 			{
-				Config: testAccManifestConfigDeleteProtectionDisabled,
+				Config: testAccManifestConfigDeleteProtectionDisabled(ns),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test_protected", "delete_protection", "false"),
-					testhelpers.CheckNamespaceExists(k8sClient, "acctest-protected"),
+					testhelpers.CheckNamespaceExists(k8sClient, ns),
 				),
 			},
 			// Step 4: Now destroy should succeed
 		},
-		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, "acctest-protected"),
+		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, ns),
 	})
 }
 
-const testAccManifestConfigDeleteProtectionEnabled = `
+func testAccManifestConfigDeleteProtectionEnabled(namespace string) string {
+	return fmt.Sprintf(`
 variable "raw" {
+  type = string
+}
+variable "namespace" {
   type = string
 }
 
@@ -80,7 +89,7 @@ resource "k8sconnect_manifest" "test_protected" {
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: acctest-protected
+  name: %s
 YAML
 
   delete_protection = true
@@ -89,10 +98,15 @@ YAML
     kubeconfig_raw = var.raw
   }
 }
-`
+`, namespace)
+}
 
-const testAccManifestConfigDeleteProtectionDisabled = `
+func testAccManifestConfigDeleteProtectionDisabled(namespace string) string {
+	return fmt.Sprintf(`
 variable "raw" {
+  type = string
+}
+variable "namespace" {
   type = string
 }
 
@@ -103,7 +117,7 @@ resource "k8sconnect_manifest" "test_protected" {
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: acctest-protected
+  name: %s
 YAML
 
   delete_protection = false
@@ -112,7 +126,8 @@ YAML
     kubeconfig_raw = var.raw
   }
 }
-`
+`, namespace)
+}
 
 func TestAccManifestResource_ConnectionChange(t *testing.T) {
 	t.Parallel()
@@ -122,6 +137,7 @@ func TestAccManifestResource_ConnectionChange(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("conn-change-ns-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
@@ -131,31 +147,35 @@ func TestAccManifestResource_ConnectionChange(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create with kubeconfig_raw
 			{
-				Config: testAccManifestConfigConnectionChange1,
+				Config: testAccManifestConfigConnectionChange1(ns),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_conn_change", "id"),
-					testhelpers.CheckNamespaceExists(k8sClient, "acctest-conn-change"),
+					testhelpers.CheckNamespaceExists(k8sClient, ns),
 					// TODO: Add check that ownership annotation exists on the K8s resource
 				),
 			},
 			// Step 2: Change connection method (same cluster)
 			{
-				Config: testAccManifestConfigConnectionChange2,
+				Config: testAccManifestConfigConnectionChange2(ns),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
 				},
 				ExpectError: regexp.MustCompile("connection change would move resource to a different cluster"),
 			},
 		},
-		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, "acctest-conn-change"),
+		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, ns),
 	})
 }
 
-const testAccManifestConfigConnectionChange1 = `
+func testAccManifestConfigConnectionChange1(namespace string) string {
+	return fmt.Sprintf(`
 variable "raw" { type = string }
+variable "namespace" { type = string }
 provider "k8sconnect" {}
 
 resource "k8sconnect_manifest" "test_conn_change" {
@@ -163,17 +183,20 @@ resource "k8sconnect_manifest" "test_conn_change" {
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: acctest-conn-change
+  name: %s
 YAML
 
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
 }
-`
+`, namespace)
+}
 
-const testAccManifestConfigConnectionChange2 = `
+func testAccManifestConfigConnectionChange2(namespace string) string {
+	return fmt.Sprintf(`
 variable "raw" { type = string }
+variable "namespace" { type = string }
 provider "k8sconnect" {}
 
 resource "k8sconnect_manifest" "test_conn_change" {
@@ -181,7 +204,7 @@ resource "k8sconnect_manifest" "test_conn_change" {
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: acctest-conn-change
+  name: %s
 YAML
 
   cluster_connection = {
@@ -189,7 +212,8 @@ YAML
     context        = "k3d-oidc-e2e"  # Explicit context (connection change)
   }
 }
-`
+`, namespace)
+}
 
 func TestAccManifestResource_ForceDestroy(t *testing.T) {
 	t.Parallel()
@@ -199,6 +223,8 @@ func TestAccManifestResource_ForceDestroy(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("force-destroy-ns-%d", time.Now().UnixNano()%1000000)
+	pvcName := fmt.Sprintf("force-destroy-pvc-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
@@ -207,35 +233,57 @@ func TestAccManifestResource_ForceDestroy(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				Config: testAccManifestConfigForceDestroy,
+				Config: testAccManifestConfigForceDestroy(ns, pvcName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"pvc_name":  config.StringVariable(pvcName),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test_force", "force_destroy", "true"),
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test_force", "delete_timeout", "30s"),
-					testhelpers.CheckPVCExists(k8sClient, "default", "test-pvc-force"),
+					testhelpers.CheckPVCExists(k8sClient, ns, pvcName),
 				),
 			},
 		},
-		CheckDestroy: testhelpers.CheckPVCDestroy(k8sClient, "default", "test-pvc-force"),
+		CheckDestroy: testhelpers.CheckPVCDestroy(k8sClient, ns, pvcName),
 	})
 }
 
-const testAccManifestConfigForceDestroy = `
+func testAccManifestConfigForceDestroy(namespace, pvcName string) string {
+	return fmt.Sprintf(`
 variable "raw" {
+  type = string
+}
+variable "namespace" {
+  type = string
+}
+variable "pvc_name" {
   type = string
 }
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "force_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "test_force" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: test-pvc-force
-  namespace: default
+  name: %s
+  namespace: %s
 spec:
   accessModes:
     - ReadWriteOnce
@@ -250,8 +298,11 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
+  
+  depends_on = [k8sconnect_manifest.force_namespace]
 }
-`
+`, namespace, pvcName, namespace)
+}
 
 func TestAccManifestResource_DeleteTimeout(t *testing.T) {
 	t.Parallel()
@@ -261,6 +312,7 @@ func TestAccManifestResource_DeleteTimeout(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("delete-timeout-ns-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
@@ -269,22 +321,27 @@ func TestAccManifestResource_DeleteTimeout(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				Config: testAccManifestConfigDeleteTimeout,
+				Config: testAccManifestConfigDeleteTimeout(ns),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test_timeout", "delete_timeout", "2m"),
-					testhelpers.CheckNamespaceExists(k8sClient, "acctest-timeout"),
+					testhelpers.CheckNamespaceExists(k8sClient, ns),
 				),
 			},
 		},
-		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, "acctest-timeout"),
+		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, ns),
 	})
 }
 
-const testAccManifestConfigDeleteTimeout = `
+func testAccManifestConfigDeleteTimeout(namespace string) string {
+	return fmt.Sprintf(`
 variable "raw" {
+  type = string
+}
+variable "namespace" {
   type = string
 }
 
@@ -295,7 +352,7 @@ resource "k8sconnect_manifest" "test_timeout" {
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: acctest-timeout
+  name: %s
 YAML
 
   delete_timeout = "2m"
@@ -304,12 +361,15 @@ YAML
     kubeconfig_raw = var.raw
   }
 }
-`
+`, namespace)
+}
 
-const testAccManifestConfigDeleteProtectionProviderOnly = `
+func testAccManifestConfigDeleteProtectionProviderOnly() string {
+	return `
 variable "raw" {
   type = string
 }
 
 provider "k8sconnect" {}
 `
+}

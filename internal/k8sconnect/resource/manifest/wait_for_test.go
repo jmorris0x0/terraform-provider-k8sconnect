@@ -31,8 +31,10 @@ func TestAccManifestResource_NoWaitNoStatus(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("no-wait-ns-%d", time.Now().UnixNano()%1000000)
+	cmName := fmt.Sprintf("no-wait-%d", time.Now().UnixNano()%1000000)
+
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
-	cmName := fmt.Sprintf("no-wait-%d", time.Now().Unix())
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -41,37 +43,55 @@ func TestAccManifestResource_NoWaitNoStatus(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create ConfigMap without wait_for
 			{
-				Config: testAccManifestConfigNoWait(cmName),
+				Config: testAccManifestConfigNoWait(ns, cmName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					testhelpers.CheckConfigMapExists(k8sClient, "default", cmName),
+					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
 					// Status should not be set (null) when no wait_for
 					resource.TestCheckNoResourceAttr("k8sconnect_manifest.test", "status"),
 				),
 			},
 			// Step 2: Re-apply with formatting changes only - should show no drift
 			{
-				Config: testAccManifestConfigNoWaitFormatted(cmName),
+				Config: testAccManifestConfigNoWaitFormatted(ns, cmName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
 				},
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: false, // No drift expected!
 			},
 		},
-		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, "default", cmName),
+		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, ns, cmName),
 	})
 }
 
-func testAccManifestConfigNoWait(name string) string {
+func testAccManifestConfigNoWait(namespace, name string) string {
 	return fmt.Sprintf(`
 variable "raw" {
   type = string
 }
+variable "namespace" {
+  type = string
+}
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "test_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "test" {
   yaml_body = <<YAML
@@ -79,7 +99,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: %s
-  namespace: default
+  namespace: %s
 data:
   key1: value1
   key2: value2
@@ -90,17 +110,35 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
+  
+  depends_on = [k8sconnect_manifest.test_namespace]
 }
-`, name)
+`, namespace, name, namespace)
 }
 
-func testAccManifestConfigNoWaitFormatted(name string) string {
+func testAccManifestConfigNoWaitFormatted(namespace, name string) string {
 	return fmt.Sprintf(`
 variable "raw" {
   type = string
 }
+variable "namespace" {
+  type = string
+}
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "test_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "test" {
   yaml_body = <<YAML
@@ -109,7 +147,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: %s
-  namespace: default
+  namespace: %s
 data:
   key1: value1
   key2: value2  # Another comment
@@ -120,8 +158,10 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
+  
+  depends_on = [k8sconnect_manifest.test_namespace]
 }
-`, name)
+`, namespace, name, namespace)
 }
 
 // TestAccManifestResource_WaitForFieldExists tests waiting for a field to exist
@@ -134,7 +174,7 @@ func TestAccManifestResource_WaitForFieldExists(t *testing.T) {
 	}
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
-	nsName := fmt.Sprintf("wait-field-%d", time.Now().Unix())
+	nsName := fmt.Sprintf("wait-field-%d", time.Now().UnixNano()%1000000)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -200,7 +240,7 @@ func TestAccManifestResource_WaitForFieldValue(t *testing.T) {
 	}
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
-	nsName := fmt.Sprintf("wait-value-%d", time.Now().Unix())
+	nsName := fmt.Sprintf("wait-value-%d", time.Now().UnixNano()%1000000)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -261,8 +301,9 @@ func TestAccManifestResource_WaitForCondition(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("wait-cond-ns-%d", time.Now().UnixNano()%1000000)
+	cmName := fmt.Sprintf("wait-cond-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
-	cmName := fmt.Sprintf("wait-cond-%d", time.Now().Unix())
 
 	// This test would need a resource that has conditions
 	// For now, using a ConfigMap as a placeholder - in real implementation
@@ -273,28 +314,45 @@ func TestAccManifestResource_WaitForCondition(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				Config: testAccManifestConfigWaitForCondition(cmName),
+				Config: testAccManifestConfigWaitForCondition(ns, cmName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					testhelpers.CheckConfigMapExists(k8sClient, "default", cmName),
+					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
 					// For a real test, check that condition was met
 					// resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.conditions.0.type", "Ready"),
 				),
 			},
 		},
-		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, "default", cmName),
+		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, ns, cmName),
 	})
 }
 
-func testAccManifestConfigWaitForCondition(name string) string {
+func testAccManifestConfigWaitForCondition(namespace, name string) string {
 	return fmt.Sprintf(`
 variable "raw" {
   type = string
 }
+variable "namespace" {
+  type = string
+}
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "test_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "test" {
   yaml_body = <<YAML
@@ -302,7 +360,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: %s
-  namespace: default
+  namespace: %s
 data:
   test: value
 YAML
@@ -315,8 +373,10 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
+  
+  depends_on = [k8sconnect_manifest.test_namespace]
 }
-`, name)
+`, namespace, name, namespace)
 }
 
 // TestAccManifestResource_WaitForPVCBinding tests waiting for PersistentVolumeClaim binding
@@ -328,8 +388,9 @@ func TestAccManifestResource_WaitForPVCBinding(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("wait-pvc-ns-%d", time.Now().UnixNano()%1000000)
+	pvcName := fmt.Sprintf("wait-pvc-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
-	pvcName := fmt.Sprintf("wait-pvc-%d", time.Now().Unix())
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -337,12 +398,13 @@ func TestAccManifestResource_WaitForPVCBinding(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				Config: testAccManifestConfigWaitForPVC(pvcName),
+				Config: testAccManifestConfigWaitForPVC(ns, pvcName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					testhelpers.CheckPVCExists(k8sClient, "default", pvcName),
+					testhelpers.CheckPVCExists(k8sClient, ns, pvcName),
 					// Verify the PVC is bound
 					resource.TestCheckResourceAttr("k8sconnect_manifest.pvc", "status.phase", "Bound"),
 					// Verify we have capacity set
@@ -352,17 +414,33 @@ func TestAccManifestResource_WaitForPVCBinding(t *testing.T) {
 				),
 			},
 		},
-		CheckDestroy: testhelpers.CheckPVCDestroy(k8sClient, "default", pvcName),
+		CheckDestroy: testhelpers.CheckPVCDestroy(k8sClient, ns, pvcName),
 	})
 }
 
-func testAccManifestConfigWaitForPVC(name string) string {
+func testAccManifestConfigWaitForPVC(namespace, name string) string {
 	return fmt.Sprintf(`
 variable "raw" {
   type = string
 }
+variable "namespace" {
+  type = string
+}
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "test_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 # First create a PersistentVolume
 resource "k8sconnect_manifest" "pv" {
@@ -394,7 +472,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: %s
-  namespace: default
+  namespace: %s
 spec:
   accessModes:
     - ReadWriteOnce
@@ -415,14 +493,14 @@ YAML
     kubeconfig_raw = var.raw
   }
 
-  depends_on = [k8sconnect_manifest.pv]
+  depends_on = [k8sconnect_manifest.pv, k8sconnect_manifest.test_namespace]
 }
 
 output "pvc_bound" {
   value = k8sconnect_manifest.pvc.status.phase == "Bound"
 }
 
-`, name, name, name)
+`, namespace, name, name, name, namespace)
 }
 
 // TestAccManifestResource_ExplicitRollout tests EXPLICIT rollout waiting for Deployments
@@ -434,8 +512,9 @@ func TestAccManifestResource_ExplicitRollout(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("explicit-rollout-ns-%d", time.Now().UnixNano()%1000000)
+	deployName := fmt.Sprintf("explicit-rollout-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
-	deployName := fmt.Sprintf("explicit-rollout-%d", time.Now().Unix())
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -443,29 +522,46 @@ func TestAccManifestResource_ExplicitRollout(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				Config: testAccManifestConfigExplicitRollout(deployName),
+				Config: testAccManifestConfigExplicitRollout(ns, deployName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					testhelpers.CheckDeploymentExists(k8sClient, "default", deployName),
+					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 					// Should wait for rollout and populate status
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.replicas", "2"),
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.readyReplicas", "2"),
 				),
 			},
 		},
-		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, "default", deployName),
+		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, ns, deployName),
 	})
 }
 
-func testAccManifestConfigExplicitRollout(name string) string {
+func testAccManifestConfigExplicitRollout(namespace, name string) string {
 	return fmt.Sprintf(`
 variable "raw" {
   type = string
 }
+variable "namespace" {
+  type = string
+}
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "test_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "test" {
   yaml_body = <<YAML
@@ -473,7 +569,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: %s
-  namespace: default
+  namespace: %s
 spec:
   replicas: 2
   selector:
@@ -499,8 +595,10 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
+  
+  depends_on = [k8sconnect_manifest.test_namespace]
 }
-`, name, name, name)
+`, namespace, name, namespace, name, name)
 }
 
 // TestAccManifestResource_NoDefaultRollout tests that Deployments DON'T automatically wait
@@ -513,8 +611,9 @@ func TestAccManifestResource_NoDefaultRollout(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("no-rollout-ns-%d", time.Now().UnixNano()%1000000)
+	deployName := fmt.Sprintf("no-rollout-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
-	deployName := fmt.Sprintf("no-rollout-%d", time.Now().Unix())
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -522,28 +621,45 @@ func TestAccManifestResource_NoDefaultRollout(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				Config: testAccManifestConfigNoRollout(deployName),
+				Config: testAccManifestConfigNoRollout(ns, deployName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					testhelpers.CheckDeploymentExists(k8sClient, "default", deployName),
+					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 					// Should NOT have status because no wait_for configured
 					resource.TestCheckNoResourceAttr("k8sconnect_manifest.test", "status"),
 				),
 			},
 		},
-		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, "default", deployName),
+		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, ns, deployName),
 	})
 }
 
-func testAccManifestConfigNoRollout(name string) string {
+func testAccManifestConfigNoRollout(namespace, name string) string {
 	return fmt.Sprintf(`
 variable "raw" {
   type = string
 }
+variable "namespace" {
+  type = string
+}
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "test_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "test" {
   yaml_body = <<YAML
@@ -551,7 +667,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: %s
-  namespace: default
+  namespace: %s
 spec:
   replicas: 1
   selector:
@@ -574,8 +690,10 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
+  
+  depends_on = [k8sconnect_manifest.test_namespace]
 }
-`, name, name, name)
+`, namespace, name, namespace, name, name)
 }
 
 // TestAccManifestResource_WaitTimeout tests timeout behavior
@@ -587,8 +705,9 @@ func TestAccManifestResource_WaitTimeout(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("wait-timeout-ns-%d", time.Now().UnixNano()%1000000)
+	cmName := fmt.Sprintf("wait-timeout-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
-	cmName := fmt.Sprintf("wait-timeout-%d", time.Now().Unix())
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -596,29 +715,46 @@ func TestAccManifestResource_WaitTimeout(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				Config: testAccManifestConfigWaitTimeout(cmName),
+				Config: testAccManifestConfigWaitTimeout(ns, cmName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					testhelpers.CheckConfigMapExists(k8sClient, "default", cmName),
+					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
 					// Resource should exist even though wait timed out
 				),
 				// Expect a warning but not an error
 				ExpectNonEmptyPlan: false,
 			},
 		},
-		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, "default", cmName),
+		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, ns, cmName),
 	})
 }
 
-func testAccManifestConfigWaitTimeout(name string) string {
+func testAccManifestConfigWaitTimeout(namespace, name string) string {
 	return fmt.Sprintf(`
 variable "raw" {
   type = string
 }
+variable "namespace" {
+  type = string
+}
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "test_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "test" {
   yaml_body = <<YAML
@@ -626,7 +762,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: %s
-  namespace: default
+  namespace: %s
 data:
   test: value
 YAML
@@ -639,8 +775,10 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
+  
+  depends_on = [k8sconnect_manifest.test_namespace]
 }
-`, name)
+`, namespace, name, namespace)
 }
 
 // TestAccManifestResource_WaitForMultipleValues tests waiting for multiple field values
@@ -652,8 +790,9 @@ func TestAccManifestResource_WaitForMultipleValues(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("multi-wait-ns-%d", time.Now().UnixNano()%1000000)
+	deployName := fmt.Sprintf("multi-wait-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
-	deployName := fmt.Sprintf("multi-wait-%d", time.Now().Unix())
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -661,29 +800,46 @@ func TestAccManifestResource_WaitForMultipleValues(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				Config: testAccManifestConfigMultipleValues(deployName),
+				Config: testAccManifestConfigMultipleValues(ns, deployName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					testhelpers.CheckDeploymentExists(k8sClient, "default", deployName),
+					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 					// Should wait for both conditions
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.replicas", "2"),
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.readyReplicas", "2"),
 				),
 			},
 		},
-		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, "default", deployName),
+		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, ns, deployName),
 	})
 }
 
-func testAccManifestConfigMultipleValues(name string) string {
+func testAccManifestConfigMultipleValues(namespace, name string) string {
 	return fmt.Sprintf(`
 variable "raw" {
   type = string
 }
+variable "namespace" {
+  type = string
+}
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "test_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "test" {
   yaml_body = <<YAML
@@ -691,7 +847,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: %s
-  namespace: default
+  namespace: %s
 spec:
   replicas: 2
   selector:
@@ -719,8 +875,10 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
+  
+  depends_on = [k8sconnect_manifest.test_namespace]
 }
-`, name, name, name)
+`, namespace, name, namespace, name, name)
 }
 
 // TestAccManifestResource_StatefulSetRollout tests EXPLICIT rollout for StatefulSets
@@ -732,8 +890,9 @@ func TestAccManifestResource_StatefulSetRollout(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("sts-rollout-ns-%d", time.Now().UnixNano()%1000000)
+	stsName := fmt.Sprintf("sts-rollout-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
-	stsName := fmt.Sprintf("sts-rollout-%d", time.Now().Unix())
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -741,29 +900,46 @@ func TestAccManifestResource_StatefulSetRollout(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				Config: testAccManifestConfigStatefulSetExplicit(stsName),
+				Config: testAccManifestConfigStatefulSetExplicit(ns, stsName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					testhelpers.CheckStatefulSetExists(k8sClient, "default", stsName),
+					testhelpers.CheckStatefulSetExists(k8sClient, ns, stsName),
 					// Should wait and populate status with explicit rollout
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.replicas", "1"),
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.readyReplicas", "1"),
 				),
 			},
 		},
-		CheckDestroy: testhelpers.CheckStatefulSetDestroy(k8sClient, "default", stsName),
+		CheckDestroy: testhelpers.CheckStatefulSetDestroy(k8sClient, ns, stsName),
 	})
 }
 
-func testAccManifestConfigStatefulSetExplicit(name string) string {
+func testAccManifestConfigStatefulSetExplicit(namespace, name string) string {
 	return fmt.Sprintf(`
 variable "raw" {
   type = string
 }
+variable "namespace" {
+  type = string
+}
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "test_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "test" {
   yaml_body = <<YAML
@@ -771,7 +947,7 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: %s
-  namespace: default
+  namespace: %s
 spec:
   serviceName: %s
   replicas: 1
@@ -798,8 +974,10 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
+  
+  depends_on = [k8sconnect_manifest.test_namespace]
 }
-`, name, name, name, name)
+`, namespace, name, namespace, name, name, name)
 }
 
 // TestAccManifestResource_EmptyWaitForNoStatus verifies empty wait_for block doesn't trigger waiting or status population
@@ -811,8 +989,9 @@ func TestAccManifestResource_EmptyWaitForNoStatus(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("empty-wait-ns-%d", time.Now().UnixNano()%1000000)
+	deployName := fmt.Sprintf("empty-wait-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
-	deployName := fmt.Sprintf("empty-wait-%d", time.Now().Unix())
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -820,12 +999,13 @@ func TestAccManifestResource_EmptyWaitForNoStatus(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				Config: testAccManifestConfigEmptyWaitFor(deployName),
+				Config: testAccManifestConfigEmptyWaitFor(ns, deployName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					testhelpers.CheckDeploymentExists(k8sClient, "default", deployName),
+					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 					// Custom check for null status - can't use TestCheckNoResourceAttr for dynamic attributes
 					func(s *terraform.State) error {
 						rs, ok := s.RootModule().Resources["k8sconnect_manifest.test"]
@@ -852,17 +1032,33 @@ func TestAccManifestResource_EmptyWaitForNoStatus(t *testing.T) {
 				),
 			},
 		},
-		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, "default", deployName),
+		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, ns, deployName),
 	})
 }
 
-func testAccManifestConfigEmptyWaitFor(name string) string {
+func testAccManifestConfigEmptyWaitFor(namespace, name string) string {
 	return fmt.Sprintf(`
 variable "raw" {
   type = string
 }
+variable "namespace" {
+  type = string
+}
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "test_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "test" {
   yaml_body = <<YAML
@@ -870,7 +1066,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: %s
-  namespace: default
+  namespace: %s
 spec:
   replicas: 1
   selector:
@@ -894,8 +1090,10 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
+  
+  depends_on = [k8sconnect_manifest.test_namespace]
 }
-`, name, name, name)
+`, namespace, name, namespace, name, name)
 }
 
 // TestAccManifestResource_StatusStability verifies status remains stable across plans
@@ -907,8 +1105,9 @@ func TestAccManifestResource_StatusStability(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("status-stable-ns-%d", time.Now().UnixNano()%1000000)
+	deployName := fmt.Sprintf("status-stable-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
-	deployName := fmt.Sprintf("status-stable-%d", time.Now().Unix())
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -917,12 +1116,13 @@ func TestAccManifestResource_StatusStability(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create Deployment with wait_for, status gets populated
 			{
-				Config: testAccManifestConfigStatusStability(deployName, "initial"),
+				Config: testAccManifestConfigStatusStability(ns, deployName, "initial"),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					testhelpers.CheckDeploymentExists(k8sClient, "default", deployName),
+					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 					// Status should be populated
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.replicas", "2"),
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.readyReplicas", "2"),
@@ -932,12 +1132,13 @@ func TestAccManifestResource_StatusStability(t *testing.T) {
 			},
 			// Step 2: Add a label (unrelated change) - status should remain stable
 			{
-				Config: testAccManifestConfigStatusStability(deployName, "updated"),
+				Config: testAccManifestConfigStatusStability(ns, deployName, "updated"),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					testhelpers.CheckDeploymentExists(k8sClient, "default", deployName),
+					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 					// Critical status values should be preserved
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.replicas", "2"),
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.readyReplicas", "2"),
@@ -948,7 +1149,7 @@ func TestAccManifestResource_StatusStability(t *testing.T) {
 					func(s *terraform.State) error {
 						// This ensures the update actually happened
 						ctx := context.Background()
-						deploy, err := k8sClient.AppsV1().Deployments("default").Get(ctx, deployName, metav1.GetOptions{})
+						deploy, err := k8sClient.AppsV1().Deployments(ns).Get(ctx, deployName, metav1.GetOptions{})
 						if err != nil {
 							return fmt.Errorf("failed to get deployment: %v", err)
 						}
@@ -963,17 +1164,33 @@ func TestAccManifestResource_StatusStability(t *testing.T) {
 				),
 			},
 		},
-		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, "default", deployName),
+		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, ns, deployName),
 	})
 }
 
-func testAccManifestConfigStatusStability(name, labelValue string) string {
+func testAccManifestConfigStatusStability(namespace, name, labelValue string) string {
 	return fmt.Sprintf(`
 variable "raw" {
   type = string
 }
+variable "namespace" {
+  type = string
+}
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "test_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "test" {
   yaml_body = <<YAML
@@ -981,7 +1198,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: %s
-  namespace: default
+  namespace: %s
   labels:
     test-label: %s
 spec:
@@ -1008,12 +1225,14 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
+  
+  depends_on = [k8sconnect_manifest.test_namespace]
 }
 
 output "stable_replicas" {
   value = k8sconnect_manifest.test.status.replicas
 }
-`, name, labelValue, name, name)
+`, namespace, name, namespace, labelValue, name, name)
 }
 
 // TestAccManifestResource_StatusRemovedWhenWaitRemoved verifies status is removed when wait_for is removed
@@ -1025,8 +1244,9 @@ func TestAccManifestResource_StatusRemovedWhenWaitRemoved(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("status-removal-ns-%d", time.Now().UnixNano()%1000000)
+	deployName := fmt.Sprintf("status-removal-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
-	deployName := fmt.Sprintf("status-removal-%d", time.Now().Unix())
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -1035,40 +1255,58 @@ func TestAccManifestResource_StatusRemovedWhenWaitRemoved(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create with wait_for, status populated
 			{
-				Config: testAccManifestConfigWithWaitFor(deployName),
+				Config: testAccManifestConfigWithWaitFor(ns, deployName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					testhelpers.CheckDeploymentExists(k8sClient, "default", deployName),
+					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 					// Status should be populated
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.replicas", "1"),
 				),
 			},
 			// Step 2: Remove wait_for, status should be removed
 			{
-				Config: testAccManifestConfigWithoutWaitFor(deployName),
+				Config: testAccManifestConfigWithoutWaitFor(ns, deployName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					testhelpers.CheckDeploymentExists(k8sClient, "default", deployName),
+					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 					// Status should be null
 					resource.TestCheckNoResourceAttr("k8sconnect_manifest.test", "status"),
 				),
 			},
 		},
-		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, "default", deployName),
+		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, ns, deployName),
 	})
 }
 
-func testAccManifestConfigWithWaitFor(name string) string {
+func testAccManifestConfigWithWaitFor(namespace, name string) string {
 	return fmt.Sprintf(`
 variable "raw" {
   type = string
 }
+variable "namespace" {
+  type = string
+}
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "test_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "test" {
   yaml_body = <<YAML
@@ -1076,7 +1314,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: %s
-  namespace: default
+  namespace: %s
 spec:
   replicas: 1
   selector:
@@ -1101,17 +1339,35 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
+  
+  depends_on = [k8sconnect_manifest.test_namespace]
 }
-`, name, name, name)
+`, namespace, name, namespace, name, name)
 }
 
-func testAccManifestConfigWithoutWaitFor(name string) string {
+func testAccManifestConfigWithoutWaitFor(namespace, name string) string {
 	return fmt.Sprintf(`
 variable "raw" {
   type = string
 }
+variable "namespace" {
+  type = string
+}
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "test_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "test" {
   yaml_body = <<YAML
@@ -1119,7 +1375,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: %s
-  namespace: default
+  namespace: %s
 spec:
   replicas: 1
   selector:
@@ -1142,8 +1398,10 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
+  
+  depends_on = [k8sconnect_manifest.test_namespace]
 }
-`, name, name, name)
+`, namespace, name, namespace, name, name)
 }
 
 // TestAccManifestResource_InvalidFieldPath tests error handling for invalid field paths
@@ -1155,8 +1413,9 @@ func TestAccManifestResource_InvalidFieldPath(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("invalid-path-ns-%d", time.Now().UnixNano()%1000000)
+	cmName := fmt.Sprintf("invalid-path-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
-	cmName := fmt.Sprintf("invalid-path-%d", time.Now().Unix())
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -1164,28 +1423,45 @@ func TestAccManifestResource_InvalidFieldPath(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				Config: testAccManifestConfigInvalidPath(cmName),
+				Config: testAccManifestConfigInvalidPath(ns, cmName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
 				},
 				// Should create resource but warn about invalid path
 				Check: resource.ComposeTestCheckFunc(
-					testhelpers.CheckConfigMapExists(k8sClient, "default", cmName),
+					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
 				),
 				ExpectNonEmptyPlan: false,
 			},
 		},
-		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, "default", cmName),
+		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, ns, cmName),
 	})
 }
 
-func testAccManifestConfigInvalidPath(name string) string {
+func testAccManifestConfigInvalidPath(namespace, name string) string {
 	return fmt.Sprintf(`
 variable "raw" {
   type = string
 }
+variable "namespace" {
+  type = string
+}
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "test_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "test" {
   yaml_body = <<YAML
@@ -1193,7 +1469,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: %s
-  namespace: default
+  namespace: %s
 data:
   test: value
 YAML
@@ -1206,6 +1482,8 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
+  
+  depends_on = [k8sconnect_manifest.test_namespace]
 }
-`, name)
+`, namespace, name, namespace)
 }

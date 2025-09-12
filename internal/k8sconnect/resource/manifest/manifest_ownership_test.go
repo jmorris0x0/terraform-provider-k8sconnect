@@ -27,6 +27,8 @@ func TestAccManifestResource_Ownership(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("ownership-ns-%d", time.Now().UnixNano()%1000000)
+	cmName := fmt.Sprintf("ownership-cm-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
@@ -35,37 +37,59 @@ func TestAccManifestResource_Ownership(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				Config: testAccManifestConfigOwnership,
+				Config: testAccManifestConfigOwnership(ns, cmName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"cm_name":   config.StringVariable(cmName),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					// ID should be 12 hex characters
 					resource.TestMatchResourceAttr("k8sconnect_manifest.test_ownership", "id",
 						regexp.MustCompile("^[a-f0-9]{12}$")),
-					testhelpers.CheckConfigMapExists(k8sClient, "default", "test-ownership"),
-					testhelpers.CheckOwnershipAnnotations(k8sClient, "default", "test-ownership"),
+					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
+					testhelpers.CheckOwnershipAnnotations(k8sClient, ns, cmName),
 				),
 			},
 		},
-		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, "default", "test-ownership"),
+		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, ns, cmName),
 	})
 }
 
-const testAccManifestConfigOwnership = `
+func testAccManifestConfigOwnership(namespace, cmName string) string {
+	return fmt.Sprintf(`
 variable "raw" {
+  type = string
+}
+variable "namespace" {
+  type = string
+}
+variable "cm_name" {
   type = string
 }
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "ownership_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "test_ownership" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: test-ownership
-  namespace: default
+  name: %s
+  namespace: %s
 data:
   key: value
 YAML
@@ -73,7 +97,10 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
-}`
+  
+  depends_on = [k8sconnect_manifest.ownership_namespace]
+}`, namespace, cmName, namespace)
+}
 
 func TestAccManifestResource_OwnershipConflict(t *testing.T) {
 	t.Parallel()
@@ -83,6 +110,8 @@ func TestAccManifestResource_OwnershipConflict(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("ownership-conflict-ns-%d", time.Now().UnixNano()%1000000)
+	cmName := fmt.Sprintf("conflict-cm-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
@@ -92,42 +121,66 @@ func TestAccManifestResource_OwnershipConflict(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Create first resource
 			{
-				Config: testAccManifestConfigOwnershipFirst,
+				Config: testAccManifestConfigOwnershipFirst(ns, cmName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"cm_name":   config.StringVariable(cmName),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					testhelpers.CheckConfigMapExists(k8sClient, "default", "test-conflict"),
-					testhelpers.CheckOwnershipAnnotations(k8sClient, "default", "test-conflict"),
+					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
+					testhelpers.CheckOwnershipAnnotations(k8sClient, ns, cmName),
 				),
 			},
 			// Try to create second resource managing same ConfigMap - should fail
 			{
-				Config: testAccManifestConfigOwnershipBoth,
+				Config: testAccManifestConfigOwnershipBoth(ns, cmName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"cm_name":   config.StringVariable(cmName),
 				},
 				ExpectError: regexp.MustCompile("resource managed by different k8sconnect resource"),
 			},
 		},
-		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, "default", "test-conflict"),
+		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, ns, cmName),
 	})
 }
 
-const testAccManifestConfigOwnershipFirst = `
+func testAccManifestConfigOwnershipFirst(namespace, cmName string) string {
+	return fmt.Sprintf(`
 variable "raw" {
+  type = string
+}
+variable "namespace" {
+  type = string
+}
+variable "cm_name" {
   type = string
 }
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "conflict_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "first" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: test-conflict
-  namespace: default
+  name: %s
+  namespace: %s
 data:
   owner: first
 YAML
@@ -135,22 +188,45 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
-}`
+  
+  depends_on = [k8sconnect_manifest.conflict_namespace]
+}`, namespace, cmName, namespace)
+}
 
-const testAccManifestConfigOwnershipBoth = `
+func testAccManifestConfigOwnershipBoth(namespace, cmName string) string {
+	return fmt.Sprintf(`
 variable "raw" {
+  type = string
+}
+variable "namespace" {
+  type = string
+}
+variable "cm_name" {
   type = string
 }
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "conflict_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "first" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: test-conflict
-  namespace: default
+  name: %s
+  namespace: %s
 data:
   owner: first
 YAML
@@ -158,6 +234,8 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
+  
+  depends_on = [k8sconnect_manifest.conflict_namespace]
 }
 
 resource "k8sconnect_manifest" "second" {
@@ -165,8 +243,8 @@ resource "k8sconnect_manifest" "second" {
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: test-conflict
-  namespace: default
+  name: %s
+  namespace: %s
 data:
   owner: second
 YAML
@@ -174,7 +252,10 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
-}`
+  
+  depends_on = [k8sconnect_manifest.conflict_namespace]
+}`, namespace, cmName, namespace, cmName, namespace)
+}
 
 func TestAccManifestResource_OwnershipImport(t *testing.T) {
 	t.Parallel()
@@ -184,6 +265,8 @@ func TestAccManifestResource_OwnershipImport(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("ownership-import-ns-%d", time.Now().UnixNano()%1000000)
+	cmName := fmt.Sprintf("import-ownership-cm-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
@@ -193,25 +276,29 @@ func TestAccManifestResource_OwnershipImport(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create ConfigMap with Terraform
 			{
-				Config: testAccManifestConfigOwnershipImport,
+				Config: testAccManifestConfigOwnershipImport(ns, cmName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"cm_name":   config.StringVariable(cmName),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestMatchResourceAttr("k8sconnect_manifest.import_test", "id",
 						regexp.MustCompile("^[a-f0-9]{12}$")),
-					testhelpers.CheckOwnershipAnnotations(k8sClient, "default", "test-import-ownership"),
+					testhelpers.CheckOwnershipAnnotations(k8sClient, ns, cmName),
 				),
 			},
 			// Step 2: Import the ConfigMap
 			{
-				Config: testAccManifestConfigOwnershipImport,
+				Config: testAccManifestConfigOwnershipImport(ns, cmName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"cm_name":   config.StringVariable(cmName),
 				},
 				ResourceName:      "k8sconnect_manifest.import_test",
 				ImportState:       true,
-				ImportStateId:     "k3d-oidc-e2e/default/ConfigMap/test-import-ownership",
+				ImportStateId:     fmt.Sprintf("k3d-oidc-e2e/%s/ConfigMap/%s", ns, cmName),
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
 					"imported_without_annotations",
@@ -224,34 +311,56 @@ func TestAccManifestResource_OwnershipImport(t *testing.T) {
 			},
 			// Step 3: Verify ownership annotations still exist after import
 			{
-				Config: testAccManifestConfigOwnershipImport,
+				Config: testAccManifestConfigOwnershipImport(ns, cmName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"cm_name":   config.StringVariable(cmName),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestMatchResourceAttr("k8sconnect_manifest.import_test", "id",
 						regexp.MustCompile("^[a-f0-9]{12}$")),
-					testhelpers.CheckOwnershipAnnotations(k8sClient, "default", "test-import-ownership"),
+					testhelpers.CheckOwnershipAnnotations(k8sClient, ns, cmName),
 				),
 			},
 		},
 	})
 }
 
-const testAccManifestConfigOwnershipImport = `
+func testAccManifestConfigOwnershipImport(namespace, cmName string) string {
+	return fmt.Sprintf(`
 variable "raw" {
+  type = string
+}
+variable "namespace" {
+  type = string
+}
+variable "cm_name" {
   type = string
 }
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "import_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "import_test" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: test-import-ownership
-  namespace: default
+  name: %s
+  namespace: %s
 data:
   key: value
 YAML
@@ -259,7 +368,10 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
-}`
+  
+  depends_on = [k8sconnect_manifest.import_namespace]
+}`, namespace, cmName, namespace)
+}
 
 func TestAccManifestResource_FieldManagerConflict(t *testing.T) {
 	t.Parallel()
@@ -269,6 +381,8 @@ func TestAccManifestResource_FieldManagerConflict(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("field-conflict-ns-%d", time.Now().UnixNano()%1000000)
+	deployName := fmt.Sprintf("field-conflict-deploy-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 	k8sClientset := k8sClient.(*kubernetes.Clientset)
 
@@ -279,20 +393,22 @@ func TestAccManifestResource_FieldManagerConflict(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create deployment with Terraform
 			{
-				Config: testAccManifestConfig_FieldConflict(false),
+				Config: testAccManifestConfig_FieldConflict(ns, deployName, false),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":         config.StringVariable(raw),
+					"namespace":   config.StringVariable(ns),
+					"deploy_name": config.StringVariable(deployName),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					testhelpers.CheckDeploymentExists(k8sClient, "default", "field-conflict-test"),
-					testhelpers.CheckDeploymentReplicaCount(k8sClientset, "default", "field-conflict-test", 2),
+					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
+					testhelpers.CheckDeploymentReplicaCount(k8sClientset, ns, deployName, 2),
 				),
 			},
 			// Step 2: Modify with kubectl to create field manager conflict
 			{
 				PreConfig: func() {
 					// Scale deployment using kubectl to create a different field manager
-					cmd := exec.Command("kubectl", "scale", "deployment", "field-conflict-test", "--replicas=3")
+					cmd := exec.Command("kubectl", "-n", ns, "scale", "deployment", deployName, "--replicas=3")
 					if err := cmd.Run(); err != nil {
 						t.Fatalf("Failed to scale deployment with kubectl: %v", err)
 					}
@@ -300,18 +416,22 @@ func TestAccManifestResource_FieldManagerConflict(t *testing.T) {
 					// Give it a moment to process
 					time.Sleep(2 * time.Second)
 				},
-				Config: testAccManifestConfig_FieldConflict(false),
+				Config: testAccManifestConfig_FieldConflict(ns, deployName, false),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":         config.StringVariable(raw),
+					"namespace":   config.StringVariable(ns),
+					"deploy_name": config.StringVariable(deployName),
 				},
 				ExpectError: regexp.MustCompile(`Field Manager Conflict`),
 			},
 
 			// Step 2b: Plan-only to check warning
 			{
-				Config: testAccManifestConfig_FieldConflictUpdate(false), // Try to change back to 4 replicas
+				Config: testAccManifestConfig_FieldConflictUpdate(ns, deployName, false), // Try to change back to 4 replicas
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":         config.StringVariable(raw),
+					"namespace":   config.StringVariable(ns),
+					"deploy_name": config.StringVariable(deployName),
 				},
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: true,
@@ -320,43 +440,66 @@ func TestAccManifestResource_FieldManagerConflict(t *testing.T) {
 			},
 			// Step 3: Try to change replicas back with Terraform (should warn about conflict)
 			{
-				Config: testAccManifestConfig_FieldConflictUpdate(false),
+				Config: testAccManifestConfig_FieldConflictUpdate(ns, deployName, false),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":         config.StringVariable(raw),
+					"namespace":   config.StringVariable(ns),
+					"deploy_name": config.StringVariable(deployName),
 				},
 				ExpectError: regexp.MustCompile(`Field Manager Conflict`),
 			},
 			// Step 4: Force the change
 			{
-				Config: testAccManifestConfig_FieldConflictUpdate(true),
+				Config: testAccManifestConfig_FieldConflictUpdate(ns, deployName, true),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":         config.StringVariable(raw),
+					"namespace":   config.StringVariable(ns),
+					"deploy_name": config.StringVariable(deployName),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					// Now should be 4 because we forced
-					testhelpers.CheckDeploymentReplicaCount(k8sClientset, "default", "field-conflict-test", 4),
+					testhelpers.CheckDeploymentReplicaCount(k8sClientset, ns, deployName, 4),
 				),
 			},
 		},
-		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, "default", "field-conflict-test"),
+		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, ns, deployName),
 	})
 }
 
-func testAccManifestConfig_FieldConflict(forceConflicts bool) string {
+func testAccManifestConfig_FieldConflict(namespace, deployName string, forceConflicts bool) string {
 	return fmt.Sprintf(`
 variable "raw" {
   type = string
 }
+variable "namespace" {
+  type = string
+}
+variable "deploy_name" {
+  type = string
+}
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "field_conflict_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "test_deployment" {
   yaml_body = <<YAML
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: field-conflict-test
-  namespace: default
+  name: %s
+  namespace: %s
 spec:
   replicas: 2
   selector:
@@ -384,25 +527,46 @@ YAML
   }
 
   force_conflicts = %t
+  
+  depends_on = [k8sconnect_manifest.field_conflict_namespace]
 }
-`, forceConflicts)
+`, namespace, deployName, namespace, forceConflicts)
 }
 
-func testAccManifestConfig_FieldConflictUpdate(forceConflicts bool) string {
+func testAccManifestConfig_FieldConflictUpdate(namespace, deployName string, forceConflicts bool) string {
 	return fmt.Sprintf(`
 variable "raw" {
   type = string
 }
+variable "namespace" {
+  type = string
+}
+variable "deploy_name" {
+  type = string
+}
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "field_conflict_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "test_deployment" {
   yaml_body = <<YAML
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: field-conflict-test
-  namespace: default
+  name: %s
+  namespace: %s
 spec:
   replicas: 4
   selector:
@@ -430,6 +594,8 @@ YAML
   }
 
   force_conflicts = %t
+  
+  depends_on = [k8sconnect_manifest.field_conflict_namespace]
 }
-`, forceConflicts)
+`, namespace, deployName, namespace, forceConflicts)
 }

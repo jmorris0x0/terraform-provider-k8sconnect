@@ -3,9 +3,11 @@ package manifest_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
@@ -27,6 +29,8 @@ func TestAccManifestResource_DriftDetection(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("drift-detection-ns-%d", time.Now().UnixNano()%1000000)
+	cmName := fmt.Sprintf("drift-test-cm-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
@@ -36,14 +40,16 @@ func TestAccManifestResource_DriftDetection(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create initial ConfigMap
 			{
-				Config: testAccManifestConfigDriftDetectionInitial,
+				Config: testAccManifestConfigDriftDetectionInitial(ns, cmName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"cm_name":   config.StringVariable(cmName),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.drift_test", "id"),
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.drift_test", "managed_state_projection"),
-					testhelpers.CheckConfigMapExists(k8sClient, "default", "drift-test-cm"),
+					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
 				),
 			},
 			// Step 2: Modify ConfigMap outside of Terraform (simulatingulating drift)
@@ -52,7 +58,7 @@ func TestAccManifestResource_DriftDetection(t *testing.T) {
 					ctx := context.Background()
 
 					// Get the current ConfigMap to preserve ownership annotations
-					cm, err := k8sClient.CoreV1().ConfigMaps("default").Get(ctx, "drift-test-cm", metav1.GetOptions{})
+					cm, err := k8sClient.CoreV1().ConfigMaps(ns).Get(ctx, cmName, metav1.GetOptions{})
 					if err != nil {
 						t.Fatalf("Failed to get ConfigMap: %v", err)
 					}
@@ -81,7 +87,7 @@ func TestAccManifestResource_DriftDetection(t *testing.T) {
 					}
 
 					// Use Update with FieldManager to ensure the change is tracked
-					_, err = k8sClient.CoreV1().ConfigMaps("default").Update(ctx, cm, metav1.UpdateOptions{
+					_, err = k8sClient.CoreV1().ConfigMaps(ns).Update(ctx, cm, metav1.UpdateOptions{
 						FieldManager: "manual-edit", // Different field manager to simulate external change
 					})
 					if err != nil {
@@ -89,50 +95,74 @@ func TestAccManifestResource_DriftDetection(t *testing.T) {
 					}
 					t.Log("✅ Modified ConfigMap outside of Terraform (simulating drift)")
 				},
-				Config: testAccManifestConfigDriftDetectionInitial,
+				Config: testAccManifestConfigDriftDetectionInitial(ns, cmName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"cm_name":   config.StringVariable(cmName),
 				},
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: true, // Should detect drift!
 			},
 			// Step 3: Verify drift is corrected by apply
 			{
-				Config: testAccManifestConfigDriftDetectionInitial,
+				Config: testAccManifestConfigDriftDetectionInitial(ns, cmName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"cm_name":   config.StringVariable(cmName),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					// Verify ConfigMap is back to original state
-					testhelpers.CheckConfigMapData(k8sClient, "default", "drift-test-cm", map[string]string{
+					testhelpers.CheckConfigMapData(k8sClient, ns, cmName, map[string]string{
 						"key1": "value1",
 						"key2": "value2",
 						"key3": "value3",
 					}),
 					// Verify annotation is back to original
-					testhelpers.CheckConfigMapAnnotation(k8sClient, "default", "drift-test-cm",
+					testhelpers.CheckConfigMapAnnotation(k8sClient, ns, cmName,
 						"example.com/team", "backend-team"),
 				),
 			},
 		},
-		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, "default", "drift-test-cm"),
+		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, ns, cmName),
 	})
 }
 
-const testAccManifestConfigDriftDetectionInitial = `
+func testAccManifestConfigDriftDetectionInitial(namespace, cmName string) string {
+	return fmt.Sprintf(`
 variable "raw" {
+  type = string
+}
+variable "namespace" {
+  type = string
+}
+variable "cm_name" {
   type = string
 }
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "drift_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "drift_test" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: drift-test-cm
-  namespace: default
+  name: %s
+  namespace: %s
   annotations:
     example.com/team: "backend-team"
 data:
@@ -146,8 +176,11 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
+  
+  depends_on = [k8sconnect_manifest.drift_namespace]
 }
-`
+`, namespace, cmName, namespace)
+}
 
 func TestAccManifestResource_NoDriftWhenNoChanges(t *testing.T) {
 	t.Parallel()
@@ -157,6 +190,8 @@ func TestAccManifestResource_NoDriftWhenNoChanges(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("no-drift-ns-%d", time.Now().UnixNano()%1000000)
+	cmName := fmt.Sprintf("no-drift-cm-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
@@ -166,20 +201,24 @@ func TestAccManifestResource_NoDriftWhenNoChanges(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create resource
 			{
-				Config: testAccManifestConfigNoDrift,
+				Config: testAccManifestConfigNoDrift(ns, cmName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"cm_name":   config.StringVariable(cmName),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.no_drift", "id"),
-					testhelpers.CheckConfigMapExists(k8sClient, "default", "no-drift-cm"),
+					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
 				),
 			},
 			// Step 2: Run plan without any changes - should be empty
 			{
-				Config: testAccManifestConfigNoDrift,
+				Config: testAccManifestConfigNoDrift(ns, cmName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"cm_name":   config.StringVariable(cmName),
 				},
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: false, // No drift expected!
@@ -188,7 +227,7 @@ func TestAccManifestResource_NoDriftWhenNoChanges(t *testing.T) {
 			{
 				PreConfig: func() {
 					ctx := context.Background()
-					cm, err := k8sClient.CoreV1().ConfigMaps("default").Get(ctx, "no-drift-cm", metav1.GetOptions{})
+					cm, err := k8sClient.CoreV1().ConfigMaps(ns).Get(ctx, cmName, metav1.GetOptions{})
 					if err != nil {
 						t.Fatalf("Failed to get ConfigMap: %v", err)
 					}
@@ -205,38 +244,60 @@ func TestAccManifestResource_NoDriftWhenNoChanges(t *testing.T) {
 					cm.Data["unmanaged_key"] = "not-in-terraform"
 					cm.Labels["added-by"] = "external-controller"
 
-					_, err = k8sClient.CoreV1().ConfigMaps("default").Update(ctx, cm, metav1.UpdateOptions{})
+					_, err = k8sClient.CoreV1().ConfigMaps(ns).Update(ctx, cm, metav1.UpdateOptions{})
 					if err != nil {
 						t.Fatalf("Failed to update ConfigMap: %v", err)
 					}
 					t.Log("✅ Added unmanaged fields to ConfigMap")
 				},
-				Config: testAccManifestConfigNoDrift,
+				Config: testAccManifestConfigNoDrift(ns, cmName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"cm_name":   config.StringVariable(cmName),
 				},
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: false, // Still no drift - we don't manage those fields!
 			},
 		},
-		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, "default", "no-drift-cm"),
+		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, ns, cmName),
 	})
 }
 
-const testAccManifestConfigNoDrift = `
+func testAccManifestConfigNoDrift(namespace, cmName string) string {
+	return fmt.Sprintf(`
 variable "raw" {
+  type = string
+}
+variable "namespace" {
+  type = string
+}
+variable "cm_name" {
   type = string
 }
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "no_drift_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "no_drift" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: no-drift-cm
-  namespace: default
+  name: %s
+  namespace: %s
 data:
   config: |
     setting1=value1
@@ -246,8 +307,11 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
+  
+  depends_on = [k8sconnect_manifest.no_drift_namespace]
 }
-`
+`, namespace, cmName, namespace)
+}
 
 func TestAccManifestResource_DriftDetectionNestedStructures(t *testing.T) {
 	t.Parallel()
@@ -257,6 +321,8 @@ func TestAccManifestResource_DriftDetectionNestedStructures(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("drift-nested-ns-%d", time.Now().UnixNano()%1000000)
+	deployName := fmt.Sprintf("drift-deployment-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
@@ -266,20 +332,22 @@ func TestAccManifestResource_DriftDetectionNestedStructures(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create Deployment
 			{
-				Config: testAccManifestConfigDriftDetectionDeployment,
+				Config: testAccManifestConfigDriftDetectionDeployment(ns, deployName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":         config.StringVariable(raw),
+					"namespace":   config.StringVariable(ns),
+					"deploy_name": config.StringVariable(deployName),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.drift_deployment", "id"),
-					testhelpers.CheckDeploymentExists(k8sClient, "default", "drift-test-deployment"),
+					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 				),
 			},
 			// Step 2: Modify nested fields
 			{
 				PreConfig: func() {
 					ctx := context.Background()
-					dep, err := k8sClient.AppsV1().Deployments("default").Get(ctx, "drift-test-deployment", metav1.GetOptions{})
+					dep, err := k8sClient.AppsV1().Deployments(ns).Get(ctx, deployName, metav1.GetOptions{})
 					if err != nil {
 						t.Fatalf("Failed to get Deployment: %v", err)
 					}
@@ -293,38 +361,60 @@ func TestAccManifestResource_DriftDetectionNestedStructures(t *testing.T) {
 					dep.Spec.Template.Spec.Containers[0].Env = append(dep.Spec.Template.Spec.Containers[0].Env,
 						v1.EnvVar{Name: "ADDED_VAR", Value: "added"})
 
-					_, err = k8sClient.AppsV1().Deployments("default").Update(ctx, dep, metav1.UpdateOptions{})
+					_, err = k8sClient.AppsV1().Deployments(ns).Update(ctx, dep, metav1.UpdateOptions{})
 					if err != nil {
 						t.Fatalf("Failed to update Deployment: %v", err)
 					}
 					t.Log("✅ Modified Deployment nested fields")
 				},
-				Config: testAccManifestConfigDriftDetectionDeployment,
+				Config: testAccManifestConfigDriftDetectionDeployment(ns, deployName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":         config.StringVariable(raw),
+					"namespace":   config.StringVariable(ns),
+					"deploy_name": config.StringVariable(deployName),
 				},
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: true, // Should detect drift in image and replicas
 			},
 		},
-		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, "default", "drift-test-deployment"),
+		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, ns, deployName),
 	})
 }
 
-const testAccManifestConfigDriftDetectionDeployment = `
+func testAccManifestConfigDriftDetectionDeployment(namespace, deployName string) string {
+	return fmt.Sprintf(`
 variable "raw" {
+  type = string
+}
+variable "namespace" {
+  type = string
+}
+variable "deploy_name" {
   type = string
 }
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "drift_deployment_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "drift_deployment" {
   yaml_body = <<YAML
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: drift-test-deployment
-  namespace: default
+  name: %s
+  namespace: %s
 spec:
   replicas: 3
   selector:
@@ -345,8 +435,11 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
+  
+  depends_on = [k8sconnect_manifest.drift_deployment_namespace]
 }
-`
+`, namespace, deployName, namespace)
+}
 
 func TestAccManifestResource_DriftDetectionArrays(t *testing.T) {
 	t.Parallel()
@@ -356,6 +449,8 @@ func TestAccManifestResource_DriftDetectionArrays(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("drift-arrays-ns-%d", time.Now().UnixNano()%1000000)
+	svcName := fmt.Sprintf("drift-service-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
@@ -365,20 +460,22 @@ func TestAccManifestResource_DriftDetectionArrays(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create Service with multiple ports
 			{
-				Config: testAccManifestConfigDriftDetectionService,
+				Config: testAccManifestConfigDriftDetectionService(ns, svcName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"svc_name":  config.StringVariable(svcName),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.drift_service", "id"),
-					testhelpers.CheckServiceExists(k8sClient, "default", "drift-test-service"),
+					testhelpers.CheckServiceExists(k8sClient, ns, svcName),
 				),
 			},
 			// Step 2: Modify array elements
 			{
 				PreConfig: func() {
 					ctx := context.Background()
-					svc, err := k8sClient.CoreV1().Services("default").Get(ctx, "drift-test-service", metav1.GetOptions{})
+					svc, err := k8sClient.CoreV1().Services(ns).Get(ctx, svcName, metav1.GetOptions{})
 					if err != nil {
 						t.Fatalf("Failed to get Service: %v", err)
 					}
@@ -392,38 +489,60 @@ func TestAccManifestResource_DriftDetectionArrays(t *testing.T) {
 						Protocol: v1.ProtocolTCP,
 					})
 
-					_, err = k8sClient.CoreV1().Services("default").Update(ctx, svc, metav1.UpdateOptions{})
+					_, err = k8sClient.CoreV1().Services(ns).Update(ctx, svc, metav1.UpdateOptions{})
 					if err != nil {
 						t.Fatalf("Failed to update Service: %v", err)
 					}
 					t.Log("✅ Modified Service ports array")
 				},
-				Config: testAccManifestConfigDriftDetectionService,
+				Config: testAccManifestConfigDriftDetectionService(ns, svcName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"svc_name":  config.StringVariable(svcName),
 				},
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: true, // Should detect port change
 			},
 		},
-		CheckDestroy: testhelpers.CheckServiceDestroy(k8sClient, "default", "drift-test-service"),
+		CheckDestroy: testhelpers.CheckServiceDestroy(k8sClient, ns, svcName),
 	})
 }
 
-const testAccManifestConfigDriftDetectionService = `
+func testAccManifestConfigDriftDetectionService(namespace, svcName string) string {
+	return fmt.Sprintf(`
 variable "raw" {
+  type = string
+}
+variable "namespace" {
+  type = string
+}
+variable "svc_name" {
   type = string
 }
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "drift_service_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "drift_service" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Service
 metadata:
-  name: drift-test-service
-  namespace: default
+  name: %s
+  namespace: %s
 spec:
   selector:
     app: drift-test
@@ -441,5 +560,8 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
+  
+  depends_on = [k8sconnect_manifest.drift_service_namespace]
 }
-`
+`, namespace, svcName, namespace)
+}

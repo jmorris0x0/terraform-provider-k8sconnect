@@ -2,8 +2,10 @@
 package manifest_test
 
 import (
+	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
@@ -22,6 +24,8 @@ func TestAccManifestResource_QuantityNormalization(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("quantity-norm-ns-%d", time.Now().UnixNano()%1000000)
+	quotaName := fmt.Sprintf("test-quantities-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
@@ -30,9 +34,11 @@ func TestAccManifestResource_QuantityNormalization(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				Config: testAccManifestConfigResourceQuota,
+				Config: testAccManifestConfigResourceQuota(ns, quotaName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":        config.StringVariable(raw),
+					"namespace":  config.StringVariable(ns),
+					"quota_name": config.StringVariable(quotaName),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					// Initial apply should succeed
@@ -42,32 +48,54 @@ func TestAccManifestResource_QuantityNormalization(t *testing.T) {
 			},
 			{
 				// CRITICAL TEST: Re-apply with same config should show no changes
-				Config: testAccManifestConfigResourceQuota,
+				Config: testAccManifestConfigResourceQuota(ns, quotaName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":        config.StringVariable(raw),
+					"namespace":  config.StringVariable(ns),
+					"quota_name": config.StringVariable(quotaName),
 				},
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: false, // Verifies no drift from quantity normalization!
 			},
 		},
-		CheckDestroy: testhelpers.CheckResourceQuotaDestroy(k8sClient, "default", "test-quantities"),
+		CheckDestroy: testhelpers.CheckResourceQuotaDestroy(k8sClient, ns, quotaName),
 	})
 }
 
-const testAccManifestConfigResourceQuota = `
+func testAccManifestConfigResourceQuota(namespace, quotaName string) string {
+	return fmt.Sprintf(`
 variable "raw" {
+  type = string
+}
+variable "namespace" {
+  type = string
+}
+variable "quota_name" {
   type = string
 }
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "quota_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "test_quota" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: ResourceQuota
 metadata:
-  name: test-quantities
-  namespace: default
+  name: %s
+  namespace: %s
 spec:
   hard:
     requests.memory: "2Gi"      # K8s normalizes to "2147483648"
@@ -83,8 +111,11 @@ YAML
   }
 
   delete_timeout = "30s" # ResourceQuotas delete quickly
+  
+  depends_on = [k8sconnect_manifest.quota_namespace]
 }
-`
+`, namespace, quotaName, namespace)
+}
 
 func TestAccManifestResource_PVCQuantityNormalization(t *testing.T) {
 	t.Parallel()
@@ -94,6 +125,8 @@ func TestAccManifestResource_PVCQuantityNormalization(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("pvc-quantity-ns-%d", time.Now().UnixNano()%1000000)
+	pvcName := fmt.Sprintf("test-pvc-quantity-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
@@ -102,20 +135,24 @@ func TestAccManifestResource_PVCQuantityNormalization(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				Config: testAccManifestConfigPVCQuantity,
+				Config: testAccManifestConfigPVCQuantity(ns, pvcName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"pvc_name":  config.StringVariable(pvcName),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_pvc_quantity", "id"),
-					testhelpers.CheckPVCExists(k8sClient, "default", "test-pvc-quantity"),
+					testhelpers.CheckPVCExists(k8sClient, ns, pvcName),
 				),
 			},
 			{
 				// Re-apply should show no changes despite quantity normalization
-				Config: testAccManifestConfigPVCQuantity,
+				Config: testAccManifestConfigPVCQuantity(ns, pvcName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"pvc_name":  config.StringVariable(pvcName),
 				},
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: false,
@@ -124,20 +161,40 @@ func TestAccManifestResource_PVCQuantityNormalization(t *testing.T) {
 	})
 }
 
-const testAccManifestConfigPVCQuantity = `
+func testAccManifestConfigPVCQuantity(namespace, pvcName string) string {
+	return fmt.Sprintf(`
 variable "raw" {
+  type = string
+}
+variable "namespace" {
+  type = string
+}
+variable "pvc_name" {
   type = string
 }
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "pvc_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "test_pvc_quantity" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: test-pvc-quantity
-  namespace: default
+  name: %s
+  namespace: %s
 spec:
   accessModes:
     - ReadWriteOnce
@@ -149,8 +206,11 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
+  
+  depends_on = [k8sconnect_manifest.pvc_namespace]
 }
-`
+`, namespace, pvcName, namespace)
+}
 
 func TestAccManifestResource_ContainerResourcesNormalization(t *testing.T) {
 	t.Parallel()
@@ -160,6 +220,8 @@ func TestAccManifestResource_ContainerResourcesNormalization(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
 	}
 
+	ns := fmt.Sprintf("container-resources-ns-%d", time.Now().UnixNano()%1000000)
+	deployName := fmt.Sprintf("test-resources-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
@@ -168,9 +230,11 @@ func TestAccManifestResource_ContainerResourcesNormalization(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				Config: testAccManifestConfigDeploymentResources,
+				Config: testAccManifestConfigDeploymentResources(ns, deployName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":         config.StringVariable(raw),
+					"namespace":   config.StringVariable(ns),
+					"deploy_name": config.StringVariable(deployName),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_deployment", "id"),
@@ -178,32 +242,54 @@ func TestAccManifestResource_ContainerResourcesNormalization(t *testing.T) {
 			},
 			{
 				// Verify no drift from CPU/memory normalization
-				Config: testAccManifestConfigDeploymentResources,
+				Config: testAccManifestConfigDeploymentResources(ns, deployName),
 				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
+					"raw":         config.StringVariable(raw),
+					"namespace":   config.StringVariable(ns),
+					"deploy_name": config.StringVariable(deployName),
 				},
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: false,
 			},
 		},
-		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, "default", "test-resources"),
+		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, ns, deployName),
 	})
 }
 
-const testAccManifestConfigDeploymentResources = `
+func testAccManifestConfigDeploymentResources(namespace, deployName string) string {
+	return fmt.Sprintf(`
 variable "raw" {
+  type = string
+}
+variable "namespace" {
+  type = string
+}
+variable "deploy_name" {
   type = string
 }
 
 provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "deploy_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
 
 resource "k8sconnect_manifest" "test_deployment" {
   yaml_body = <<YAML
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: test-resources
-  namespace: default
+  name: %s
+  namespace: %s
 spec:
   replicas: 1
   selector:
@@ -229,5 +315,8 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
+  
+  depends_on = [k8sconnect_manifest.deploy_namespace]
 }
-`
+`, namespace, deployName, namespace)
+}
