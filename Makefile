@@ -246,7 +246,6 @@ coverage: oidc-setup
 	go tool cover -html=$$PROFILE -o coverage.html ; \
 	echo "HTML report written to ./coverage.html"
 
-
 .PHONY: fix-headers
 fix-headers: ## Fix file path header comments in all Go files
 	@echo "🔧 Fixing file path headers..."
