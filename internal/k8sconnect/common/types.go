@@ -7,16 +7,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
-	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/factory"
 )
-
-// ConnectionConfig contains the connection resolver and client factory
-// that are passed from the provider to resources
-type ConnectionConfig struct {
-	ConnectionResolver *auth.ConnectionResolver
-	ClientFactory      factory.ClientFactory
-}
 
 // ConvertToAttrValue converts arbitrary Go data (typically from Kubernetes unstructured objects)
 // to Terraform framework attr.Value types. This enables proper dot notation access
