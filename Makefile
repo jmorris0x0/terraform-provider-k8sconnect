@@ -152,6 +152,8 @@ testacc: oidc-setup
 		tfenv install $$TF_VERSION || true; \
 		tfenv use $$TF_VERSION || true; \
 	fi; \
+	TEST_FILTER="$${TEST:-TestAcc}"; \
+	echo "Running tests matching: $$TEST_FILTER"; \
 	export \
 	  TF_ACC=1 \
 	  TF_ACC_K8S_HOST="$$(cat $(TESTBUILD_DIR)/cluster-endpoint.txt)" \
@@ -169,7 +171,7 @@ testacc: oidc-setup
 	echo "TF_ACC_K8S_CLIENT_CERT=$$(echo $$TF_ACC_K8S_CLIENT_CERT | cut -c1-20)..."; \
 	echo "TF_ACC_K8S_CLIENT_KEY=$$(echo $$TF_ACC_K8S_CLIENT_KEY | cut -c1-20)..."; \
 	echo "Terraform version: $$(terraform version -json | jq -r .terraform_version)"; \
-	go test -cover -v ./internal/k8sconnect/... -timeout 30m -run "TestAcc"
+	go test -cover -v ./internal/k8sconnect/... -timeout 30m -run "$$TEST_FILTER"
 
 .PHONY: clean
 clean:
