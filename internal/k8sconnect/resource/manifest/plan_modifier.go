@@ -139,9 +139,6 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 		// This is an UPDATE operation
 		if !resp.Diagnostics.HasError() {
 			// Handle status field planning based on wait_for configuration
-			// In ModifyPlan function, replace the entire status handling section with:
-
-			// Handle status field planning based on wait_for configuration
 			if !req.State.Raw.IsNull() {
 				// UPDATE operation
 				var stateData manifestResourceModel
