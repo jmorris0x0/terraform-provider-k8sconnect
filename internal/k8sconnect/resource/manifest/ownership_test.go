@@ -1,4 +1,4 @@
-// internal/k8sconnect/resource/manifest/manifest_ownership_test.go
+// internal/k8sconnect/resource/manifest/ownership_test.go
 package manifest_test
 
 import (

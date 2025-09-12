@@ -1,4 +1,4 @@
-// internal/k8sconnect/resource/manifest/manifest_unit_test.go
+// internal/k8sconnect/resource/manifest/unit_test.go
 package manifest
 
 import (

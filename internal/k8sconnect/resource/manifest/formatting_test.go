@@ -1,4 +1,4 @@
-// internal/k8sconnect/resource/manifest/manifest_formatting_test.go
+// internal/k8sconnect/resource/manifest/formatting_test.go
 package manifest_test
 
 import (

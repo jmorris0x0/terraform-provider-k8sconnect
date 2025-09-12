@@ -1,4 +1,4 @@
-// internal/k8sconnect/resource/manifest/manifest_quantity_test.go
+// internal/k8sconnect/resource/manifest/quantity_test.go
 package manifest_test
 
 import (

@@ -1,4 +1,4 @@
-// internal/k8sconnect/resource/manifest/manifest_drift_test.go
+// internal/k8sconnect/resource/manifest/drift_test.go
 package manifest_test
 
 import (
