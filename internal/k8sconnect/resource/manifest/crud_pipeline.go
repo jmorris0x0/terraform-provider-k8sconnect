@@ -49,7 +49,7 @@ func (p *OperationPipeline) PrepareContext(
 		Data: data,
 	}
 
-	// Step 1: Resolve connection (handles provider fallback)
+	// Step 1: Resolve connection
 	conn, err := p.resolveEffectiveConnection(ctx, data, requireConnection)
 	if err != nil {
 		return nil, err
