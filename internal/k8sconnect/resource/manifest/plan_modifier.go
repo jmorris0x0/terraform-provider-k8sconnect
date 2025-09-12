@@ -139,66 +139,99 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 		// This is an UPDATE operation
 		if !resp.Diagnostics.HasError() {
 			// Handle status field planning based on wait_for configuration
-			if !stateData.Status.IsNull() {
-				// We have existing status - check what should happen to it
-				if plannedData.WaitFor.IsNull() {
-					// wait_for was completely removed - status should be cleared
-					plannedData.Status = types.DynamicNull()
-					tflog.Debug(ctx, "UPDATE: wait_for removed, status will be cleared")
-				} else {
-					// wait_for still exists - check if it has actual conditions
-					var waitConfig waitForModel
-					diags := plannedData.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
+			// In ModifyPlan function, replace the entire status handling section with:
 
-					if diags.HasError() {
-						// Can't parse wait_for, preserve status for stability
-						plannedData.Status = stateData.Status
-						tflog.Debug(ctx, "UPDATE: Cannot parse wait_for, preserving status")
-					} else {
-						// Check if ANY actual wait condition is configured
-						hasWaitConditions := (!waitConfig.Field.IsNull() && waitConfig.Field.ValueString() != "") ||
-							!waitConfig.FieldValue.IsNull() ||
-							(!waitConfig.Condition.IsNull() && waitConfig.Condition.ValueString() != "") ||
-							(!waitConfig.Rollout.IsNull() && waitConfig.Rollout.ValueBool())
+			// Handle status field planning based on wait_for configuration
+			if !req.State.Raw.IsNull() {
+				// UPDATE operation
+				var stateData manifestResourceModel
+				diags := req.State.Get(ctx, &stateData)
+				resp.Diagnostics.Append(diags...)
 
-						if hasWaitConditions {
-							// Real wait conditions exist - preserve status (it will be updated after waiting)
-							plannedData.Status = stateData.Status
-							tflog.Debug(ctx, "UPDATE: wait_for has actual conditions, preserving status for update")
-						} else {
-							// Empty wait_for block - clear status
+				if !resp.Diagnostics.HasError() {
+					if !stateData.Status.IsNull() {
+						// We have existing status
+						if plannedData.WaitFor.IsNull() {
+							// wait_for was removed - clear status
 							plannedData.Status = types.DynamicNull()
-							tflog.Debug(ctx, "UPDATE: wait_for has no actual conditions, status will be cleared")
+							tflog.Debug(ctx, "UPDATE: wait_for removed, status will be cleared")
+						} else {
+							// Parse wait config to check type
+							var waitConfig waitForModel
+							diags := plannedData.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
+
+							if diags.HasError() {
+								// Can't parse wait_for, clear status to be safe
+								plannedData.Status = types.DynamicNull()
+								tflog.Debug(ctx, "UPDATE: Cannot parse wait_for, clearing status")
+							} else {
+								// Only field waits maintain status
+								isFieldWait := !waitConfig.Field.IsNull() && waitConfig.Field.ValueString() != ""
+
+								if isFieldWait {
+									// Preserve status - will be updated after wait
+									plannedData.Status = stateData.Status
+									tflog.Debug(ctx, "UPDATE: field wait configured, preserving status for update")
+								} else {
+									// Non-field wait - clear status
+									plannedData.Status = types.DynamicNull()
+									tflog.Debug(ctx, "UPDATE: non-field wait, status will be cleared")
+								}
+							}
+						}
+					} else {
+						// No existing status
+						if !plannedData.WaitFor.IsNull() {
+							var waitConfig waitForModel
+							diags := plannedData.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
+
+							if !diags.HasError() {
+								isFieldWait := !waitConfig.Field.IsNull() && waitConfig.Field.ValueString() != ""
+								if isFieldWait {
+									// Only field waits get unknown status
+									plannedData.Status = types.DynamicUnknown()
+									tflog.Debug(ctx, "UPDATE: field wait will populate status")
+								} else {
+									// Non-field waits stay null
+									plannedData.Status = types.DynamicNull()
+									tflog.Debug(ctx, "UPDATE: non-field wait, status stays null")
+								}
+							} else {
+								plannedData.Status = types.DynamicNull()
+							}
+						} else {
+							plannedData.Status = types.DynamicNull()
+							tflog.Debug(ctx, "UPDATE: No wait_for configured, status will be null")
 						}
 					}
 				}
-			} else if !plannedData.WaitFor.IsNull() {
-				// No existing status, but wait_for is configured
-				var waitConfig waitForModel
-				diags := plannedData.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
+			} else {
+				// CREATE operation
+				if !plannedData.WaitFor.IsNull() {
+					var waitConfig waitForModel
+					diags := plannedData.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
 
-				if diags.HasError() {
-					plannedData.Status = types.DynamicUnknown()
-					tflog.Debug(ctx, "UPDATE: Cannot parse wait_for, marking status as unknown")
-				} else {
-					// Check if ANY actual wait condition is configured
-					hasWaitConditions := (!waitConfig.Field.IsNull() && waitConfig.Field.ValueString() != "") ||
-						!waitConfig.FieldValue.IsNull() ||
-						(!waitConfig.Condition.IsNull() && waitConfig.Condition.ValueString() != "") ||
-						(!waitConfig.Rollout.IsNull() && waitConfig.Rollout.ValueBool())
+					if !diags.HasError() {
+						// Check if this is a field wait
+						isFieldWait := !waitConfig.Field.IsNull() && waitConfig.Field.ValueString() != ""
 
-					if hasWaitConditions {
-						plannedData.Status = types.DynamicUnknown()
-						tflog.Debug(ctx, "UPDATE: wait_for has actual conditions, marking status as unknown")
+						if isFieldWait {
+							// Only field waits populate status
+							plannedData.Status = types.DynamicUnknown()
+							tflog.Debug(ctx, "CREATE: field wait will populate status")
+						} else {
+							// All other wait types don't populate status
+							plannedData.Status = types.DynamicNull()
+							tflog.Debug(ctx, "CREATE: non-field wait, no status")
+						}
 					} else {
 						plannedData.Status = types.DynamicNull()
-						tflog.Debug(ctx, "UPDATE: wait_for has no actual conditions, status will be null")
+						tflog.Debug(ctx, "CREATE: Cannot parse wait_for, no status")
 					}
+				} else {
+					plannedData.Status = types.DynamicNull()
+					tflog.Debug(ctx, "CREATE: No wait_for configured, status will be null")
 				}
-			} else {
-				// No existing status and no wait_for
-				plannedData.Status = types.DynamicNull()
-				tflog.Debug(ctx, "UPDATE: No wait_for configured, status will be null")
 			}
 		}
 	} else {

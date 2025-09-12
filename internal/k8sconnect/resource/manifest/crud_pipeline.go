@@ -160,6 +160,21 @@ func (p *OperationPipeline) UpdateStatus(rc *ResourceContext, waited bool) error
 		return nil
 	}
 
+	// Parse wait configuration
+	var waitConfig waitForModel
+	diags := rc.Data.WaitFor.As(rc.Ctx, &waitConfig, basetypes.ObjectAsOptions{})
+	if diags.HasError() {
+		rc.Data.Status = types.DynamicNull()
+		return nil
+	}
+
+	// Only field waits populate status
+	if waitConfig.Field.IsNull() || waitConfig.Field.ValueString() == "" {
+		rc.Data.Status = types.DynamicNull()
+		tflog.Debug(rc.Ctx, "Not populating status - not a field wait")
+		return nil
+	}
+
 	// Get current state from cluster
 	currentObj, err := rc.Client.Get(rc.Ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName())
 	if err != nil {
@@ -168,20 +183,32 @@ func (p *OperationPipeline) UpdateStatus(rc *ResourceContext, waited bool) error
 		return nil
 	}
 
-	// Extract and convert status
+	// Extract and prune status
 	if statusRaw, found, _ := unstructured.NestedMap(currentObj.Object, "status"); found && len(statusRaw) > 0 {
-		statusValue, err := common.ConvertToAttrValue(rc.Ctx, statusRaw)
-		if err != nil {
-			tflog.Warn(rc.Ctx, "Failed to convert status", map[string]interface{}{"error": err.Error()})
-			rc.Data.Status = types.DynamicNull()
+		// PRUNE to only the waited-for field
+		prunedStatus := pruneStatusToField(statusRaw, waitConfig.Field.ValueString())
+
+		if prunedStatus != nil {
+			tflog.Debug(rc.Ctx, "Pruned status to waited field", map[string]interface{}{
+				"field": waitConfig.Field.ValueString(),
+			})
+
+			statusValue, err := common.ConvertToAttrValue(rc.Ctx, prunedStatus)
+			if err != nil {
+				tflog.Warn(rc.Ctx, "Failed to convert pruned status", map[string]interface{}{"error": err.Error()})
+				rc.Data.Status = types.DynamicNull()
+			} else {
+				rc.Data.Status = types.DynamicValue(statusValue)
+			}
 		} else {
-			rc.Data.Status = types.DynamicValue(statusValue)
+			tflog.Warn(rc.Ctx, "Field not found in status", map[string]interface{}{
+				"field": waitConfig.Field.ValueString(),
+			})
+			rc.Data.Status = types.DynamicNull()
 		}
 	} else {
-		// No status but we waited - set empty map
-		emptyStatus := map[string]interface{}{}
-		statusValue, _ := common.ConvertToAttrValue(rc.Ctx, emptyStatus)
-		rc.Data.Status = types.DynamicValue(statusValue)
+		// No status in K8s resource
+		rc.Data.Status = types.DynamicNull()
 	}
 
 	return nil

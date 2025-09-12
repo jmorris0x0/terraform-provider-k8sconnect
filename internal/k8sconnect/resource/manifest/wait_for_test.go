@@ -254,8 +254,8 @@ func TestAccManifestResource_WaitForFieldValue(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckNamespaceExists(k8sClient, nsName),
-					// Should have waited for Active phase
-					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.phase", "Active"),
+					// Should have waited for Active phase but not populated status
+					resource.TestCheckNoResourceAttr("k8sconnect_manifest.test", "status"),
 				),
 			},
 		},
@@ -405,12 +405,8 @@ func TestAccManifestResource_WaitForPVCBinding(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckPVCExists(k8sClient, ns, pvcName),
-					// Verify the PVC is bound
-					resource.TestCheckResourceAttr("k8sconnect_manifest.pvc", "status.phase", "Bound"),
-					// Verify we have capacity set
-					resource.TestCheckResourceAttr("k8sconnect_manifest.pvc", "status.capacity.storage", "1Gi"),
-					// Check output
-					resource.TestCheckOutput("pvc_bound", "true"),
+					// No status check - field_value doesn't populate status
+					resource.TestCheckNoResourceAttr("k8sconnect_manifest.pvc", "status"),
 				),
 			},
 		},
@@ -496,10 +492,6 @@ YAML
   depends_on = [k8sconnect_manifest.pv, k8sconnect_manifest.test_namespace]
 }
 
-output "pvc_bound" {
-  value = k8sconnect_manifest.pvc.status.phase == "Bound"
-}
-
 `, namespace, name, name, name, namespace)
 }
 
@@ -529,9 +521,8 @@ func TestAccManifestResource_ExplicitRollout(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
-					// Should wait for rollout and populate status
-					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.replicas", "2"),
-					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.readyReplicas", "2"),
+					// No status check - rollout doesn't populate status
+					resource.TestCheckNoResourceAttr("k8sconnect_manifest.test", "status"),
 				),
 			},
 		},
@@ -723,6 +714,8 @@ func TestAccManifestResource_WaitTimeout(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
 					// Resource should exist even though wait timed out
+					// Status should be null since field doesn't exist
+					resource.TestCheckNoResourceAttr("k8sconnect_manifest.test", "status"),
 				),
 				// Expect a warning but not an error
 				ExpectNonEmptyPlan: false,
@@ -807,9 +800,8 @@ func TestAccManifestResource_WaitForMultipleValues(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
-					// Should wait for both conditions
-					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.replicas", "2"),
-					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.readyReplicas", "2"),
+					// No status check - field_value doesn't populate status
+					resource.TestCheckNoResourceAttr("k8sconnect_manifest.test", "status"),
 				),
 			},
 		},
@@ -907,9 +899,8 @@ func TestAccManifestResource_StatefulSetRollout(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckStatefulSetExists(k8sClient, ns, stsName),
-					// Should wait and populate status with explicit rollout
-					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.replicas", "1"),
-					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.readyReplicas", "1"),
+					// No status check - rollout doesn't populate status
+					resource.TestCheckNoResourceAttr("k8sconnect_manifest.test", "status"),
 				),
 			},
 		},
@@ -1123,11 +1114,8 @@ func TestAccManifestResource_StatusStability(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
-					// Status should be populated
-					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.replicas", "2"),
-					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.readyReplicas", "2"),
-					// Store the observedGeneration for comparison (but we won't require it to be unchanged)
-					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test", "status.observedGeneration"),
+					// Status should be populated - only readyReplicas since that's what we wait for
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.readyReplicas", "1"),
 				),
 			},
 			// Step 2: Add a label (unrelated change) - status should remain stable
@@ -1140,11 +1128,7 @@ func TestAccManifestResource_StatusStability(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 					// Critical status values should be preserved
-					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.replicas", "2"),
-					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.readyReplicas", "2"),
-					// observedGeneration may increment (that's normal K8s behavior)
-					// The important thing is that status is not null/unknown
-					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test", "status.observedGeneration"),
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.readyReplicas", "1"),
 					// Verify the label was actually updated
 					func(s *terraform.State) error {
 						// This ensures the update actually happened
@@ -1202,7 +1186,7 @@ metadata:
   labels:
     test-label: %s
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: %s
@@ -1219,7 +1203,7 @@ spec:
 YAML
 
   wait_for = {
-    rollout = true
+    field = "status.readyReplicas"
   }
 
   cluster_connection = {
@@ -1230,7 +1214,7 @@ YAML
 }
 
 output "stable_replicas" {
-  value = k8sconnect_manifest.test.status.replicas
+  value = k8sconnect_manifest.test.status.readyReplicas
 }
 `, namespace, name, namespace, labelValue, name, name)
 }
@@ -1263,7 +1247,7 @@ func TestAccManifestResource_StatusRemovedWhenWaitRemoved(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 					// Status should be populated
-					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.replicas", "1"),
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.replicas", "2"),
 				),
 			},
 			// Step 2: Remove wait_for, status should be removed
@@ -1316,7 +1300,7 @@ metadata:
   name: %s
   namespace: %s
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: %s
@@ -1333,7 +1317,7 @@ spec:
 YAML
 
   wait_for = {
-    rollout = true
+    field = "status.replicas"
   }
 
   cluster_connection = {
@@ -1377,7 +1361,7 @@ metadata:
   name: %s
   namespace: %s
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: %s
@@ -1431,6 +1415,8 @@ func TestAccManifestResource_InvalidFieldPath(t *testing.T) {
 				// Should create resource but warn about invalid path
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
+					// Status should be null since field doesn't exist
+					resource.TestCheckNoResourceAttr("k8sconnect_manifest.test", "status"),
 				),
 				ExpectNonEmptyPlan: false,
 			},
