@@ -227,5 +227,10 @@ func (s *stubK8sClient) Watch(ctx context.Context, gvr schema.GroupVersionResour
 	return nil, fmt.Errorf("watch not implemented in stub")
 }
 
+func (s *stubK8sClient) PatchStatus(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string, patchType types.PatchType, data []byte, options metav1.PatchOptions) (*unstructured.Unstructured, error) {
+	// For stub, just return success or configured response
+	return s.GetResponse, nil
+}
+
 // Interface assertion to ensure stubK8sClient satisfies K8sClient
 var _ K8sClient = (*stubK8sClient)(nil)

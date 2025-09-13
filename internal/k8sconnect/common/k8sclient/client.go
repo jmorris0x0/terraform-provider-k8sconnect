@@ -55,6 +55,9 @@ type K8sClient interface {
 
 	// Watch returns a watcher that handles reconnection automatically
 	Watch(ctx context.Context, gvr schema.GroupVersionResource, namespace string, opts metav1.ListOptions) (watch.Interface, error)
+
+	// PatchStatus patches the status subresource of a Kubernetes object
+	PatchStatus(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string, patchType types.PatchType, data []byte, options metav1.PatchOptions) (*unstructured.Unstructured, error)
 }
 
 // ApplyOptions holds options for server-side apply operations.
@@ -609,6 +612,19 @@ func (rw *resilientWatcher) run() {
 			time.Sleep(time.Second) // Brief pause before reconnect
 		}
 	}
+}
+
+func (d *DynamicK8sClient) PatchStatus(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string, patchType types.PatchType, data []byte, options metav1.PatchOptions) (*unstructured.Unstructured, error) {
+	var result *unstructured.Unstructured
+	var err error
+
+	if namespace == "" {
+		result, err = d.client.Resource(gvr).Patch(ctx, name, patchType, data, options, "status")
+	} else {
+		result, err = d.client.Resource(gvr).Namespace(namespace).Patch(ctx, name, patchType, data, options, "status")
+	}
+
+	return result, err
 }
 
 func (rw *resilientWatcher) Stop() {

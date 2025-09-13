@@ -17,6 +17,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect"
 	testhelpers "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/test"
@@ -1470,6 +1473,208 @@ YAML
   }
   
   depends_on = [k8sconnect_manifest.test_namespace]
+}
+`, namespace, name, namespace)
+}
+
+// TestAccManifestResource_StatusDriftDetection tests that external status changes are detected during refresh
+// This is critical for resources managed by controllers (AWS LB Controller, cert-manager, etc.)
+// where the status field changes outside of Terraform's control
+func TestAccManifestResource_StatusDriftDetection(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+	}
+
+	ns := fmt.Sprintf("status-drift-%d", time.Now().UnixNano()%1000000)
+	svcName := fmt.Sprintf("test-svc-%d", time.Now().UnixNano()%1000000)
+
+	// Standard client for test verification
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	// Need raw clientset for patching status (simulating external controller)
+	restConfig, err := clientcmd.RESTConfigFromKubeConfig([]byte(raw))
+	if err != nil {
+		t.Fatalf("Failed to create REST config: %v", err)
+	}
+	clientset, err := kubernetes.NewForConfig(restConfig)
+	if err != nil {
+		t.Fatalf("Failed to create clientset: %v", err)
+	}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create service with wait_for but no status yet (simulates pending LB)
+			{
+				Config: testAccServiceWithStatusTracking(ns, svcName),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckServiceExists(k8sClient, ns, svcName),
+					// Status should be null since field doesn't exist yet
+					resource.TestCheckNoResourceAttr("k8sconnect_manifest.test", "status"),
+				),
+			},
+			// Step 2: Controller adds LoadBalancer (Nothing → Something)
+			{
+				PreConfig: func() {
+					// Simulate AWS LB controller populating status
+					patch := []byte(`{"status":{"loadBalancer":{"ingress":[{"hostname":"k8s-elb-1234567890.us-east-1.elb.amazonaws.com"}]}}}`)
+					_, err := clientset.CoreV1().Services(ns).Patch(
+						context.Background(),
+						svcName,
+						types.MergePatchType,
+						patch,
+						metav1.PatchOptions{},
+						"status", // Patch the status subresource
+					)
+					if err != nil {
+						t.Fatalf("Failed to patch status: %v", err)
+					}
+					t.Log("Simulated controller adding LoadBalancer status")
+				},
+				Config: testAccServiceWithStatusTracking(ns, svcName),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					// Status should now be populated after refresh
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test",
+						"status.loadBalancer.ingress.0.hostname",
+						"k8s-elb-1234567890.us-east-1.elb.amazonaws.com"),
+				),
+			},
+			// Step 3: Controller replaces LoadBalancer (Something → Something Else)
+			{
+				PreConfig: func() {
+					// Simulate controller replacing the LB
+					patch := []byte(`{"status":{"loadBalancer":{"ingress":[{"hostname":"k8s-elb-0987654321.us-east-1.elb.amazonaws.com"}]}}}`)
+					_, err := clientset.CoreV1().Services(ns).Patch(
+						context.Background(),
+						svcName,
+						types.MergePatchType,
+						patch,
+						metav1.PatchOptions{},
+						"status",
+					)
+					if err != nil {
+						t.Fatalf("Failed to patch status: %v", err)
+					}
+					t.Log("Simulated controller replacing LoadBalancer")
+				},
+				Config: testAccServiceWithStatusTracking(ns, svcName),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					// Should detect the drift and update to new hostname
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test",
+						"status.loadBalancer.ingress.0.hostname",
+						"k8s-elb-0987654321.us-east-1.elb.amazonaws.com"),
+				),
+			},
+			// Step 4: Controller removes LoadBalancer (Something → Nothing)
+			{
+				PreConfig: func() {
+					// Simulate controller removing LB status
+					patch := []byte(`{"status":{"loadBalancer":null}}`)
+					_, err := clientset.CoreV1().Services(ns).Patch(
+						context.Background(),
+						svcName,
+						types.MergePatchType,
+						patch,
+						metav1.PatchOptions{},
+						"status",
+					)
+					if err != nil {
+						t.Fatalf("Failed to patch status: %v", err)
+					}
+					t.Log("Simulated controller removing LoadBalancer status")
+				},
+				Config: testAccServiceWithStatusTracking(ns, svcName),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					// Status should be cleared
+					resource.TestCheckNoResourceAttr("k8sconnect_manifest.test", "status"),
+				),
+			},
+		},
+		CheckDestroy: testhelpers.CheckServiceDestroy(k8sClient, ns, svcName),
+	})
+}
+
+func testAccServiceWithStatusTracking(namespace, name string) string {
+	return fmt.Sprintf(`
+variable "raw" {
+  type = string
+}
+variable "namespace" {
+  type = string
+}
+
+provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "test_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
+
+resource "k8sconnect_manifest" "test" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Service
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  type: LoadBalancer
+  selector:
+    app: test
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+YAML
+
+  wait_for = {
+    field = "status.loadBalancer.ingress"
+    timeout = "5s"  # Short timeout - we control status manually
+  }
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+  
+  depends_on = [k8sconnect_manifest.test_namespace]
+}
+
+# This output would typically feed into other resources
+# like Route53 records or application configs
+output "load_balancer_hostname" {
+  value = try(
+    k8sconnect_manifest.test.status.loadBalancer.ingress[0].hostname,
+    "pending"
+  )
 }
 `, namespace, name, namespace)
 }
