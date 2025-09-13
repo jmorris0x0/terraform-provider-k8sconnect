@@ -47,6 +47,7 @@ type manifestResourceModel struct {
 	ImportedWithoutAnnotations types.Bool    `tfsdk:"imported_without_annotations"`
 	WaitFor                    types.Object  `tfsdk:"wait_for"`
 	Status                     types.Dynamic `tfsdk:"status"`
+	UseFieldOwnership          types.Bool    `tfsdk:"use_field_ownership"`
 }
 
 type waitForModel struct {
@@ -208,6 +209,10 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 			"field_ownership": schema.StringAttribute{
 				Computed:    true,
 				Description: "Internal tracking of field ownership by different controllers",
+			},
+			"use_field_ownership": schema.BoolAttribute{
+				Optional:    true,
+				Description: "Use SSA field ownership for projection (experimental). Prevents drift from controller-added fields like nodePort.",
 			},
 			"status": schema.DynamicAttribute{
 				Computed:    true,
