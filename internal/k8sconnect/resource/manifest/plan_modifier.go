@@ -137,6 +137,7 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 		}
 
 		// This is an UPDATE operation
+		fmt.Printf("\n=== ModifyPlan STATUS DECISION (UPDATE) ===\n")
 		if !resp.Diagnostics.HasError() {
 			// Handle status field planning based on wait_for configuration
 			if !req.State.Raw.IsNull() {
@@ -147,10 +148,12 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 
 				if !resp.Diagnostics.HasError() {
 					if !stateData.Status.IsNull() {
+						fmt.Printf("State has existing status\n")
 						// We have existing status
 						if plannedData.WaitFor.IsNull() {
 							// wait_for was removed - clear status
 							plannedData.Status = types.DynamicNull()
+							fmt.Printf("Setting status to: DynamicNull (wait_for removed)\n")
 							tflog.Debug(ctx, "UPDATE: wait_for removed, status will be cleared")
 						} else {
 							// Parse wait config to check type
@@ -160,50 +163,109 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 							if diags.HasError() {
 								// Can't parse wait_for, clear status to be safe
 								plannedData.Status = types.DynamicNull()
+								fmt.Printf("Setting status to: DynamicNull (cannot parse wait_for)\n")
 								tflog.Debug(ctx, "UPDATE: Cannot parse wait_for, clearing status")
 							} else {
 								// Only field waits maintain status
 								isFieldWait := !waitConfig.Field.IsNull() && waitConfig.Field.ValueString() != ""
+								fmt.Printf("wait_for.field = '%v', isFieldWait = %v\n", waitConfig.Field.ValueString(), isFieldWait)
 
 								if isFieldWait {
 									// Preserve status - will be updated after wait
 									plannedData.Status = stateData.Status
+									fmt.Printf("Setting status to: preserved from state\n")
 									tflog.Debug(ctx, "UPDATE: field wait configured, preserving status for update")
 								} else {
 									// Non-field wait - clear status
 									plannedData.Status = types.DynamicNull()
+									fmt.Printf("Setting status to: DynamicNull (non-field wait)\n")
 									tflog.Debug(ctx, "UPDATE: non-field wait, status will be cleared")
 								}
 							}
 						}
 					} else {
+						fmt.Printf("State has no existing status\n")
 						// No existing status
-						if !plannedData.WaitFor.IsNull() {
+						if !plannedData.WaitFor.IsNull() && !stateData.WaitFor.IsNull() {
+							// Both have wait_for - compare them
+							var planWait, stateWait waitForModel
+							planDiags := plannedData.WaitFor.As(ctx, &planWait, basetypes.ObjectAsOptions{})
+							stateDiags := stateData.WaitFor.As(ctx, &stateWait, basetypes.ObjectAsOptions{})
+
+							if !planDiags.HasError() && !stateDiags.HasError() {
+								planIsFieldWait := !planWait.Field.IsNull() && planWait.Field.ValueString() != ""
+								fmt.Printf("wait_for.field = '%v', isFieldWait = %v\n", planWait.Field.ValueString(), planIsFieldWait)
+
+								if planIsFieldWait {
+									// Check if the field path changed
+									fmt.Printf("Comparing fields - plan: '%v', state: '%v'\n",
+										planWait.Field.ValueString(), stateWait.Field.ValueString())
+
+									if planWait.Field.ValueString() != stateWait.Field.ValueString() {
+										// Field path changed - try to populate status
+										plannedData.Status = types.DynamicUnknown()
+										fmt.Printf("Setting status to: DynamicUnknown (field changed)\n")
+										tflog.Debug(ctx, "UPDATE: wait_for.field changed, will try to populate status",
+											map[string]interface{}{
+												"old_field": stateWait.Field.ValueString(),
+												"new_field": planWait.Field.ValueString(),
+											})
+									} else {
+										// Same field path - we already tried, keep null
+										plannedData.Status = types.DynamicNull()
+										fmt.Printf("Setting status to: DynamicNull (field unchanged, already tried)\n")
+										tflog.Debug(ctx, "UPDATE: wait_for.field unchanged, keeping status null",
+											map[string]interface{}{
+												"field": planWait.Field.ValueString(),
+											})
+									}
+								} else {
+									// Non-field wait
+									plannedData.Status = types.DynamicNull()
+									fmt.Printf("Setting status to: DynamicNull (non-field wait)\n")
+									tflog.Debug(ctx, "UPDATE: non-field wait, status stays null")
+								}
+							} else {
+								// Parse error - keep null
+								plannedData.Status = types.DynamicNull()
+								fmt.Printf("Setting status to: DynamicNull (parse error)\n")
+								tflog.Debug(ctx, "UPDATE: Cannot parse wait_for, keeping status null")
+							}
+						} else if !plannedData.WaitFor.IsNull() && stateData.WaitFor.IsNull() {
+							// wait_for added for first time
+							fmt.Printf("wait_for added (was null in state)\n")
 							var waitConfig waitForModel
 							diags := plannedData.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
 
 							if !diags.HasError() {
 								isFieldWait := !waitConfig.Field.IsNull() && waitConfig.Field.ValueString() != ""
+								fmt.Printf("wait_for.field = '%v', isFieldWait = %v\n", waitConfig.Field.ValueString(), isFieldWait)
 								if isFieldWait {
-									// Only field waits get unknown status
+									// New field wait - try to populate
 									plannedData.Status = types.DynamicUnknown()
-									tflog.Debug(ctx, "UPDATE: field wait will populate status")
+									fmt.Printf("Setting status to: DynamicUnknown (new field wait)\n")
+									tflog.Debug(ctx, "UPDATE: wait_for.field added, will populate status")
 								} else {
-									// Non-field waits stay null
+									// Non-field wait
 									plannedData.Status = types.DynamicNull()
-									tflog.Debug(ctx, "UPDATE: non-field wait, status stays null")
+									fmt.Printf("Setting status to: DynamicNull (non-field wait)\n")
+									tflog.Debug(ctx, "UPDATE: non-field wait added, no status")
 								}
 							} else {
 								plannedData.Status = types.DynamicNull()
+								fmt.Printf("Setting status to: DynamicNull (parse error)\n")
 							}
 						} else {
+							// No wait_for at all or wait_for removed
 							plannedData.Status = types.DynamicNull()
+							fmt.Printf("Setting status to: DynamicNull (no wait_for or removed)\n")
 							tflog.Debug(ctx, "UPDATE: No wait_for configured, status will be null")
 						}
 					}
 				}
 			} else {
 				// CREATE operation
+				fmt.Printf("\n=== ModifyPlan STATUS DECISION (CREATE) ===\n")
 				if !plannedData.WaitFor.IsNull() {
 					var waitConfig waitForModel
 					diags := plannedData.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
@@ -211,34 +273,41 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 					if !diags.HasError() {
 						// Check if this is a field wait
 						isFieldWait := !waitConfig.Field.IsNull() && waitConfig.Field.ValueString() != ""
+						fmt.Printf("wait_for.field = '%v', isFieldWait = %v\n", waitConfig.Field.ValueString(), isFieldWait)
 
 						if isFieldWait {
 							// Only field waits populate status
 							plannedData.Status = types.DynamicUnknown()
+							fmt.Printf("Setting status to: DynamicUnknown (field wait will populate)\n")
 							tflog.Debug(ctx, "CREATE: field wait will populate status")
 						} else {
 							// All other wait types don't populate status
 							plannedData.Status = types.DynamicNull()
+							fmt.Printf("Setting status to: DynamicNull (non-field wait)\n")
 							tflog.Debug(ctx, "CREATE: non-field wait, no status")
 						}
 					} else {
 						plannedData.Status = types.DynamicNull()
+						fmt.Printf("Setting status to: DynamicNull (parse error)\n")
 						tflog.Debug(ctx, "CREATE: Cannot parse wait_for, no status")
 					}
 				} else {
 					plannedData.Status = types.DynamicNull()
+					fmt.Printf("Setting status to: DynamicNull (no wait_for)\n")
 					tflog.Debug(ctx, "CREATE: No wait_for configured, status will be null")
 				}
 			}
 		}
 	} else {
 		// This is a CREATE operation
+		fmt.Printf("\n=== ModifyPlan STATUS DECISION (CREATE - alternate path) ===\n")
 		if !plannedData.WaitFor.IsNull() {
 			var waitConfig waitForModel
 			diags := plannedData.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
 
 			if diags.HasError() {
 				plannedData.Status = types.DynamicUnknown()
+				fmt.Printf("Setting status to: DynamicUnknown (parse error)\n")
 				tflog.Debug(ctx, "CREATE: Cannot parse wait_for, marking status as unknown")
 			} else {
 				// Check if ANY actual wait condition is configured
@@ -247,23 +316,41 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 					(!waitConfig.Condition.IsNull() && waitConfig.Condition.ValueString() != "") ||
 					(!waitConfig.Rollout.IsNull() && waitConfig.Rollout.ValueBool())
 
+				fmt.Printf("hasWaitConditions = %v\n", hasWaitConditions)
+				fmt.Printf("  Field: '%v'\n", waitConfig.Field.ValueString())
+				fmt.Printf("  FieldValue IsNull: %v\n", waitConfig.FieldValue.IsNull())
+				fmt.Printf("  Condition: '%v'\n", waitConfig.Condition.ValueString())
+				fmt.Printf("  Rollout: %v\n", waitConfig.Rollout.ValueBool())
+
 				if hasWaitConditions {
 					plannedData.Status = types.DynamicUnknown()
+					fmt.Printf("Setting status to: DynamicUnknown (has wait conditions)\n")
 					tflog.Debug(ctx, "CREATE: wait_for has actual conditions, marking status as unknown")
 				} else {
 					plannedData.Status = types.DynamicNull()
+					fmt.Printf("Setting status to: DynamicNull (no actual conditions)\n")
 					tflog.Debug(ctx, "CREATE: wait_for has no actual conditions, status will be null")
 				}
 			}
 		} else {
 			plannedData.Status = types.DynamicNull()
+			fmt.Printf("Setting status to: DynamicNull (no wait_for)\n")
 			tflog.Debug(ctx, "CREATE: No wait_for configured, status will be null")
 		}
 	}
 
 	// Final plan set
+	fmt.Printf("\n=== ModifyPlan FINAL STATUS ===\n")
+	fmt.Printf("Status IsNull: %v, IsUnknown: %v\n", plannedData.Status.IsNull(), plannedData.Status.IsUnknown())
+
 	diags = resp.Plan.Set(ctx, &plannedData)
 	resp.Diagnostics.Append(diags...)
+
+	// Verify what was actually set
+	var finalPlan manifestResourceModel
+	resp.Plan.Get(ctx, &finalPlan)
+	fmt.Printf("After Plan.Set - Status IsNull: %v, IsUnknown: %v\n", finalPlan.Status.IsNull(), finalPlan.Status.IsUnknown())
+	fmt.Printf("=== END ModifyPlan ===\n\n")
 }
 
 // checkFieldOwnershipConflicts detects when fields managed by other controllers are being changed

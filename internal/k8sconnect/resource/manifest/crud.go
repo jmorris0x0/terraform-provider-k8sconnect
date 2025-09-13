@@ -100,24 +100,46 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 	})
 
 	// Handle wait conditions
+	fmt.Printf("\n=== Create BEFORE WAIT ===\n")
+	fmt.Printf("wait_for IsNull: %v\n", rc.Data.WaitFor.IsNull())
+
 	waited := false
-	if err := pipeline.ExecuteWait(rc); err != nil {
+	err = pipeline.ExecuteWait(rc)
+
+	fmt.Printf("\n=== Create AFTER WAIT ===\n")
+	fmt.Printf("Wait error: %v\n", err)
+
+	if err != nil {
 		resp.Diagnostics.AddWarning("Wait Failed",
 			fmt.Sprintf("Resource created but wait failed: %s", err))
 		waited = true
 	} else if !rc.Data.WaitFor.IsNull() {
 		var waitConfig waitForModel
 		diags := rc.Data.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
+
+		fmt.Printf("Parsed wait_for - Field: '%v'\n", waitConfig.Field.ValueString())
+
 		if !diags.HasError() && pipeline.hasActiveWaitConditions(waitConfig) {
 			waited = true
 		}
 	}
 
+	fmt.Printf("Waited flag: %v\n", waited)
+	fmt.Printf("Status BEFORE UpdateStatus - IsNull: %v, IsUnknown: %v\n",
+		rc.Data.Status.IsNull(), rc.Data.Status.IsUnknown())
+
 	pipeline.UpdateStatus(rc, waited)
+
+	fmt.Printf("Status AFTER UpdateStatus - IsNull: %v, IsUnknown: %v\n",
+		rc.Data.Status.IsNull(), rc.Data.Status.IsUnknown())
 
 	if err := pipeline.UpdateProjection(rc); err != nil {
 		tflog.Warn(ctx, "Failed to update projection", map[string]interface{}{"error": err.Error()})
 	}
+
+	fmt.Printf("FINAL Status before State.Set - IsNull: %v, IsUnknown: %v\n",
+		data.Status.IsNull(), data.Status.IsUnknown())
+	fmt.Printf("=== END Create ===\n\n")
 
 	diags = resp.State.Set(ctx, &data)
 	resp.Diagnostics.Append(diags...)
