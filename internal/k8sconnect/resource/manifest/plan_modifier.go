@@ -89,46 +89,55 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 	// Extract field paths - use experimental field ownership for projection if enabled
 	var paths []string
 	useFieldOwnership := !plannedData.UseFieldOwnership.IsNull() && plannedData.UseFieldOwnership.ValueBool()
-	if useFieldOwnership && !req.State.Raw.IsNull() {
-		// UPDATE - try to use field ownership
-		gvr, err := client.GetGVR(ctx, desiredObj)
-		if err == nil {
-			currentObj, err := client.Get(ctx, gvr, desiredObj.GetNamespace(), desiredObj.GetName())
+	isCreate := req.State.Raw.IsNull()
+
+	if useFieldOwnership && isCreate {
+		// CREATE with field ownership - set projection to Unknown to avoid mismatch
+		tflog.Debug(ctx, "CREATE with field ownership - setting projection to unknown")
+		plannedData.ManagedStateProjection = types.StringUnknown()
+	} else {
+		// Either UPDATE with field ownership, or any operation without field ownership
+		if useFieldOwnership && !isCreate {
+			// UPDATE - try to use field ownership
+			gvr, err := client.GetGVR(ctx, desiredObj)
 			if err == nil {
-				tflog.Debug(ctx, "Using field ownership for projection")
-				paths = extractOwnedPaths(ctx, currentObj.GetManagedFields(), desiredObj.Object)
+				currentObj, err := client.Get(ctx, gvr, desiredObj.GetNamespace(), desiredObj.GetName())
+				if err == nil {
+					tflog.Debug(ctx, "Using field ownership for projection")
+					paths = extractOwnedPaths(ctx, currentObj.GetManagedFields(), desiredObj.Object)
+				} else {
+					tflog.Debug(ctx, "Could not get current object, falling back to YAML paths")
+					paths = extractFieldPaths(desiredObj.Object, "")
+				}
 			} else {
-				tflog.Debug(ctx, "Could not get current object, falling back to YAML paths")
 				paths = extractFieldPaths(desiredObj.Object, "")
 			}
 		} else {
+			// CREATE or feature disabled - use standard extraction
 			paths = extractFieldPaths(desiredObj.Object, "")
 		}
-	} else {
-		// CREATE or feature disabled - use standard extraction
-		paths = extractFieldPaths(desiredObj.Object, "")
-	}
 
-	// Project the dry-run result
-	projection, err := projectFields(dryRunResult.Object, paths)
-	if err != nil {
-		resp.Diagnostics.AddError("Projection Failed", fmt.Sprintf("Failed to project fields: %s", err))
-		return
-	}
+		// Project the dry-run result
+		projection, err := projectFields(dryRunResult.Object, paths)
+		if err != nil {
+			resp.Diagnostics.AddError("Projection Failed", fmt.Sprintf("Failed to project fields: %s", err))
+			return
+		}
 
-	// Convert to JSON
-	projectionJSON, err := toJSON(projection)
-	if err != nil {
-		resp.Diagnostics.AddError("JSON Conversion Failed", fmt.Sprintf("Failed to convert projection: %s", err))
-		return
-	}
+		// Convert to JSON
+		projectionJSON, err := toJSON(projection)
+		if err != nil {
+			resp.Diagnostics.AddError("JSON Conversion Failed", fmt.Sprintf("Failed to convert projection: %s", err))
+			return
+		}
 
-	// Update the plan with projection
-	plannedData.ManagedStateProjection = types.StringValue(projectionJSON)
-	tflog.Debug(ctx, "Dry-run projection complete", map[string]interface{}{
-		"path_count":      len(paths),
-		"projection_size": len(projectionJSON),
-	})
+		// Update the plan with projection
+		plannedData.ManagedStateProjection = types.StringValue(projectionJSON)
+		tflog.Debug(ctx, "Dry-run projection complete", map[string]interface{}{
+			"path_count":      len(paths),
+			"projection_size": len(projectionJSON),
+		})
+	}
 
 	// Check if we have state to compare against
 	if !req.State.Raw.IsNull() {

@@ -216,14 +216,37 @@ func (p *OperationPipeline) UpdateStatus(rc *ResourceContext, waited bool) error
 
 // UpdateProjection updates managed state projection and field ownership
 func (p *OperationPipeline) UpdateProjection(rc *ResourceContext) error {
-	// Get current state
-	currentObj, err := rc.Client.Get(rc.Ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName())
-	if err != nil {
-		return fmt.Errorf("failed to read for projection: %w", err)
+	// Get current state - but we may already have it from two-phase create
+	var currentObj *unstructured.Unstructured
+	if len(rc.Object.GetManagedFields()) > 0 {
+		// We already have managedFields from two-phase create
+		currentObj = rc.Object
+		tflog.Debug(rc.Ctx, "Using existing object with managedFields for projection")
+	} else {
+		// Need to fetch it
+		var err error
+		currentObj, err = rc.Client.Get(rc.Ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName())
+		if err != nil {
+			return fmt.Errorf("failed to read for projection: %w", err)
+		}
 	}
 
-	// Extract paths from desired state
-	paths := extractFieldPaths(rc.Object.Object, "")
+	// Extract paths - use field ownership if flag is enabled
+	var paths []string
+	useFieldOwnership := !rc.Data.UseFieldOwnership.IsNull() && rc.Data.UseFieldOwnership.ValueBool()
+
+	if useFieldOwnership && len(currentObj.GetManagedFields()) > 0 {
+		tflog.Debug(rc.Ctx, "Using field ownership for projection", map[string]interface{}{
+			"managers": len(currentObj.GetManagedFields()),
+		})
+		paths = extractOwnedPaths(rc.Ctx, currentObj.GetManagedFields(), rc.Object.Object)
+	} else {
+		if useFieldOwnership {
+			tflog.Warn(rc.Ctx, "Field ownership requested but no managedFields available")
+		}
+		// Fall back to standard extraction
+		paths = extractFieldPaths(rc.Object.Object, "")
+	}
 
 	// Create projection
 	projection, err := projectFields(currentObj.Object, paths)
@@ -238,8 +261,13 @@ func (p *OperationPipeline) UpdateProjection(rc *ResourceContext) error {
 	}
 
 	rc.Data.ManagedStateProjection = types.StringValue(projectionJSON)
+	tflog.Debug(rc.Ctx, "Updated projection", map[string]interface{}{
+		"use_ownership": useFieldOwnership,
+		"path_count":    len(paths),
+		"size":          len(projectionJSON),
+	})
 
-	// Update field ownership
+	// Update field ownership (existing code continues...)
 	ownership := extractFieldOwnership(currentObj)
 	ownershipJSON, err := json.Marshal(ownership)
 	if err != nil {
@@ -249,12 +277,10 @@ func (p *OperationPipeline) UpdateProjection(rc *ResourceContext) error {
 		rc.Data.FieldOwnership = types.StringValue(string(ownershipJSON))
 	}
 
-	// Clear ImportedWithoutAnnotations after first update (it's only used during import)
+	// Clear ImportedWithoutAnnotations after first update (existing code)
 	if !rc.Data.ImportedWithoutAnnotations.IsNull() && rc.Data.ImportedWithoutAnnotations.ValueBool() {
-		// This was an import, but now we've updated the annotations
 		rc.Data.ImportedWithoutAnnotations = types.BoolNull()
 	} else if rc.Data.ImportedWithoutAnnotations.IsUnknown() {
-		// Not an import, set to null
 		rc.Data.ImportedWithoutAnnotations = types.BoolNull()
 	}
 

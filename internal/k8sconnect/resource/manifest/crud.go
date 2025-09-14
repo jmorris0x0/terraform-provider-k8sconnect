@@ -24,92 +24,76 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	// Use pipeline for common setup
+	// Generate ID for new resource
+	data.ID = types.StringValue(r.generateID())
+
+	// Use pipeline for setup
 	pipeline := NewOperationPipeline(r)
-	rc, err := pipeline.PrepareContext(ctx, &data, true)
+	rc, err := pipeline.PrepareContext(ctx, &data, false)
 	if err != nil {
 		resp.Diagnostics.AddError("Preparation Failed", err.Error())
 		return
 	}
 
-	// Check if resource already exists
-	existingObj, err := rc.Client.Get(ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName())
-	if err == nil {
-		// Resource exists - check ownership
-		existingID := r.getOwnershipID(existingObj)
-		if existingID != "" {
-			// Check if this is our resource (imported or previously created)
-			if existingID == data.ID.ValueString() {
-				// This is our resource - treat as update
-				tflog.Info(ctx, "resource already owned by this state, treating as update", map[string]interface{}{
-					"kind": rc.Object.GetKind(),
-					"name": rc.Object.GetName(),
-					"id":   existingID,
-				})
-				// Continue with the create logic which will act as an update
-			} else {
-				// Different ID - owned by another state
-				resp.Diagnostics.AddError(
-					"Resource Already Managed",
-					fmt.Sprintf("resource managed by different k8sconnect resource (Terraform ID: %s)", existingID),
-				)
-				return
-			}
-		} else {
-			// Resource exists but not managed - we can take ownership
-			tflog.Info(ctx, "adopting unmanaged resource", map[string]interface{}{
-				"kind": rc.Object.GetKind(),
-				"name": rc.Object.GetName(),
-			})
-		}
-	} else if !errors.IsNotFound(err) {
-		// Real error checking if resource exists
-		resp.Diagnostics.AddError("Existence Check Failed",
-			fmt.Sprintf("Failed to check if resource exists: %s", err))
-		return
-	}
-
-	// Only generate new ID if we don't already have one
-	var id string
-	if data.ID.IsNull() || data.ID.ValueString() == "" {
-		id = r.generateID()
-	} else {
-		// Use existing ID (from import or previous apply)
-		id = data.ID.ValueString()
-	}
-
-	data.ID = types.StringValue(id)
+	// Set ownership annotation
 	r.setOwnershipAnnotation(rc.Object, data.ID.ValueString())
 
-	// Apply with Force=false
+	// Check force conflicts
+	forceConflicts := false
+	if !data.ForceConflicts.IsNull() {
+		forceConflicts = data.ForceConflicts.ValueBool()
+	}
+
+	// Apply the resource
 	err = rc.Client.Apply(ctx, rc.Object, k8sclient.ApplyOptions{
 		FieldManager: "k8sconnect",
-		Force:        false,
+		Force:        forceConflicts,
 	})
 	if err != nil {
-		resp.Diagnostics.AddError("Creation Failed",
-			fmt.Sprintf("Failed to create %s: %s", rc.Object.GetKind(), err))
+		if isFieldConflictError(err) {
+			resp.Diagnostics.AddError("Field Manager Conflict",
+				"Another controller owns fields you're trying to set. "+
+					"Set force_conflicts = true to override.")
+		} else {
+			resp.Diagnostics.AddError("Create Failed", err.Error())
+		}
 		return
+	}
+
+	// Phase 2 - Only read back if using field ownership
+	if !data.UseFieldOwnership.IsNull() && data.UseFieldOwnership.ValueBool() {
+		createdObj, err := rc.Client.Get(ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName())
+		if err != nil {
+			tflog.Warn(ctx, "Failed to read resource after create", map[string]interface{}{
+				"error": err.Error(),
+				"kind":  rc.Object.GetKind(),
+				"name":  rc.Object.GetName(),
+			})
+		} else {
+			rc.Object = createdObj
+			tflog.Debug(ctx, "Read resource after create for managedFields", map[string]interface{}{
+				"kind":          rc.Object.GetKind(),
+				"name":          rc.Object.GetName(),
+				"has_managed":   len(rc.Object.GetManagedFields()) > 0,
+				"field_manager": "k8sconnect",
+			})
+		}
 	}
 
 	tflog.Info(ctx, "Resource created", map[string]interface{}{
-		"id":        data.ID.ValueString(),
 		"kind":      rc.Object.GetKind(),
 		"name":      rc.Object.GetName(),
 		"namespace": rc.Object.GetNamespace(),
 	})
 
 	// Handle wait conditions
-	fmt.Printf("\n=== Create BEFORE WAIT ===\n")
+	fmt.Printf("=== Create BEFORE WAIT ===\n")
 	fmt.Printf("wait_for IsNull: %v\n", rc.Data.WaitFor.IsNull())
 
+	fmt.Printf("=== Create AFTER WAIT ===\n")
 	waited := false
-	err = pipeline.ExecuteWait(rc)
-
-	fmt.Printf("\n=== Create AFTER WAIT ===\n")
-	fmt.Printf("Wait error: %v\n", err)
-
-	if err != nil {
+	if err := pipeline.ExecuteWait(rc); err != nil {
+		fmt.Printf("Wait error: %v\n", err)
 		resp.Diagnostics.AddWarning("Wait Failed",
 			fmt.Sprintf("Resource created but wait failed: %s", err))
 		waited = true
