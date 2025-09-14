@@ -1664,6 +1664,8 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
+
+  use_field_ownership = true
   
   depends_on = [k8sconnect_manifest.test_namespace]
 }
