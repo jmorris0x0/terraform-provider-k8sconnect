@@ -38,6 +38,27 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 	// Set ownership annotation
 	r.setOwnershipAnnotation(rc.Object, data.ID.ValueString())
 
+	// Check if resource already exists and verify ownership
+	existingObj, err := rc.Client.Get(ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName())
+	if err == nil {
+		// Resource exists - check ownership
+		existingID := r.getOwnershipID(existingObj)
+		if existingID != "" && existingID != data.ID.ValueString() {
+			// Different ID - owned by another state
+			resp.Diagnostics.AddError(
+				"Resource Already Managed",
+				fmt.Sprintf("resource managed by different k8sconnect resource (Terraform ID: %s)", existingID),
+			)
+			return
+		}
+		// If existingID is empty (unowned) or matches our ID, we can proceed
+	} else if !errors.IsNotFound(err) {
+		// Real error checking if resource exists
+		resp.Diagnostics.AddError("Existence Check Failed",
+			fmt.Sprintf("Failed to check if resource exists: %s", err))
+		return
+	}
+
 	// Check force conflicts
 	forceConflicts := false
 	if !data.ForceConflicts.IsNull() {
@@ -100,32 +121,37 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 	} else if !rc.Data.WaitFor.IsNull() {
 		var waitConfig waitForModel
 		diags := rc.Data.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
-
-		fmt.Printf("Parsed wait_for - Field: '%v'\n", waitConfig.Field.ValueString())
-
-		if !diags.HasError() && pipeline.hasActiveWaitConditions(waitConfig) {
+		if resp.Diagnostics.Append(diags...); !resp.Diagnostics.HasError() {
 			waited = true
+			fmt.Printf("Parsed wait_for - Field: %v\n", waitConfig.Field)
 		}
 	}
 
 	fmt.Printf("Waited flag: %v\n", waited)
+
+	// Update status field
 	fmt.Printf("Status BEFORE UpdateStatus - IsNull: %v, IsUnknown: %v\n",
 		rc.Data.Status.IsNull(), rc.Data.Status.IsUnknown())
 
-	pipeline.UpdateStatus(rc, waited)
+	if err := pipeline.UpdateStatus(rc, waited); err != nil {
+		tflog.Warn(ctx, "Failed to update status", map[string]interface{}{"error": err.Error()})
+	}
 
 	fmt.Printf("Status AFTER UpdateStatus - IsNull: %v, IsUnknown: %v\n",
 		rc.Data.Status.IsNull(), rc.Data.Status.IsUnknown())
 
+	// Update projection
 	if err := pipeline.UpdateProjection(rc); err != nil {
-		tflog.Warn(ctx, "Failed to update projection", map[string]interface{}{"error": err.Error()})
+		resp.Diagnostics.AddWarning("Projection Update Failed",
+			fmt.Sprintf("Resource created but projection update failed: %s", err))
 	}
 
+	// Save state
 	fmt.Printf("FINAL Status before State.Set - IsNull: %v, IsUnknown: %v\n",
-		data.Status.IsNull(), data.Status.IsUnknown())
+		rc.Data.Status.IsNull(), rc.Data.Status.IsUnknown())
 	fmt.Printf("=== END Create ===\n\n")
 
-	diags = resp.State.Set(ctx, &data)
+	diags = resp.State.Set(ctx, rc.Data)
 	resp.Diagnostics.Append(diags...)
 }
 
