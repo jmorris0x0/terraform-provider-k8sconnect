@@ -164,25 +164,22 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 		var stateData manifestResourceModel
 		diags := req.State.Get(ctx, &stateData)
 		resp.Diagnostics.Append(diags...)
-
 		if !resp.Diagnostics.HasError() && !stateData.ManagedStateProjection.IsNull() {
 			// If projections match, only YAML formatting changed in Kubernetes
 			if stateData.ManagedStateProjection.Equal(plannedData.ManagedStateProjection) {
 				tflog.Debug(ctx, "No Kubernetes resource changes detected, preserving YAML")
-
 				// Preserve the original YAML and internal fields since no actual changes will occur
 				plannedData.YAMLBody = stateData.YAMLBody
 				plannedData.ManagedStateProjection = stateData.ManagedStateProjection
 				plannedData.FieldOwnership = stateData.FieldOwnership
 				plannedData.ImportedWithoutAnnotations = stateData.ImportedWithoutAnnotations
-
 				// But still allow terraform-specific settings to update
 				// (delete_protection, force_conflicts, etc. are not preserved)
 			} else {
 				// Log what's different
 				fmt.Printf("=== PROJECTION MISMATCH ===\n")
-				fmt.Printf("State projection includes nodePort: %v\n", strings.Contains(stateData.ManagedStateProjection.ValueString(), "nodePort"))
-				fmt.Printf("Plan projection includes nodePort: %v\n", strings.Contains(plannedData.ManagedStateProjection.ValueString(), "nodePort"))
+				fmt.Printf("State projection: %s\n", stateData.ManagedStateProjection.ValueString())
+				fmt.Printf("Plan projection: %s\n", plannedData.ManagedStateProjection.ValueString())
 			}
 		}
 	}
