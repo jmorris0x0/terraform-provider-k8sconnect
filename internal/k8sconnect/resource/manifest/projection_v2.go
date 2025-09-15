@@ -17,36 +17,37 @@ func extractOwnedPaths(ctx context.Context, managedFields []metav1.ManagedFields
 	userJSONBytes, _ := json.MarshalIndent(userJSON, "", "  ")
 	fmt.Printf("UserJSON input:\n%s\n", userJSONBytes)
 
-	// Find our field manager entry
-	var ourFields *metav1.FieldsV1
+	// Collect ALL fields from ALL k8sconnect entries (both Apply and Update operations)
+	allOwnedFields := make(map[string]interface{})
+
 	for _, mf := range managedFields {
 		fmt.Printf("Found manager: %s, operation: %s\n", mf.Manager, mf.Operation)
-		if mf.Manager == "k8sconnect" {
-			ourFields = mf.FieldsV1
-			fmt.Printf("Using k8sconnect fields\n")
-			break
+		if mf.Manager == "k8sconnect" && mf.FieldsV1 != nil {
+			// Parse this entry's fields
+			var fields map[string]interface{}
+			if err := json.Unmarshal(mf.FieldsV1.Raw, &fields); err != nil {
+				fmt.Printf("Failed to parse FieldsV1 for %s/%s: %v\n", mf.Manager, mf.Operation, err)
+				continue
+			}
+
+			fmt.Printf("Merging fields from k8sconnect/%s\n", mf.Operation)
+			// Merge these fields into our accumulated ownership
+			mergeFields(allOwnedFields, fields)
 		}
 	}
 
-	if ourFields == nil {
+	if len(allOwnedFields) == 0 {
 		fmt.Printf("No managedFields for k8sconnect, falling back\n")
 		return extractFieldPaths(userJSON, "")
 	}
 
-	// Parse the FieldsV1 JSON
-	var fields map[string]interface{}
-	if err := json.Unmarshal(ourFields.Raw, &fields); err != nil {
-		fmt.Printf("Failed to parse FieldsV1: %v\n", err)
-		return extractFieldPaths(userJSON, "")
-	}
-
-	// Show what we own
-	fieldsJSON, _ := json.MarshalIndent(fields, "", "  ")
-	fmt.Printf("Field ownership from k8sconnect:\n%s\n", fieldsJSON)
+	// Show what we own (combined from all k8sconnect entries)
+	fieldsJSON, _ := json.MarshalIndent(allOwnedFields, "", "  ")
+	fmt.Printf("Combined field ownership from k8sconnect:\n%s\n", fieldsJSON)
 
 	// Extract owned paths
 	paths := []string{}
-	parseOwnedFields(fields, "", userJSON, &paths)
+	parseOwnedFields(allOwnedFields, "", userJSON, &paths)
 
 	fmt.Printf("Extracted owned paths (%d total):\n", len(paths))
 	for _, p := range paths {
@@ -87,6 +88,23 @@ func extractOwnedPaths(ctx context.Context, managedFields []metav1.ManagedFields
 	fmt.Printf("=== extractOwnedPaths END ===\n\n")
 
 	return paths
+}
+
+// mergeFields recursively merges fields from source into dest
+func mergeFields(dest, source map[string]interface{}) {
+	for key, sourceVal := range source {
+		if destVal, exists := dest[key]; exists {
+			// Both have this key - need to merge if both are maps
+			if destMap, ok := destVal.(map[string]interface{}); ok {
+				if sourceMap, ok := sourceVal.(map[string]interface{}); ok {
+					mergeFields(destMap, sourceMap)
+					continue
+				}
+			}
+		}
+		// Otherwise just set/overwrite
+		dest[key] = sourceVal
+	}
 }
 
 func parseOwnedFields(ownership map[string]interface{}, prefix string, userObj interface{}, paths *[]string) {
