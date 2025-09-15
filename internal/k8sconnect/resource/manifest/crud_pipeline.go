@@ -239,16 +239,19 @@ func (p *OperationPipeline) UpdateProjection(rc *ResourceContext) error {
 		tflog.Debug(rc.Ctx, "Using field ownership for projection", map[string]interface{}{
 			"managers": len(currentObj.GetManagedFields()),
 		})
-		paths = extractOwnedPaths(rc.Ctx, currentObj.GetManagedFields(), rc.Object.Object)
+		// FIX: Pass currentObj.Object (the actual K8s object with nodePort)
+		// not rc.Object.Object (the user's YAML without nodePort)
+		paths = extractOwnedPaths(rc.Ctx, currentObj.GetManagedFields(), currentObj.Object)
 	} else {
 		if useFieldOwnership {
 			tflog.Warn(rc.Ctx, "Field ownership requested but no managedFields available")
 		}
 		// Fall back to standard extraction
+		// Here we use rc.Object.Object because we're extracting from user's YAML
 		paths = extractFieldPaths(rc.Object.Object, "")
 	}
 
-	// Create projection
+	// Create projection - always project from the current K8s object
 	projection, err := projectFields(currentObj.Object, paths)
 	if err != nil {
 		return fmt.Errorf("failed to project fields: %w", err)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -164,74 +165,62 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	// Check if connection is ready (same as original)
-	if !r.isConnectionReady(data.ClusterConnection) {
-		tflog.Info(ctx, "Skipping Read due to unknown connection values")
-		return
-	}
-
-	// Get connection from state (same as original)
+	// Parse connection from state
 	conn, err := r.convertObjectToConnectionModel(ctx, data.ClusterConnection)
 	if err != nil {
-		resp.Diagnostics.AddError("Connection Conversion Failed", err.Error())
+		// Connection error - likely removed resource
+		resp.State.RemoveResource(ctx)
 		return
 	}
 
-	// Parse the stored YAML to get resource info (same as original)
+	// Create client
+	client, err := r.clientGetter(conn)
+	if err != nil {
+		// Can't connect - resource might be gone
+		resp.State.RemoveResource(ctx)
+		return
+	}
+
+	// Parse YAML to get the object identity
 	obj, err := r.parseYAML(data.YAMLBody.ValueString())
 	if err != nil {
-		resp.Diagnostics.AddError("YAML Parse Failed", err.Error())
+		resp.Diagnostics.AddError("Invalid YAML",
+			fmt.Sprintf("Failed to parse YAML from state: %s", err))
 		return
 	}
 
-	// Create K8s client
-	var client k8sclient.K8sClient
-	if r.clientFactory != nil {
-		client, err = r.clientFactory.GetClient(conn)
-	} else if r.clientGetter != nil {
-		client, err = r.clientGetter(conn)
-	} else {
-		resp.Diagnostics.AddError("No Client Factory", "No client factory or getter configured")
-		return
-	}
-	if err != nil {
-		resp.Diagnostics.AddError("Client Creation Failed", err.Error())
-		return
-	}
-
-	// Get the GVR for this resource (same as original)
+	// Get GVR
 	gvr, err := client.GetGVR(ctx, obj)
 	if err != nil {
-		resp.Diagnostics.AddError("GVR Resolution Failed", err.Error())
+		resp.Diagnostics.AddError("Resource Discovery Failed",
+			fmt.Sprintf("Failed to get resource type: %s", err))
 		return
 	}
 
-	// Check if resource exists
+	// Read current state from Kubernetes
 	currentObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
 	if err != nil {
-		if errors.IsNotFound(err) {
-			tflog.Info(ctx, "Resource not found, removing from state",
-				map[string]interface{}{
-					"id":        data.ID.ValueString(),
-					"kind":      obj.GetKind(),
-					"name":      obj.GetName(),
-					"namespace": obj.GetNamespace(),
-				})
+		if strings.Contains(err.Error(), "not found") {
+			// Resource was deleted outside Terraform
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		resp.Diagnostics.AddError("Failed to Get Resource",
-			fmt.Sprintf("Failed to read %s %s: %s", obj.GetKind(), obj.GetName(), err))
+		resp.Diagnostics.AddError("Read Failed",
+			fmt.Sprintf("Failed to read %s: %s", obj.GetKind(), err))
 		return
 	}
 
-	// Check ownership
-	currentID := r.getOwnershipID(currentObj)
+	// Check if this resource is owned by this Terraform resource
+	annotations := currentObj.GetAnnotations()
+	currentID := ""
+	if annotations != nil {
+		currentID = annotations["k8sconnect.terraform.io/terraform-id"]
+	}
+
 	if currentID == "" {
-		resp.Diagnostics.AddWarning(
-			"Resource Ownership Lost",
-			fmt.Sprintf("The %s '%s' is no longer marked as managed by Terraform.\n"+
-				"The ownership annotations have been removed.",
+		resp.Diagnostics.AddError(
+			"Resource Not Managed",
+			fmt.Sprintf("The %s '%s' exists but is not managed by Terraform. Use 'terraform import' to manage it.",
 				obj.GetKind(), obj.GetName()),
 		)
 		return
@@ -246,8 +235,23 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	// Extract paths from the stored YAML (what we're managing)
-	paths := extractFieldPaths(obj.Object, "")
+	// Extract paths - use field ownership if flag is enabled
+	var paths []string
+	useFieldOwnership := !data.UseFieldOwnership.IsNull() && data.UseFieldOwnership.ValueBool()
+
+	if useFieldOwnership && len(currentObj.GetManagedFields()) > 0 {
+		tflog.Debug(ctx, "Using field ownership for projection during Read", map[string]interface{}{
+			"managers": len(currentObj.GetManagedFields()),
+		})
+		// Use the actual K8s object to properly map array indices
+		paths = extractOwnedPaths(ctx, currentObj.GetManagedFields(), currentObj.Object)
+	} else {
+		if useFieldOwnership {
+			tflog.Warn(ctx, "Field ownership requested but no managedFields available during Read")
+		}
+		// Fall back to standard extraction from YAML
+		paths = extractFieldPaths(obj.Object, "")
+	}
 
 	// Project the current state to only include fields we manage
 	projection, err := projectFields(currentObj.Object, paths)
@@ -282,6 +286,7 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 
 	tflog.Debug(ctx, "Updated managed state projection", map[string]interface{}{
 		"id":              data.ID.ValueString(),
+		"use_ownership":   useFieldOwnership,
 		"path_count":      len(paths),
 		"projection_size": len(projectionJSON),
 	})

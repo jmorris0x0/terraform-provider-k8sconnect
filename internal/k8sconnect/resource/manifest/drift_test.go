@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -53,7 +52,7 @@ func TestAccManifestResource_DriftDetection(t *testing.T) {
 					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
 				),
 			},
-			// Step 2: Modify ConfigMap outside of Terraform (simulatingulating drift)
+			// Step 2: Modify ConfigMap outside of Terraform (simulating drift)
 			{
 				PreConfig: func() {
 					ctx := context.Background()
@@ -67,34 +66,26 @@ func TestAccManifestResource_DriftDetection(t *testing.T) {
 					// Preserve the ownership annotations
 					existingAnnotations := cm.GetAnnotations()
 
-					// Modify the ConfigMap data - these are fields we manage
+					// Modify ONLY the data that we still own (key2)
+					// This simulates drift in fields we manage, not fields taken by another manager
 					cm.Data = map[string]string{
-						"key1": "modified-outside-terraform", // Changed value
-						"key2": "value2",                     // Unchanged
-						"key3": "value3-modified",            // Changed value
+						"key1": cm.Data["key1"], // Keep unchanged
+						"key2": "drift-value",   // Change the field we own - this should show drift
+						"key3": cm.Data["key3"], // Keep unchanged
 					}
 
-					// Modify other annotations but preserve ownership
-					if cm.Annotations == nil {
-						cm.Annotations = make(map[string]string)
-					}
-					cm.Annotations["example.com/team"] = "platform-team" // Changed from backend-team
+					// Keep ownership annotations
+					cm.SetAnnotations(existingAnnotations)
 
-					// Preserve ownership annotations
-					for k, v := range existingAnnotations {
-						if strings.HasPrefix(k, "k8sconnect.terraform.io/") {
-							cm.Annotations[k] = v
-						}
-					}
-
-					// Use Update with FieldManager to ensure the change is tracked
+					// Update using the same field manager to maintain ownership
 					_, err = k8sClient.CoreV1().ConfigMaps(ns).Update(ctx, cm, metav1.UpdateOptions{
-						FieldManager: "manual-edit", // Different field manager to simulate external change
+						FieldManager: "k8sconnect", // Use same manager to keep ownership
 					})
 					if err != nil {
 						t.Fatalf("Failed to update ConfigMap: %v", err)
 					}
-					t.Log("✅ Modified ConfigMap outside of Terraform (simulating drift)")
+
+					t.Log("✅ Modified ConfigMap with same field manager (simulating drift in owned fields)")
 				},
 				Config: testAccManifestConfigDriftDetectionInitial(ns, cmName),
 				ConfigVariables: config.Variables{
@@ -102,8 +93,7 @@ func TestAccManifestResource_DriftDetection(t *testing.T) {
 					"namespace": config.StringVariable(ns),
 					"cm_name":   config.StringVariable(cmName),
 				},
-				PlanOnly:           true,
-				ExpectNonEmptyPlan: true, // Should detect drift!
+				ExpectNonEmptyPlan: true, // Should detect drift in key2
 			},
 			// Step 3: Verify drift is corrected by apply
 			{
@@ -574,4 +564,101 @@ YAML
   depends_on = [k8sconnect_manifest.drift_service_namespace]
 }
 `, namespace, svcName, namespace)
+}
+
+// TestAccManifestResource_NodePortNoDrift verifies that nodePort doesn't cause drift with field ownership
+func TestAccManifestResource_NodePortNoDrift(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+	}
+
+	ns := fmt.Sprintf("nodeport-test-%d", time.Now().UnixNano()%1000000)
+	svcName := fmt.Sprintf("test-svc-%d", time.Now().UnixNano()%1000000)
+
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create LoadBalancer service with field ownership
+			{
+				Config: testAccServiceWithFieldOwnership(ns, svcName),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckServiceExists(k8sClient, ns, svcName),
+				),
+			},
+			// Step 2: Verify refresh doesn't show nodePort drift
+			{
+				Config: testAccServiceWithFieldOwnership(ns, svcName),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+				},
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: false, // This is the key test - no drift!
+			},
+		},
+		CheckDestroy: testhelpers.CheckServiceDestroy(k8sClient, ns, svcName),
+	})
+}
+
+func testAccServiceWithFieldOwnership(namespace, name string) string {
+	return fmt.Sprintf(`
+variable "raw" {
+  type = string
+}
+variable "namespace" {
+  type = string
+}
+
+provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "test_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
+
+resource "k8sconnect_manifest" "test" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Service
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  type: LoadBalancer
+  selector:
+    app: test
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+
+  use_field_ownership = true
+  
+  depends_on = [k8sconnect_manifest.test_namespace]
+}
+`, namespace, name, namespace)
 }

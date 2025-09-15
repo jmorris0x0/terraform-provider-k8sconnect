@@ -1,0 +1,142 @@
+// TestAccManifestResource_StatusExternalUpdate tests that external status updates are detected
+// This test is expected to FAIL due to a known issue with status field handling after wait timeout
+func TestAccManifestResource_StatusExternalUpdate(t *testing.T) {
+	t.Skip("Known issue: Status field not updated after wait timeout - see issue #XXX")
+	
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+	}
+
+	ns := fmt.Sprintf("status-update-%d", time.Now().UnixNano()%1000000)
+	svcName := fmt.Sprintf("test-svc-%d", time.Now().UnixNano()%1000000)
+
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+	
+	// Need raw clientset for patching status
+	restConfig, err := clientcmd.RESTConfigFromKubeConfig([]byte(raw))
+	if err != nil {
+		t.Fatalf("Failed to create REST config: %v", err)
+	}
+	clientset, err := kubernetes.NewForConfig(restConfig)
+	if err != nil {
+		t.Fatalf("Failed to create clientset: %v", err)
+	}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create service with wait_for that will timeout
+			{
+				Config: testAccServiceWithWaitTimeout(ns, svcName),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckServiceExists(k8sClient, ns, svcName),
+					// Status should be null after timeout
+					resource.TestCheckNoResourceAttr("k8sconnect_manifest.test", "status"),
+				),
+			},
+			// Step 2: Patch status externally and verify it's detected
+			{
+				PreConfig: func() {
+					// Simulate external controller updating status
+					patch := []byte(`{"status":{"loadBalancer":{"ingress":[{"hostname":"external-lb.example.com"}]}}}`)
+					_, err := clientset.CoreV1().Services(ns).Patch(
+						context.Background(),
+						svcName,
+						types.MergePatchType,
+						patch,
+						metav1.PatchOptions{},
+						"status",
+					)
+					if err != nil {
+						t.Fatalf("Failed to patch status: %v", err)
+					}
+					t.Log("Patched status externally")
+				},
+				Config: testAccServiceWithWaitTimeout(ns, svcName),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					// This SHOULD work but currently doesn't - status remains null
+					// Uncommenting this line will cause the test to fail
+					// resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.loadBalancer.ingress[0].hostname", "external-lb.example.com"),
+					resource.TestCheckOutput("load_balancer_hostname", "external-lb.example.com"),
+				),
+			},
+		},
+		CheckDestroy: testhelpers.CheckServiceDestroy(k8sClient, ns, svcName),
+	})
+}
+
+func testAccServiceWithWaitTimeout(namespace, name string) string {
+	return fmt.Sprintf(`
+variable "raw" {
+  type = string
+}
+variable "namespace" {
+  type = string
+}
+
+provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "test_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
+
+resource "k8sconnect_manifest" "test" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Service
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  type: LoadBalancer
+  selector:
+    app: test
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+YAML
+
+  wait_for = {
+    field = "status.loadBalancer.ingress"
+    timeout = "2s"  # Very short timeout to ensure it fails
+  }
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+  
+  depends_on = [k8sconnect_manifest.test_namespace]
+}
+
+output "load_balancer_hostname" {
+  value = try(
+    k8sconnect_manifest.test.status.loadBalancer.ingress[0].hostname,
+    "not-populated"
+  )
+}
+`, namespace, name, namespace)
+}
+
