@@ -243,8 +243,8 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		tflog.Debug(ctx, "Using field ownership for projection during Read", map[string]interface{}{
 			"managers": len(currentObj.GetManagedFields()),
 		})
-		// Use the actual K8s object to properly map array indices
-		paths = extractOwnedPaths(ctx, currentObj.GetManagedFields(), currentObj.Object)
+		// Use the desired YAML to determine paths, but project from actual K8s object
+		paths = extractOwnedPaths(ctx, currentObj.GetManagedFields(), obj.Object)
 	} else {
 		if useFieldOwnership {
 			tflog.Warn(ctx, "Field ownership requested but no managedFields available during Read")
