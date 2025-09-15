@@ -56,16 +56,13 @@ func TestAccManifestResource_DriftDetection(t *testing.T) {
 			{
 				PreConfig: func() {
 					ctx := context.Background()
-
 					// Get the current ConfigMap to preserve ownership annotations
 					cm, err := k8sClient.CoreV1().ConfigMaps(ns).Get(ctx, cmName, metav1.GetOptions{})
 					if err != nil {
 						t.Fatalf("Failed to get ConfigMap: %v", err)
 					}
-
 					// Preserve the ownership annotations
 					existingAnnotations := cm.GetAnnotations()
-
 					// Modify ONLY the data that we still own (key2)
 					// This simulates drift in fields we manage, not fields taken by another manager
 					cm.Data = map[string]string{
@@ -73,16 +70,22 @@ func TestAccManifestResource_DriftDetection(t *testing.T) {
 						"key2": "drift-value",   // Change the field we own - this should show drift
 						"key3": cm.Data["key3"], // Keep unchanged
 					}
-
 					// Keep ownership annotations
 					cm.SetAnnotations(existingAnnotations)
-
 					// Update using the same field manager to maintain ownership
 					_, err = k8sClient.CoreV1().ConfigMaps(ns).Update(ctx, cm, metav1.UpdateOptions{
 						FieldManager: "k8sconnect", // Use same manager to keep ownership
 					})
 					if err != nil {
 						t.Fatalf("Failed to update ConfigMap: %v", err)
+					}
+
+					// ADD THIS DEBUG OUTPUT
+					cmAfter, _ := k8sClient.CoreV1().ConfigMaps(ns).Get(ctx, cmName, metav1.GetOptions{})
+					t.Logf("ConfigMap after modification: data=%v", cmAfter.Data)
+					t.Logf("Number of managedFields entries: %d", len(cmAfter.ManagedFields))
+					for i, mf := range cmAfter.ManagedFields {
+						t.Logf("ManagedField[%d]: manager=%s, operation=%s", i, mf.Manager, mf.Operation)
 					}
 
 					t.Log("✅ Modified ConfigMap with same field manager (simulating drift in owned fields)")
@@ -145,6 +148,8 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
+
+  use_field_ownership = false
 }
 
 resource "k8sconnect_manifest" "drift_test" {

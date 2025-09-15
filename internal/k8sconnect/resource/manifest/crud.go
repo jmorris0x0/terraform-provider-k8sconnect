@@ -269,6 +269,10 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
+	fmt.Printf("=== READ: Projection for %s/%s ===\n", currentObj.GetKind(), currentObj.GetName())
+	fmt.Printf("Projection: %s\n", projectionJSON[:min(500, len(projectionJSON))])
+	fmt.Printf("=== END READ ===\n")
+
 	// Update the projection in state - this is what enables drift detection
 	data.ManagedStateProjection = types.StringValue(projectionJSON)
 
