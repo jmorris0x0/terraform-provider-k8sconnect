@@ -1,0 +1,24 @@
+k8sconnect_manifest.namespace_k8sconnect: Creating...
+╷
+│ Error: Preparation Failed
+│
+│   with k8sconnect_manifest.namespace_k8sconnect,
+│   on main.tf line 64, in resource "k8sconnect_manifest" "namespace_k8sconnect":
+│   64: resource "k8sconnect_manifest" "namespace_k8sconnect" {
+│
+│ failed to create Kubernetes client: failed to create REST config: failed to decode
+│ cluster_ca_certificate: illegal base64 data at input byte 0
+
+this is the provider being confused by the cert not being encoded. I need to either make this the same as the other two providers, or give a much, much better error message
+
+Or even better, autodetect and accept both!
+
+
+Also, client cert is shown in the plan. This is bad!
+
+  # k8sconnect_manifest.nginx_service will be created
+  + resource "k8sconnect_manifest" "nginx_service" {
+      + cluster_connection           = {
+          + client_certificate     = "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURLVENDQWhHZ0F3SUJBZ0lJTjVocVhGOHRaSFF3RFFZSktvWklodmNOQVFFTEJRQXdGVEVUTUJFR0ExVUUKQXhNS2EzVmlaWEp1WlhSbGN6QWVGdzB5TlRBNU1UWXlNakl6TlRCYUZ3MHlOakE1TVRZeU1qSTROVEJhTUR3eApIekFkQmdOVkJBb1RGbXQxWW1WaFpHMDZZMngxYzNSbGNpMWhaRzFwYm5NeEdUQVhCZ05WQkFNVEVHdDFZbVZ5CmJtVjBaWE10WVdSdGFXNHdnZ0VpTUEwR0NTcUdTSWIzRFFFQkFRVUFBNElCRHdBd2dnRUtBb0lCQVFEblNuODgKZ1MzUmZlbktFcXBPTGVvQUgxY2VSbmtlc3I4Z1NSOGZBMFBCVVlWWUVtVUlBUVllQzBDcG5lU3BIY1JhdjlwMApHdGtuSUR5WmVobC9yck9JQTRXSjJocjBCSm1IcXAybDJZY1BORlJzNStoQkQ4eFlMMStobUlYbUxpUjVOb0IyCm9aNDNwRUdnNEtZWXFJY0dhYS91ME9Wc2VFTkFYUzZPeDFmdkk1NW9vaTVDM2p5aTByRGE1a21mR2RWSmpKdkQKQnJaRnBlRzNlTzh5ekd6ZVRCTmJSbnJKZlJJNExyZkxXRnY2d1ZwZXVKcnBlV2U5d21KeitubjZBaDRwWS9zSAppUk9nTzJJV0E4THR6czJ1SldKb1RnYlp1VG9SY0wyY0dFY0cvWWFTbVZBTndxdXpyRCtvY0pSeHJBNTFxbkwvCjVkeGlxeis3VEh4Z2Z1dk5BZ01CQUFHalZqQlVNQTRHQTFVZER3RUIvd1FFQXdJRm9EQVRCZ05WSFNVRUREQUsKQmdnckJnRUZCUWNEQWpBTUJnTlZIUk1CQWY4RUFqQUFNQjhHQTFVZEl3UVlNQmFBRkl0c0NKY09UaFdhdm5MVAp4WXR6TUEreFdnaXBNQTBHQ1NxR1NJYjNEUUVCQ3dVQUE0SUJBUUNRUlJBRDIyN21kVW5iWUFNdEFXWW45aFpsCjltMyszZkxxYVBCb2FmK2VaalArMUNMaW5BNXFOb1Z3Qk9nWnNqRTRlZmxaWGZQNGMzWE13NndSOHdWbTdNTlIKcGVCV0NqL2p3bCtJVXJUVWY1OVpianVPUEc3cHZNaXF6ODJ3d1N1dllyakNGTUxPOXYwc0NFcWlScXh0N05HcQovVk9aSVQwYU9sMlZEQmVLQzJjOXN5cE12MTBpajNrN3VHT2dFSVJQMTBPQmEyT2phcVV2SW5BeTAvLzB2S2R0CkZHUzJFTzlqRmJtemJDZ3RSYnFwRll6RlI0NDA2YmZMdUlyb1REb3BsM1FnMjJoWlpWaFh3K1dBc0RBazRLQ04KNXJXbmdrRjNJK3hxWGFVRXVWWmlLNHhPYnpWK0RCZ1paUC9VNVgrK1NiZEEyYjRTRnNkNnVxTno2MUh1Ci0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K"
+
+
