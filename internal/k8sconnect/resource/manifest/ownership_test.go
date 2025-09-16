@@ -373,6 +373,15 @@ YAML
 }`, namespace, cmName, namespace)
 }
 
+// TestAccManifestResource_FieldManagerConflict verifies that field ownership conflicts are detected and reported.
+// Expected behavior:
+//  1. When another field manager (e.g., kubectl) takes ownership of a field that's defined in our YAML
+//  2. The provider should detect this conflict during planning
+//  3. An error should be raised indicating which fields are conflicted and who owns them
+//  4. The error should provide clear resolution options:
+//     a) Remove the conflicting field from your Terraform YAML
+//     b) Set force_conflicts=true to forcibly take ownership (may cause fights with other controllers)
+//     c) Future: Use ignore_field_changes to explicitly ignore the field
 func TestAccManifestResource_FieldManagerConflict(t *testing.T) {
 	t.Parallel()
 
