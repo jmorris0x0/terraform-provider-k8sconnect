@@ -30,6 +30,7 @@ coverage.html
 *.tfstate
 *.tfstate.*
 .terraform/
+*.terraform.lock.hcl
 
 # Log files
 *.log
