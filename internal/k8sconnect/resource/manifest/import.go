@@ -247,6 +247,7 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		DeleteProtection:           types.BoolValue(false),
 		ManagedStateProjection:     types.StringValue(projectionJSON),
 		ImportedWithoutAnnotations: types.BoolValue(true),
+		UseFieldOwnership:          types.BoolValue(true),
 		WaitFor: types.ObjectNull(map[string]attr.Type{
 			"condition":   types.StringType,
 			"field":       types.StringType,
