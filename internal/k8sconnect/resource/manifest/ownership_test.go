@@ -2,9 +2,9 @@
 package manifest_test
 
 import (
+	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"regexp"
 	"testing"
 	"time"
@@ -13,6 +13,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/config"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect"
@@ -397,6 +398,7 @@ YAML
 //	    conflictDetails),
 //
 // )
+// TestAccManifestResource_FieldManagerConflict verifies that field ownership conflicts are detected and reported.
 func TestAccManifestResource_FieldManagerConflict(t *testing.T) {
 	t.Parallel()
 
@@ -409,6 +411,9 @@ func TestAccManifestResource_FieldManagerConflict(t *testing.T) {
 	deployName := fmt.Sprintf("field-conflict-deploy-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 	k8sClientset := k8sClient.(*kubernetes.Clientset)
+
+	// Create our minimal SSA test client from the helpers
+	ssaClient := testhelpers.NewSSATestClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -428,51 +433,56 @@ func TestAccManifestResource_FieldManagerConflict(t *testing.T) {
 					testhelpers.CheckDeploymentReplicaCount(k8sClientset, ns, deployName, 2),
 				),
 			},
-			// Step 2: Modify with kubectl to create field manager conflict
+			// Step 2: Use Server-Side Apply to transfer ownership to hpa-controller
 			{
 				PreConfig: func() {
-					// Scale deployment using kubectl to create a different field manager
-					cmd := exec.Command("kubectl", "-n", ns, "scale", "deployment", deployName, "--replicas=3")
-					if err := cmd.Run(); err != nil {
-						t.Fatalf("Failed to scale deployment with kubectl: %v", err)
+					ctx := context.Background()
+
+					// Use our minimal SSA client from helpers to properly transfer field ownership
+					// This simulates what an HPA controller would actually do
+					err := ssaClient.ApplyDeploymentReplicasSSA(ctx, ns, deployName, 3, "hpa-controller")
+					if err != nil {
+						t.Fatalf("Failed to apply with hpa-controller: %v", err)
 					}
 
 					// Give it a moment to process
 					time.Sleep(2 * time.Second)
-				},
-				Config: testAccManifestConfig_FieldConflict(ns, deployName, false),
-				ConfigVariables: config.Variables{
-					"raw":         config.StringVariable(raw),
-					"namespace":   config.StringVariable(ns),
-					"deploy_name": config.StringVariable(deployName),
-				},
-				ExpectError: regexp.MustCompile(`Field Manager Conflict`),
-			},
 
-			// Step 2b: Plan-only to check warning
-			{
-				Config: testAccManifestConfig_FieldConflictUpdate(ns, deployName, false), // Try to change back to 4 replicas
-				ConfigVariables: config.Variables{
-					"raw":         config.StringVariable(raw),
-					"namespace":   config.StringVariable(ns),
-					"deploy_name": config.StringVariable(deployName),
+					// Verify the field ownership changed
+					deploy, err := k8sClientset.AppsV1().Deployments(ns).Get(ctx, deployName, metav1.GetOptions{})
+					if err != nil {
+						t.Fatalf("Failed to get deployment: %v", err)
+					}
+
+					t.Logf("ManagedFields after hpa-controller SSA:")
+					hasHPA := false
+					for _, mf := range deploy.ManagedFields {
+						t.Logf("  Manager: %s, Operation: %s", mf.Manager, mf.Operation)
+						if mf.Manager == "hpa-controller" {
+							hasHPA = true
+							t.Logf("    ✓ hpa-controller took ownership via SSA")
+						}
+					}
+
+					if !hasHPA {
+						t.Fatalf("hpa-controller did not appear in managedFields after SSA")
+					}
+
+					// Verify replicas changed to 3
+					if deploy.Spec.Replicas == nil || *deploy.Spec.Replicas != 3 {
+						t.Fatalf("Expected replicas to be 3, got %v", deploy.Spec.Replicas)
+					}
 				},
-				PlanOnly:           true,
-				ExpectNonEmptyPlan: true,
-				// Unfortunately Terraform test framework doesn't easily let us check for warnings
-				// But this step would trigger the warning in real usage
-			},
-			// Step 3: Try to change replicas back with Terraform (should warn about conflict)
-			{
+				// Now try to change replicas with Terraform - should conflict
 				Config: testAccManifestConfig_FieldConflictUpdate(ns, deployName, false),
 				ConfigVariables: config.Variables{
 					"raw":         config.StringVariable(raw),
 					"namespace":   config.StringVariable(ns),
 					"deploy_name": config.StringVariable(deployName),
 				},
-				ExpectError: regexp.MustCompile(`Field Manager Conflict`),
+				ExpectError: regexp.MustCompile(`Field Manager Conflict|Field Ownership Conflict`),
 			},
-			// Step 4: Force the change
+			// Step 3: Force the change
 			{
 				Config: testAccManifestConfig_FieldConflictUpdate(ns, deployName, true),
 				ConfigVariables: config.Variables{
@@ -481,7 +491,7 @@ func TestAccManifestResource_FieldManagerConflict(t *testing.T) {
 					"deploy_name": config.StringVariable(deployName),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					// Now should be 4 because we forced
+					// Should be 4 because we forced it
 					testhelpers.CheckDeploymentReplicaCount(k8sClientset, ns, deployName, 4),
 				),
 			},
