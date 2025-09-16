@@ -201,17 +201,24 @@ func parseOwnedFields(ownership map[string]interface{}, prefix string, userObj i
 
 // matchesMergeKey checks if an item matches the merge key criteria
 func matchesMergeKey(item map[string]interface{}, mergeKey map[string]interface{}) bool {
-	for k, v := range mergeKey {
-		itemVal, exists := item[k]
-		if !exists {
-			return false
-		}
-		// Convert both to strings for comparison (handles int vs float issues)
-		if fmt.Sprintf("%v", itemVal) != fmt.Sprintf("%v", v) {
-			return false
+	// Check if the user's specified fields match the corresponding merge key fields
+	// This allows partial matching when user relies on K8s defaults
+
+	// Count how many fields from merge key we can verify
+	verifiableFields := 0
+	matchedFields := 0
+
+	for mergeField, mergeVal := range mergeKey {
+		if itemVal, exists := item[mergeField]; exists {
+			verifiableFields++
+			if fmt.Sprintf("%v", itemVal) == fmt.Sprintf("%v", mergeVal) {
+				matchedFields++
+			}
 		}
 	}
-	return true
+
+	// If we could verify at least one field and all verifiable fields matched
+	return verifiableFields > 0 && verifiableFields == matchedFields
 }
 
 // shouldIncludeUserField checks if a field from user's YAML should always be included
