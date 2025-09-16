@@ -382,6 +382,21 @@ YAML
 //     a) Remove the conflicting field from your Terraform YAML
 //     b) Set force_conflicts=true to forcibly take ownership (may cause fights with other controllers)
 //     c) Future: Use ignore_field_changes to explicitly ignore the field
+//
+// Eventually make sure there is an error something like this:
+// resp.Diagnostics.AddError(
+//
+//	"Field Ownership Conflict",
+//	fmt.Sprintf("Cannot modify fields owned by other controllers:\n"+
+//	    "  - %s (owned by %s)\n\n"+
+//	    "Resolution options:\n"+
+//	    "1. Remove the conflicting field from your Terraform configuration\n"+
+//	    "2. Set force_conflicts = true to forcibly take ownership\n"+
+//	    "   WARNING: The other controller may fight back, causing perpetual drift\n"+
+//	    "3. (Future) Add field to ignore_field_changes when implemented",
+//	    conflictDetails),
+//
+// )
 func TestAccManifestResource_FieldManagerConflict(t *testing.T) {
 	t.Parallel()
 
