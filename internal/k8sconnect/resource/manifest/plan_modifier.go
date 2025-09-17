@@ -381,44 +381,44 @@ func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req
 
 	fmt.Printf("Parsed ownership map with %d entries\n", len(ownership))
 
-	// Parse projections
-	var stateProj, planProj map[string]interface{}
-	if err := json.Unmarshal([]byte(stateData.ManagedStateProjection.ValueString()), &stateProj); err != nil {
-		fmt.Printf("Failed to parse state projection: %v\n", err)
-		return
-	}
-	if err := json.Unmarshal([]byte(planData.ManagedStateProjection.ValueString()), &planProj); err != nil {
-		fmt.Printf("Failed to parse plan projection: %v\n", err)
-		return
-	}
+	// NEW APPROACH: Instead of parsing projections, check what user wants vs what they own
 
-	// Find changed fields
-	changes := findChangedFields(stateProj, planProj, "")
-	fmt.Printf("Found %d changed fields\n", len(changes))
-	for i, change := range changes {
-		fmt.Printf("  Change %d: %s (current: %v, desired: %v)\n",
-			i, change.Path, change.CurrentValue, change.DesiredValue)
-	}
-
-	if len(changes) == 0 {
+	// Parse the user's desired YAML to see what fields they want
+	desiredObj, err := r.parseYAML(planData.YAMLBody.ValueString())
+	if err != nil {
+		fmt.Printf("Failed to parse user's YAML: %v\n", err)
 		return
 	}
 
-	// Check ownership for each change
+	// Extract all paths the user wants to manage
+	userWantsPaths := extractFieldPaths(desiredObj.Object, "")
+	fmt.Printf("User wants to manage %d paths\n", len(userWantsPaths))
+
+	// Check each path the user wants against ownership
 	var conflicts []FieldConflict
-	for _, change := range changes {
-		if owner, exists := ownership[change.Path]; exists && owner.Manager != "k8sconnect" {
-			fmt.Printf("  CONFLICT: Field %s owned by %s (not k8sconnect)\n", change.Path, owner.Manager)
-			conflicts = append(conflicts, FieldConflict{
-				Path:         change.Path,
-				CurrentValue: change.CurrentValue,
-				DesiredValue: change.DesiredValue,
-				Owner:        owner.Manager,
-			})
-		} else if _, exists := ownership[change.Path]; exists {
-			fmt.Printf("  OK: Field %s owned by k8sconnect\n", change.Path)
+	for _, path := range userWantsPaths {
+		// Skip metadata fields that are always owned by us
+		if strings.HasPrefix(path, "metadata.annotations.k8sconnect.terraform.io/") {
+			continue
+		}
+		// Skip core fields that don't have ownership
+		if path == "apiVersion" || path == "kind" || path == "metadata.name" || path == "metadata.namespace" {
+			continue
+		}
+
+		if owner, exists := ownership[path]; exists {
+			if owner.Manager != "k8sconnect" {
+				fmt.Printf("  CONFLICT: Field %s owned by %s (not k8sconnect)\n", path, owner.Manager)
+				conflicts = append(conflicts, FieldConflict{
+					Path:  path,
+					Owner: owner.Manager,
+				})
+			} else {
+				fmt.Printf("  OK: Field %s owned by k8sconnect\n", path)
+			}
 		} else {
-			fmt.Printf("  NO OWNERSHIP DATA: Field %s\n", change.Path)
+			// Field not in ownership map - might be a new field or not tracked
+			fmt.Printf("  NO OWNERSHIP DATA: Field %s (likely ok - new or untracked)\n", path)
 		}
 	}
 
@@ -431,12 +431,10 @@ func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req
 	fmt.Printf("=== checkFieldOwnershipConflicts END ===\n")
 }
 
-// FieldConflict represents a field that is changing but owned by another controller
+// FieldConflict represents a field that user wants but is owned by another controller
 type FieldConflict struct {
-	Path         string
-	CurrentValue interface{}
-	DesiredValue interface{}
-	Owner        string
+	Path  string
+	Owner string
 }
 
 // FieldChange represents any field that is changing
@@ -524,7 +522,6 @@ func findChangedFields(current, desired map[string]interface{}, prefix string) [
 	return changes
 }
 
-// addConflictWarning adds a warning about field ownership conflicts
 func addConflictWarning(resp *resource.ModifyPlanResponse, conflicts []FieldConflict, forceConflicts types.Bool) {
 	if forceConflicts.ValueBool() {
 		// Just warn when forcing
