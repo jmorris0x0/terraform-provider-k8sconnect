@@ -275,3 +275,7 @@ fix-headers: ## Fix file path header comments in all Go files
 complexity: ## Check code complexity
 	@go run github.com/fzipp/gocyclo/cmd/gocyclo@latest -over 15 . | sort -rn || true
 
+.PHONY: loc
+loc: ## Count lines of code by file type
+	@go run github.com/boyter/scc/v3@latest . --exclude-dir=vendor,node_modules,.git --sort lines
+

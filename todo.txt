@@ -57,3 +57,4 @@ Or even better, autodetect and accept both! Would need a test for this.
 
 22. Address code scanning alerts currently in github.
 
+23. Tag line: A kubernetes terraform provider built around edge cases.
