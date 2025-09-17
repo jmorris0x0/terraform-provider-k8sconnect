@@ -54,3 +54,6 @@ Or even better, autodetect and accept both! Would need a test for this.
 20. Remove the many print statements throughout the codebase or convert to logs.
 
 21. Convert this list to project issues.
+
+22. Address code scanning alerts currently in github.
+
