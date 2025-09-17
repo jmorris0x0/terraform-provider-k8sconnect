@@ -60,3 +60,6 @@ Or even better, autodetect and accept both! Would need a test for this.
 23. Tag line: A kubernetes terraform provider built around edge cases.
 
 24. Does the HPA simulation test handle multiple simultaneous ownership changes? What about a mix of ownership changes and normal drift? Can the code send multiple errors to the test? If it did would be understood? Do we need to harmonize errors first?
+
+25. From README: "All cluster_connection fields are marked sensitive and won't appear in logs or plan output." Did I change that attribute name? Should I still? How about cluster_auth? It's more descriptive.
+
