@@ -11,7 +11,7 @@ Traditional providers force cluster configuration into the provider block; **k8s
 
 > ### ⚠️ ALPHA RELEASE
 > **This provider is in alpha and not suitable for production use.** Breaking changes may occur without notice. Use at your own risk.
-
+> Targeting December 2025 for feature complete release announcement.
 
 ---
 
