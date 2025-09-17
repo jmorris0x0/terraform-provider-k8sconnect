@@ -58,3 +58,5 @@ Or even better, autodetect and accept both! Would need a test for this.
 22. Address code scanning alerts currently in github.
 
 23. Tag line: A kubernetes terraform provider built around edge cases.
+
+24. Does the HPA simulation test handle multiple simultaneous ownership changes? What about a mix of ownership changes and normal drift? Can the code send multiple errors to the test? If it did would be understood? Do we need to harmonize errors first?
