@@ -44,3 +44,5 @@ Or even better, autodetect and accept both! Would need a test for this.
 15. Add ignore_field_changes for surgical ignores. Avoids annoying initial diff for HPA and other controllers.
 
 16. Consider moving key features higher up in the docs.
+
+17. Move development from master to develop branch
