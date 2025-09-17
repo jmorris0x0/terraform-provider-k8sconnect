@@ -324,57 +324,82 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 	var finalPlan manifestResourceModel
 	resp.Plan.Get(ctx, &finalPlan)
 	fmt.Printf("After Plan.Set - Status IsNull: %v, IsUnknown: %v\n", finalPlan.Status.IsNull(), finalPlan.Status.IsUnknown())
+
+	if !req.State.Raw.IsNull() {
+		r.checkFieldOwnershipConflicts(ctx, req, resp)
+	}
+
 	fmt.Printf("=== END ModifyPlan ===\n\n")
 }
 
 // checkFieldOwnershipConflicts detects when fields managed by other controllers are being changed
 func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	fmt.Printf("=== checkFieldOwnershipConflicts START ===\n")
+
 	// Get state and plan projections
 	var stateData, planData manifestResourceModel
-
 	diags := req.State.Get(ctx, &stateData)
 	resp.Diagnostics.Append(diags...)
 	diags = req.Plan.Get(ctx, &planData)
 	resp.Diagnostics.Append(diags...)
-
 	if resp.Diagnostics.HasError() {
+		fmt.Printf("Has diagnostics error, returning\n")
 		return
 	}
 
 	// Skip if projections are not available
 	if stateData.ManagedStateProjection.IsNull() || planData.ManagedStateProjection.IsNull() {
+		fmt.Printf("Projections not available (state null: %v, plan null: %v), returning\n",
+			stateData.ManagedStateProjection.IsNull(), planData.ManagedStateProjection.IsNull())
 		return
 	}
 
 	// Skip if projections are the same
 	if stateData.ManagedStateProjection.Equal(planData.ManagedStateProjection) {
+		fmt.Printf("Projections are equal, returning\n")
 		return
 	}
 
+	fmt.Printf("Projections differ - checking for conflicts\n")
+
 	// Get field ownership from state
 	if stateData.FieldOwnership.IsNull() {
+		fmt.Printf("field_ownership is null, returning\n")
 		return
 	}
+
+	fmt.Printf("field_ownership value: %s\n", stateData.FieldOwnership.ValueString())
 
 	var ownership map[string]FieldOwnership
 	if err := json.Unmarshal([]byte(stateData.FieldOwnership.ValueString()), &ownership); err != nil {
 		tflog.Warn(ctx, "Failed to unmarshal field ownership", map[string]interface{}{
 			"error": err.Error(),
 		})
+		fmt.Printf("Failed to unmarshal field ownership: %v\n", err)
 		return
 	}
+
+	fmt.Printf("Parsed ownership map with %d entries\n", len(ownership))
 
 	// Parse projections
 	var stateProj, planProj map[string]interface{}
 	if err := json.Unmarshal([]byte(stateData.ManagedStateProjection.ValueString()), &stateProj); err != nil {
+		fmt.Printf("Failed to parse state projection: %v\n", err)
 		return
 	}
 	if err := json.Unmarshal([]byte(planData.ManagedStateProjection.ValueString()), &planProj); err != nil {
+		fmt.Printf("Failed to parse plan projection: %v\n", err)
 		return
 	}
 
 	// Find changed fields
 	changes := findChangedFields(stateProj, planProj, "")
+	fmt.Printf("Found %d changed fields\n", len(changes))
+	for i, change := range changes {
+		fmt.Printf("  Change %d: %s (current: %v, desired: %v)\n",
+			i, change.Path, change.CurrentValue, change.DesiredValue)
+	}
+
 	if len(changes) == 0 {
 		return
 	}
@@ -383,18 +408,27 @@ func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req
 	var conflicts []FieldConflict
 	for _, change := range changes {
 		if owner, exists := ownership[change.Path]; exists && owner.Manager != "k8sconnect" {
+			fmt.Printf("  CONFLICT: Field %s owned by %s (not k8sconnect)\n", change.Path, owner.Manager)
 			conflicts = append(conflicts, FieldConflict{
 				Path:         change.Path,
 				CurrentValue: change.CurrentValue,
 				DesiredValue: change.DesiredValue,
 				Owner:        owner.Manager,
 			})
+		} else if _, exists := ownership[change.Path]; exists {
+			fmt.Printf("  OK: Field %s owned by k8sconnect\n", change.Path)
+		} else {
+			fmt.Printf("  NO OWNERSHIP DATA: Field %s\n", change.Path)
 		}
 	}
 
+	fmt.Printf("Total conflicts: %d\n", len(conflicts))
 	if len(conflicts) > 0 {
+		fmt.Printf("Calling addConflictWarning with force_conflicts=%v\n", planData.ForceConflicts.ValueBool())
 		addConflictWarning(resp, conflicts, planData.ForceConflicts)
 	}
+
+	fmt.Printf("=== checkFieldOwnershipConflicts END ===\n")
 }
 
 // FieldConflict represents a field that is changing but owned by another controller
