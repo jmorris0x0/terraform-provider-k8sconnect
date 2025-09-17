@@ -26,6 +26,7 @@ Applies a single‑document Kubernetes YAML manifest to a cluster, with per‑re
 - `delete_timeout` (String) How long to wait for a resource to be deleted before considering the deletion failed. Defaults to 300s (5 minutes).
 - `force_conflicts` (Boolean) Force field manager conflicts during server-side apply. When false (default), operations will fail if another field manager owns the field. When true, forcibly takes ownership of conflicting fields.
 - `force_destroy` (Boolean) Force destroy resources that have finalizers and are stuck in 'Terminating' state. This removes finalizers before deletion.
+- `use_field_ownership` (Boolean) Use SSA field ownership for projection (experimental). Prevents drift from controller-added fields like nodePort.
 - `wait_for` (Attributes) Wait for resource to reach desired state during apply. Automatically enables status tracking. (see [below for nested schema](#nestedatt--wait_for))
 
 ### Read-Only
@@ -41,9 +42,9 @@ Applies a single‑document Kubernetes YAML manifest to a cluster, with per‑re
 
 Optional:
 
-- `client_certificate` (String) PEM-encoded client certificate for TLS authentication.
+- `client_certificate` (String, Sensitive) PEM-encoded client certificate for TLS authentication.
 - `client_key` (String, Sensitive) PEM-encoded client certificate key for TLS authentication.
-- `cluster_ca_certificate` (String) PEM-encoded root certificate bundle for TLS authentication.
+- `cluster_ca_certificate` (String, Sensitive) PEM-encoded root certificate bundle for TLS authentication.
 - `context` (String) Context to use from the kubeconfig.
 - `exec` (Attributes) Configuration for exec-based authentication. (see [below for nested schema](#nestedatt--cluster_connection--exec))
 - `host` (String) The hostname (in form of URI) of the Kubernetes API server.
