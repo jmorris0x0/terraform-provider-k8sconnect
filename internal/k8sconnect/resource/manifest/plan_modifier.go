@@ -107,24 +107,38 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 		if useFieldOwnership && !isCreate {
 			// UPDATE - try to use field ownership
 			fmt.Printf("Decision: UPDATE with field ownership - attempting to get current object\n")
-			gvr, err := client.GetGVR(ctx, desiredObj)
-			if err == nil {
-				currentObj, err := client.Get(ctx, gvr, desiredObj.GetNamespace(), desiredObj.GetName())
-				if err == nil {
-					fmt.Printf("Got current object with %d managedFields entries\n", len(currentObj.GetManagedFields()))
-					tflog.Debug(ctx, "Using field ownership for projection")
-					paths = extractOwnedPaths(ctx, currentObj.GetManagedFields(), desiredObj.Object)
-					fmt.Printf("extractOwnedPaths returned %d paths\n", len(paths))
-				} else {
-					fmt.Printf("Could not get current object: %v\n", err)
-					tflog.Debug(ctx, "Could not get current object, falling back to YAML paths")
-					paths = extractFieldPaths(desiredObj.Object, "")
-					fmt.Printf("extractFieldPaths (fallback) returned %d paths\n", len(paths))
-				}
-			} else {
-				fmt.Printf("Could not get GVR: %v\n", err)
+
+			// Check force_conflicts setting FIRST
+			forceConflicts := !plannedData.ForceConflicts.IsNull() && plannedData.ForceConflicts.ValueBool()
+			fmt.Printf("force_conflicts setting: %v\n", forceConflicts)
+
+			if forceConflicts {
+				// When force_conflicts is true, use ALL fields from YAML
+				// We'll forcibly take ownership, so include everything
+				fmt.Printf("force_conflicts=true: Using ALL fields from YAML (not checking ownership)\n")
 				paths = extractFieldPaths(desiredObj.Object, "")
-				fmt.Printf("extractFieldPaths (GVR error) returned %d paths\n", len(paths))
+				fmt.Printf("extractFieldPaths returned %d paths (forcing ownership of all)\n", len(paths))
+			} else {
+				// Normal ownership-based extraction
+				gvr, err := client.GetGVR(ctx, desiredObj)
+				if err == nil {
+					currentObj, err := client.Get(ctx, gvr, desiredObj.GetNamespace(), desiredObj.GetName())
+					if err == nil {
+						fmt.Printf("Got current object with %d managedFields entries\n", len(currentObj.GetManagedFields()))
+						tflog.Debug(ctx, "Using field ownership for projection")
+						paths = extractOwnedPaths(ctx, currentObj.GetManagedFields(), desiredObj.Object)
+						fmt.Printf("extractOwnedPaths returned %d paths\n", len(paths))
+					} else {
+						fmt.Printf("Could not get current object: %v\n", err)
+						tflog.Debug(ctx, "Could not get current object, falling back to YAML paths")
+						paths = extractFieldPaths(desiredObj.Object, "")
+						fmt.Printf("extractFieldPaths (fallback) returned %d paths\n", len(paths))
+					}
+				} else {
+					fmt.Printf("Could not get GVR: %v\n", err)
+					paths = extractFieldPaths(desiredObj.Object, "")
+					fmt.Printf("extractFieldPaths (GVR error) returned %d paths\n", len(paths))
+				}
 			}
 		} else {
 			// CREATE or feature disabled - use standard extraction
