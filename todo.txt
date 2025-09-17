@@ -1,3 +1,5 @@
+1. Make cert handling smarter
+
 k8sconnect_manifest.namespace_k8sconnect: Creating...
 ╷
 │ Error: Preparation Failed
@@ -11,14 +13,32 @@ k8sconnect_manifest.namespace_k8sconnect: Creating...
 
 this is the provider being confused by the cert not being encoded. I need to either make this the same as the other two providers, or give a much, much better error message
 
-Or even better, autodetect and accept both!
+Or even better, autodetect and accept both! Would need a test for this.
 
+2. Add custom ownership annotations. This can solve the issue with cross state conflicts. Not sure how hard this is.
 
-Also, client cert is shown in the plan. This is bad!
+3. Add the missing test called ./failing_test
 
-  # k8sconnect_manifest.nginx_service will be created
-  + resource "k8sconnect_manifest" "nginx_service" {
-      + cluster_connection           = {
-          + client_certificate     = "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURLVENDQWhHZ0F3SUJBZ0lJTjVocVhGOHRaSFF3RFFZSktvWklodmNOQVFFTEJRQXdGVEVUTUJFR0ExVUUKQXhNS2EzVmlaWEp1WlhSbGN6QWVGdzB5TlRBNU1UWXlNakl6TlRCYUZ3MHlOakE1TVRZeU1qSTROVEJhTUR3eApIekFkQmdOVkJBb1RGbXQxWW1WaFpHMDZZMngxYzNSbGNpMWhaRzFwYm5NeEdUQVhCZ05WQkFNVEVHdDFZbVZ5CmJtVjBaWE10WVdSdGFXNHdnZ0VpTUEwR0NTcUdTSWIzRFFFQkFRVUFBNElCRHdBd2dnRUtBb0lCQVFEblNuODgKZ1MzUmZlbktFcXBPTGVvQUgxY2VSbmtlc3I4Z1NSOGZBMFBCVVlWWUVtVUlBUVllQzBDcG5lU3BIY1JhdjlwMApHdGtuSUR5WmVobC9yck9JQTRXSjJocjBCSm1IcXAybDJZY1BORlJzNStoQkQ4eFlMMStobUlYbUxpUjVOb0IyCm9aNDNwRUdnNEtZWXFJY0dhYS91ME9Wc2VFTkFYUzZPeDFmdkk1NW9vaTVDM2p5aTByRGE1a21mR2RWSmpKdkQKQnJaRnBlRzNlTzh5ekd6ZVRCTmJSbnJKZlJJNExyZkxXRnY2d1ZwZXVKcnBlV2U5d21KeitubjZBaDRwWS9zSAppUk9nTzJJV0E4THR6czJ1SldKb1RnYlp1VG9SY0wyY0dFY0cvWWFTbVZBTndxdXpyRCtvY0pSeHJBNTFxbkwvCjVkeGlxeis3VEh4Z2Z1dk5BZ01CQUFHalZqQlVNQTRHQTFVZER3RUIvd1FFQXdJRm9EQVRCZ05WSFNVRUREQUsKQmdnckJnRUZCUWNEQWpBTUJnTlZIUk1CQWY4RUFqQUFNQjhHQTFVZEl3UVlNQmFBRkl0c0NKY09UaFdhdm5MVAp4WXR6TUEreFdnaXBNQTBHQ1NxR1NJYjNEUUVCQ3dVQUE0SUJBUUNRUlJBRDIyN21kVW5iWUFNdEFXWW45aFpsCjltMyszZkxxYVBCb2FmK2VaalArMUNMaW5BNXFOb1Z3Qk9nWnNqRTRlZmxaWGZQNGMzWE13NndSOHdWbTdNTlIKcGVCV0NqL2p3bCtJVXJUVWY1OVpianVPUEc3cHZNaXF6ODJ3d1N1dllyakNGTUxPOXYwc0NFcWlScXh0N05HcQovVk9aSVQwYU9sMlZEQmVLQzJjOXN5cE12MTBpajNrN3VHT2dFSVJQMTBPQmEyT2phcVV2SW5BeTAvLzB2S2R0CkZHUzJFTzlqRmJtemJDZ3RSYnFwRll6RlI0NDA2YmZMdUlyb1REb3BsM1FnMjJoWlpWaFh3K1dBc0RBazRLQ04KNXJXbmdrRjNJK3hxWGFVRXVWWmlLNHhPYnpWK0RCZ1paUC9VNVgrK1NiZEEyYjRTRnNkNnVxTno2MUh1Ci0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K"
+4. Add existing resource datasource. This should be last after manifest resource is fully polished.
 
+5. Reduce cyclomatic complexity of all functions to less than 15.
 
+6. Deep dive into UX. Do we need to show a yaml diff if the dry run diff is better?
+
+7. SEO. Is the provider named optimally for discovery?
+
+8. Release pipeline needs love. Tofu release is missing. Need to verify that builds work for windows and linux.
+
+9. Need to double check that the attribute doc strings are completely correct. I've made changes to status that might be updated.
+
+10. Remove some attributes from UI that should probably be private.
+
+11. Write up main docs for landing page.
+
+12. Medium article, posts to r/kubernetes, r/terraform, hackernews.
+
+13. Make sure all key features are documented. I've made changes to status that might be updated.
+
+14. Need many working examples linked to make feature list. Is there a way to auto test them? Non working examples really suck.
+
+15. Add ignore_field_changes for surgical ignores. Avoids annoying initial diff for HPA and other controllers.

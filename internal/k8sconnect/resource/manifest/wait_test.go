@@ -1,4 +1,4 @@
-// internal/k8sconnect/resource/manifest/wait_for_test.go
+// internal/k8sconnect/resource/manifest/wait_test.go
 
 package manifest_test
 
