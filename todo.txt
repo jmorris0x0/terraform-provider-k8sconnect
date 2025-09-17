@@ -46,3 +46,11 @@ Or even better, autodetect and accept both! Would need a test for this.
 16. Consider moving key features higher up in the docs.
 
 17. Move development from master to develop branch
+
+18. There are probably more edge cases for ownership that need acceptance testing. Need to make a table of all possible transitions. Also make sure that the warnings are accurate for all of them.
+
+19. Harmonize errors across the project. Need a single source of truth to share between the tests and the code.
+
+20. Remove the many print statements throughout the codebase or convert to logs.
+
+21. Convert this list to project issues.
