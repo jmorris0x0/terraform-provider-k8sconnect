@@ -270,3 +270,8 @@ fix-headers: ## Fix file path header comments in all Go files
 		fi \
 	done
 	@echo "✅ Headers fixed"
+
+.PHONY: complexity
+complexity: ## Check code complexity
+	@go run github.com/fzipp/gocyclo/cmd/gocyclo@latest -over 15 . | sort -rn || true
+
