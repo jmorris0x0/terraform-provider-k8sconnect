@@ -8,6 +8,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 )
 
 // ConfigValidators implements resource-level validation for the manifest resource
@@ -34,134 +36,189 @@ func (v *clusterConnectionValidator) MarkdownDescription(ctx context.Context) st
 	return "Ensures exactly one cluster connection mode is specified: inline (`host` + `cluster_ca_certificate`), `kubeconfig_file`, or `kubeconfig_raw`"
 }
 
+// ValidateResource ensures exactly one connection mode is specified
 func (v *clusterConnectionValidator) ValidateResource(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
-	var data manifestResourceModel
+	// Load and validate data
+	data, ok := v.loadResourceData(ctx, req, resp)
+	if !ok {
+		return
+	}
 
+	// Skip validation for unknown connections (during planning)
+	if data.ClusterConnection.IsUnknown() {
+		return
+	}
+
+	// Check connection exists
+	if !v.validateConnectionExists(data.ClusterConnection, resp) {
+		return
+	}
+
+	// Convert to connection model
+	connModel, ok := v.getConnectionModel(ctx, data.ClusterConnection)
+	if !ok {
+		return // Unknown values during planning
+	}
+
+	// Validate connection modes
+	v.validateConnectionModes(connModel, resp)
+
+	// Validate inline connection if applicable
+	if v.hasInlineMode(connModel) {
+		v.validateInlineConnection(connModel, resp)
+	}
+
+	// Validate client certificates
+	v.validateClientCertificates(connModel, resp)
+}
+
+// loadResourceData loads the manifest resource data from config
+func (v *clusterConnectionValidator) loadResourceData(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) (manifestResourceModel, bool) {
+	var data manifestResourceModel
 	diags := req.Config.Get(ctx, &data)
 	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
+	return data, !resp.Diagnostics.HasError()
+}
 
-	conn := data.ClusterConnection
-
-	// If connection is unknown (during planning), skip ALL validation
-	// The connection will be validated again during apply when values are known
-	if conn.IsUnknown() {
-		return
-	}
-
-	// If connection is null, that's an error
+// validateConnectionExists checks if connection block is present
+func (v *clusterConnectionValidator) validateConnectionExists(conn types.Object, resp *resource.ValidateConfigResponse) bool {
 	if conn.IsNull() {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("cluster_connection"),
 			"Missing Cluster Connection Configuration",
 			"cluster_connection block is required.",
 		)
-		return
+		return false
 	}
+	return true
+}
 
-	// Convert to connection model to access fields
-	r := &manifestResource{} // Create a temporary resource instance for the helper method
+// getConnectionModel safely converts connection object to model
+func (v *clusterConnectionValidator) getConnectionModel(ctx context.Context, conn types.Object) (auth.ClusterConnectionModel, bool) {
+	r := &manifestResource{}
 	connModel, err := r.convertObjectToConnectionModel(ctx, conn)
 	if err != nil {
-		// If conversion fails, it might be due to unknown values, which is okay during planning
-		// Don't report validation errors for unknown values - they'll be validated at apply time
+		// Unknown values during planning - skip validation
+		return connModel, false
+	}
+	return connModel, true
+}
+
+// validateConnectionModes ensures exactly one connection mode is specified
+func (v *clusterConnectionValidator) validateConnectionModes(connModel auth.ClusterConnectionModel, resp *resource.ValidateConfigResponse) {
+	modes := v.countActiveModes(connModel)
+
+	if modes == 0 {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("cluster_connection"),
+			"No Connection Mode Specified",
+			"Must specify exactly one connection mode:\n"+
+				"• Inline: Provide 'host' and 'cluster_ca_certificate'\n"+
+				"• Kubeconfig file: Provide 'kubeconfig_file' path\n"+
+				"• Kubeconfig raw: Provide 'kubeconfig_raw' content",
+		)
+	} else if modes > 1 {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("cluster_connection"),
+			"Multiple Connection Modes Specified",
+			v.buildMultipleModeError(connModel),
+		)
+	}
+}
+
+// countActiveModes counts how many connection modes are configured
+func (v *clusterConnectionValidator) countActiveModes(connModel auth.ClusterConnectionModel) int {
+	modes := 0
+	if v.hasInlineMode(connModel) {
+		modes++
+	}
+	if !connModel.KubeconfigFile.IsNull() {
+		modes++
+	}
+	if !connModel.KubeconfigRaw.IsNull() {
+		modes++
+	}
+	return modes
+}
+
+// hasInlineMode checks if inline connection fields are present
+func (v *clusterConnectionValidator) hasInlineMode(connModel auth.ClusterConnectionModel) bool {
+	return !connModel.Host.IsNull() || !connModel.ClusterCACertificate.IsNull()
+}
+
+// buildMultipleModeError creates error message for multiple modes
+func (v *clusterConnectionValidator) buildMultipleModeError(connModel auth.ClusterConnectionModel) string {
+	conflictingModes := []string{}
+	if v.hasInlineMode(connModel) {
+		conflictingModes = append(conflictingModes, "inline (host + cluster_ca_certificate)")
+	}
+	if !connModel.KubeconfigFile.IsNull() {
+		conflictingModes = append(conflictingModes, "kubeconfig_file")
+	}
+	if !connModel.KubeconfigRaw.IsNull() {
+		conflictingModes = append(conflictingModes, "kubeconfig_raw")
+	}
+
+	return fmt.Sprintf("Only one connection mode can be specified. Found: %v\n\n"+
+		"Choose ONE of:\n"+
+		"• Remove 'kubeconfig_file' and 'kubeconfig_raw' to use inline mode\n"+
+		"• Remove inline fields ('host', 'cluster_ca_certificate') to use kubeconfig",
+		conflictingModes)
+}
+
+// validateInlineConnection ensures inline connection has required fields
+func (v *clusterConnectionValidator) validateInlineConnection(connModel auth.ClusterConnectionModel, resp *resource.ValidateConfigResponse) {
+	// Check both host and CA are present
+	if !v.hasCompleteInlineConfig(connModel) {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("cluster_connection"),
+			"Incomplete Inline Connection",
+			"Inline connections require both 'host' and 'cluster_ca_certificate'.",
+		)
 		return
 	}
 
-	// Check for inline mode (host-based)
-	hasInline := !connModel.Host.IsNull()
-
-	// Check for kubeconfig modes
-	hasFile := !connModel.KubeconfigFile.IsNull()
-	hasRaw := !connModel.KubeconfigRaw.IsNull()
-
-	// Count active modes
-	modeCount := 0
-	activeModes := []string{}
-
-	if hasInline {
-		modeCount++
-		activeModes = append(activeModes, "inline")
-	}
-
-	if hasFile {
-		modeCount++
-		activeModes = append(activeModes, "kubeconfig_file")
-	}
-
-	if hasRaw {
-		modeCount++
-		activeModes = append(activeModes, "kubeconfig_raw")
-	}
-
-	// Only validate mode count if we have enough information
-	// If any fields are unknown, we can't make definitive statements about mode count
-	hasUnknownFields := connModel.Host.IsUnknown() ||
-		connModel.ClusterCACertificate.IsUnknown() ||
-		connModel.KubeconfigFile.IsUnknown() ||
-		connModel.KubeconfigRaw.IsUnknown()
-
-	if hasUnknownFields {
-		// Skip mode validation when we have unknown values
-		return
-	}
-
-	// Validate exactly one mode is specified (only when all values are known)
-	if modeCount == 0 {
+	// Validate authentication is provided
+	if !v.hasAuthentication(connModel) {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("cluster_connection"),
-			"Missing Cluster Connection Configuration",
-			"Exactly one cluster connection mode must be specified:\n\n"+
-				"• **Inline mode**: Set 'host' with authentication\n"+
-				"• **Kubeconfig file**: Set 'kubeconfig_file'\n"+
-				"• **Kubeconfig raw**: Set 'kubeconfig_raw'",
-		)
-	} else if modeCount > 1 {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("cluster_connection"),
-			"Multiple Cluster Connection Modes Specified",
-			fmt.Sprintf("Only one cluster connection mode can be specified, but found %d: %v\n\n"+
-				"Choose exactly one:\n"+
-				"• **Inline mode**: Set 'host' with authentication (remove kubeconfig settings)\n"+
-				"• **Kubeconfig file**: Set 'kubeconfig_file' (remove inline and raw kubeconfig settings)\n"+
-				"• **Kubeconfig raw**: Set 'kubeconfig_raw' (remove inline and file kubeconfig settings)",
-				modeCount, activeModes),
+			"Missing Authentication",
+			"Inline connections require at least one authentication method:\n"+
+				"• Bearer token: Set 'token'\n"+
+				"• Client certificates: Set both 'client_certificate' and 'client_key'\n"+
+				"• Exec auth: Configure the 'exec' block",
 		)
 	}
+}
 
-	// Additional validation for inline mode
-	if hasInline && modeCount == 1 {
-		// Validate CA cert or insecure for inline mode
-		if connModel.ClusterCACertificate.IsNull() && (connModel.Insecure.IsNull() || !connModel.Insecure.ValueBool()) {
-			resp.Diagnostics.AddAttributeError(
-				path.Root("cluster_connection"),
-				"Missing TLS Configuration",
-				"Inline connections require either 'cluster_ca_certificate' or 'insecure = true'.",
-			)
-		}
+// hasCompleteInlineConfig checks if inline config has both required fields
+func (v *clusterConnectionValidator) hasCompleteInlineConfig(connModel auth.ClusterConnectionModel) bool {
+	return !connModel.Host.IsNull() && !connModel.ClusterCACertificate.IsNull()
+}
 
-		// Validate authentication is provided
-		hasAuth := !connModel.Token.IsNull() ||
-			(!connModel.ClientCertificate.IsNull() && !connModel.ClientKey.IsNull()) ||
-			(connModel.Exec != nil && !connModel.Exec.APIVersion.IsNull())
+// hasAuthentication checks if any authentication method is configured
+func (v *clusterConnectionValidator) hasAuthentication(connModel auth.ClusterConnectionModel) bool {
+	return !connModel.Token.IsNull() ||
+		v.hasClientCertAuth(connModel) ||
+		v.hasExecAuth(connModel)
+}
 
-		if !hasAuth {
-			resp.Diagnostics.AddAttributeError(
-				path.Root("cluster_connection"),
-				"Missing Authentication",
-				"Inline connections require at least one authentication method:\n"+
-					"• Bearer token: Set 'token'\n"+
-					"• Client certificates: Set both 'client_certificate' and 'client_key'\n"+
-					"• Exec auth: Configure the 'exec' block",
-			)
-		}
-	}
+// hasClientCertAuth checks if client certificate authentication is configured
+func (v *clusterConnectionValidator) hasClientCertAuth(connModel auth.ClusterConnectionModel) bool {
+	return !connModel.ClientCertificate.IsNull() && !connModel.ClientKey.IsNull()
+}
 
-	// Validate client certificate and key are provided together
-	if (!connModel.ClientCertificate.IsNull() && connModel.ClientKey.IsNull()) ||
-		(connModel.ClientCertificate.IsNull() && !connModel.ClientKey.IsNull()) {
+// hasExecAuth checks if exec authentication is configured
+func (v *clusterConnectionValidator) hasExecAuth(connModel auth.ClusterConnectionModel) bool {
+	return connModel.Exec != nil && !connModel.Exec.APIVersion.IsNull()
+}
+
+// validateClientCertificates ensures cert and key are provided together
+func (v *clusterConnectionValidator) validateClientCertificates(connModel auth.ClusterConnectionModel, resp *resource.ValidateConfigResponse) {
+	hasCert := !connModel.ClientCertificate.IsNull()
+	hasKey := !connModel.ClientKey.IsNull()
+
+	if hasCert != hasKey {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("cluster_connection"),
 			"Incomplete Client Certificate Configuration",

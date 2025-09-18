@@ -459,7 +459,6 @@ func (r *manifestResource) logWaitConditions(waitConfig waitForModel, hasConditi
 	fmt.Printf("  Rollout: %v\n", waitConfig.Rollout.ValueBool())
 }
 
-// ///////////////////////////////////////////////
 // checkFieldOwnershipConflicts detects when fields managed by other controllers are being changed
 func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	fmt.Printf("=== checkFieldOwnershipConflicts START ===\n")
