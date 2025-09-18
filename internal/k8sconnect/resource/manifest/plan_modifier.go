@@ -71,6 +71,42 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 	fmt.Printf("=== END ModifyPlan ===\n\n")
 }
 
+// setProjectionUnknown sets projection to unknown and saves plan
+func (r *manifestResource) setProjectionUnknown(ctx context.Context, plannedData *manifestResourceModel, resp *resource.ModifyPlanResponse, reason string) {
+	tflog.Debug(ctx, reason)
+	plannedData.ManagedStateProjection = types.StringUnknown()
+	diags := resp.Plan.Set(ctx, plannedData)
+	resp.Diagnostics.Append(diags...)
+}
+
+// isCreateOperation checks if this is a create vs update
+func isCreateOperation(req resource.ModifyPlanRequest) bool {
+	return req.State.Raw.IsNull()
+}
+
+// isFieldWait checks if wait config is for a field wait
+func isFieldWait(waitConfig waitForModel) bool {
+	return !waitConfig.Field.IsNull() && waitConfig.Field.ValueString() != ""
+}
+
+// hasActiveWaitConditions checks if wait config has any active conditions
+func hasActiveWaitConditions(waitConfig waitForModel) bool {
+	return (!waitConfig.Field.IsNull() && waitConfig.Field.ValueString() != "") ||
+		!waitConfig.FieldValue.IsNull() ||
+		(!waitConfig.Condition.IsNull() && waitConfig.Condition.ValueString() != "") ||
+		(!waitConfig.Rollout.IsNull() && waitConfig.Rollout.ValueBool())
+}
+
+// parseWaitConfig safely parses wait_for configuration
+func parseWaitConfig(ctx context.Context, waitFor types.Object) (waitForModel, bool) {
+	var config waitForModel
+	if waitFor.IsNull() {
+		return config, false
+	}
+	diags := waitFor.As(ctx, &config, basetypes.ObjectAsOptions{})
+	return config, !diags.HasError()
+}
+
 // validateConnectionReady checks if connection values are ready for use
 func (r *manifestResource) validateConnectionReady(ctx context.Context, plannedData *manifestResourceModel, resp *resource.ModifyPlanResponse) bool {
 	// If connection is not ready (unknown values), skip dry-run
@@ -81,138 +117,6 @@ func (r *manifestResource) validateConnectionReady(ctx context.Context, plannedD
 		resp.Diagnostics.Append(diags...)
 		return false
 	}
-	return true
-}
-
-// executeDryRunAndProjection performs dry-run and calculates field projection
-func (r *manifestResource) executeDryRunAndProjection(ctx context.Context, req resource.ModifyPlanRequest, plannedData *manifestResourceModel, desiredObj *unstructured.Unstructured, resp *resource.ModifyPlanResponse) bool {
-	// Convert connection
-	conn, err := r.convertObjectToConnectionModel(ctx, plannedData.ClusterConnection)
-	if err != nil {
-		tflog.Debug(ctx, "Skipping dry-run due to connection conversion error", map[string]interface{}{
-			"error": err.Error(),
-		})
-		plannedData.ManagedStateProjection = types.StringUnknown()
-		diags := resp.Plan.Set(ctx, plannedData)
-		resp.Diagnostics.Append(diags...)
-		return false
-	}
-
-	// Create client
-	client, err := r.clientGetter(conn)
-	if err != nil {
-		tflog.Debug(ctx, "Skipping dry-run due to client creation error", map[string]interface{}{
-			"error": err.Error(),
-		})
-		plannedData.ManagedStateProjection = types.StringUnknown()
-		diags := resp.Plan.Set(ctx, plannedData)
-		resp.Diagnostics.Append(diags...)
-		return false
-	}
-
-	// Perform dry-run
-	dryRunResult, err := client.DryRunApply(ctx, desiredObj, k8sclient.ApplyOptions{
-		FieldManager: "k8sconnect",
-		Force:        true,
-	})
-	if err != nil {
-		tflog.Debug(ctx, "Dry-run failed", map[string]interface{}{
-			"error": err.Error(),
-		})
-		// Don't fail the plan, just skip projection
-		plannedData.ManagedStateProjection = types.StringUnknown()
-		diags := resp.Plan.Set(ctx, plannedData)
-		resp.Diagnostics.Append(diags...)
-		return false
-	}
-
-	// Extract field paths - use experimental field ownership for projection if enabled
-	var paths []string
-	useFieldOwnership := !plannedData.UseFieldOwnership.IsNull() && plannedData.UseFieldOwnership.ValueBool()
-	isCreate := req.State.Raw.IsNull()
-
-	// Enhanced logging
-	fmt.Printf("\n=== ModifyPlan PROJECTION LOGIC ===\n")
-	fmt.Printf("useFieldOwnership: %v\n", useFieldOwnership)
-	fmt.Printf("isCreate: %v\n", isCreate)
-	fmt.Printf("State.Raw.IsNull: %v\n", req.State.Raw.IsNull())
-
-	if useFieldOwnership && isCreate {
-		// CREATE with field ownership - set projection to Unknown to avoid mismatch
-		fmt.Printf("Decision: CREATE with field ownership - setting projection to Unknown\n")
-		tflog.Debug(ctx, "CREATE with field ownership - setting projection to unknown")
-		plannedData.ManagedStateProjection = types.StringUnknown()
-	} else {
-		// Either UPDATE with field ownership, or any operation without field ownership
-		if useFieldOwnership && !isCreate {
-			// UPDATE - try to use field ownership
-			fmt.Printf("Decision: UPDATE with field ownership - attempting to get current object\n")
-
-			// Check force_conflicts setting FIRST
-			forceConflicts := !plannedData.ForceConflicts.IsNull() && plannedData.ForceConflicts.ValueBool()
-			fmt.Printf("force_conflicts setting: %v\n", forceConflicts)
-
-			if forceConflicts {
-				// When force_conflicts is true, use ALL fields from YAML
-				// We'll forcibly take ownership, so include everything
-				fmt.Printf("force_conflicts=true: Using ALL fields from YAML (not checking ownership)\n")
-				paths = extractFieldPaths(desiredObj.Object, "")
-				fmt.Printf("extractFieldPaths returned %d paths (forcing ownership of all)\n", len(paths))
-			} else {
-				// Normal ownership-based extraction
-				gvr, err := client.GetGVR(ctx, desiredObj)
-				if err == nil {
-					currentObj, err := client.Get(ctx, gvr, desiredObj.GetNamespace(), desiredObj.GetName())
-					if err == nil {
-						fmt.Printf("Got current object with %d managedFields entries\n", len(currentObj.GetManagedFields()))
-						tflog.Debug(ctx, "Using field ownership for projection")
-						paths = extractOwnedPaths(ctx, currentObj.GetManagedFields(), desiredObj.Object)
-						fmt.Printf("extractOwnedPaths returned %d paths\n", len(paths))
-					} else {
-						fmt.Printf("Could not get current object: %v\n", err)
-						tflog.Debug(ctx, "Could not get current object, falling back to YAML paths")
-						paths = extractFieldPaths(desiredObj.Object, "")
-						fmt.Printf("extractFieldPaths (fallback) returned %d paths\n", len(paths))
-					}
-				} else {
-					fmt.Printf("Could not get GVR: %v\n", err)
-					paths = extractFieldPaths(desiredObj.Object, "")
-					fmt.Printf("extractFieldPaths (GVR error) returned %d paths\n", len(paths))
-				}
-			}
-		} else {
-			// CREATE or feature disabled - use standard extraction
-			fmt.Printf("Decision: Standard extraction (CREATE without ownership or feature disabled)\n")
-			paths = extractFieldPaths(desiredObj.Object, "")
-			fmt.Printf("extractFieldPaths returned %d paths\n", len(paths))
-		}
-
-		// Project the dry-run result
-		projection, err := projectFields(dryRunResult.Object, paths)
-		if err != nil {
-			resp.Diagnostics.AddError("Projection Failed", fmt.Sprintf("Failed to project fields: %s", err))
-			return false
-		}
-
-		// Convert to JSON
-		projectionJSON, err := toJSON(projection)
-		if err != nil {
-			resp.Diagnostics.AddError("JSON Conversion Failed", fmt.Sprintf("Failed to convert projection: %s", err))
-			return false
-		}
-
-		// Log the projection content for debugging
-		fmt.Printf("Projection includes nodePort: %v\n", strings.Contains(projectionJSON, "nodePort"))
-
-		// Update the plan with projection
-		plannedData.ManagedStateProjection = types.StringValue(projectionJSON)
-		tflog.Debug(ctx, "Dry-run projection complete", map[string]interface{}{
-			"path_count":      len(paths),
-			"projection_size": len(projectionJSON),
-		})
-	}
-	fmt.Printf("=== END ModifyPlan PROJECTION LOGIC ===\n\n")
-
 	return true
 }
 
@@ -244,140 +148,315 @@ func (r *manifestResource) checkDriftAndPreserveState(ctx context.Context, req r
 	}
 }
 
+// executeDryRunAndProjection performs dry-run and calculates field projection
+func (r *manifestResource) executeDryRunAndProjection(ctx context.Context, req resource.ModifyPlanRequest, plannedData *manifestResourceModel, desiredObj *unstructured.Unstructured, resp *resource.ModifyPlanResponse) bool {
+	// Setup client
+	client, err := r.setupDryRunClient(ctx, plannedData, resp)
+	if err != nil {
+		return false
+	}
+
+	// Perform dry-run
+	dryRunResult, err := r.performDryRun(ctx, client, desiredObj, plannedData, resp)
+	if err != nil {
+		return false
+	}
+
+	// Calculate and apply projection
+	return r.calculateProjection(ctx, req, plannedData, desiredObj, dryRunResult, client, resp)
+}
+
+// setupDryRunClient creates the k8s client for dry-run
+func (r *manifestResource) setupDryRunClient(ctx context.Context, plannedData *manifestResourceModel, resp *resource.ModifyPlanResponse) (k8sclient.K8sClient, error) {
+	// Convert connection
+	conn, err := r.convertObjectToConnectionModel(ctx, plannedData.ClusterConnection)
+	if err != nil {
+		r.setProjectionUnknown(ctx, plannedData, resp,
+			fmt.Sprintf("Skipping dry-run due to connection conversion error: %s", err))
+		return nil, err
+	}
+
+	// Create client
+	client, err := r.clientGetter(conn)
+	if err != nil {
+		r.setProjectionUnknown(ctx, plannedData, resp,
+			fmt.Sprintf("Skipping dry-run due to client creation error: %s", err))
+		return nil, err
+	}
+
+	return client, nil
+}
+
+// performDryRun executes the dry-run against k8s
+func (r *manifestResource) performDryRun(ctx context.Context, client k8sclient.K8sClient, desiredObj *unstructured.Unstructured, plannedData *manifestResourceModel, resp *resource.ModifyPlanResponse) (*unstructured.Unstructured, error) {
+	dryRunResult, err := client.DryRunApply(ctx, desiredObj, k8sclient.ApplyOptions{
+		FieldManager: "k8sconnect",
+		Force:        true,
+	})
+	if err != nil {
+		r.setProjectionUnknown(ctx, plannedData, resp,
+			fmt.Sprintf("Dry-run failed: %s", err))
+		return nil, err
+	}
+	return dryRunResult, nil
+}
+
+// calculateProjection determines projection strategy and calculates projection
+func (r *manifestResource) calculateProjection(ctx context.Context, req resource.ModifyPlanRequest, plannedData *manifestResourceModel, desiredObj, dryRunResult *unstructured.Unstructured, client k8sclient.K8sClient, resp *resource.ModifyPlanResponse) bool {
+	useFieldOwnership := !plannedData.UseFieldOwnership.IsNull() && plannedData.UseFieldOwnership.ValueBool()
+	isCreate := isCreateOperation(req)
+
+	// Enhanced logging
+	fmt.Printf("\n=== ModifyPlan PROJECTION LOGIC ===\n")
+	fmt.Printf("useFieldOwnership: %v\n", useFieldOwnership)
+	fmt.Printf("isCreate: %v\n", isCreate)
+	fmt.Printf("State.Raw.IsNull: %v\n", req.State.Raw.IsNull())
+
+	// Determine projection strategy
+	paths := r.determineProjectionPaths(ctx, plannedData, desiredObj, client, useFieldOwnership, isCreate)
+
+	// Special case: CREATE with field ownership
+	if useFieldOwnership && isCreate && len(paths) == 0 {
+		fmt.Printf("Decision: CREATE with field ownership - setting projection to Unknown\n")
+		tflog.Debug(ctx, "CREATE with field ownership - setting projection to unknown")
+		plannedData.ManagedStateProjection = types.StringUnknown()
+		fmt.Printf("=== END ModifyPlan PROJECTION LOGIC ===\n\n")
+		return true
+	}
+
+	// Apply projection
+	return r.applyProjection(ctx, dryRunResult, paths, plannedData, resp)
+}
+
+// determineProjectionPaths decides which paths to project based on strategy
+func (r *manifestResource) determineProjectionPaths(ctx context.Context, plannedData *manifestResourceModel, desiredObj *unstructured.Unstructured, client k8sclient.K8sClient, useFieldOwnership, isCreate bool) []string {
+	// CREATE with field ownership - special case
+	if useFieldOwnership && isCreate {
+		return nil // Signal to set projection to Unknown
+	}
+
+	// UPDATE with field ownership
+	if useFieldOwnership && !isCreate {
+		fmt.Printf("Decision: UPDATE with field ownership - attempting to get current object\n")
+		return r.getFieldOwnershipPaths(ctx, plannedData, desiredObj, client)
+	}
+
+	// Standard extraction (CREATE without ownership or feature disabled)
+	fmt.Printf("Decision: Standard extraction (CREATE without ownership or feature disabled)\n")
+	paths := extractFieldPaths(desiredObj.Object, "")
+	fmt.Printf("extractFieldPaths returned %d paths\n", len(paths))
+	return paths
+}
+
+// getFieldOwnershipPaths gets paths based on field ownership
+func (r *manifestResource) getFieldOwnershipPaths(ctx context.Context, plannedData *manifestResourceModel, desiredObj *unstructured.Unstructured, client k8sclient.K8sClient) []string {
+	// Check force_conflicts setting FIRST
+	forceConflicts := !plannedData.ForceConflicts.IsNull() && plannedData.ForceConflicts.ValueBool()
+	fmt.Printf("force_conflicts setting: %v\n", forceConflicts)
+
+	if forceConflicts {
+		// When force_conflicts is true, use ALL fields from YAML
+		fmt.Printf("force_conflicts=true: Using ALL fields from YAML (not checking ownership)\n")
+		paths := extractFieldPaths(desiredObj.Object, "")
+		fmt.Printf("extractFieldPaths returned %d paths (forcing ownership of all)\n", len(paths))
+		return paths
+	}
+
+	// Try to get current object for ownership info
+	gvr, err := client.GetGVR(ctx, desiredObj)
+	if err != nil {
+		fmt.Printf("Could not get GVR: %v\n", err)
+		paths := extractFieldPaths(desiredObj.Object, "")
+		fmt.Printf("extractFieldPaths (GVR error) returned %d paths\n", len(paths))
+		return paths
+	}
+
+	currentObj, err := client.Get(ctx, gvr, desiredObj.GetNamespace(), desiredObj.GetName())
+	if err != nil {
+		fmt.Printf("Could not get current object: %v\n", err)
+		tflog.Debug(ctx, "Could not get current object, falling back to YAML paths")
+		paths := extractFieldPaths(desiredObj.Object, "")
+		fmt.Printf("extractFieldPaths (fallback) returned %d paths\n", len(paths))
+		return paths
+	}
+
+	fmt.Printf("Got current object with %d managedFields entries\n", len(currentObj.GetManagedFields()))
+	tflog.Debug(ctx, "Using field ownership for projection")
+	paths := extractOwnedPaths(ctx, currentObj.GetManagedFields(), desiredObj.Object)
+	fmt.Printf("extractOwnedPaths returned %d paths\n", len(paths))
+	return paths
+}
+
+// applyProjection projects fields and updates plan
+func (r *manifestResource) applyProjection(ctx context.Context, dryRunResult *unstructured.Unstructured, paths []string, plannedData *manifestResourceModel, resp *resource.ModifyPlanResponse) bool {
+	// Project the dry-run result
+	projection, err := projectFields(dryRunResult.Object, paths)
+	if err != nil {
+		resp.Diagnostics.AddError("Projection Failed", fmt.Sprintf("Failed to project fields: %s", err))
+		return false
+	}
+
+	// Convert to JSON
+	projectionJSON, err := toJSON(projection)
+	if err != nil {
+		resp.Diagnostics.AddError("JSON Conversion Failed", fmt.Sprintf("Failed to convert projection: %s", err))
+		return false
+	}
+
+	// Log the projection content for debugging
+	fmt.Printf("Projection includes nodePort: %v\n", strings.Contains(projectionJSON, "nodePort"))
+
+	// Update the plan with projection
+	plannedData.ManagedStateProjection = types.StringValue(projectionJSON)
+	tflog.Debug(ctx, "Dry-run projection complete", map[string]interface{}{
+		"path_count":      len(paths),
+		"projection_size": len(projectionJSON),
+	})
+
+	fmt.Printf("=== END ModifyPlan PROJECTION LOGIC ===\n\n")
+	return true
+}
+
 // determineStatusField handles complex status field logic based on wait_for
 func (r *manifestResource) determineStatusField(ctx context.Context, req resource.ModifyPlanRequest, plannedData *manifestResourceModel, resp *resource.ModifyPlanResponse) {
-	// Handle status field based on wait_for configuration
 	fmt.Printf("\n=== ModifyPlan STATUS DECISION ")
-	isCreate := req.State.Raw.IsNull()
-	if isCreate {
+
+	if isCreateOperation(req) {
 		fmt.Printf("(CREATE - alternate path) ===\n")
-		// For CREATE, check if wait_for has actual wait conditions
-		if !plannedData.WaitFor.IsNull() {
-			var waitConfig waitForModel
-			diags := plannedData.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
-
-			if !diags.HasError() {
-				// Check if wait_for has actual conditions (not just an empty object)
-				hasWaitConditions := (!waitConfig.Field.IsNull() && waitConfig.Field.ValueString() != "") ||
-					!waitConfig.FieldValue.IsNull() ||
-					(!waitConfig.Condition.IsNull() && waitConfig.Condition.ValueString() != "") ||
-					(!waitConfig.Rollout.IsNull() && waitConfig.Rollout.ValueBool())
-
-				fmt.Printf("hasWaitConditions = %v\n", hasWaitConditions)
-				fmt.Printf("  Field: '%v'\n", waitConfig.Field.ValueString())
-				fmt.Printf("  FieldValue IsNull: %v\n", waitConfig.FieldValue.IsNull())
-				fmt.Printf("  Condition: '%v'\n", waitConfig.Condition.ValueString())
-				fmt.Printf("  Rollout: %v\n", waitConfig.Rollout.ValueBool())
-
-				if hasWaitConditions {
-					plannedData.Status = types.DynamicUnknown()
-					fmt.Printf("Setting status to: DynamicUnknown (has wait conditions)\n")
-					tflog.Debug(ctx, "CREATE: wait_for has actual conditions, marking status as unknown")
-				} else {
-					plannedData.Status = types.DynamicNull()
-					fmt.Printf("Setting status to: DynamicNull (no actual conditions)\n")
-					tflog.Debug(ctx, "CREATE: wait_for has no actual conditions, status will be null")
-				}
-			} else {
-				plannedData.Status = types.DynamicNull()
-				fmt.Printf("Setting status to: DynamicNull (parse error)\n")
-				tflog.Debug(ctx, "CREATE: Cannot parse wait_for, no status")
-			}
-		} else {
-			plannedData.Status = types.DynamicNull()
-			fmt.Printf("Setting status to: DynamicNull (no wait_for)\n")
-			tflog.Debug(ctx, "CREATE: No wait_for configured, status will be null")
-		}
+		r.determineCreateStatus(ctx, plannedData)
 	} else {
-		// This is an UPDATE operation
 		fmt.Printf("(UPDATE) ===\n")
-		var stateData manifestResourceModel
-		diags := req.State.Get(ctx, &stateData)
-		resp.Diagnostics.Append(diags...)
-
-		if !resp.Diagnostics.HasError() {
-			if !stateData.Status.IsNull() {
-				fmt.Printf("State has existing status\n")
-			} else {
-				fmt.Printf("State has no existing status\n")
-			}
-
-			if plannedData.WaitFor.IsNull() {
-				// wait_for was removed - clear status
-				plannedData.Status = types.DynamicNull()
-				fmt.Printf("Setting status to: DynamicNull (no wait_for or removed)\n")
-				tflog.Debug(ctx, "UPDATE: wait_for removed or not configured, status will be null")
-			} else {
-				// Parse wait config to check type
-				var waitConfig waitForModel
-				diags := plannedData.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
-
-				if !diags.HasError() {
-					// Check if this is a field wait
-					isFieldWait := !waitConfig.Field.IsNull() && waitConfig.Field.ValueString() != ""
-					fmt.Printf("wait_for.field = '%v', isFieldWait = %v\n", waitConfig.Field.ValueString(), isFieldWait)
-
-					// Compare with state's wait_for
-					if !stateData.WaitFor.IsNull() {
-						var stateWaitConfig waitForModel
-						stateDiags := stateData.WaitFor.As(ctx, &stateWaitConfig, basetypes.ObjectAsOptions{})
-						if !stateDiags.HasError() {
-							stateFieldWait := !stateWaitConfig.Field.IsNull() && stateWaitConfig.Field.ValueString() != ""
-							fmt.Printf("Comparing fields - plan: '%v', state: '%v'\n",
-								waitConfig.Field.ValueString(), stateWaitConfig.Field.ValueString())
-
-							if isFieldWait && stateFieldWait && waitConfig.Field.Equal(stateWaitConfig.Field) {
-								// Same field wait - check if we already tried it
-								if !stateData.Status.IsNull() {
-									// We have status from before - keep it
-									plannedData.Status = stateData.Status
-									fmt.Printf("Setting status to: preserved from state (field unchanged)\n")
-								} else {
-									// Field wait but no status yet - null
-									plannedData.Status = types.DynamicNull()
-									fmt.Printf("Setting status to: DynamicNull (field unchanged, already tried)\n")
-								}
-							} else if isFieldWait {
-								// Different field wait or new field wait
-								plannedData.Status = types.DynamicUnknown()
-								fmt.Printf("Setting status to: DynamicUnknown (field changed or new)\n")
-							} else {
-								// Not a field wait
-								plannedData.Status = types.DynamicNull()
-								fmt.Printf("Setting status to: DynamicNull (not a field wait)\n")
-							}
-						} else {
-							// Can't parse state wait_for
-							if isFieldWait {
-								plannedData.Status = types.DynamicUnknown()
-								fmt.Printf("Setting status to: DynamicUnknown (new field wait)\n")
-							} else {
-								plannedData.Status = types.DynamicNull()
-								fmt.Printf("Setting status to: DynamicNull (non-field wait)\n")
-							}
-						}
-					} else {
-						// wait_for added for first time
-						if isFieldWait {
-							plannedData.Status = types.DynamicUnknown()
-							fmt.Printf("Setting status to: DynamicUnknown (new field wait)\n")
-						} else {
-							plannedData.Status = types.DynamicNull()
-							fmt.Printf("Setting status to: DynamicNull (non-field wait)\n")
-						}
-					}
-				} else {
-					// Can't parse wait_for
-					plannedData.Status = types.DynamicNull()
-					fmt.Printf("Setting status to: DynamicNull (parse error)\n")
-					tflog.Debug(ctx, "UPDATE: Cannot parse wait_for, clearing status")
-				}
-			}
-		}
+		r.determineUpdateStatus(ctx, req, plannedData, resp)
 	}
 
 	fmt.Printf("\n=== ModifyPlan FINAL STATUS ===\n")
 	fmt.Printf("Status IsNull: %v, IsUnknown: %v\n", plannedData.Status.IsNull(), plannedData.Status.IsUnknown())
+}
+
+// determineCreateStatus handles status for CREATE operations
+func (r *manifestResource) determineCreateStatus(ctx context.Context, plannedData *manifestResourceModel) {
+	waitConfig, ok := parseWaitConfig(ctx, plannedData.WaitFor)
+	if !ok {
+		plannedData.Status = types.DynamicNull()
+		fmt.Printf("Setting status to: DynamicNull (no wait_for)\n")
+		tflog.Debug(ctx, "CREATE: No wait_for configured, status will be null")
+		return
+	}
+
+	// Check and log wait conditions
+	hasConditions := hasActiveWaitConditions(waitConfig)
+	r.logWaitConditions(waitConfig, hasConditions)
+
+	if hasConditions && isFieldWait(waitConfig) {
+		plannedData.Status = types.DynamicUnknown()
+		fmt.Printf("Setting status to: DynamicUnknown (has field wait)\n")
+		tflog.Debug(ctx, "CREATE: wait_for.field configured, marking status as unknown")
+	} else {
+		plannedData.Status = types.DynamicNull()
+		if hasConditions {
+			fmt.Printf("Setting status to: DynamicNull (no field wait)\n")
+			tflog.Debug(ctx, "CREATE: non-field wait type, status will be null")
+		} else {
+			fmt.Printf("Setting status to: DynamicNull (no actual conditions)\n")
+			tflog.Debug(ctx, "CREATE: wait_for has no actual conditions, status will be null")
+		}
+	}
+}
+
+// determineUpdateStatus handles status for UPDATE operations
+func (r *manifestResource) determineUpdateStatus(ctx context.Context, req resource.ModifyPlanRequest, plannedData *manifestResourceModel, resp *resource.ModifyPlanResponse) {
+	// Get state data
+	var stateData manifestResourceModel
+	diags := req.State.Get(ctx, &stateData)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Log current state
+	if !stateData.Status.IsNull() {
+		fmt.Printf("State has existing status\n")
+	} else {
+		fmt.Printf("State has no existing status\n")
+	}
+
+	// Parse configurations
+	planWaitConfig, hasPlanWait := parseWaitConfig(ctx, plannedData.WaitFor)
+	stateWaitConfig, hasStateWait := parseWaitConfig(ctx, stateData.WaitFor)
+
+	// Determine status based on wait configurations
+	status := r.calculateUpdateStatus(
+		hasPlanWait, hasStateWait,
+		planWaitConfig, stateWaitConfig,
+		!stateData.Status.IsNull(),
+	)
+
+	// Apply the status decision
+	if status.preserve {
+		plannedData.Status = stateData.Status
+		fmt.Printf("Setting status to: preserved from state (%s)\n", status.reason)
+	} else if status.unknown {
+		plannedData.Status = types.DynamicUnknown()
+		fmt.Printf("Setting status to: DynamicUnknown (%s)\n", status.reason)
+	} else {
+		plannedData.Status = types.DynamicNull()
+		fmt.Printf("Setting status to: DynamicNull (%s)\n", status.reason)
+	}
+
+	tflog.Debug(ctx, fmt.Sprintf("UPDATE: %s", status.reason))
+}
+
+// statusDecision represents the outcome of status calculation
+type statusDecision struct {
+	preserve bool
+	unknown  bool
+	reason   string
+}
+
+// calculateUpdateStatus determines what status should be for updates
+func (r *manifestResource) calculateUpdateStatus(hasPlanWait, hasStateWait bool, planConfig, stateConfig waitForModel, stateHasStatus bool) statusDecision {
+	// No wait_for configured
+	if !hasPlanWait {
+		return statusDecision{reason: "wait_for removed or not configured"}
+	}
+
+	planIsFieldWait := isFieldWait(planConfig)
+	fmt.Printf("wait_for.field = '%v', isFieldWait = %v\n", planConfig.Field.ValueString(), planIsFieldWait)
+
+	// Not a field wait
+	if !planIsFieldWait {
+		return statusDecision{reason: "not a field wait"}
+	}
+
+	// New field wait (no previous wait_for)
+	if !hasStateWait {
+		return statusDecision{unknown: true, reason: "new field wait"}
+	}
+
+	// Compare with previous wait_for
+	stateIsFieldWait := isFieldWait(stateConfig)
+	fmt.Printf("Comparing fields - plan: '%v', state: '%v'\n",
+		planConfig.Field.ValueString(), stateConfig.Field.ValueString())
+
+	// Check if field unchanged
+	if stateIsFieldWait && planConfig.Field.Equal(stateConfig.Field) {
+		if stateHasStatus {
+			return statusDecision{preserve: true, reason: "field unchanged"}
+		}
+		return statusDecision{reason: "field unchanged, already tried"}
+	}
+
+	// Field changed or different wait type
+	return statusDecision{unknown: true, reason: "field changed or new"}
+}
+
+// logWaitConditions logs detailed wait condition info
+func (r *manifestResource) logWaitConditions(waitConfig waitForModel, hasConditions bool) {
+	fmt.Printf("hasWaitConditions = %v\n", hasConditions)
+	fmt.Printf("  Field: '%v'\n", waitConfig.Field.ValueString())
+	fmt.Printf("  FieldValue IsNull: %v\n", waitConfig.FieldValue.IsNull())
+	fmt.Printf("  Condition: '%v'\n", waitConfig.Condition.ValueString())
+	fmt.Printf("  Rollout: %v\n", waitConfig.Rollout.ValueBool())
 }
 
 // ///////////////////////////////////////////////
