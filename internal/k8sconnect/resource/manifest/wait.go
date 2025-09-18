@@ -4,6 +4,7 @@ package manifest
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -333,50 +334,113 @@ func (r *manifestResource) waitForCondition(ctx context.Context, client k8sclien
 	gvr schema.GroupVersionResource, obj *unstructured.Unstructured,
 	conditionType string, timeout time.Duration) error {
 
-	// Check function
-	checkCondition := func(obj *unstructured.Unstructured) bool {
+	// Create condition checker
+	checker := r.createConditionChecker(conditionType)
+
+	// Check if already satisfied
+	if satisfied, err := r.checkConditionImmediately(ctx, client, gvr, obj, checker, conditionType); err != nil {
+		return err
+	} else if satisfied {
+		return nil
+	}
+
+	// Try watching for changes
+	if err := r.watchForCondition(ctx, client, gvr, obj, checker, conditionType, timeout); err != nil {
+		// Fall back to polling if watch fails
+		if r.isWatchError(err) {
+			return r.pollForCondition(ctx, client, gvr, obj, checker, conditionType, timeout)
+		}
+		return err
+	}
+
+	return nil
+}
+
+// createConditionChecker returns a function that checks if a condition is met
+func (r *manifestResource) createConditionChecker(conditionType string) func(*unstructured.Unstructured) bool {
+	return func(obj *unstructured.Unstructured) bool {
 		conditions, found, err := unstructured.NestedSlice(obj.Object, "status", "conditions")
 		if err != nil || !found {
 			return false
 		}
 
 		for _, cond := range conditions {
-			condMap, ok := cond.(map[string]interface{})
-			if !ok {
-				continue
-			}
-
-			if typeVal, ok := condMap["type"].(string); ok && typeVal == conditionType {
-				if statusVal, ok := condMap["status"].(string); ok && statusVal == "True" {
-					return true
-				}
+			if r.isConditionMet(cond, conditionType) {
+				return true
 			}
 		}
 		return false
 	}
+}
 
-	// Check current state first
+// isConditionMet checks if a single condition matches and is True
+func (r *manifestResource) isConditionMet(cond interface{}, conditionType string) bool {
+	condMap, ok := cond.(map[string]interface{})
+	if !ok {
+		return false
+	}
+
+	typeVal, typeOk := condMap["type"].(string)
+	statusVal, statusOk := condMap["status"].(string)
+
+	return typeOk && typeVal == conditionType && statusOk && statusVal == "True"
+}
+
+// checkConditionImmediately checks if condition is already satisfied
+func (r *manifestResource) checkConditionImmediately(ctx context.Context, client k8sclient.K8sClient,
+	gvr schema.GroupVersionResource, obj *unstructured.Unstructured,
+	checker func(*unstructured.Unstructured) bool, conditionType string) (bool, error) {
+
 	current, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
-	if err == nil && checkCondition(current) {
+	if err != nil {
+		return false, nil // Don't fail, just proceed to watching
+	}
+
+	if checker(current) {
 		tflog.Info(ctx, "Condition already met", map[string]interface{}{
 			"condition": conditionType,
 		})
-		return nil
+		return true, nil
 	}
 
-	// Set up watch with ResourceVersion
-	opts := metav1.ListOptions{
-		FieldSelector: fmt.Sprintf("metadata.name=%s", obj.GetName()),
-	}
-	if current != nil {
-		opts.ResourceVersion = current.GetResourceVersion()
+	return false, nil
+}
+
+// watchForCondition sets up a watch for condition changes
+func (r *manifestResource) watchForCondition(ctx context.Context, client k8sclient.K8sClient,
+	gvr schema.GroupVersionResource, obj *unstructured.Unstructured,
+	checker func(*unstructured.Unstructured) bool, conditionType string, timeout time.Duration) error {
+
+	// Setup watch options
+	watchOpts := r.createWatchOptions(obj)
+
+	// Get current resource for ResourceVersion
+	current, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
+	if err == nil && current != nil {
+		watchOpts.ResourceVersion = current.GetResourceVersion()
 	}
 
-	watcher, err := client.Watch(ctx, gvr, obj.GetNamespace(), opts)
+	// Create watcher
+	watcher, err := client.Watch(ctx, gvr, obj.GetNamespace(), watchOpts)
 	if err != nil {
-		return r.pollForCondition(ctx, client, gvr, obj, checkCondition, conditionType, timeout)
+		return fmt.Errorf("watch setup failed: %w", err)
 	}
 	defer watcher.Stop()
+
+	// Watch for events
+	return r.processWatchEvents(ctx, watcher, checker, conditionType, timeout)
+}
+
+// createWatchOptions creates watch options for the resource
+func (r *manifestResource) createWatchOptions(obj *unstructured.Unstructured) metav1.ListOptions {
+	return metav1.ListOptions{
+		FieldSelector: fmt.Sprintf("metadata.name=%s", obj.GetName()),
+	}
+}
+
+// processWatchEvents processes events from the watcher
+func (r *manifestResource) processWatchEvents(ctx context.Context, watcher watch.Interface,
+	checker func(*unstructured.Unstructured) bool, conditionType string, timeout time.Duration) error {
 
 	timeoutCh := time.After(timeout)
 
@@ -384,28 +448,57 @@ func (r *manifestResource) waitForCondition(ctx context.Context, client k8sclien
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+
 		case <-timeoutCh:
 			return fmt.Errorf("timeout after %v waiting for condition %q", timeout, conditionType)
+
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
 				return fmt.Errorf("watch ended unexpectedly")
 			}
 
-			if event.Type == watch.Error {
-				return r.pollForCondition(ctx, client, gvr, obj, checkCondition, conditionType, timeout)
+			if err := r.handleWatchEvent(ctx, event, checker, conditionType); err != nil {
+				return err
 			}
 
-			if event.Type == watch.Modified || event.Type == watch.Added {
-				current := event.Object.(*unstructured.Unstructured)
-				if checkCondition(current) {
-					tflog.Info(ctx, "Condition is now met", map[string]interface{}{
-						"condition": conditionType,
-					})
-					return nil
-				}
+			if r.isConditionMetByEvent(event, checker) {
+				tflog.Info(ctx, "Condition is now met", map[string]interface{}{
+					"condition": conditionType,
+				})
+				return nil
 			}
 		}
 	}
+}
+
+// handleWatchEvent handles a single watch event
+func (r *manifestResource) handleWatchEvent(ctx context.Context, event watch.Event,
+	checker func(*unstructured.Unstructured) bool, conditionType string) error {
+
+	if event.Type == watch.Error {
+		return fmt.Errorf("watch error occurred")
+	}
+
+	return nil
+}
+
+// isConditionMetByEvent checks if the event indicates condition is met
+func (r *manifestResource) isConditionMetByEvent(event watch.Event, checker func(*unstructured.Unstructured) bool) bool {
+	if event.Type != watch.Modified && event.Type != watch.Added {
+		return false
+	}
+
+	current, ok := event.Object.(*unstructured.Unstructured)
+	if !ok {
+		return false
+	}
+
+	return checker(current)
+}
+
+// isWatchError determines if an error is watch-related
+func (r *manifestResource) isWatchError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "watch")
 }
 
 // pollForCondition polls for condition when watch is not available
