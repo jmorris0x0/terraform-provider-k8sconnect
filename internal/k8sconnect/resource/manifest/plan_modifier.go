@@ -13,6 +13,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 // ModifyPlan implements resource.ResourceWithModifyPlan
@@ -30,12 +31,8 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 		return
 	}
 
-	// If connection is not ready (unknown values), skip dry-run
-	if !r.isConnectionReady(plannedData.ClusterConnection) {
-		tflog.Debug(ctx, "Skipping dry-run due to unknown connection values")
-		plannedData.ManagedStateProjection = types.StringUnknown()
-		diags = resp.Plan.Set(ctx, &plannedData)
-		resp.Diagnostics.Append(diags...)
+	// Validate connection is ready for operations
+	if !r.validateConnectionReady(ctx, &plannedData, resp) {
 		return
 	}
 
@@ -46,6 +43,49 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 		return
 	}
 
+	// Execute dry-run and compute projection
+	if !r.executeDryRunAndProjection(ctx, req, &plannedData, desiredObj, resp) {
+		return
+	}
+
+	// Check for drift and preserve state if needed
+	r.checkDriftAndPreserveState(ctx, req, &plannedData, resp)
+
+	// Determine status field behavior based on wait_for
+	r.determineStatusField(ctx, req, &plannedData, resp)
+
+	// Save the modified plan
+	diags = resp.Plan.Set(ctx, &plannedData)
+	resp.Diagnostics.Append(diags...)
+
+	// Verify what was actually set
+	var finalPlan manifestResourceModel
+	resp.Plan.Get(ctx, &finalPlan)
+	fmt.Printf("After Plan.Set - Status IsNull: %v, IsUnknown: %v\n", finalPlan.Status.IsNull(), finalPlan.Status.IsUnknown())
+
+	// Check field ownership conflicts for updates
+	if !req.State.Raw.IsNull() {
+		r.checkFieldOwnershipConflicts(ctx, req, resp)
+	}
+
+	fmt.Printf("=== END ModifyPlan ===\n\n")
+}
+
+// validateConnectionReady checks if connection values are ready for use
+func (r *manifestResource) validateConnectionReady(ctx context.Context, plannedData *manifestResourceModel, resp *resource.ModifyPlanResponse) bool {
+	// If connection is not ready (unknown values), skip dry-run
+	if !r.isConnectionReady(plannedData.ClusterConnection) {
+		tflog.Debug(ctx, "Skipping dry-run due to unknown connection values")
+		plannedData.ManagedStateProjection = types.StringUnknown()
+		diags := resp.Plan.Set(ctx, plannedData)
+		resp.Diagnostics.Append(diags...)
+		return false
+	}
+	return true
+}
+
+// executeDryRunAndProjection performs dry-run and calculates field projection
+func (r *manifestResource) executeDryRunAndProjection(ctx context.Context, req resource.ModifyPlanRequest, plannedData *manifestResourceModel, desiredObj *unstructured.Unstructured, resp *resource.ModifyPlanResponse) bool {
 	// Convert connection
 	conn, err := r.convertObjectToConnectionModel(ctx, plannedData.ClusterConnection)
 	if err != nil {
@@ -53,9 +93,9 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 			"error": err.Error(),
 		})
 		plannedData.ManagedStateProjection = types.StringUnknown()
-		diags = resp.Plan.Set(ctx, &plannedData)
+		diags := resp.Plan.Set(ctx, plannedData)
 		resp.Diagnostics.Append(diags...)
-		return
+		return false
 	}
 
 	// Create client
@@ -65,9 +105,9 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 			"error": err.Error(),
 		})
 		plannedData.ManagedStateProjection = types.StringUnknown()
-		diags = resp.Plan.Set(ctx, &plannedData)
+		diags := resp.Plan.Set(ctx, plannedData)
 		resp.Diagnostics.Append(diags...)
-		return
+		return false
 	}
 
 	// Perform dry-run
@@ -81,9 +121,9 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 		})
 		// Don't fail the plan, just skip projection
 		plannedData.ManagedStateProjection = types.StringUnknown()
-		diags = resp.Plan.Set(ctx, &plannedData)
+		diags := resp.Plan.Set(ctx, plannedData)
 		resp.Diagnostics.Append(diags...)
-		return
+		return false
 	}
 
 	// Extract field paths - use experimental field ownership for projection if enabled
@@ -151,14 +191,14 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 		projection, err := projectFields(dryRunResult.Object, paths)
 		if err != nil {
 			resp.Diagnostics.AddError("Projection Failed", fmt.Sprintf("Failed to project fields: %s", err))
-			return
+			return false
 		}
 
 		// Convert to JSON
 		projectionJSON, err := toJSON(projection)
 		if err != nil {
 			resp.Diagnostics.AddError("JSON Conversion Failed", fmt.Sprintf("Failed to convert projection: %s", err))
-			return
+			return false
 		}
 
 		// Log the projection content for debugging
@@ -173,6 +213,11 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 	}
 	fmt.Printf("=== END ModifyPlan PROJECTION LOGIC ===\n\n")
 
+	return true
+}
+
+// checkDriftAndPreserveState compares projections and preserves state if no changes
+func (r *manifestResource) checkDriftAndPreserveState(ctx context.Context, req resource.ModifyPlanRequest, plannedData *manifestResourceModel, resp *resource.ModifyPlanResponse) {
 	// Check if we have state to compare against
 	if !req.State.Raw.IsNull() {
 		var stateData manifestResourceModel
@@ -197,10 +242,13 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 			}
 		}
 	}
+}
 
+// determineStatusField handles complex status field logic based on wait_for
+func (r *manifestResource) determineStatusField(ctx context.Context, req resource.ModifyPlanRequest, plannedData *manifestResourceModel, resp *resource.ModifyPlanResponse) {
 	// Handle status field based on wait_for configuration
 	fmt.Printf("\n=== ModifyPlan STATUS DECISION ")
-	isCreate = req.State.Raw.IsNull()
+	isCreate := req.State.Raw.IsNull()
 	if isCreate {
 		fmt.Printf("(CREATE - alternate path) ===\n")
 		// For CREATE, check if wait_for has actual wait conditions
@@ -330,22 +378,9 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 
 	fmt.Printf("\n=== ModifyPlan FINAL STATUS ===\n")
 	fmt.Printf("Status IsNull: %v, IsUnknown: %v\n", plannedData.Status.IsNull(), plannedData.Status.IsUnknown())
-
-	diags = resp.Plan.Set(ctx, &plannedData)
-	resp.Diagnostics.Append(diags...)
-
-	// Verify what was actually set
-	var finalPlan manifestResourceModel
-	resp.Plan.Get(ctx, &finalPlan)
-	fmt.Printf("After Plan.Set - Status IsNull: %v, IsUnknown: %v\n", finalPlan.Status.IsNull(), finalPlan.Status.IsUnknown())
-
-	if !req.State.Raw.IsNull() {
-		r.checkFieldOwnershipConflicts(ctx, req, resp)
-	}
-
-	fmt.Printf("=== END ModifyPlan ===\n\n")
 }
 
+// ///////////////////////////////////////////////
 // checkFieldOwnershipConflicts detects when fields managed by other controllers are being changed
 func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	fmt.Printf("=== checkFieldOwnershipConflicts START ===\n")
