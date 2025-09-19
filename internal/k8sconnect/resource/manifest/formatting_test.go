@@ -57,7 +57,18 @@ func TestAccManifestResource_NoUpdateOnFormattingChanges(t *testing.T) {
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: false,
 			},
-			// Step 3: Add only whitespace - should show no changes
+			// Step 3: Reorder fields - should show no changes
+			{
+				Config: testAccManifestConfigFormattingReordered(ns, cmName),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"cm_name":   config.StringVariable(cmName),
+				},
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: false,
+			},
+			// Step 4: Add only whitespace - should show no changes
 			{
 				Config: testAccManifestConfigFormattingWhitespace(ns, cmName),
 				ConfigVariables: config.Variables{
@@ -68,7 +79,7 @@ func TestAccManifestResource_NoUpdateOnFormattingChanges(t *testing.T) {
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: false,
 			},
-			// Step 4: Both comments and whitespace - should show no changes
+			// Step 5: Both comments and whitespace - should show no changes
 			{
 				Config: testAccManifestConfigFormattingBoth(ns, cmName),
 				ConfigVariables: config.Variables{
@@ -79,7 +90,7 @@ func TestAccManifestResource_NoUpdateOnFormattingChanges(t *testing.T) {
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: false,
 			},
-			// Step 5: Real change - should show changes
+			// Step 6: Real change - should show changes
 			{
 				Config: testAccManifestConfigFormattingRealChange(ns, cmName),
 				ConfigVariables: config.Variables{
@@ -350,4 +361,52 @@ YAML
   depends_on = [k8sconnect_manifest.formatting_namespace]
 }
 `, namespace, cmName, namespace)
+}
+
+func testAccManifestConfigFormattingReordered(namespace, cmName string) string {
+	return fmt.Sprintf(`
+variable "raw" {
+  type = string
+}
+variable "namespace" {
+  type = string
+}
+variable "cm_name" {
+  type = string
+}
+
+provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "formatting_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
+
+resource "k8sconnect_manifest" "test" {
+  yaml_body = <<YAML
+kind: ConfigMap
+data:
+  key2: value2
+  key1: value1
+metadata:
+  namespace: %s
+  name: %s
+apiVersion: v1
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+  
+  depends_on = [k8sconnect_manifest.formatting_namespace]
+}
+`, namespace, namespace, cmName)
 }
