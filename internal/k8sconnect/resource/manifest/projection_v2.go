@@ -80,6 +80,29 @@ func extractOwnedPaths(ctx context.Context, managedFields []metav1.ManagedFields
 		}
 	}
 
+	// FIX: Always add core fields even if not in user's YAML
+	// This handles cases like namespace inference where Kubernetes adds the field
+	coreFields := []string{
+		"apiVersion",
+		"kind",
+		"metadata.name",
+		"metadata.namespace",
+	}
+
+	for _, coreField := range coreFields {
+		found := false
+		for _, p := range paths {
+			if p == coreField {
+				found = true
+				break
+			}
+		}
+		if !found {
+			fmt.Printf("Adding core field (always required): %s\n", coreField)
+			paths = append(paths, coreField)
+		}
+	}
+
 	fmt.Printf("Final extracted paths (%d total):\n", len(paths))
 	for _, p := range paths {
 		fmt.Printf("  - %s\n", p)
