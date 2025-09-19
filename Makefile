@@ -173,6 +173,13 @@ testacc: oidc-setup
 	echo "Terraform version: $$(terraform version -json | jq -r .terraform_version)"; \
 	go test -cover -v ./internal/k8sconnect/... -timeout 30m -run "$$TEST_FILTER"
 
+.PHONY: test-examples
+test-examples: oidc-setup
+	@echo "📚 Testing examples directory..."
+	@cd test/examples && \
+	TF_ACC_KUBECONFIG_RAW="$$(cat ../../.testbuild/kubeconfig.yaml)" \
+	go test -v -timeout 30m
+
 .PHONY: clean
 clean:
 	-docker rm -f dex
