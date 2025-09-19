@@ -3,6 +3,7 @@ package manifest
 
 import (
 	"context"
+	"crypto/md5"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -48,35 +49,25 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 		return
 	}
 
-	// NEW: Shadow mode - call new analysis but don't use it yet
-	if !req.State.Raw.IsNull() {
-		var stateData manifestResourceModel
-		req.State.Get(ctx, &stateData)
-
-		if !resp.Diagnostics.HasError() {
-			// Call new analysis
-			analysis := r.analyzeDrift(ctx, &stateData, &plannedData, desiredObj)
-			action := r.determineAction(analysis, plannedData.ForceConflicts.ValueBool())
-
-			// Print what we WOULD do (but don't do it yet)
-			fmt.Printf("\n=== SHADOW DRIFT ANALYSIS ===\n")
-			fmt.Printf("Has value drift: %v\n", analysis.HasValueDrift)
-			fmt.Printf("Has ownership drift: %v\n", analysis.HasOwnershipDrift)
-			fmt.Printf("Ownership conflicts: %d\n", len(analysis.OwnershipConflicts))
-			fmt.Printf("Determined action: %s\n", action.String())
-			fmt.Printf("=== END SHADOW ANALYSIS ===\n\n")
-		}
-	}
-
-	// Check for drift and preserve state if needed
+	// Check drift and preserve state if needed
 	r.checkDriftAndPreserveState(ctx, req, &plannedData, resp)
 
 	// Determine status field behavior based on wait_for
 	r.determineStatusField(ctx, req, &plannedData, resp)
 
+	// Debug: Check projection before saving
+	fmt.Printf("BEFORE Plan.Set - plan projection hash: %x\n",
+		md5.Sum([]byte(plannedData.ManagedStateProjection.ValueString())))
+
 	// Save the modified plan
 	diags = resp.Plan.Set(ctx, &plannedData)
 	resp.Diagnostics.Append(diags...)
+
+	// Debug: Check projection after saving
+	var checkPlan manifestResourceModel
+	resp.Plan.Get(ctx, &checkPlan)
+	fmt.Printf("AFTER Plan.Set - plan projection hash: %x\n",
+		md5.Sum([]byte(checkPlan.ManagedStateProjection.ValueString())))
 
 	// Verify what was actually set
 	var finalPlan manifestResourceModel
@@ -164,6 +155,13 @@ func (r *manifestResource) checkDriftAndPreserveState(ctx context.Context, req r
 				fmt.Printf("State projection: %s\n", stateData.ManagedStateProjection.ValueString())
 				fmt.Printf("Plan projection: %s\n", plannedData.ManagedStateProjection.ValueString())
 			}
+
+			// ADD THIS LOGGING HERE (still inside the if block where stateData exists)
+			fmt.Printf("=== checkDriftAndPreserveState END ===\n")
+			fmt.Printf("Final plan projection hash: %x\n",
+				md5.Sum([]byte(plannedData.ManagedStateProjection.ValueString())))
+			fmt.Printf("Are projections equal at end? %v\n",
+				stateData.ManagedStateProjection.Equal(plannedData.ManagedStateProjection))
 		}
 	}
 }
@@ -482,7 +480,6 @@ func (r *manifestResource) logWaitConditions(waitConfig waitForModel, hasConditi
 // checkFieldOwnershipConflicts detects when fields managed by other controllers are being changed
 func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	fmt.Printf("=== checkFieldOwnershipConflicts START ===\n")
-
 	// Get state and plan projections
 	var stateData, planData manifestResourceModel
 	diags := req.State.Get(ctx, &stateData)
@@ -493,30 +490,27 @@ func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req
 		fmt.Printf("Has diagnostics error, returning\n")
 		return
 	}
-
+	fmt.Printf("Projections - state hash: %x, plan hash: %x\n",
+		md5.Sum([]byte(stateData.ManagedStateProjection.ValueString())),
+		md5.Sum([]byte(planData.ManagedStateProjection.ValueString())))
 	// Skip if projections are not available
 	if stateData.ManagedStateProjection.IsNull() || planData.ManagedStateProjection.IsNull() {
 		fmt.Printf("Projections not available (state null: %v, plan null: %v), returning\n",
 			stateData.ManagedStateProjection.IsNull(), planData.ManagedStateProjection.IsNull())
 		return
 	}
-
 	// Skip if projections are the same
 	if stateData.ManagedStateProjection.Equal(planData.ManagedStateProjection) {
 		fmt.Printf("Projections are equal, returning\n")
 		return
 	}
-
 	fmt.Printf("Projections differ - checking for conflicts\n")
-
 	// Get field ownership from state
 	if stateData.FieldOwnership.IsNull() {
 		fmt.Printf("field_ownership is null, returning\n")
 		return
 	}
-
 	fmt.Printf("field_ownership value: %s\n", stateData.FieldOwnership.ValueString())
-
 	var ownership map[string]FieldOwnership
 	if err := json.Unmarshal([]byte(stateData.FieldOwnership.ValueString()), &ownership); err != nil {
 		tflog.Warn(ctx, "Failed to unmarshal field ownership", map[string]interface{}{
@@ -525,22 +519,16 @@ func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req
 		fmt.Printf("Failed to unmarshal field ownership: %v\n", err)
 		return
 	}
-
 	fmt.Printf("Parsed ownership map with %d entries\n", len(ownership))
-
-	// NEW APPROACH: Instead of parsing projections, check what user wants vs what they own
-
 	// Parse the user's desired YAML to see what fields they want
 	desiredObj, err := r.parseYAML(planData.YAMLBody.ValueString())
 	if err != nil {
 		fmt.Printf("Failed to parse user's YAML: %v\n", err)
 		return
 	}
-
 	// Extract all paths the user wants to manage
 	userWantsPaths := extractFieldPaths(desiredObj.Object, "")
 	fmt.Printf("User wants to manage %d paths\n", len(userWantsPaths))
-
 	// Check each path the user wants against ownership
 	var conflicts []FieldConflict
 	for _, path := range userWantsPaths {
@@ -553,28 +541,29 @@ func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req
 			continue
 		}
 
+		// ADD DETAILED LOGGING HERE
 		if owner, exists := ownership[path]; exists {
+			fmt.Printf("  Path %s: owned by '%s', checking against 'k8sconnect', equal? %v\n",
+				path, owner.Manager, owner.Manager == "k8sconnect")
 			if owner.Manager != "k8sconnect" {
-				fmt.Printf("  CONFLICT: Field %s owned by %s (not k8sconnect)\n", path, owner.Manager)
+				fmt.Printf("  CONFLICT DETECTED: Field %s owned by %s (not k8sconnect)\n", path, owner.Manager)
 				conflicts = append(conflicts, FieldConflict{
 					Path:  path,
 					Owner: owner.Manager,
 				})
 			} else {
-				fmt.Printf("  OK: Field %s owned by k8sconnect\n", path)
+				fmt.Printf("  OK: Field %s correctly owned by k8sconnect\n", path)
 			}
 		} else {
 			// Field not in ownership map - might be a new field or not tracked
-			fmt.Printf("  NO OWNERSHIP DATA: Field %s (likely ok - new or untracked)\n", path)
+			fmt.Printf("  NO OWNERSHIP DATA: Field %s not in ownership map (likely ok - new or untracked)\n", path)
 		}
 	}
-
 	fmt.Printf("Total conflicts: %d\n", len(conflicts))
 	if len(conflicts) > 0 {
 		fmt.Printf("Calling addConflictWarning with force_conflicts=%v\n", planData.ForceConflicts.ValueBool())
 		addConflictWarning(resp, conflicts, planData.ForceConflicts)
 	}
-
 	fmt.Printf("=== checkFieldOwnershipConflicts END ===\n")
 }
 

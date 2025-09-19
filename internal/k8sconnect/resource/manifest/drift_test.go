@@ -80,7 +80,6 @@ func TestAccManifestResource_DriftDetection(t *testing.T) {
 						t.Fatalf("Failed to update ConfigMap: %v", err)
 					}
 
-					// ADD THIS DEBUG OUTPUT
 					cmAfter, _ := k8sClient.CoreV1().ConfigMaps(ns).Get(ctx, cmName, metav1.GetOptions{})
 					t.Logf("ConfigMap after modification: data=%v", cmAfter.Data)
 					t.Logf("Number of managedFields entries: %d", len(cmAfter.ManagedFields))
@@ -96,7 +95,6 @@ func TestAccManifestResource_DriftDetection(t *testing.T) {
 					"namespace": config.StringVariable(ns),
 					"cm_name":   config.StringVariable(cmName),
 				},
-				ExpectNonEmptyPlan: true, // Should detect drift in key2
 			},
 			// Step 3: Verify drift is corrected by apply
 			{
@@ -666,6 +664,8 @@ YAML
 `, namespace, name, namespace)
 }
 
+// TODO Need to add apply to this as well
+// And/Or, insert a Step 2.5 that tries to apply without force_conflicts and expects an error.
 func TestAccManifestResource_CombinedDriftScenarios(t *testing.T) {
 	t.Parallel()
 

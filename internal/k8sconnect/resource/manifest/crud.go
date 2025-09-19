@@ -17,6 +17,7 @@ import (
 )
 
 func (r *manifestResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	fmt.Printf("=== ACTUAL CREATE FUNCTION CALLED ===\n")
 	var data manifestResourceModel
 
 	diags := req.Plan.Get(ctx, &data)
@@ -71,8 +72,10 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		FieldManager: "k8sconnect",
 		Force:        forceConflicts,
 	})
+
 	if err != nil {
 		if isFieldConflictError(err) {
+			fmt.Printf("DEBUG Create: Field conflict error details: %v\n", err)
 			resp.Diagnostics.AddError("Field Manager Conflict",
 				"Another controller owns fields you're trying to set. "+
 					"Set force_conflicts = true to override.")
@@ -301,6 +304,7 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 }
 
 func (r *manifestResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	fmt.Printf("=== ACTUAL UPDATE FUNCTION CALLED ===\n")
 	var state, plan manifestResourceModel
 
 	diags := req.State.Get(ctx, &state)
@@ -334,8 +338,24 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 		FieldManager: "k8sconnect",
 		Force:        forceConflicts,
 	})
+
+	if err != nil && isFieldConflictError(err) && !forceConflicts {
+		fmt.Printf("Checking if conflicts are only with self: %v\n", err.Error())
+		if conflictsOnlyWithSelf(err) {
+			fmt.Printf("Self-conflict detected, forcing update\n")
+			tflog.Info(ctx, "Detected drift in fields we own, forcing update")
+			err = rc.Client.Apply(ctx, rc.Object, k8sclient.ApplyOptions{
+				FieldManager: "k8sconnect",
+				Force:        true,
+			})
+		} else {
+			fmt.Printf("Not a self-conflict, not forcing\n")
+		}
+	}
+
 	if err != nil {
 		if isFieldConflictError(err) {
+			fmt.Printf("DEBUG Update: Field conflict error details: %v\n", err)
 			resp.Diagnostics.AddError("Field Manager Conflict",
 				"Another controller owns fields you're trying to modify. "+
 					"Set force_conflicts = true to override.")
