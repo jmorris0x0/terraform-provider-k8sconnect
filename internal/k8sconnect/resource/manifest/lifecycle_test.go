@@ -212,7 +212,7 @@ YAML
 
   cluster_connection = {
     kubeconfig_raw = var.raw
-    context        = "k3d-oidc-e2e"  # Explicit context (connection change)
+    context        = "k3d-k8sconnect-test"  # Explicit context (connection change)
   }
 }
 `, namespace)

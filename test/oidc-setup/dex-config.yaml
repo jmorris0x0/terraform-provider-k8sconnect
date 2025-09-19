@@ -1,4 +1,4 @@
-# test/oidc-e2e/dex-config.yaml
+# test/oidc-setup/dex-config.yaml
 issuer: https://dex:5556/dex
 
 storage:

@@ -52,7 +52,7 @@ jobs:
       
       - name: Clean up
         if: always()
-        run: kind delete cluster --name oidc-e2e || true
+        run: k3d cluster delete --name k8sconnect-test || true
 
   terraform-latest-test:
     if: github.event_name == 'schedule' || inputs.enable_terraform_latest
@@ -83,5 +83,5 @@ jobs:
       
       - name: Clean up
         if: always()
-        run: kind delete cluster --name oidc-e2e || true
+        run: k3d cluster delete --name k8sconnect-test || true
 

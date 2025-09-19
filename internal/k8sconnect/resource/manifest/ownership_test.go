@@ -299,7 +299,7 @@ func TestAccManifestResource_OwnershipImport(t *testing.T) {
 				},
 				ResourceName:      "k8sconnect_manifest.import_test",
 				ImportState:       true,
-				ImportStateId:     fmt.Sprintf("k3d-oidc-e2e/%s/ConfigMap/%s", ns, cmName),
+				ImportStateId:     fmt.Sprintf("k3d-k8sconnect-test/%s/ConfigMap/%s", ns, cmName),
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
 					"imported_without_annotations",

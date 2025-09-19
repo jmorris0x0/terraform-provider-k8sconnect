@@ -1,4 +1,4 @@
-# test/oidc-e2e/auth-resources.yaml
+# test/oidc-setup/auth-resources.yaml
 # Resources for testing different authentication methods
 ---
 apiVersion: v1

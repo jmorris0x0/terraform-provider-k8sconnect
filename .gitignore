@@ -39,6 +39,6 @@ coverage.html
 Thumbs.db
 
 # Test artifacts
-test/oidc-e2e/ssl/
+test/oidc-setup/ssl/
 .testbuild/
 bin/

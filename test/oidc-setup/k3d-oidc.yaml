@@ -1,13 +1,13 @@
-# test/oidc-e2e/k3d-oidc.yaml
+# test/oidc-setup/k3d-oidc.yaml
 apiVersion: k3d.io/v1alpha5
 kind: Simple
 metadata:
-  name: oidc-e2e
+  name: k8sconnect-test
 servers: 1
 agents: 0
 kubeAPI:
   hostPort: "6443"
-network: k3d-oidc-e2e
+network: k3d-k8sconnect-test
 # Note: volumes are mounted via command line instead due to absolute path requirement
 options:
   k3s:
@@ -29,7 +29,7 @@ options:
     timeout: "120s"
 registries:
   create:
-    name: k3d-oidc-e2e-registry
+    name: k3d-k8sconnect-test-registry
     host: "0.0.0.0"
     #hostPort: "5000"
 

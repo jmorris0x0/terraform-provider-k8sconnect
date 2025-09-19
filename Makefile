@@ -1,4 +1,4 @@
-OIDC_DIR          := $(CURDIR)/test/oidc-e2e
+OIDC_DIR          := $(CURDIR)/test/oidc-setup
 DEX_SSL_DIR       := $(OIDC_DIR)/ssl
 TESTBUILD_DIR     := $(CURDIR)/.testbuild
 DEX_IMAGE         := ghcr.io/dexidp/dex:v2.42.1
@@ -94,14 +94,14 @@ oidc-setup:
 	@cd $(OIDC_DIR) && ./gencert.sh
 
 	@echo "🌐 Ensuring Docker network exists"
-	- docker network inspect k3d-oidc-e2e >/dev/null 2>&1 || docker network create k3d-oidc-e2e
+	- docker network inspect k3d-k8sconnect-test >/dev/null 2>&1 || docker network create k3d-k8sconnect-test
 
 
 	@echo "🧹 Cleaning old Dex container"
 	- docker rm -f dex || true
 
 	@echo "🚀 Starting Dex (HTTPS)"
-	@docker run -d --name dex --network k3d-oidc-e2e \
+	@docker run -d --name dex --network k3d-k8sconnect-test \
 	  -v $(OIDC_DIR)/dex-config.yaml:/etc/dex/config.yaml \
 	  -v $(DEX_SSL_DIR)/cert.pem:/etc/dex/tls.crt \
 	  -v $(DEX_SSL_DIR)/key.pem:/etc/dex/tls.key \
@@ -114,7 +114,7 @@ oidc-setup:
 	@echo "✅ Dex is up!"
 
 	@echo "🧹 Deleting existing cluster (if any)"
-	- k3d cluster delete oidc-e2e || true
+	- k3d cluster delete k8sconnect-test || true
 
 	@echo "🚀 Creating cluster with OIDC config"
 	k3d cluster create \
@@ -176,7 +176,7 @@ testacc: oidc-setup
 .PHONY: clean
 clean:
 	-docker rm -f dex
-	-k3d cluster delete oidc-e2e
+	-k3d cluster delete k8sconnect-test
 	-rm -rf $(TESTBUILD_DIR) $(DEX_SSL_DIR)
 	-rm -rf bin/
 

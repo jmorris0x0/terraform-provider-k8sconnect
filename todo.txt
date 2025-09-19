@@ -64,3 +64,27 @@ Or even better, autodetect and accept both! Would need a test for this.
 27. Do we need to test the ownershipt conflict test without force_conflicts=true?
 
 28. remove feature flag now that everything is working.
+
+29. Needs much more testing around immutable field UX.
+
+
+Triage:
+
+Consider cluster_auth attibute change? cluster_connection is too long.
+
+Add better error for certs not being base64
+
+Error survey and single source of truth
+
+General simplification and refactoring
+
+ignore_changes []
+
+Attribute transitions and edge case tests.
+
+Testing survey
+
+ignore_field_changes = []. Or, wrap it into ignore_changes = [yaml_body.thing.thing]
+
+Metal LB for LB test in Kind
+

@@ -54,7 +54,7 @@ func TestAccManifestResource_Import(t *testing.T) {
 				},
 				ResourceName:      "k8sconnect_manifest.test_import",
 				ImportState:       true,
-				ImportStateId:     fmt.Sprintf("k3d-oidc-e2e/%s/%s", "Namespace", namespaceName),
+				ImportStateId:     fmt.Sprintf("k3d-k8sconnect-test/%s/%s", "Namespace", namespaceName),
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
 					"imported_without_annotations",
@@ -142,7 +142,7 @@ func TestAccManifestResource_ImportWithManagedFields(t *testing.T) {
 				},
 				ResourceName:      resourceName,
 				ImportState:       true,
-				ImportStateId:     fmt.Sprintf("k3d-oidc-e2e/%s/ConfigMap/%s", ns, configMapName),
+				ImportStateId:     fmt.Sprintf("k3d-k8sconnect-test/%s/ConfigMap/%s", ns, configMapName),
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
 					"imported_without_annotations", // This field is set during import

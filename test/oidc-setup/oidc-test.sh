@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # grab the access_token from your get-token.sh output
-ACCESS_TOKEN="$(./test/oidc-e2e/get-token.sh | jq -r '.status.token')"
+ACCESS_TOKEN="$(./test/oidc-setup/get-token.sh | jq -r '.status.token')"
 CLUSTER_ENDPOINT="https://127.0.0.1:56043"
 
 echo $ACCESS_TOKEN

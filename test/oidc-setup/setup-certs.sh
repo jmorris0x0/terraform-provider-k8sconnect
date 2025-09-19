@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test/oidc-e2e/setup-certs.sh
+# test/oidc-setup/setup-certs.sh
 # Generate client certificates for testing client cert authentication
 
 set -e
