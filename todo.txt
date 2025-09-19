@@ -64,3 +64,7 @@ Or even better, autodetect and accept both! Would need a test for this.
 25. From README: "All cluster_connection fields are marked sensitive and won't appear in logs or plan output." Did I change that attribute name? Should I still? How about cluster_auth? It's more descriptive.
 
 26. Canonicalize the yaml so that we don't get diffs from order changes. We already exclude whitespace changes. But if we are only going to show the json (difficult decision) then we need to be more precise. Making people diff their own yaml seems like a bad idea.
+
+27. Do we need to test the ownershipt conflict test without force_conflicts=true?
+
+

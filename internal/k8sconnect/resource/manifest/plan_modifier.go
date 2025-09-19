@@ -48,6 +48,26 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 		return
 	}
 
+	// NEW: Shadow mode - call new analysis but don't use it yet
+	if !req.State.Raw.IsNull() {
+		var stateData manifestResourceModel
+		req.State.Get(ctx, &stateData)
+
+		if !resp.Diagnostics.HasError() {
+			// Call new analysis
+			analysis := r.analyzeDrift(ctx, &stateData, &plannedData, desiredObj)
+			action := r.determineAction(analysis, plannedData.ForceConflicts.ValueBool())
+
+			// Print what we WOULD do (but don't do it yet)
+			fmt.Printf("\n=== SHADOW DRIFT ANALYSIS ===\n")
+			fmt.Printf("Has value drift: %v\n", analysis.HasValueDrift)
+			fmt.Printf("Has ownership drift: %v\n", analysis.HasOwnershipDrift)
+			fmt.Printf("Ownership conflicts: %d\n", len(analysis.OwnershipConflicts))
+			fmt.Printf("Determined action: %s\n", action.String())
+			fmt.Printf("=== END SHADOW ANALYSIS ===\n\n")
+		}
+	}
+
 	// Check for drift and preserve state if needed
 	r.checkDriftAndPreserveState(ctx, req, &plannedData, resp)
 

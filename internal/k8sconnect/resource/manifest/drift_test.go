@@ -665,3 +665,217 @@ YAML
 }
 `, namespace, name, namespace)
 }
+
+func TestAccManifestResource_CombinedDriftScenarios(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+	}
+
+	ns := fmt.Sprintf("combined-drift-ns-%d", time.Now().UnixNano()%1000000)
+	deployName := fmt.Sprintf("combined-deploy-%d", time.Now().UnixNano()%1000000)
+	cmName := fmt.Sprintf("combined-cm-%d", time.Now().UnixNano()%1000000)
+
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create resources
+			{
+				Config: testAccCombinedDriftConfig(ns, deployName, cmName, false),
+				ConfigVariables: config.Variables{
+					"raw":         config.StringVariable(raw),
+					"namespace":   config.StringVariable(ns),
+					"deploy_name": config.StringVariable(deployName),
+					"cm_name":     config.StringVariable(cmName),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
+					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
+				),
+			},
+			// Step 2: Simulate BOTH types of drift
+			{
+				PreConfig: func() {
+					ctx := context.Background()
+
+					// 1. Simulate HPA taking over replicas - use Patch with different field manager
+					patchData := []byte(`{"spec":{"replicas":5}}`)
+					_, err := k8sClient.AppsV1().Deployments(ns).Patch(ctx, deployName,
+						types.StrategicMergePatchType,
+						patchData,
+						metav1.PatchOptions{
+							FieldManager: "hpa-controller",
+						})
+					if err != nil {
+						t.Fatalf("Failed to simulate HPA ownership: %v", err)
+					}
+					t.Log("✅ Simulated HPA taking ownership of replicas field")
+
+					// 2. Modify ConfigMap data (value drift)
+					cm, err := k8sClient.CoreV1().ConfigMaps(ns).Get(ctx, cmName, metav1.GetOptions{})
+					if err != nil {
+						t.Fatalf("Failed to get ConfigMap: %v", err)
+					}
+
+					// Preserve the ownership annotations
+					existingAnnotations := cm.GetAnnotations()
+
+					// Modify the data
+					cm.Data = map[string]string{
+						"key1": "drift-value-1", // Changed
+						"key2": "drift-value-2", // Changed
+					}
+
+					// Keep ownership annotations
+					cm.SetAnnotations(existingAnnotations)
+
+					// Update using same field manager (simulating value drift, not ownership change)
+					_, err = k8sClient.CoreV1().ConfigMaps(ns).Update(ctx, cm, metav1.UpdateOptions{
+						FieldManager: "k8sconnect",
+					})
+					if err != nil {
+						t.Fatalf("Failed to modify ConfigMap: %v", err)
+					}
+					t.Log("✅ Modified ConfigMap values (value drift)")
+
+					// Log the state for debugging
+					t.Logf("ConfigMap after modification: data=%v", cm.Data)
+
+					// Check deployment managed fields
+					deploy, _ := k8sClient.AppsV1().Deployments(ns).Get(ctx, deployName, metav1.GetOptions{})
+					t.Logf("Deployment ManagedFields after HPA takeover:")
+					for _, mf := range deploy.ManagedFields {
+						t.Logf("  Manager: %s, Operation: %s", mf.Manager, mf.Operation)
+					}
+				},
+				Config: testAccCombinedDriftConfig(ns, deployName, cmName, false),
+				ConfigVariables: config.Variables{
+					"raw":         config.StringVariable(raw),
+					"namespace":   config.StringVariable(ns),
+					"deploy_name": config.StringVariable(deployName),
+					"cm_name":     config.StringVariable(cmName),
+				},
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true, // Should detect both drifts
+			},
+			// Step 3: Apply with force_conflicts to fix both
+			{
+				Config: testAccCombinedDriftConfig(ns, deployName, cmName, true),
+				ConfigVariables: config.Variables{
+					"raw":         config.StringVariable(raw),
+					"namespace":   config.StringVariable(ns),
+					"deploy_name": config.StringVariable(deployName),
+					"cm_name":     config.StringVariable(cmName),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					// Verify ConfigMap is corrected
+					testhelpers.CheckConfigMapData(k8sClient, ns, cmName, map[string]string{
+						"key1": "value1",
+						"key2": "value2",
+					}),
+					// Verify Deployment exists and has been updated
+					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
+				),
+			},
+		},
+		CheckDestroy: resource.ComposeTestCheckFunc(
+			testhelpers.CheckDeploymentDestroy(k8sClient, ns, deployName),
+			testhelpers.CheckConfigMapDestroy(k8sClient, ns, cmName),
+		),
+	})
+}
+
+func testAccCombinedDriftConfig(namespace, deployName, cmName string, forceConflicts bool) string {
+	forceStr := "false"
+	if forceConflicts {
+		forceStr = "true"
+	}
+
+	return fmt.Sprintf(`
+variable "raw" {
+  type = string
+}
+variable "namespace" {
+  type = string
+}
+variable "deploy_name" {
+  type = string
+}
+variable "cm_name" {
+  type = string
+}
+
+provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+}
+
+resource "k8sconnect_manifest" "deployment" {
+  yaml_body = <<YAML
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: combined-test
+  template:
+    metadata:
+      labels:
+        app: combined-test
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.19
+YAML
+
+  force_conflicts = %s
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+
+  depends_on = [k8sconnect_manifest.namespace]
+}
+
+resource "k8sconnect_manifest" "configmap" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: %s
+  namespace: %s
+data:
+  key1: value1
+  key2: value2
+YAML
+
+  force_conflicts = %s
+
+  cluster_connection = {
+    kubeconfig_raw = var.raw
+  }
+
+  depends_on = [k8sconnect_manifest.namespace]
+}
+`, namespace, deployName, namespace, forceStr, cmName, namespace, forceStr)
+}
