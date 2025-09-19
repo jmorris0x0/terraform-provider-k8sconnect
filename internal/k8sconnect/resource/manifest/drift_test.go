@@ -167,8 +167,6 @@ data:
   key3: value3
 YAML
 
-  force_conflicts = true  
-
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
