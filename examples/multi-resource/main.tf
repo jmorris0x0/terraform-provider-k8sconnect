@@ -1,4 +1,7 @@
 # examples/multi-resource/main.tf
+
+provider "k8sconnect" {}
+
 data "k8sconnect_yaml_split" "resources" {
   content = <<-YAML
     apiVersion: v1

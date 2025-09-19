@@ -117,7 +117,7 @@ func isolateExample(content []byte) []byte {
 }
 
 func writeTestFiles(t *testing.T, dir string, kubeconfig string) {
-	// Write versions.tf
+	// Write versions.tf (still needed for required_providers)
 	versions := `terraform {
   required_providers {
     k8sconnect = {
@@ -125,9 +125,7 @@ func writeTestFiles(t *testing.T, dir string, kubeconfig string) {
       version = "0.1.0"
     }
   }
-}
-
-provider "k8sconnect" {}`
+}`
 	os.WriteFile(filepath.Join(dir, "versions.tf"), []byte(versions), 0644)
 
 	// Write variables.tf

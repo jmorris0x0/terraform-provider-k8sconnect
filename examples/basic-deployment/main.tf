@@ -1,5 +1,7 @@
 # examples/basic-deployment/main.tf
 
+provider "k8sconnect" {}
+
 resource "k8sconnect_manifest" "namespace" {
   yaml_body = <<-YAML
     apiVersion: v1
