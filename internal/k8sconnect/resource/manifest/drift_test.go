@@ -345,7 +345,7 @@ func TestAccManifestResource_DriftDetectionNestedStructures(t *testing.T) {
 						types.StrategicMergePatchType,
 						[]byte(driftTestDeploymentPatch),
 						metav1.PatchOptions{
-							FieldManager: "external-controller",
+							FieldManager: "k8sconnect",
 						},
 					)
 					if err != nil {
