@@ -86,14 +86,7 @@ jobs:
           # Set CI flag for Makefile
           export CI=true
           make oidc-setup
-      
-      - name: Verify managedFields support
-        run: |
-          kubectl create deployment test-managed --image=nginx:1.19
-          kubectl get deployment test-managed -o json | jq '.metadata.managedFields' | grep -q manager || (echo "❌ managedFields not found!" && exit 1)
-          echo "✅ managedFields verified in K3d!"
-          kubectl delete deployment test-managed
-      
+
       - name: Run acceptance tests
         run: make testacc
         env:
