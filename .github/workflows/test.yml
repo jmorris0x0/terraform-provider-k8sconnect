@@ -22,8 +22,7 @@ jobs:
           cache: true
       
       - name: Run unit tests
-        run: |
-          go test -v ./... -run "^Test[^A].*"
+        run: make test
       
       - name: Upload coverage
         uses: codecov/codecov-action@v5
