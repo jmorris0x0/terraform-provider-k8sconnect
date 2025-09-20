@@ -2,9 +2,9 @@ name: Test
 
 on:
   push:
-    branches: [main]
+    branches: [] # TODO Add this back to master when switch to develop branch
   pull_request:
-    branches: [main]
+    branches: [master]
   workflow_dispatch:
 
 permissions:
@@ -50,8 +50,8 @@ jobs:
   acceptance-test:
     runs-on: ubuntu-latest
     needs: [unit-test, build]
-    # Only run acceptance tests on main or if PR is from the same repo (has access to secrets)
-    if: github.ref == 'refs/heads/main' || github.event.pull_request.head.repo.full_name == github.repository
+    # Only run acceptance tests on master or if PR is from the same repo (has access to secrets)
+    if: github.ref == 'refs/heads/master' || github.event.pull_request.head.repo.full_name == github.repository
     strategy:
       fail-fast: false
       matrix:
