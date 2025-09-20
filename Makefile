@@ -17,7 +17,7 @@ build:
 .PHONY: test
 test:
 	@echo "🧪 Running unit tests"
-	go test -v ./... -run "^Test[^A].*"
+	@go test -v $$(go list ./... | grep -v /test/examples) -run "^Test[^A].*"
 
 .PHONY: install
 install:

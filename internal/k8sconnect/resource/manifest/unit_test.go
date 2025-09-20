@@ -76,7 +76,7 @@ HZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
 		Token:                types.StringValue("test-token"),
 	}
 
-	config, err = auth.CreateRESTConfig(context.Background(), connNoExec)
+	_, err = auth.CreateRESTConfig(context.Background(), connNoExec)
 	if err != nil && !strings.Contains(err.Error(), "certificate") && !strings.Contains(err.Error(), "PEM") {
 		t.Fatalf("Unexpected error creating config without exec: %v", err)
 	}
