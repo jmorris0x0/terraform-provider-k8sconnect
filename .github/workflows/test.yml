@@ -14,7 +14,7 @@ jobs:
   unit-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - uses: actions/setup-go@v5
         with:
@@ -37,7 +37,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - uses: actions/setup-go@v5
         with:
@@ -58,7 +58,7 @@ jobs:
         terraform: ['1.12.2']
         # Add more later
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - uses: actions/setup-go@v5
         with:
@@ -108,7 +108,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - uses: actions/setup-go@v5
         with:
