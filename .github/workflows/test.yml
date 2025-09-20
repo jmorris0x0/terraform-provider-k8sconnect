@@ -2,9 +2,9 @@ name: Test
 
 on:
   push:
-    branches: [] # TODO Add this back to master when switch to develop branch
+    branches: [develop]
   pull_request:
-    branches: [master]
+    branches: [develop, master]
   workflow_dispatch:
 
 permissions:
