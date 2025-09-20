@@ -334,8 +334,6 @@ func CheckDeploymentReplicaCount(client *kubernetes.Clientset, namespace, name s
 	}
 }
 
-// Add these functions to internal/k8sconnect/common/test/helpers.go
-
 func CheckStatefulSetExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()
@@ -363,5 +361,37 @@ func CheckStatefulSetDestroy(client kubernetes.Interface, namespace, name string
 			time.Sleep(2 * time.Second)
 		}
 		return fmt.Errorf("statefulset %s/%s still exists after deletion", namespace, name)
+	}
+}
+
+// CheckJobExists verifies a Job exists in the cluster
+func CheckJobExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		_, err := client.BatchV1().Jobs(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("job %s/%s does not exist: %v", namespace, name, err)
+		}
+		fmt.Printf("✅ Verified job %s/%s exists in Kubernetes\n", namespace, name)
+		return nil
+	}
+}
+
+// CheckJobDestroy verifies a Job has been deleted
+func CheckJobDestroy(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		for i := 0; i < 15; i++ {
+			_, err := client.BatchV1().Jobs(namespace).Get(ctx, name, metav1.GetOptions{})
+			if err != nil {
+				if strings.Contains(err.Error(), "not found") {
+					fmt.Printf("✅ Verified job %s/%s was deleted\n", namespace, name)
+					return nil
+				}
+				return fmt.Errorf("unexpected error checking job: %v", err)
+			}
+			time.Sleep(1 * time.Second)
+		}
+		return fmt.Errorf("job %s/%s still exists after deletion", namespace, name)
 	}
 }

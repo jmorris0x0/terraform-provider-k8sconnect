@@ -96,9 +96,8 @@ oidc-setup:
 	@echo "🌐 Ensuring Docker network exists"
 	- docker network inspect k3d-k8sconnect-test >/dev/null 2>&1 || docker network create k3d-k8sconnect-test
 
-
 	@echo "🧹 Cleaning old Dex container"
-	- docker rm -f dex || true
+	-@docker rm -f dex 2>/dev/null || true
 
 	@echo "🚀 Starting Dex (HTTPS)"
 	@docker run -d --name dex --network k3d-k8sconnect-test \

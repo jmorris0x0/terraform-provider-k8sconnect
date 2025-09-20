@@ -305,31 +305,29 @@ func TestAccManifestResource_WaitForCondition(t *testing.T) {
 	}
 
 	ns := fmt.Sprintf("wait-cond-ns-%d", time.Now().UnixNano()%1000000)
-	cmName := fmt.Sprintf("wait-cond-%d", time.Now().UnixNano()%1000000)
+	deployName := fmt.Sprintf("wait-cond-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
-	// This test would need a resource that has conditions
-	// For now, using a ConfigMap as a placeholder - in real implementation
-	// this would be a CRD or other resource with conditions
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
 			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
 		},
 		Steps: []resource.TestStep{
 			{
-				Config: testAccManifestConfigWaitForCondition(ns, cmName),
+				Config: testAccManifestConfigWaitForCondition(ns, deployName),
 				ConfigVariables: config.Variables{
 					"raw":       config.StringVariable(raw),
 					"namespace": config.StringVariable(ns),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
-					// For a real test, check that condition was met
-					// resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.conditions.0.type", "Ready"),
+					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
+					// Verify that we waited for the condition
+					// Note: condition wait doesn't populate status per the design
+					resource.TestCheckNoResourceAttr("k8sconnect_manifest.test", "status"),
 				),
 			},
 		},
-		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, ns, cmName),
+		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, ns, deployName),
 	})
 }
 
@@ -359,19 +357,34 @@ YAML
 
 resource "k8sconnect_manifest" "test" {
   yaml_body = <<YAML
-apiVersion: v1
-kind: ConfigMap
+apiVersion: apps/v1
+kind: Deployment
 metadata:
   name: %s
   namespace: %s
-data:
-  test: value
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: %s
+  template:
+    metadata:
+      labels:
+        app: %s
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.21
+        ports:
+        - containerPort: 80
 YAML
 
-  # In a real test, this would be used with a CRD
-  # wait_for = {
-  #   condition = "Ready"
-  # }
+  wait_for = {
+    # Wait for the Progressing condition to be True
+    # This indicates the deployment is actively rolling out
+    condition = "Progressing"
+    timeout = "2m"
+  }
 
   cluster_connection = {
     kubeconfig_raw = var.raw
@@ -379,7 +392,7 @@ YAML
   
   depends_on = [k8sconnect_manifest.test_namespace]
 }
-`, namespace, name, namespace)
+`, namespace, name, namespace, name, name)
 }
 
 // TestAccManifestResource_WaitForPVCBinding tests waiting for PersistentVolumeClaim binding
@@ -1232,7 +1245,7 @@ func TestAccManifestResource_StatusRemovedWhenWaitRemoved(t *testing.T) {
 	}
 
 	ns := fmt.Sprintf("status-removal-ns-%d", time.Now().UnixNano()%1000000)
-	deployName := fmt.Sprintf("status-removal-%d", time.Now().UnixNano()%1000000)
+	jobName := fmt.Sprintf("status-removal-job-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
@@ -1240,38 +1253,38 @@ func TestAccManifestResource_StatusRemovedWhenWaitRemoved(t *testing.T) {
 			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
 		},
 		Steps: []resource.TestStep{
-			// Step 1: Create with wait_for, status populated
+			// Step 1: Create Job with wait_for succeeded field
 			{
-				Config: testAccManifestConfigWithWaitFor(ns, deployName),
+				Config: testAccManifestConfigJobWithWaitFor(ns, jobName),
 				ConfigVariables: config.Variables{
 					"raw":       config.StringVariable(raw),
 					"namespace": config.StringVariable(ns),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
-					// Status should be populated
-					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.replicas", "2"),
+					testhelpers.CheckJobExists(k8sClient, ns, jobName),
+					// Status should be populated with succeeded count
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.succeeded", "1"),
 				),
 			},
-			// Step 2: Remove wait_for, status should be removed
+			// Step 2: Remove wait_for, status should be cleared
 			{
-				Config: testAccManifestConfigWithoutWaitFor(ns, deployName),
+				Config: testAccManifestConfigJobWithoutWaitFor(ns, jobName),
 				ConfigVariables: config.Variables{
 					"raw":       config.StringVariable(raw),
 					"namespace": config.StringVariable(ns),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
-					// Status should be null
+					testhelpers.CheckJobExists(k8sClient, ns, jobName),
+					// Status should be null when wait_for is removed
 					resource.TestCheckNoResourceAttr("k8sconnect_manifest.test", "status"),
 				),
 			},
 		},
-		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, ns, deployName),
+		CheckDestroy: testhelpers.CheckJobDestroy(k8sClient, ns, jobName),
 	})
 }
 
-func testAccManifestConfigWithWaitFor(namespace, name string) string {
+func testAccManifestConfigJobWithWaitFor(namespace, name string) string {
 	return fmt.Sprintf(`
 variable "raw" {
   type = string
@@ -1298,30 +1311,26 @@ YAML
 
 resource "k8sconnect_manifest" "test" {
   yaml_body = <<YAML
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: batch/v1
+kind: Job
 metadata:
   name: %s
   namespace: %s
 spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: %s
+  backoffLimit: 1
   template:
-    metadata:
-      labels:
-        app: %s
     spec:
       containers:
-      - name: nginx
-        image: nginx:1.21
-        ports:
-        - containerPort: 80
+      - name: hello
+        image: busybox:1.28
+        command: ["sh", "-c", "echo 'Hello World' && sleep 2"]
+      restartPolicy: Never
 YAML
 
   wait_for = {
-    field = "status.replicas"
+    # Wait for succeeded field - only appears when job completes successfully
+    field = "status.succeeded"
+    timeout = "2m"
   }
 
   cluster_connection = {
@@ -1330,10 +1339,10 @@ YAML
   
   depends_on = [k8sconnect_manifest.test_namespace]
 }
-`, namespace, name, namespace, name, name)
+`, namespace, name, namespace)
 }
 
-func testAccManifestConfigWithoutWaitFor(namespace, name string) string {
+func testAccManifestConfigJobWithoutWaitFor(namespace, name string) string {
 	return fmt.Sprintf(`
 variable "raw" {
   type = string
@@ -1360,26 +1369,20 @@ YAML
 
 resource "k8sconnect_manifest" "test" {
   yaml_body = <<YAML
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: batch/v1
+kind: Job
 metadata:
   name: %s
   namespace: %s
 spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: %s
+  backoffLimit: 1
   template:
-    metadata:
-      labels:
-        app: %s
     spec:
       containers:
-      - name: nginx
-        image: nginx:1.21
-        ports:
-        - containerPort: 80
+      - name: hello
+        image: busybox:1.28
+        command: ["sh", "-c", "echo 'Hello World' && sleep 2"]
+      restartPolicy: Never
 YAML
 
   # wait_for removed - status should be cleared
@@ -1387,10 +1390,11 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
+  use_field_ownership = false
   
   depends_on = [k8sconnect_manifest.test_namespace]
 }
-`, namespace, name, namespace, name, name)
+`, namespace, name, namespace)
 }
 
 // TestAccManifestResource_InvalidFieldPath tests error handling for invalid field paths
