@@ -51,6 +51,11 @@ func testExampleDir(t *testing.T, exampleDir string, kubeconfig string) {
 	// Create temp directory for test
 	testDir := t.TempDir()
 
+	// Generate a single hash for this entire test to ensure consistency
+	h := sha256.New()
+	h.Write([]byte(fmt.Sprintf("%d%d", time.Now().UnixNano(), rand.Int63())))
+	testHash := hex.EncodeToString(h.Sum(nil))[:8]
+
 	// Copy ALL files from example directory
 	err := filepath.Walk(exampleDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -77,12 +82,13 @@ func testExampleDir(t *testing.T, exampleDir string, kubeconfig string) {
 		}
 
 		// Apply isolation to .tf files and non-template YAML files
+		// Use the SAME hash for all files in this test
 		if strings.HasSuffix(path, ".tf") {
-			content = isolateExample(content)
+			content = isolateExampleWithHash(content, testHash)
 		} else if (strings.HasSuffix(path, ".yaml") || strings.HasSuffix(path, ".yml")) &&
 			!strings.Contains(path, "template") {
 			// Only isolate YAML files that aren't templates
-			content = isolateExample(content)
+			content = isolateExampleWithHash(content, testHash)
 		}
 
 		return os.WriteFile(destPath, content, 0644)
@@ -116,19 +122,25 @@ func testExampleDir(t *testing.T, exampleDir string, kubeconfig string) {
 	runTerraform(t, testDir, "destroy", "-auto-approve")
 }
 
-func isolateExample(content []byte) []byte {
-	// Generate a short hash for uniqueness
-	h := sha256.New()
-	h.Write([]byte(fmt.Sprintf("%d%d", time.Now().UnixNano(), rand.Int63())))
-	hash := hex.EncodeToString(h.Sum(nil))[:8]
-
+func isolateExampleWithHash(content []byte, hash string) []byte {
 	result := string(content)
 
 	// Only isolate "example" namespace, not others like "demo"
+	// Use the provided hash to ensure consistency across all files
 	result = strings.ReplaceAll(result, `name: example`, fmt.Sprintf(`name: example-%s`, hash))
 	result = strings.ReplaceAll(result, `namespace: example`, fmt.Sprintf(`namespace: example-%s`, hash))
 
 	return []byte(result)
+}
+
+// Backward compatibility wrapper (not used anymore but kept for reference)
+func isolateExample(content []byte) []byte {
+	// Generate a hash for this call
+	h := sha256.New()
+	h.Write([]byte(fmt.Sprintf("%d%d", time.Now().UnixNano(), rand.Int63())))
+	hash := hex.EncodeToString(h.Sum(nil))[:8]
+
+	return isolateExampleWithHash(content, hash)
 }
 
 func writeTestFiles(t *testing.T, dir string, kubeconfig string) {
