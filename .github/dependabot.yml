@@ -4,6 +4,7 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    target-branch: "develop"  # ← Add this
     open-pull-requests-limit: 5
     allow:
       - dependency-type: "all"
@@ -18,6 +19,7 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    target-branch: "develop"  # ← Add this
     open-pull-requests-limit: 5
     groups:
       github-actions:
@@ -26,4 +28,3 @@ updates:
         update-types:
           - "minor"
           - "patch"
-
