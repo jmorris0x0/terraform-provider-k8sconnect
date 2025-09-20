@@ -2,9 +2,9 @@ name: Security
 
 on:
   push:
-    branches: [] # Add back master when we switch to develop branch for most work.
+    branches: [develop]
   pull_request:
-    branches: [master]
+    branches: [develop, master]
   schedule:
     - cron: '0 0 * * 1'  # Weekly on Monday
   workflow_dispatch:
