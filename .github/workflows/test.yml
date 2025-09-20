@@ -91,6 +91,7 @@ jobs:
         run: make testacc
         env:
           TF_ACC_TERRAFORM_VERSION: ${{ matrix.terraform }}
+          TEST: TestAccManifestResource_StatusRemovedWhenWaitRemoved
      
 
       - name: Run examples tests
