@@ -1,4 +1,3 @@
-// test/examples/examples_test.go
 package examples
 
 import (
@@ -14,44 +13,36 @@ import (
 	"time"
 )
 
-// test/examples/examples_test.go - fix the glob pattern
 func TestExamples(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping examples test in short mode")
-	}
-
+	// Get kubeconfig from environment
 	kubeconfig := os.Getenv("TF_ACC_KUBECONFIG_RAW")
 	if kubeconfig == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set for examples tests")
 	}
 
-	// Fix: Remove trailing slash from glob pattern
-	exampleDirs, err := filepath.Glob("../../examples/*")
+	// Find all example directories
+	examplesDir := "../../examples"
+	entries, err := os.ReadDir(examplesDir)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Failed to read examples directory: %v", err)
 	}
 
-	if len(exampleDirs) == 0 {
-		t.Fatal("No examples found in examples/ directory")
-	}
-
-	for _, dir := range exampleDirs {
-		// Skip if not a directory (like README.md)
-		info, err := os.Stat(dir)
-		if err != nil || !info.IsDir() {
+	for _, entry := range entries {
+		if !entry.IsDir() {
 			continue
 		}
 
+		exampleDir := filepath.Join(examplesDir, entry.Name())
+
 		// Check if directory contains .tf files
-		tfFiles, _ := filepath.Glob(filepath.Join(dir, "*.tf"))
+		tfFiles, _ := filepath.Glob(filepath.Join(exampleDir, "*.tf"))
 		if len(tfFiles) == 0 {
 			continue
 		}
 
-		exampleName := filepath.Base(dir)
-		t.Run(exampleName, func(t *testing.T) {
+		t.Run(entry.Name(), func(t *testing.T) {
 			t.Parallel()
-			testExampleDir(t, dir, kubeconfig)
+			testExampleDir(t, exampleDir, kubeconfig)
 		})
 	}
 }
@@ -60,27 +51,51 @@ func testExampleDir(t *testing.T, exampleDir string, kubeconfig string) {
 	// Create temp directory for test
 	testDir := t.TempDir()
 
-	// Copy all .tf files from example
-	tfFiles, _ := filepath.Glob(filepath.Join(exampleDir, "*.tf"))
-	for _, file := range tfFiles {
-		content, err := os.ReadFile(file)
+	// Copy ALL files from example directory
+	err := filepath.Walk(exampleDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			t.Fatal(err)
+			return err
 		}
 
-		// Apply namespace isolation
-		content = isolateExample(content)
-
-		destFile := filepath.Join(testDir, filepath.Base(file))
-		if err := os.WriteFile(destFile, content, 0644); err != nil {
-			t.Fatal(err)
+		// Get relative path from example dir
+		relPath, err := filepath.Rel(exampleDir, path)
+		if err != nil {
+			return err
 		}
+
+		destPath := filepath.Join(testDir, relPath)
+
+		if info.IsDir() {
+			// Create directory
+			return os.MkdirAll(destPath, 0755)
+		}
+
+		// Copy file
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+
+		// Apply isolation to .tf files and non-template YAML files
+		if strings.HasSuffix(path, ".tf") {
+			content = isolateExample(content)
+		} else if (strings.HasSuffix(path, ".yaml") || strings.HasSuffix(path, ".yml")) &&
+			!strings.Contains(path, "template") {
+			// Only isolate YAML files that aren't templates
+			content = isolateExample(content)
+		}
+
+		return os.WriteFile(destPath, content, 0644)
+	})
+
+	if err != nil {
+		t.Fatalf("Failed to copy example files: %v", err)
 	}
 
 	// Write test infrastructure files
 	writeTestFiles(t, testDir, kubeconfig)
 
-	// Run Terraform lifecycle
+	// Run Terraform commands
 	runTerraform(t, testDir, "init", "-backend=false")
 	runTerraform(t, testDir, "plan", "-out=tfplan")
 	runTerraform(t, testDir, "apply", "tfplan")
@@ -105,11 +120,11 @@ func isolateExample(content []byte) []byte {
 	// Generate a short hash for uniqueness
 	h := sha256.New()
 	h.Write([]byte(fmt.Sprintf("%d%d", time.Now().UnixNano(), rand.Int63())))
-	hash := hex.EncodeToString(h.Sum(nil))[:8] // First 8 chars of hash
+	hash := hex.EncodeToString(h.Sum(nil))[:8]
 
 	result := string(content)
 
-	// Replace "example" namespace with unique suffix
+	// Only isolate "example" namespace, not others like "demo"
 	result = strings.ReplaceAll(result, `name: example`, fmt.Sprintf(`name: example-%s`, hash))
 	result = strings.ReplaceAll(result, `namespace: example`, fmt.Sprintf(`namespace: example-%s`, hash))
 
@@ -147,7 +162,14 @@ func writeTestFiles(t *testing.T, dir string, kubeconfig string) {
 func runTerraform(t *testing.T, dir string, args ...string) {
 	cmd := exec.Command("terraform", args...)
 	cmd.Dir = dir
+
 	output, err := cmd.CombinedOutput()
+
+	if testing.Verbose() {
+		t.Logf("Command: terraform %s", strings.Join(args, " "))
+		t.Logf("Output:\n%s", output)
+	}
+
 	if err != nil {
 		t.Logf("Command: terraform %s", strings.Join(args, " "))
 		t.Logf("Output:\n%s", output)

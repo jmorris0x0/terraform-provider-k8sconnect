@@ -37,7 +37,7 @@ Or even better, autodetect and accept both! Would need a test for this.
 
 13. Make sure all key features are documented. I've made changes to status that might be updated.
 
-14. Need many working examples linked to make feature list. Is there a way to auto test them? Non working examples really suck.
+14. Need many working examples linked to make feature list. We have auto idempotency testing set up so this is now easy.
 
 15. Add ignore_field_changes for surgical ignores. Avoids annoying initial diff for HPA and other controllers.
 

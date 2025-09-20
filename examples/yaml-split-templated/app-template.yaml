@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${app_name}-${environment}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${app_name}
+  namespace: ${app_name}-${environment}
+spec:
+  replicas: ${replicas}
+  selector:
+    matchLabels:
+      app: ${app_name}
+  template:
+    metadata:
+      labels:
+        app: ${app_name}
+        environment: ${environment}
+    spec:
+      containers:
+      - name: app
+        image: nginx:1.20

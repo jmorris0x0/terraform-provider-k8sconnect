@@ -1,0 +1,27 @@
+// In your provider code where the ownership conflict is detected:
+
+func formatOwnershipConflictError(resource, namespace, name, currentID, existingID string) error {
+    return fmt.Errorf(`Resource Ownership Conflict
+
+The %s '%s/%s' is already managed by a different Terraform resource.
+Current resource ID: %s
+Existing resource ID: %s
+
+This usually happens when:
+1. Multiple Terraform configurations are managing the same cluster
+2. Resources were copied between Terraform modules without updating names
+3. A previous Terraform apply was interrupted and state wasn't cleaned up
+4. The resource was imported into different Terraform states
+
+To resolve:
+- Use unique resource names across different Terraform configurations
+- Run 'terraform import' to take ownership of existing resources
+- Add 'force_conflicts = true' to forcibly take ownership (use with caution)
+- Check if another team member or CI pipeline is managing this resource
+
+To investigate:
+- Check the annotation 'k8sconnect.io/owned-by' on the Kubernetes resource
+- Run: kubectl get %s %s -n %s -o yaml | grep owned-by`,
+        resource, namespace, name, currentID, existingID,
+        strings.ToLower(resource), name, namespace)
+}
