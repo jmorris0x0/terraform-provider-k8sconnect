@@ -91,7 +91,7 @@ oidc-setup:
 	@echo "🔐 Generating self‑signed certs"
 	@rm -fr $(DEX_SSL_DIR)
 	@mkdir -p $(DEX_SSL_DIR)
-	@cd $(OIDC_DIR) && ./gencert.sh
+	@cd $(OIDC_DIR) && ./gencert.sh >/dev/null 2>&1
 
 	@echo "🌐 Ensuring Docker network exists"
 	- docker network inspect k3d-k8sconnect-test >/dev/null 2>&1 || docker network create k3d-k8sconnect-test
@@ -140,7 +140,7 @@ oidc-setup:
 
 	@echo "📜 Generating client certificates"
 	@chmod +x $(OIDC_DIR)/setup-certs.sh
-	@$(OIDC_DIR)/setup-certs.sh $(TESTBUILD_DIR)
+	@$(OIDC_DIR)/setup-certs.sh $(TESTBUILD_DIR) 2>/dev/null
 
 .PHONY: testacc
 testacc: oidc-setup

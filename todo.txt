@@ -100,4 +100,14 @@ Make sure all forms of wait are really tested.
 
 Add wait for status tests in examples. Verify behavior that down stream things are not destroyed between applies.
 
+Do I need to add a warning for terraform less than 1.6 or pre SSA k8s?
+
+Should I make the entire json manifest available as a computed attribute? Could be useful.
+
+Guardrails around people looking for status items that really don't exist?
+  For example, error if value doesn't start with status as a reminder not to wait for other stuff like annotations?
+
+  field   = "status.loadBalancer.ingress"
+
+Remove field_ownership from diff. It's just noise, probably.
 
