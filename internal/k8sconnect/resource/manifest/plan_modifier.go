@@ -40,6 +40,29 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 	// Parse the desired YAML
 	desiredObj, err := r.parseYAML(plannedData.YAMLBody.ValueString())
 	if err != nil {
+		// Check if this might be due to unresolved interpolations
+		yamlStr := plannedData.YAMLBody.ValueString()
+		if strings.Contains(yamlStr, "${") {
+			fmt.Printf("DEBUG ModifyPlan: YAML parsing failed with interpolation syntax present, deferring to apply: %v\n", err)
+			// During plan with interpolations to computed values, we can't parse/validate
+			// Mark computed fields as unknown
+			plannedData.ManagedStateProjection = types.StringUnknown()
+			plannedData.FieldOwnership = types.StringUnknown()
+
+			// Handle status based on wait_for
+			if !plannedData.WaitFor.IsNull() {
+				plannedData.Status = types.DynamicUnknown()
+			} else {
+				plannedData.Status = types.DynamicNull()
+			}
+
+			// Save the plan with unknown computed fields
+			diags = resp.Plan.Set(ctx, &plannedData)
+			resp.Diagnostics.Append(diags...)
+			return
+		}
+
+		// This is a real YAML parsing error
 		resp.Diagnostics.AddError("Invalid YAML", fmt.Sprintf("Failed to parse YAML: %s", err))
 		return
 	}
