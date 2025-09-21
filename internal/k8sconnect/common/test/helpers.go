@@ -395,3 +395,32 @@ func CheckJobDestroy(client kubernetes.Interface, namespace, name string) resour
 		return fmt.Errorf("job %s/%s still exists after deletion", namespace, name)
 	}
 }
+
+// CheckConfigMapFieldSet verifies that a specific field exists in a ConfigMap's data (value can be any non-empty string)
+func CheckConfigMapFieldSet(client kubernetes.Interface, namespace, name, fieldPath string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		cm, err := client.CoreV1().ConfigMaps(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to get configmap %s/%s: %v", namespace, name, err)
+		}
+
+		// Parse the field path (e.g., "data.source_id")
+		if !strings.HasPrefix(fieldPath, "data.") {
+			return fmt.Errorf("field path must start with 'data.' for ConfigMap, got: %s", fieldPath)
+		}
+
+		key := strings.TrimPrefix(fieldPath, "data.")
+		value, exists := cm.Data[key]
+		if !exists {
+			return fmt.Errorf("configmap %s/%s missing expected field %q", namespace, name, key)
+		}
+
+		if value == "" {
+			return fmt.Errorf("configmap %s/%s field %q exists but is empty", namespace, name, key)
+		}
+
+		fmt.Printf("✅ Verified configmap %s/%s has field %s set (value: %s)\n", namespace, name, key, value)
+		return nil
+	}
+}
