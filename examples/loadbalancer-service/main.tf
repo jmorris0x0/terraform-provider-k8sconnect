@@ -25,7 +25,7 @@ resource "k8sconnect_manifest" "service" {
       selector:
         app: web
       ports:
-      - port: 80
+      - port: 9998
         targetPort: 8080
   YAML
 

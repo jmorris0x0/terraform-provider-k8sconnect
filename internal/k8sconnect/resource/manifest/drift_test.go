@@ -648,7 +648,7 @@ spec:
   selector:
     app: test
   ports:
-  - port: 80
+  - port: 9996
     targetPort: 8080
     protocol: TCP
 YAML

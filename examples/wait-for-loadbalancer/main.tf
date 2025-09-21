@@ -23,7 +23,7 @@ resource "k8sconnect_manifest" "loadbalancer_service" {
     spec:
       type: LoadBalancer
       ports:
-      - port: 8080
+      - port: 9999
         targetPort: 80
       selector:
         app: demo
@@ -63,4 +63,3 @@ output "loadbalancer_endpoint" {
   )
   description = "The LoadBalancer endpoint for the demo service"
 }
-
