@@ -31,19 +31,15 @@ Or even better, autodetect and accept both! Would need a test for this.
 
 10. Remove some attributes from UI that should probably be private.
 
-11. Write up main docs for landing page.
+11. Write up main docs for registry landing page.
 
 12. Medium article, posts to r/kubernetes, r/terraform, hackernews.
 
 13. Make sure all key features are documented. I've made changes to status that might be updated.
 
-14. Need many working examples linked to make feature list. We have auto idempotency testing set up so this is now easy.
-
 15. Add ignore_field_changes for surgical ignores. Avoids annoying initial diff for HPA and other controllers.
 
 16. Consider moving key features higher up in the docs.
-
-17. Move development from master to develop branch
 
 18. There are probably more edge cases for ownership that need acceptance testing. Need to make a table of all possible transitions. Also make sure that the warnings are accurate for all of them.
 
@@ -63,7 +59,7 @@ Or even better, autodetect and accept both! Would need a test for this.
 
 27. Do we need to test the ownership conflict test without force_conflicts=true?
 
-28. remove feature flag now that everything is working.
+28. Remove feature flag now that everything is working.
 
 29. Needs much more testing around immutable field UX.
 
@@ -96,8 +92,17 @@ Delayed application of an out of date plan.
 
 move pure server side up in feature list.
 
-Make sure all forms of wait are really tested.
-
 Add wait for status tests in examples. Verify behavior that down stream things are not destroyed between applies.
 
+Do I need to add a warning for terraform less than 1.6 or pre SSA k8s?
 
+Should I make the entire json manifest available as a computed attribute? Could be useful.
+
+Guardrails around people looking for status items that really don't exist?
+  For example, error if value doesn't start with status as a reminder not to wait for other stuff like annotations?
+
+  field   = "status.loadBalancer.ingress"
+
+Remove field_ownership from diff. It's just noise, probably.
+
+Add token example to connection methods section of readme.

@@ -103,6 +103,22 @@ jobs:
         if: always()
         run: k3d cluster delete k8sconnect-test || true
 
+  acceptance-test-summary:
+    name: acceptance-test
+    runs-on: ubuntu-latest
+    needs: acceptance-test
+    if: always()
+    steps:
+      - name: Check matrix results
+        run: |
+          if [[ "${{ needs.acceptance-test.result }}" == "success" ]]; then
+            echo "All acceptance tests passed"
+            exit 0
+          else
+            echo "Some acceptance tests failed"
+            exit 1
+          fi
+
   lint:
     runs-on: ubuntu-latest
     steps:

@@ -4,6 +4,7 @@ package manifest
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -383,13 +384,30 @@ func (v *requiredFieldsValidator) ValidateResource(ctx context.Context, req reso
 			"Missing Required Field",
 			"'yaml_body' is required and must contain valid Kubernetes YAML manifest content.",
 		)
-	} else if !data.YAMLBody.IsUnknown() && data.YAMLBody.ValueString() == "" {
-		// Only check for empty string if the value is known
-		resp.Diagnostics.AddAttributeError(
-			path.Root("yaml_body"),
-			"Empty YAML Content",
-			"'yaml_body' cannot be empty. It must contain a valid single-document Kubernetes YAML manifest.",
-		)
+		return
+	}
+
+	if !data.YAMLBody.IsUnknown() && data.YAMLBody.ValueString() != "" {
+		yamlStr := data.YAMLBody.ValueString()
+
+		// If YAML contains interpolations, skip ALL validation
+		// These will be resolved during apply phase
+		if strings.Contains(yamlStr, "${") {
+			fmt.Printf("DEBUG requiredFieldsValidator: Skipping YAML validation due to interpolation syntax\n")
+			return
+		}
+
+		// No interpolations - validate the YAML (includes multi-doc check)
+		r := &manifestResource{}
+		_, err := r.parseYAML(yamlStr)
+		if err != nil {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("yaml_body"),
+				"Invalid YAML",
+				fmt.Sprintf("Failed to parse YAML: %s", err),
+			)
+			return
+		}
 	}
 
 	// Note: cluster_connection validation is handled by clusterConnectionValidator

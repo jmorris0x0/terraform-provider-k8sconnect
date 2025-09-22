@@ -1599,7 +1599,7 @@ spec:
   selector:
     app: test
   ports:
-  - port: 80
+  - port: 9997
     targetPort: 8080
     protocol: TCP
 YAML
