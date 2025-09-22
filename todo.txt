@@ -92,7 +92,7 @@ Delayed application of an out of date plan.
 
 move pure server side up in feature list.
 
-Add wait for status tests in examples. Verify behavior that down stream things are not destroyed between applies.
+Add wait for status tests in examples. Verify behavior that downstream things are not destroyed between applies.
 
 Do I need to add a warning for terraform less than 1.6 or pre SSA k8s?
 
@@ -106,3 +106,8 @@ Guardrails around people looking for status items that really don't exist?
 Remove field_ownership from diff. It's just noise, probably.
 
 Add token example to connection methods section of readme.
+
+Add open tofu tests.
+
+Check earliest version of terraform this works with. 1.0 or really 1.6?
+

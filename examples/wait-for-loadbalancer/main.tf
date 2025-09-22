@@ -38,7 +38,6 @@ resource "k8sconnect_manifest" "loadbalancer_service" {
   depends_on         = [k8sconnect_manifest.namespace]
 }
 
-# This should work if the feature is working correctly
 resource "k8sconnect_manifest" "endpoint_config" {
   yaml_body = <<-YAML
     apiVersion: v1

@@ -12,6 +12,7 @@ import (
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/factory"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
+	resourceds "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/datasource/resource"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/datasource/yaml_split"
 	manifestres "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/resource/manifest"
 )
@@ -79,5 +80,6 @@ func (p *k8sconnectProvider) Resources(ctx context.Context) []func() resource.Re
 func (p *k8sconnectProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
 		yaml_split.NewYamlSplitDataSource,
+		resourceds.NewResourceDataSource,
 	}
 }
