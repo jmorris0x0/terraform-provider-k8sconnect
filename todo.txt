@@ -113,4 +113,19 @@ Check earliest version of terraform this works with. 1.0 or really 1.6?
 
 Check tests for stubs and skips that I might have forgotten about.
 
-The resouruce datasource has ugly args that are nested for no reason. Flatten it.
+The resouruce datasource has ugly args that are nested for no reason. Flatten it unless you are adding more attributes.
+
+Consider adding a wait_for to the datasource. This could be complex.
+
+Better errors for the new datasource.
+
+Can we lookup in the datasource output dynamically? Need to use the same logic we use in the resource to convert json to attribute probably. Look at how other providers work.
+
+I think the cluster_connection attribute needs better validation testing. It's somewhat complex. Perhaps some kind of combinatorial random tests of different attributes? Which things are mutually exclusive? Maybe it's simpler than I remember
+
+Need significant tests for the new datasource. Specifically how it works in the dependency graph. How does it work with unknowns (both passing and recieving). What about interpolation? Does it solve my own cluster problems?
+
+Does new datasource need a wait_for? Does that make sense in this context? If we are using it during apply, this could be valuable. If I can't get a LB hostname or IP, not sure how useful it is.
+
+Example files probably need both inline and template file examples. Don't want people thinking you can't do both.
+
