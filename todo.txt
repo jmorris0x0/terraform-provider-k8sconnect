@@ -111,3 +111,6 @@ Add open tofu tests.
 
 Check earliest version of terraform this works with. 1.0 or really 1.6?
 
+Check tests for stubs and skips that I might have forgotten about.
+
+The resouruce datasource has ugly args that are nested for no reason. Flatten it.

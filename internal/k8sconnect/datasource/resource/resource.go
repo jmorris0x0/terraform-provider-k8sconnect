@@ -259,10 +259,9 @@ func (d *resourceDataSource) Read(ctx context.Context, req datasource.ReadReques
 	}
 	data.YAMLBody = types.StringValue(string(yamlBytes))
 
-	// Convert to dynamic value for object access
-	objValue, diags := types.ObjectValueFrom(ctx, nil, obj.Object)
-	resp.Diagnostics.Append(diags...)
-	data.Object = types.DynamicValue(objValue)
+	// For now, don't set the object field - it's causing type conversion issues
+	// The manifest and yaml_body fields already provide the data in usable formats
+	data.Object = types.DynamicNull()
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
