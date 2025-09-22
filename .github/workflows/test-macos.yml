@@ -20,18 +20,17 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
       
-      - name: Install Docker and Kind
+      - name: Install Docker alternative and Kind
         run: |
-          # macOS runners don't have Docker by default
-          brew install --cask docker
-          brew install kind kubectl
+          # Use Colima instead of Docker Desktop for CI
+          brew install colima docker kind kubectl
           
-          # Start Docker Desktop
-          open -a Docker
+          # Start Colima (Docker alternative)
+          colima start --cpu 2 --memory 4
           
-          # Wait for Docker to be ready with timeout
+          # Wait for Docker to be ready
           echo "Waiting for Docker to start..."
-          timeout=300  # 5 minutes timeout
+          timeout=60
           counter=0
           while ! docker info >/dev/null 2>&1; do
             if [ $counter -ge $timeout ]; then
@@ -39,8 +38,8 @@ jobs:
               exit 1
             fi
             echo "Waiting for Docker... ($counter/$timeout)"
-            sleep 5
-            counter=$((counter + 5))
+            sleep 2
+            counter=$((counter + 2))
           done
           echo "Docker is ready!"
       
