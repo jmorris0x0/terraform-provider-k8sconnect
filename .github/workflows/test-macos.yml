@@ -30,8 +30,8 @@ jobs:
           brew install kind kubectl
           
           # Start Docker Desktop
-          sudo /Applications/Docker.app/Contents/MacOS/Docker --unattended --install-privileged-components
-          open -a /Applications/Docker.app --args --unattended --accept-license
+          brew services start docker-desktop
+          open -a Docker
           
           # Wait for Docker to be ready
           echo "Waiting for Docker to start..."

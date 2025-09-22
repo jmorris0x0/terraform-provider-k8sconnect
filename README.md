@@ -55,7 +55,6 @@ locals {
     }
   }
   
-  # Use multiple connection methods for different environements
   staging_connection = {
     kubeconfig_raw = file("~/.kube/staging-config")
     context        = "staging"
