@@ -129,3 +129,9 @@ Does new datasource need a wait_for? Does that make sense in this context? If we
 
 Example files probably need both inline and template file examples. Don't want people thinking you can't do both.
 
+Fill in all the missing files under Community Standards. issue templates, contributing, etc.
+
+For auth, do I need to handle both auth versions:
+API version compatibility (client.authentication.k8s.io/v1 vs v1beta1)
+
+

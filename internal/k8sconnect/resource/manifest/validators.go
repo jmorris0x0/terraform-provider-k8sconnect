@@ -239,7 +239,7 @@ func (v *execAuthValidator) Description(ctx context.Context) string {
 }
 
 func (v *execAuthValidator) MarkdownDescription(ctx context.Context) string {
-	return "Ensures that if exec auth is specified, all required fields (`api_version`, `command`, `args`) are provided"
+	return "Ensures that if exec auth is specified, all required fields (`api_version`, `command`) are provided"
 }
 
 func (v *execAuthValidator) ValidateResource(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
@@ -288,10 +288,6 @@ func (v *execAuthValidator) ValidateResource(ctx context.Context, req resource.V
 		missingFields = append(missingFields, "command")
 	}
 
-	if len(exec.Args) == 0 {
-		missingFields = append(missingFields, "args")
-	}
-
 	if len(missingFields) > 0 {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("cluster_connection").AtName("exec"),
@@ -299,8 +295,7 @@ func (v *execAuthValidator) ValidateResource(ctx context.Context, req resource.V
 			fmt.Sprintf("When using exec authentication, all fields are required. Missing: %v\n\n"+
 				"Complete exec configuration requires:\n"+
 				"• **api_version**: Authentication API version (e.g., 'client.authentication.k8s.io/v1')\n"+
-				"• **command**: Executable command (e.g., 'aws', 'gcloud')\n"+
-				"• **args**: Command arguments (e.g., ['eks', 'get-token', '--cluster-name', 'my-cluster'])",
+				"• **command**: Executable command (e.g., 'aws', 'gcloud')",
 				missingFields),
 		)
 	}

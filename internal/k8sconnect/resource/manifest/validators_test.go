@@ -145,7 +145,7 @@ func countModes(c auth.ClusterConnectionModel) int {
 func execMissingFields(e *auth.ExecAuthModel) []string {
 	var m []string
 	if e == nil {
-		return []string{"api_version", "command", "args"}
+		return []string{"api_version", "command"} // Remove "args" from here
 	}
 	if e.APIVersion.IsNull() {
 		m = append(m, "api_version")
@@ -153,8 +153,6 @@ func execMissingFields(e *auth.ExecAuthModel) []string {
 	if e.Command.IsNull() {
 		m = append(m, "command")
 	}
-	if len(e.Args) == 0 {
-		m = append(m, "args")
-	}
+	// Remove the entire check for Args
 	return m
 }

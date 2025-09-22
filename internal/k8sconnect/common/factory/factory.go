@@ -35,10 +35,9 @@ func NewCachedClientFactory() *CachedClientFactory {
 
 // GetClient returns a cached client or creates a new one
 func (f *CachedClientFactory) GetClient(conn auth.ClusterConnectionModel) (k8sclient.K8sClient, error) {
-	// Generate cache key based on connection config
 	cacheKey := f.generateCacheKey(conn)
 
-	// Check cache first (with read lock)
+	// First check with read lock
 	f.mu.RLock()
 	if client, exists := f.cache[cacheKey]; exists {
 		f.mu.RUnlock()
@@ -46,7 +45,16 @@ func (f *CachedClientFactory) GetClient(conn auth.ClusterConnectionModel) (k8scl
 	}
 	f.mu.RUnlock()
 
-	// Create new client using common auth
+	// Acquire write lock for creation
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	// Double-check - another goroutine might have created it
+	if client, exists := f.cache[cacheKey]; exists {
+		return client, nil
+	}
+
+	// Now safe to create
 	config, err := auth.CreateRESTConfig(context.Background(), conn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create REST config: %w", err)
@@ -57,11 +65,7 @@ func (f *CachedClientFactory) GetClient(conn auth.ClusterConnectionModel) (k8scl
 		return nil, err
 	}
 
-	// Cache the client (with write lock)
-	f.mu.Lock()
 	f.cache[cacheKey] = client
-	f.mu.Unlock()
-
 	return client, nil
 }
 
