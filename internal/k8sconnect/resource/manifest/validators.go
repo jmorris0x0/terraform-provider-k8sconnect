@@ -388,27 +388,25 @@ func (v *requiredFieldsValidator) ValidateResource(ctx context.Context, req reso
 	}
 
 	if !data.YAMLBody.IsUnknown() && data.YAMLBody.ValueString() != "" {
-		// Check if YAML contains interpolations that might fail parsing
 		yamlStr := data.YAMLBody.ValueString()
+
+		// If YAML contains interpolations, skip ALL validation
+		// These will be resolved during apply phase
 		if strings.Contains(yamlStr, "${") {
-			// Try parsing to see if it fails due to interpolations
-			r := &manifestResource{}
-			_, err := r.parseYAML(yamlStr)
-			if err != nil {
-				// YAML fails to parse with interpolations - skip validation
-				// This will be validated during apply when values are known
-				fmt.Printf("DEBUG requiredFieldsValidator: Skipping YAML validation due to interpolation: %v\n", err)
-				return
-			}
+			fmt.Printf("DEBUG requiredFieldsValidator: Skipping YAML validation due to interpolation syntax\n")
+			return
 		}
 
-		// Only check for actual empty string if no interpolation issues
-		if data.YAMLBody.ValueString() == "" {
+		// No interpolations - validate the YAML (includes multi-doc check)
+		r := &manifestResource{}
+		_, err := r.parseYAML(yamlStr)
+		if err != nil {
 			resp.Diagnostics.AddAttributeError(
 				path.Root("yaml_body"),
-				"Empty YAML Content",
-				"'yaml_body' cannot be empty. It must contain a valid single-document Kubernetes YAML manifest.",
+				"Invalid YAML",
+				fmt.Sprintf("Failed to parse YAML: %s", err),
 			)
+			return
 		}
 	}
 
