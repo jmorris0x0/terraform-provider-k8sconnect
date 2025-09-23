@@ -22,10 +22,10 @@ Import blocks: Verify they work correctly
 Cluster connection validation: Complex attribute combinations need better testing
 Datasource testing: Dependency graph, unknowns handling, interpolation
 OpenTofu tests: Add compatibility testing
-Terraform version compatibility: Check 1.0 vs 1.6 minimum
 Check for stubs/skips: Audit test suite for forgotten temporary code
 Auth API versions: Handle both v1 and v1beta1
 HPA simulation: Test multiple simultaneous ownership changes
+Don't need the first load balancer example. Find a different one or delete.
 
 FEATURE ADDITIONS
 

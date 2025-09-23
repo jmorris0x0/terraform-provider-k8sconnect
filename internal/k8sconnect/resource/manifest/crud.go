@@ -3,34 +3,32 @@ package manifest
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 )
 
 func (r *manifestResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	fmt.Printf("=== ACTUAL CREATE FUNCTION CALLED ===\n")
-	var data manifestResourceModel
 
+	// 1. Setup and extract plan data
+	var data manifestResourceModel
 	diags := req.Plan.Get(ctx, &data)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	// Generate ID for new resource
+	// 2. Generate resource ID
 	data.ID = types.StringValue(r.generateID())
 
-	// Use pipeline for setup
+	// 3. Setup pipeline and context
 	pipeline := NewOperationPipeline(r)
 	rc, err := pipeline.PrepareContext(ctx, &data, false)
 	if err != nil {
@@ -38,101 +36,32 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	// Set ownership annotation
+	// 4. Set ownership annotation
 	r.setOwnershipAnnotation(rc.Object, data.ID.ValueString())
 
-	// Check if resource already exists and verify ownership
-	existingObj, err := rc.Client.Get(ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName())
-	if err == nil {
-		// Resource exists - check ownership
-		existingID := r.getOwnershipID(existingObj)
-		if existingID != "" && existingID != data.ID.ValueString() {
-			// Different ID - owned by another state
-			resp.Diagnostics.AddError(
-				"Resource Already Managed",
-				fmt.Sprintf("resource managed by different k8sconnect resource (Terraform ID: %s)", existingID),
-			)
-			return
-		}
-		// If existingID is empty (unowned) or matches our ID, we can proceed
-	} else if !errors.IsNotFound(err) {
-		// Real error checking if resource exists
-		resp.Diagnostics.AddError("Existence Check Failed",
-			fmt.Sprintf("Failed to check if resource exists: %s", err))
+	// 5. Check if resource exists and verify ownership
+	if err := r.checkResourceExistenceAndOwnership(ctx, rc, &data, resp); err != nil {
 		return
 	}
 
-	// Check force conflicts
-	forceConflicts := false
-	if !data.ForceConflicts.IsNull() {
-		forceConflicts = data.ForceConflicts.ValueBool()
-	}
-
-	// Apply the resource
-	err = rc.Client.Apply(ctx, rc.Object, k8sclient.ApplyOptions{
-		FieldManager: "k8sconnect",
-		Force:        forceConflicts,
-	})
-
-	if err != nil {
-		if isFieldConflictError(err) {
-			fmt.Printf("DEBUG Create: Field conflict error details: %v\n", err)
-			resp.Diagnostics.AddError("Field Manager Conflict",
-				"Another controller owns fields you're trying to set. "+
-					"Set force_conflicts = true to override.")
-		} else {
-			resp.Diagnostics.AddError("Create Failed", err.Error())
-		}
+	// 6. Apply the resource
+	if err := r.applyResourceWithConflictHandling(ctx, rc, rc.Data, resp, "Create"); err != nil {
 		return
 	}
 
-	// Phase 2 - Always read back to get managedFields
-	createdObj, err := rc.Client.Get(ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName())
-	if err != nil {
-		tflog.Warn(ctx, "Failed to read resource after create", map[string]interface{}{
-			"error": err.Error(),
-			"kind":  rc.Object.GetKind(),
-			"name":  rc.Object.GetName(),
-		})
-	} else {
-		rc.Object = createdObj
-		tflog.Debug(ctx, "Read resource after create for managedFields", map[string]interface{}{
-			"kind":          rc.Object.GetKind(),
-			"name":          rc.Object.GetName(),
-			"has_managed":   len(rc.Object.GetManagedFields()) > 0,
-			"field_manager": "k8sconnect",
-		})
-	}
+	// 7. Phase 2 - Read back to get managedFields
+	r.readResourceAfterCreate(ctx, rc)
 
-	tflog.Info(ctx, "Resource created", map[string]interface{}{
-		"kind":      rc.Object.GetKind(),
-		"name":      rc.Object.GetName(),
-		"namespace": rc.Object.GetNamespace(),
-	})
-
-	// Handle wait conditions
+	// 8. Execute wait conditions
 	fmt.Printf("=== Create BEFORE WAIT ===\n")
 	fmt.Printf("wait_for IsNull: %v\n", rc.Data.WaitFor.IsNull())
 
-	fmt.Printf("=== Create AFTER WAIT ===\n")
-	waited := false
-	if err := pipeline.ExecuteWait(rc); err != nil {
-		fmt.Printf("Wait error: %v\n", err)
-		resp.Diagnostics.AddWarning("Wait Failed",
-			fmt.Sprintf("Resource created but wait failed: %s", err))
-		waited = true
-	} else if !rc.Data.WaitFor.IsNull() {
-		var waitConfig waitForModel
-		diags := rc.Data.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
-		if resp.Diagnostics.Append(diags...); !resp.Diagnostics.HasError() {
-			waited = true
-			fmt.Printf("Parsed wait_for - Field: %v\n", waitConfig.Field)
-		}
-	}
+	waited := r.handleWaitExecution(ctx, pipeline, rc, resp, "created")
 
+	fmt.Printf("=== Create AFTER WAIT ===\n")
 	fmt.Printf("Waited flag: %v\n", waited)
 
-	// Update status field
+	// 9. Update status field
 	fmt.Printf("Status BEFORE UpdateStatus - IsNull: %v, IsUnknown: %v\n",
 		rc.Data.Status.IsNull(), rc.Data.Status.IsUnknown())
 
@@ -143,13 +72,13 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 	fmt.Printf("Status AFTER UpdateStatus - IsNull: %v, IsUnknown: %v\n",
 		rc.Data.Status.IsNull(), rc.Data.Status.IsUnknown())
 
-	// Update projection
+	// 10. Update projection
 	if err := pipeline.UpdateProjection(rc); err != nil {
 		resp.Diagnostics.AddWarning("Projection Update Failed",
 			fmt.Sprintf("Resource created but projection update failed: %s", err))
 	}
 
-	// Save state
+	// 11. Save state
 	fmt.Printf("FINAL Status before State.Set - IsNull: %v, IsUnknown: %v\n",
 		rc.Data.Status.IsNull(), rc.Data.Status.IsUnknown())
 	fmt.Printf("=== END Create ===\n\n")
@@ -159,15 +88,15 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 }
 
 func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	// 1. Setup and extract state data
 	var data manifestResourceModel
-
 	diags := req.State.Get(ctx, &data)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	// Parse connection from state
+	// 2. Parse connection and handle connection errors
 	conn, err := r.convertObjectToConnectionModel(ctx, data.ClusterConnection)
 	if err != nil {
 		// Connection error - likely removed resource
@@ -175,7 +104,7 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	// Create client
+	// 3. Create client
 	client, err := r.clientGetter(conn)
 	if err != nil {
 		// Can't connect - resource might be gone
@@ -183,7 +112,7 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	// Parse YAML to get the object identity
+	// 4. Parse YAML to get object identity
 	obj, err := r.parseYAML(data.YAMLBody.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Invalid YAML",
@@ -191,7 +120,7 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	// Get GVR
+	// 5. Get GVR
 	gvr, err := client.GetGVR(ctx, obj)
 	if err != nil {
 		resp.Diagnostics.AddError("Resource Discovery Failed",
@@ -199,7 +128,7 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	// Read current state from Kubernetes
+	// 6. Read current state from Kubernetes
 	currentObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
@@ -212,95 +141,31 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	// Check if this resource is owned by this Terraform resource
-	annotations := currentObj.GetAnnotations()
-	currentID := ""
-	if annotations != nil {
-		currentID = annotations["k8sconnect.terraform.io/terraform-id"]
-	}
-
-	if currentID == "" {
-		resp.Diagnostics.AddError(
-			"Resource Not Managed",
-			fmt.Sprintf("The %s '%s' exists but is not managed by Terraform. Use 'terraform import' to manage it.",
-				obj.GetKind(), obj.GetName()),
-		)
+	// 7. Check ownership
+	if err := r.verifyOwnership(currentObj, data.ID.ValueString(), obj, resp); err != nil {
 		return
 	}
 
-	if currentID != data.ID.ValueString() {
-		resp.Diagnostics.AddError(
-			"Resource Ownership Conflict",
-			fmt.Sprintf("The %s '%s' is now managed by a different Terraform resource (ID: %s).",
-				obj.GetKind(), obj.GetName(), currentID),
-		)
-		return
-	}
-
-	// Extract paths - use field ownership if flag is enabled
-	var paths []string
-
-	if len(currentObj.GetManagedFields()) > 0 {
-		tflog.Debug(ctx, "Using field ownership for projection during Read", map[string]interface{}{
-			"managers": len(currentObj.GetManagedFields()),
-		})
-		paths = extractOwnedPaths(ctx, currentObj.GetManagedFields(), obj.Object)
-	} else {
-		tflog.Warn(ctx, "No managedFields available during Read, using all fields from YAML")
-		// When no ownership info, extract all fields from YAML
-		paths = extractOwnedPaths(ctx, []metav1.ManagedFieldsEntry{}, obj.Object)
-	}
-
-	// Project the current state to only include fields we manage
-	projection, err := projectFields(currentObj.Object, paths)
-	if err != nil {
+	// 8. Update projection
+	if err := r.updateProjectionFromCurrent(ctx, &data, currentObj, obj); err != nil {
 		resp.Diagnostics.AddError("Projection Failed",
 			fmt.Sprintf("Failed to project managed fields: %s", err))
 		return
 	}
 
-	// Convert projection to JSON for storage
-	projectionJSON, err := toJSON(projection)
-	if err != nil {
-		resp.Diagnostics.AddError("JSON Conversion Failed",
-			fmt.Sprintf("Failed to convert projection to JSON: %s", err))
-		return
-	}
+	// 9. Update field ownership
+	r.updateFieldOwnershipData(ctx, &data, currentObj)
 
-	fmt.Printf("=== READ: Projection for %s/%s ===\n", currentObj.GetKind(), currentObj.GetName())
-	fmt.Printf("Projection: %s\n", projectionJSON[:min(500, len(projectionJSON))])
-	fmt.Printf("=== END READ ===\n")
-
-	// Update the projection in state - this is what enables drift detection
-	data.ManagedStateProjection = types.StringValue(projectionJSON)
-
-	// The original Read ALSO updates field_ownership - needed for imports
-	ownership := extractFieldOwnership(currentObj)
-	ownershipJSON, err := json.Marshal(ownership)
-	if err != nil {
-		tflog.Warn(ctx, "Failed to marshal field ownership", map[string]interface{}{
-			"error": err.Error(),
-		})
-		data.FieldOwnership = types.StringValue("{}")
-	} else {
-		data.FieldOwnership = types.StringValue(string(ownershipJSON))
-	}
-
-	tflog.Debug(ctx, "Updated managed state projection", map[string]interface{}{
-		"id":              data.ID.ValueString(),
-		"path_count":      len(paths),
-		"projection_size": len(projectionJSON),
-	})
-
-	// Set the refreshed state - only projection was updated
+	// 10. Save refreshed state
 	diags = resp.State.Set(ctx, &data)
 	resp.Diagnostics.Append(diags...)
 }
 
 func (r *manifestResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	fmt.Printf("=== ACTUAL UPDATE FUNCTION CALLED ===\n")
-	var state, plan manifestResourceModel
 
+	// 1. Setup and extract state/plan data
+	var state, plan manifestResourceModel
 	diags := req.State.Get(ctx, &state)
 	resp.Diagnostics.Append(diags...)
 	diags = req.Plan.Get(ctx, &plan)
@@ -309,53 +174,20 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	// Use pipeline for setup
+	// 2. Setup pipeline and context
 	pipeline := NewOperationPipeline(r)
-	rc, err := pipeline.PrepareContext(ctx, &plan, true)
+	rc, err := pipeline.PrepareContext(ctx, &plan, false)
 	if err != nil {
 		resp.Diagnostics.AddError("Preparation Failed", err.Error())
 		return
 	}
 
-	// Preserve ID and ownership
+	// 3. Preserve ID and set ownership
 	plan.ID = state.ID
 	r.setOwnershipAnnotation(rc.Object, plan.ID.ValueString())
 
-	// Check force conflicts
-	forceConflicts := false
-	if !plan.ForceConflicts.IsNull() {
-		forceConflicts = plan.ForceConflicts.ValueBool()
-	}
-
-	// Apply the update
-	err = rc.Client.Apply(ctx, rc.Object, k8sclient.ApplyOptions{
-		FieldManager: "k8sconnect",
-		Force:        forceConflicts,
-	})
-
-	if err != nil && isFieldConflictError(err) && !forceConflicts {
-		fmt.Printf("Checking if conflicts are only with self: %v\n", err.Error())
-		if conflictsOnlyWithSelf(err) {
-			fmt.Printf("Self-conflict detected, forcing update\n")
-			tflog.Info(ctx, "Detected drift in fields we own, forcing update")
-			err = rc.Client.Apply(ctx, rc.Object, k8sclient.ApplyOptions{
-				FieldManager: "k8sconnect",
-				Force:        true,
-			})
-		} else {
-			fmt.Printf("Not a self-conflict, not forcing\n")
-		}
-	}
-
-	if err != nil {
-		if isFieldConflictError(err) {
-			fmt.Printf("DEBUG Update: Field conflict error details: %v\n", err)
-			resp.Diagnostics.AddError("Field Manager Conflict",
-				"Another controller owns fields you're trying to modify. "+
-					"Set force_conflicts = true to override.")
-		} else {
-			resp.Diagnostics.AddError("Update Failed", err.Error())
-		}
+	// 4. Apply the updated resource
+	if err := r.applyResourceWithConflictHandling(ctx, rc, rc.Data, resp, "Update"); err != nil {
 		return
 	}
 
@@ -365,46 +197,38 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 		"namespace": rc.Object.GetNamespace(),
 	})
 
-	// Handle wait conditions
-	waited := false
-	if err := pipeline.ExecuteWait(rc); err != nil {
-		resp.Diagnostics.AddWarning("Wait Failed",
-			fmt.Sprintf("Resource updated but wait failed: %s", err))
-		waited = true
-	} else if !rc.Data.WaitFor.IsNull() {
-		var waitConfig waitForModel
-		diags := rc.Data.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
-		if !diags.HasError() && pipeline.hasActiveWaitConditions(waitConfig) {
-			waited = true
-		}
-	}
+	// 5. Execute wait conditions
+	waited := r.handleWaitExecution(ctx, pipeline, rc, resp, "updated")
 
+	// 6. Update status
 	pipeline.UpdateStatus(rc, waited)
 
+	// 7. Update projection
 	if err := pipeline.UpdateProjection(rc); err != nil {
 		tflog.Warn(ctx, "Failed to update projection", map[string]interface{}{"error": err.Error()})
 	}
 
-	// Handle status transitions
+	// 8. Handle status transitions
 	if !state.Status.IsNull() && plan.WaitFor.IsNull() {
 		plan.Status = types.DynamicNull()
 		tflog.Info(ctx, "Clearing status - wait_for was removed")
 	}
 
+	// 9. Save updated state
 	diags = resp.State.Set(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
 }
 
 func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	// 1. Setup and extract state data
 	var data manifestResourceModel
-
 	diags := req.State.Get(ctx, &data)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	// Check delete protection
+	// 2. Check delete protection
 	if !data.DeleteProtection.IsNull() && data.DeleteProtection.ValueBool() {
 		resp.Diagnostics.AddError(
 			"Delete Protection Enabled",
@@ -413,7 +237,7 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 		return
 	}
 
-	// Use pipeline for setup
+	// 3. Setup pipeline and context
 	pipeline := NewOperationPipeline(r)
 	rc, err := pipeline.PrepareContext(ctx, &data, true)
 	if err != nil {
@@ -421,14 +245,14 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 		return
 	}
 
-	// Get delete options
+	// 4. Get delete options
 	timeout := r.getDeleteTimeout(data)
 	forceDestroy := false
 	if !data.ForceDestroy.IsNull() {
 		forceDestroy = data.ForceDestroy.ValueBool()
 	}
 
-	// Check if resource exists
+	// 5. Check if resource exists
 	_, err = rc.Client.Get(ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName())
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -439,14 +263,14 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 		return
 	}
 
-	// Always try normal delete first
+	// 6. Attempt normal deletion
 	err = rc.Client.Delete(ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName(), k8sclient.DeleteOptions{})
 	if err != nil && !errors.IsNotFound(err) {
 		resp.Diagnostics.AddError("Deletion Failed", err.Error())
 		return
 	}
 
-	// Always wait for deletion (with timeout)
+	// 7. Wait for deletion with timeout
 	err = r.waitForDeletion(ctx, rc.Client, rc.GVR, rc.Object, timeout)
 	if err != nil {
 		if forceDestroy {
@@ -467,6 +291,7 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 		}
 	}
 
+	// 8. Log successful deletion
 	tflog.Info(ctx, "Resource deleted", map[string]interface{}{
 		"kind":      rc.Object.GetKind(),
 		"name":      rc.Object.GetName(),
