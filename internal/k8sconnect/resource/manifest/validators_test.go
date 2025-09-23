@@ -81,11 +81,11 @@ func TestConnectionModeDetection(t *testing.T) {
 func TestExecFieldCompleteness(t *testing.T) {
 	exec := &auth.ExecAuthModel{
 		APIVersion: types.StringValue("client.authentication.k8s.io/v1"),
-		// missing command and args
+		// missing command (args is optional)
 	}
 	missing := execMissingFields(exec)
-	if len(missing) != 2 {
-		t.Errorf("expected 2 missing fields, got %d (%v)", len(missing), missing)
+	if len(missing) != 1 {
+		t.Errorf("expected 1 missing field, got %d (%v)", len(missing), missing)
 	}
 }
 
