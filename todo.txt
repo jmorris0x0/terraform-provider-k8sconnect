@@ -121,3 +121,5 @@ Fill in all the missing files under Community Standards. issue templates, contri
 For auth, do I need to handle both auth versions:
 API version compatibility (client.authentication.k8s.io/v1 vs v1beta1)
 
+yaml-split-dependency-ordering is flakey because CRD registration timing. CRDs are eventually consistent in Kubernetes - creating one doesn't mean it's immediately ready to use. Add some kind of wait/retry or preflight. Need to check what other providers are doing.
+
