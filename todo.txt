@@ -45,6 +45,7 @@ YAML diff vs dry-run diff: Evaluate which is better UX
 Datasource args: Flatten nested structure unless adding more attributes
 Better datasource errors: Improve error messages
 Warnings for old versions: Terraform <1.6 or pre-SSA Kubernetes
+Lock down the interface before launch: The attributes and behavior I ship with will haunt me for years.
 
 CODE QUALITY
 
@@ -56,7 +57,7 @@ MARKETING & GROWTH
 
 SEO optimization: Is "k8sconnect" optimal for discovery?
 Tagline: "A Kubernetes Terraform provider built around edge cases"
-Launch content: Medium article, r/kubernetes, r/terraform, HackerNews posts
+Launch content: Medium article, r/kubernetes, r/terraform, HackerNews posts, SweetOps Slack, Kubernetes Slack
 Release pipeline: Add Tofu release, verify Windows/Linux builds
 
 DEFERRED/COMPLEX
@@ -64,6 +65,10 @@ DEFERRED/COMPLEX
 Delayed plan application: Handle out-of-date plans
 Dynamic datasource lookup: Use same JSON-to-attribute logic as resource
 Move server-side features up: In feature list
+Migration plan for other providers
+Remove imported_without_annotations or make private
+Rename managed_state_projection
+Fix makefile to install all dependencies. Try on fresh laptop.
 
 
 
