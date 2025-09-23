@@ -445,25 +445,31 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 		return
 	}
 
-	// Delete with empty options (original signature requires it)
+	// Always try normal delete first
 	err = rc.Client.Delete(ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName(), k8sclient.DeleteOptions{})
 	if err != nil && !errors.IsNotFound(err) {
 		resp.Diagnostics.AddError("Deletion Failed", err.Error())
 		return
 	}
 
-	// Handle force destroy and timeout AFTER delete
-	if !forceDestroy {
-		err = r.waitForDeletion(ctx, rc.Client, rc.GVR, rc.Object, timeout)
-		if err != nil {
+	// Always wait for deletion (with timeout)
+	err = r.waitForDeletion(ctx, rc.Client, rc.GVR, rc.Object, timeout)
+	if err != nil {
+		if forceDestroy {
+			// Normal deletion timed out, NOW try force
+			tflog.Info(ctx, "Normal deletion timed out, attempting force destroy", map[string]interface{}{
+				"timeout":  timeout,
+				"resource": fmt.Sprintf("%s/%s", rc.Object.GetKind(), rc.Object.GetName()),
+			})
+
+			if err := r.forceDestroy(ctx, rc.Client, rc.GVR, rc.Object, resp); err != nil {
+				tflog.Warn(ctx, "Force destroy encountered issues", map[string]interface{}{"error": err.Error()})
+				// Don't fail - resource might already be gone
+			}
+		} else {
+			// No force_destroy, show helpful error message
 			r.handleDeletionTimeout(resp, rc.Client, rc.GVR, rc.Object, timeout, err)
 			return
-		}
-	} else {
-		// Force destroy - try to remove finalizers if deletion is stuck
-		if err := r.forceDestroy(ctx, rc.Client, rc.GVR, rc.Object, resp); err != nil {
-			tflog.Warn(ctx, "Force destroy encountered issues", map[string]interface{}{"error": err.Error()})
-			// Don't fail - resource might already be gone
 		}
 	}
 
