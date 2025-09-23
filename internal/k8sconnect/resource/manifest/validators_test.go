@@ -81,11 +81,11 @@ func TestConnectionModeDetection(t *testing.T) {
 func TestExecFieldCompleteness(t *testing.T) {
 	exec := &auth.ExecAuthModel{
 		APIVersion: types.StringValue("client.authentication.k8s.io/v1"),
-		// missing command and args
+		// missing command (args is optional)
 	}
 	missing := execMissingFields(exec)
-	if len(missing) != 2 {
-		t.Errorf("expected 2 missing fields, got %d (%v)", len(missing), missing)
+	if len(missing) != 1 {
+		t.Errorf("expected 1 missing field, got %d (%v)", len(missing), missing)
 	}
 }
 
@@ -145,7 +145,7 @@ func countModes(c auth.ClusterConnectionModel) int {
 func execMissingFields(e *auth.ExecAuthModel) []string {
 	var m []string
 	if e == nil {
-		return []string{"api_version", "command", "args"}
+		return []string{"api_version", "command"} // Remove "args" from here
 	}
 	if e.APIVersion.IsNull() {
 		m = append(m, "api_version")
@@ -153,8 +153,6 @@ func execMissingFields(e *auth.ExecAuthModel) []string {
 	if e.Command.IsNull() {
 		m = append(m, "command")
 	}
-	if len(e.Args) == 0 {
-		m = append(m, "args")
-	}
+	// Remove the entire check for Args
 	return m
 }

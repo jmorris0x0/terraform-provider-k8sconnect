@@ -1,4 +1,76 @@
-1. Make cert handling smarter
+CRITICAL BUGS & FIXES
+
+Base64 cert handling: Better error message when cluster_ca_certificate isn't base64 encoded, or auto-detect both formats
+Remove print statements: Convert all debug prints to proper logging or remove them
+Fix flaky test: yaml-split-dependency-ordering fails due to CRD eventual consistency - add wait/retry
+Security scanning alerts: Address current GitHub code scanning issues
+
+DOCUMENTATION & RELEASE
+
+Registry landing page: Write main docs
+Verify attribute docs: Status changes need documentation updates
+Key features placement: Move higher in docs
+Add token example: To connection methods section
+Fill community standards: Issue templates, contributing guide, etc.
+Example improvements: Show both inline and template file patterns
+
+TESTING GAPS
+
+Ownership edge cases: Create transition matrix and acceptance tests for all ownership scenarios
+Ownership conflict test: Test without force_conflicts=true (item 27)
+Import blocks: Verify they work correctly
+Cluster connection validation: Complex attribute combinations need better testing
+Datasource testing: Dependency graph, unknowns handling, interpolation
+OpenTofu tests: Add compatibility testing
+Terraform version compatibility: Check 1.0 vs 1.6 minimum
+Check for stubs/skips: Audit test suite for forgotten temporary code
+Auth API versions: Handle both v1 and v1beta1
+HPA simulation: Test multiple simultaneous ownership changes
+
+FEATURE ADDITIONS
+
+ignore_field_changes: Surgical field ignores for HPA and controllers
+Custom ownership annotations: Solve cross-state conflicts
+Wait_for in datasource: Consider if this makes sense
+Full JSON manifest: Make available as computed attribute
+Status field guardrails: Warn if field doesn't start with "status"
+Large provider chunking: Research how others handle very large resources
+
+UX IMPROVEMENTS
+
+Remove field_ownership from diffs: Just noise in output
+Hide private attributes: Some should not be in UI
+Error harmonization: Single source of truth for error messages
+YAML diff vs dry-run diff: Evaluate which is better UX
+Datasource args: Flatten nested structure unless adding more attributes
+Better datasource errors: Improve error messages
+Warnings for old versions: Terraform <1.6 or pre-SSA Kubernetes
+Lock down the interface before launch: The attributes and behavior I ship with will haunt me for years.
+
+CODE QUALITY
+
+Cyclomatic complexity: Reduce all functions to <15
+General refactoring: Simplification pass
+Convert to issues: Move this list to GitHub issues
+
+MARKETING & GROWTH
+
+SEO optimization: Is "k8sconnect" optimal for discovery?
+Tagline: "A Kubernetes Terraform provider built around edge cases"
+Launch content: Medium article, r/kubernetes, r/terraform, HackerNews posts, SweetOps Slack, Kubernetes Slack
+Release pipeline: Add Tofu release, verify Windows/Linux builds
+
+DEFERRED/COMPLEX
+
+Delayed plan application: Handle out-of-date plans
+Dynamic datasource lookup: Use same JSON-to-attribute logic as resource
+Move server-side features up: In feature list
+Migration plan for other providers
+Remove imported_without_annotations or make private
+Rename managed_state_projection
+Fix makefile to install all dependencies. Try on fresh laptop.
+
+
 
 k8sconnect_manifest.namespace_k8sconnect: Creating...
 ╷
@@ -10,107 +82,3 @@ k8sconnect_manifest.namespace_k8sconnect: Creating...
 │
 │ failed to create Kubernetes client: failed to create REST config: failed to decode
 │ cluster_ca_certificate: illegal base64 data at input byte 0
-
-this is the provider being confused by the cert not being encoded. I need to either make this the same as the other two providers, or give a much, much better error message
-
-Or even better, autodetect and accept both! Would need a test for this.
-
-2. Add custom ownership annotations. This can solve the issue with cross state conflicts. Not sure how hard this is.
-
-4. Add existing resource datasource. This should be last after manifest resource is fully polished.
-
-5. Reduce cyclomatic complexity of all functions to less than 15.
-
-6. Deep dive into UX. Do we need to show a yaml diff if the dry run diff is better?
-
-7. SEO. Is the provider named optimally for discovery?
-
-8. Release pipeline needs love. Tofu release is missing. Need to verify that builds work for windows and linux.
-
-9. Need to double check that the attribute doc strings are completely correct. I've made changes to status that might be updated.
-
-10. Remove some attributes from UI that should probably be private.
-
-11. Write up main docs for registry landing page.
-
-12. Medium article, posts to r/kubernetes, r/terraform, hackernews.
-
-13. Make sure all key features are documented. I've made changes to status that might be updated.
-
-15. Add ignore_field_changes for surgical ignores. Avoids annoying initial diff for HPA and other controllers.
-
-16. Consider moving key features higher up in the docs.
-
-18. There are probably more edge cases for ownership that need acceptance testing. Need to make a table of all possible transitions. Also make sure that the warnings are accurate for all of them.
-
-19. Harmonize errors across the project. Need a single source of truth to share between the tests and the code.
-
-20. Remove the many print statements throughout the codebase or convert to logs.
-
-21. Convert this list to project issues.
-
-22. Address code scanning alerts currently in github.
-
-23. Tag line: A kubernetes terraform provider built around edge cases.
-
-24. Does the HPA simulation test handle multiple simultaneous ownership changes? What about a mix of ownership changes and normal drift? Can the code send multiple errors to the test? If it did would be understood? Do we need to harmonize errors first?
-
-25. From README: "All cluster_connection fields are marked sensitive and won't appear in logs or plan output." Did I change that attribute name? Should I still? How about cluster_auth? It's more descriptive.
-
-27. Do we need to test the ownership conflict test without force_conflicts=true?
-
-28. Remove feature flag now that everything is working.
-
-29. Needs much more testing around immutable field UX.
-
-
-Triage:
-
-Green build! Fix flakey test
-
-Consider cluster_auth attibute change? cluster_connection is too long.
-
-Add better error for certs not being base64
-
-Error survey and single source of truth
-
-General simplification and refactoring
-
-ignore_changes []
-
-Attribute transitions and edge case tests.
-
-Testing survey
-
-ignore_field_changes = []. Or, wrap it into ignore_changes = [yaml_body.thing.thing]
-
-Metal LB for LB test in K3d. Verify IP or URL in status
-
-Verify import blocks work
-
-Delayed application of an out of date plan.
-
-move pure server side up in feature list.
-
-Add wait for status tests in examples. Verify behavior that downstream things are not destroyed between applies.
-
-Do I need to add a warning for terraform less than 1.6 or pre SSA k8s?
-
-Should I make the entire json manifest available as a computed attribute? Could be useful.
-
-Guardrails around people looking for status items that really don't exist?
-  For example, error if value doesn't start with status as a reminder not to wait for other stuff like annotations?
-
-  field   = "status.loadBalancer.ingress"
-
-Remove field_ownership from diff. It's just noise, probably.
-
-Add token example to connection methods section of readme.
-
-Add open tofu tests.
-
-Check earliest version of terraform this works with. 1.0 or really 1.6?
-
-Check tests for stubs and skips that I might have forgotten about.
-
-The resouruce datasource has ugly args that are nested for no reason. Flatten it.

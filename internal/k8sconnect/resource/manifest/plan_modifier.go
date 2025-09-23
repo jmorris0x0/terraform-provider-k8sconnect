@@ -14,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
+	//metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -250,6 +251,32 @@ func (r *manifestResource) setupDryRunClient(ctx context.Context, plannedData *m
 	return client, nil
 }
 
+// calculateProjection determines projection strategy and calculates projection
+func (r *manifestResource) calculateProjection(ctx context.Context, req resource.ModifyPlanRequest, plannedData *manifestResourceModel, desiredObj, dryRunResult *unstructured.Unstructured, client k8sclient.K8sClient, resp *resource.ModifyPlanResponse) bool {
+	isCreate := isCreateOperation(req)
+
+	// Enhanced logging
+	fmt.Printf("\n=== ModifyPlan PROJECTION LOGIC ===\n")
+	fmt.Printf("isCreate: %v\n", isCreate)
+	fmt.Printf("State.Raw.IsNull: %v\n", req.State.Raw.IsNull())
+
+	// CREATE operations: Set projection to Unknown (will be populated after create)
+	if isCreate {
+		fmt.Printf("Decision: CREATE - setting projection to Unknown\n")
+		tflog.Debug(ctx, "CREATE - setting projection to unknown")
+		plannedData.ManagedStateProjection = types.StringUnknown()
+		fmt.Printf("=== END ModifyPlan PROJECTION LOGIC ===\n\n")
+		return true
+	}
+
+	// UPDATE operations: Use field ownership
+	fmt.Printf("Decision: UPDATE - using field ownership\n")
+	paths := r.getFieldOwnershipPaths(ctx, plannedData, desiredObj, client)
+
+	// Apply projection
+	return r.applyProjection(ctx, dryRunResult, paths, plannedData, resp)
+}
+
 // performDryRun executes the dry-run against k8s
 func (r *manifestResource) performDryRun(ctx context.Context, client k8sclient.K8sClient, desiredObj *unstructured.Unstructured, plannedData *manifestResourceModel, resp *resource.ModifyPlanResponse) (*unstructured.Unstructured, error) {
 	dryRunResult, err := client.DryRunApply(ctx, desiredObj, k8sclient.ApplyOptions{
@@ -264,53 +291,6 @@ func (r *manifestResource) performDryRun(ctx context.Context, client k8sclient.K
 	return dryRunResult, nil
 }
 
-// calculateProjection determines projection strategy and calculates projection
-func (r *manifestResource) calculateProjection(ctx context.Context, req resource.ModifyPlanRequest, plannedData *manifestResourceModel, desiredObj, dryRunResult *unstructured.Unstructured, client k8sclient.K8sClient, resp *resource.ModifyPlanResponse) bool {
-	useFieldOwnership := !plannedData.UseFieldOwnership.IsNull() && plannedData.UseFieldOwnership.ValueBool()
-	isCreate := isCreateOperation(req)
-
-	// Enhanced logging
-	fmt.Printf("\n=== ModifyPlan PROJECTION LOGIC ===\n")
-	fmt.Printf("useFieldOwnership: %v\n", useFieldOwnership)
-	fmt.Printf("isCreate: %v\n", isCreate)
-	fmt.Printf("State.Raw.IsNull: %v\n", req.State.Raw.IsNull())
-
-	// Determine projection strategy
-	paths := r.determineProjectionPaths(ctx, plannedData, desiredObj, client, useFieldOwnership, isCreate)
-
-	// Special case: CREATE with field ownership
-	if useFieldOwnership && isCreate && len(paths) == 0 {
-		fmt.Printf("Decision: CREATE with field ownership - setting projection to Unknown\n")
-		tflog.Debug(ctx, "CREATE with field ownership - setting projection to unknown")
-		plannedData.ManagedStateProjection = types.StringUnknown()
-		fmt.Printf("=== END ModifyPlan PROJECTION LOGIC ===\n\n")
-		return true
-	}
-
-	// Apply projection
-	return r.applyProjection(ctx, dryRunResult, paths, plannedData, resp)
-}
-
-// determineProjectionPaths decides which paths to project based on strategy
-func (r *manifestResource) determineProjectionPaths(ctx context.Context, plannedData *manifestResourceModel, desiredObj *unstructured.Unstructured, client k8sclient.K8sClient, useFieldOwnership, isCreate bool) []string {
-	// CREATE with field ownership - special case
-	if useFieldOwnership && isCreate {
-		return nil // Signal to set projection to Unknown
-	}
-
-	// UPDATE with field ownership
-	if useFieldOwnership && !isCreate {
-		fmt.Printf("Decision: UPDATE with field ownership - attempting to get current object\n")
-		return r.getFieldOwnershipPaths(ctx, plannedData, desiredObj, client)
-	}
-
-	// Standard extraction (CREATE without ownership or feature disabled)
-	fmt.Printf("Decision: Standard extraction (CREATE without ownership or feature disabled)\n")
-	paths := extractFieldPaths(desiredObj.Object, "")
-	fmt.Printf("extractFieldPaths returned %d paths\n", len(paths))
-	return paths
-}
-
 // getFieldOwnershipPaths gets paths based on field ownership
 func (r *manifestResource) getFieldOwnershipPaths(ctx context.Context, plannedData *manifestResourceModel, desiredObj *unstructured.Unstructured, client k8sclient.K8sClient) []string {
 	// Check force_conflicts setting FIRST
@@ -321,7 +301,7 @@ func (r *manifestResource) getFieldOwnershipPaths(ctx context.Context, plannedDa
 		// When force_conflicts is true, use ALL fields from YAML
 		fmt.Printf("force_conflicts=true: Using ALL fields from YAML (not checking ownership)\n")
 		paths := extractFieldPaths(desiredObj.Object, "")
-		fmt.Printf("extractFieldPaths returned %d paths (forcing ownership of all)\n", len(paths))
+		fmt.Printf("extractOwnedPaths returned %d paths (forcing ownership of all)\n", len(paths))
 		return paths
 	}
 
@@ -330,7 +310,7 @@ func (r *manifestResource) getFieldOwnershipPaths(ctx context.Context, plannedDa
 	if err != nil {
 		fmt.Printf("Could not get GVR: %v\n", err)
 		paths := extractFieldPaths(desiredObj.Object, "")
-		fmt.Printf("extractFieldPaths (GVR error) returned %d paths\n", len(paths))
+		fmt.Printf("extractOwnedPaths (GVR error) returned %d paths\n", len(paths))
 		return paths
 	}
 
@@ -339,7 +319,7 @@ func (r *manifestResource) getFieldOwnershipPaths(ctx context.Context, plannedDa
 		fmt.Printf("Could not get current object: %v\n", err)
 		tflog.Debug(ctx, "Could not get current object, falling back to YAML paths")
 		paths := extractFieldPaths(desiredObj.Object, "")
-		fmt.Printf("extractFieldPaths (fallback) returned %d paths\n", len(paths))
+		fmt.Printf("extractOwnedPaths (fallback) returned %d paths\n", len(paths))
 		return paths
 	}
 
@@ -572,7 +552,7 @@ func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req
 		return
 	}
 	// Extract all paths the user wants to manage
-	userWantsPaths := extractFieldPaths(desiredObj.Object, "")
+	userWantsPaths := extractAllFieldsFromYAML(desiredObj.Object, "")
 	fmt.Printf("User wants to manage %d paths\n", len(userWantsPaths))
 	// Check each path the user wants against ownership
 	var conflicts []FieldConflict

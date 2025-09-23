@@ -159,7 +159,7 @@ func writeTestFiles(t *testing.T, dir string, kubeconfig string) {
 	variables := `variable "cluster_connection" {
   description = "Kubernetes cluster connection"
   type = object({
-    kubeconfig_raw = optional(string)
+    kubeconfig_raw = string
   })
 }`
 	os.WriteFile(filepath.Join(dir, "variables.tf"), []byte(variables), 0644)

@@ -147,7 +147,6 @@ YAML
     kubeconfig_raw = var.raw
   }
 
-  use_field_ownership = false
 }
 
 resource "k8sconnect_manifest" "drift_test" {
@@ -657,8 +656,6 @@ YAML
     kubeconfig_raw = var.raw
   }
 
-  use_field_ownership = true
-  
   depends_on = [k8sconnect_manifest.test_namespace]
 }
 `, namespace, name, namespace)

@@ -25,8 +25,7 @@ Applies a single‑document Kubernetes YAML manifest to a cluster, with per‑re
 - `delete_protection` (Boolean) Prevent accidental deletion of the resource. If set to true, the resource cannot be deleted unless this field is set to false.
 - `delete_timeout` (String) How long to wait for a resource to be deleted before considering the deletion failed. Defaults to 300s (5 minutes).
 - `force_conflicts` (Boolean) Force field manager conflicts during server-side apply. When false (default), operations will fail if another field manager owns the field. When true, forcibly takes ownership of conflicting fields.
-- `force_destroy` (Boolean) Force destroy resources that have finalizers and are stuck in 'Terminating' state. This removes finalizers before deletion.
-- `use_field_ownership` (Boolean) Use SSA field ownership for projection (experimental). Prevents drift from controller-added fields like nodePort.
+- `force_destroy` (Boolean) Force deletion by removing finalizers. ⚠️ **WARNING**: Unlike other providers, this REMOVES finalizers after timeout. May cause data loss and orphaned cloud resources. See docs before using.
 - `wait_for` (Attributes) Wait for resource to reach desired state during apply. Automatically enables status tracking. (see [below for nested schema](#nestedatt--wait_for))
 
 ### Read-Only
