@@ -194,9 +194,10 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 				Description: "How long to wait for a resource to be deleted before considering the deletion failed. Defaults to 300s (5 minutes).",
 			},
 			"force_destroy": schema.BoolAttribute{
-				Optional:    true,
-				Description: "Force destroy resources that have finalizers and are stuck in 'Terminating' state. This removes finalizers before deletion.",
+				Optional:            true,
+				MarkdownDescription: `Force deletion by removing finalizers. ⚠️ **WARNING**: Unlike other providers, this REMOVES finalizers after timeout. May cause data loss and orphaned cloud resources. See docs before using.`,
 			},
+
 			"managed_state_projection": schema.StringAttribute{
 				Computed:    true,
 				Description: "Internal field used to track managed fields for accurate drift detection.",
