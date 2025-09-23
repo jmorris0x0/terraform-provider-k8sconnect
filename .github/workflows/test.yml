@@ -55,7 +55,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        terraform: ['1.6.0', '1.13.3'] 
+        terraform: ['0.15.5', '1.0.11', '1.6.0', '1.13.3'] 
     steps:
       - uses: actions/checkout@v5
       
