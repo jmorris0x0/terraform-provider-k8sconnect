@@ -10,6 +10,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
@@ -234,22 +235,16 @@ func (p *OperationPipeline) UpdateProjection(rc *ResourceContext) error {
 
 	// Extract paths - use field ownership if flag is enabled
 	var paths []string
-	useFieldOwnership := !rc.Data.UseFieldOwnership.IsNull() && rc.Data.UseFieldOwnership.ValueBool()
 
-	if useFieldOwnership && len(currentObj.GetManagedFields()) > 0 {
+	if len(currentObj.GetManagedFields()) > 0 {
 		tflog.Debug(rc.Ctx, "Using field ownership for projection", map[string]interface{}{
 			"managers": len(currentObj.GetManagedFields()),
 		})
-		// FIX: Pass currentObj.Object (the actual K8s object with nodePort)
-		// not rc.Object.Object (the user's YAML without nodePort)
 		paths = extractOwnedPaths(rc.Ctx, currentObj.GetManagedFields(), currentObj.Object)
 	} else {
-		if useFieldOwnership {
-			tflog.Warn(rc.Ctx, "Field ownership requested but no managedFields available")
-		}
-		// Fall back to standard extraction
-		// Here we use rc.Object.Object because we're extracting from user's YAML
-		paths = extractFieldPaths(rc.Object.Object, "")
+		tflog.Warn(rc.Ctx, "No managedFields available, using all fields from YAML")
+		// When no ownership info, extract all fields from object
+		paths = extractOwnedPaths(rc.Ctx, []metav1.ManagedFieldsEntry{}, rc.Object.Object)
 	}
 
 	// Create projection - always project from the current K8s object
@@ -266,9 +261,8 @@ func (p *OperationPipeline) UpdateProjection(rc *ResourceContext) error {
 
 	rc.Data.ManagedStateProjection = types.StringValue(projectionJSON)
 	tflog.Debug(rc.Ctx, "Updated projection", map[string]interface{}{
-		"use_ownership": useFieldOwnership,
-		"path_count":    len(paths),
-		"size":          len(projectionJSON),
+		"path_count": len(paths),
+		"size":       len(projectionJSON),
 	})
 
 	// Update field ownership (existing code continues...)

@@ -201,7 +201,7 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 	}
 
 	// NEW: Extract field paths from the imported object
-	paths := extractFieldPaths(liveObj.Object, "")
+	paths := extractAllFieldsFromYAML(liveObj.Object, "")
 
 	// NEW: Project the current state for managed fields
 	projection, err := projectFields(liveObj.Object, paths)
@@ -247,7 +247,6 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		DeleteProtection:           types.BoolValue(false),
 		ManagedStateProjection:     types.StringValue(projectionJSON),
 		ImportedWithoutAnnotations: types.BoolValue(true),
-		UseFieldOwnership:          types.BoolValue(true),
 		WaitFor: types.ObjectNull(map[string]attr.Type{
 			"condition":   types.StringType,
 			"field":       types.StringType,

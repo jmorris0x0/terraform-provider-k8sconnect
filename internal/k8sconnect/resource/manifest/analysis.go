@@ -55,7 +55,7 @@ func (r *manifestResource) analyzeDrift(ctx context.Context,
 		json.Unmarshal([]byte(stateData.FieldOwnership.ValueString()), &ownership)
 
 		// Get fields we want to manage from the desired object
-		desiredPaths := extractFieldPaths(desiredObj.Object, "")
+		desiredPaths := extractAllFieldsFromYAML(desiredObj.Object, "")
 
 		// Check each desired field's ownership
 		for _, path := range desiredPaths {

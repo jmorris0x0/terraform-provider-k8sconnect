@@ -177,7 +177,7 @@ func TestExtractFieldPaths_StrategicMerge(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			paths := extractFieldPaths(tt.obj, "")
+			paths := extractAllFieldsFromYAML(tt.obj, "")
 
 			// Sort for consistent comparison
 			sort.Strings(paths)
@@ -432,7 +432,7 @@ func TestProjection_QuantityNormalization(t *testing.T) {
 	}
 
 	// Extract paths from user's YAML
-	paths := extractFieldPaths(userYAML, "")
+	paths := extractAllFieldsFromYAML(userYAML, "")
 
 	// Project from normalized state
 	projection, err := projectFields(k8sNormalized, paths)

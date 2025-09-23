@@ -17,8 +17,6 @@ Or even better, autodetect and accept both! Would need a test for this.
 
 2. Add custom ownership annotations. This can solve the issue with cross state conflicts. Not sure how hard this is.
 
-4. Add existing resource datasource. This should be last after manifest resource is fully polished.
-
 5. Reduce cyclomatic complexity of all functions to less than 15.
 
 6. Deep dive into UX. Do we need to show a yaml diff if the dry run diff is better?
@@ -55,20 +53,13 @@ Or even better, autodetect and accept both! Would need a test for this.
 
 24. Does the HPA simulation test handle multiple simultaneous ownership changes? What about a mix of ownership changes and normal drift? Can the code send multiple errors to the test? If it did would be understood? Do we need to harmonize errors first?
 
-25. From README: "All cluster_connection fields are marked sensitive and won't appear in logs or plan output." Did I change that attribute name? Should I still? How about cluster_auth? It's more descriptive.
-
 27. Do we need to test the ownership conflict test without force_conflicts=true?
 
 28. Remove feature flag now that everything is working.
 
-29. Needs much more testing around immutable field UX.
 
 
 Triage:
-
-Green build! Fix flakey test
-
-Consider cluster_auth attibute change? cluster_connection is too long.
 
 Add better error for certs not being base64
 
@@ -84,15 +75,11 @@ Testing survey
 
 ignore_field_changes = []. Or, wrap it into ignore_changes = [yaml_body.thing.thing]
 
-Metal LB for LB test in K3d. Verify IP or URL in status
-
 Verify import blocks work
 
 Delayed application of an out of date plan.
 
 move pure server side up in feature list.
-
-Add wait for status tests in examples. Verify behavior that downstream things are not destroyed between applies.
 
 Do I need to add a warning for terraform less than 1.6 or pre SSA k8s?
 
@@ -113,7 +100,7 @@ Check earliest version of terraform this works with. 1.0 or really 1.6?
 
 Check tests for stubs and skips that I might have forgotten about.
 
-The resouruce datasource has ugly args that are nested for no reason. Flatten it unless you are adding more attributes.
+The resource datasource has ugly args that are nested for no reason. Flatten it unless you are adding more attributes.
 
 Consider adding a wait_for to the datasource. This could be complex.
 
@@ -133,5 +120,4 @@ Fill in all the missing files under Community Standards. issue templates, contri
 
 For auth, do I need to handle both auth versions:
 API version compatibility (client.authentication.k8s.io/v1 vs v1beta1)
-
 

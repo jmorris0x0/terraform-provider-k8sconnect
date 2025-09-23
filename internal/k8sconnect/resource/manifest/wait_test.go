@@ -1306,7 +1306,6 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
-  use_field_ownership = false
 }
 
 resource "k8sconnect_manifest" "test" {
@@ -1364,7 +1363,6 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
-  use_field_ownership = false
 }
 
 resource "k8sconnect_manifest" "test" {
@@ -1390,7 +1388,6 @@ YAML
   cluster_connection = {
     kubeconfig_raw = var.raw
   }
-  use_field_ownership = false
   
   depends_on = [k8sconnect_manifest.test_namespace]
 }

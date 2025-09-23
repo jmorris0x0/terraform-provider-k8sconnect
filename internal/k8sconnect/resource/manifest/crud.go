@@ -12,6 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 )
@@ -85,24 +86,22 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	// Phase 2 - Only read back if using field ownership
-	if !data.UseFieldOwnership.IsNull() && data.UseFieldOwnership.ValueBool() {
-		createdObj, err := rc.Client.Get(ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName())
-		if err != nil {
-			tflog.Warn(ctx, "Failed to read resource after create", map[string]interface{}{
-				"error": err.Error(),
-				"kind":  rc.Object.GetKind(),
-				"name":  rc.Object.GetName(),
-			})
-		} else {
-			rc.Object = createdObj
-			tflog.Debug(ctx, "Read resource after create for managedFields", map[string]interface{}{
-				"kind":          rc.Object.GetKind(),
-				"name":          rc.Object.GetName(),
-				"has_managed":   len(rc.Object.GetManagedFields()) > 0,
-				"field_manager": "k8sconnect",
-			})
-		}
+	// Phase 2 - Always read back to get managedFields
+	createdObj, err := rc.Client.Get(ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName())
+	if err != nil {
+		tflog.Warn(ctx, "Failed to read resource after create", map[string]interface{}{
+			"error": err.Error(),
+			"kind":  rc.Object.GetKind(),
+			"name":  rc.Object.GetName(),
+		})
+	} else {
+		rc.Object = createdObj
+		tflog.Debug(ctx, "Read resource after create for managedFields", map[string]interface{}{
+			"kind":          rc.Object.GetKind(),
+			"name":          rc.Object.GetName(),
+			"has_managed":   len(rc.Object.GetManagedFields()) > 0,
+			"field_manager": "k8sconnect",
+		})
 	}
 
 	tflog.Info(ctx, "Resource created", map[string]interface{}{
@@ -240,20 +239,16 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 
 	// Extract paths - use field ownership if flag is enabled
 	var paths []string
-	useFieldOwnership := !data.UseFieldOwnership.IsNull() && data.UseFieldOwnership.ValueBool()
 
-	if useFieldOwnership && len(currentObj.GetManagedFields()) > 0 {
+	if len(currentObj.GetManagedFields()) > 0 {
 		tflog.Debug(ctx, "Using field ownership for projection during Read", map[string]interface{}{
 			"managers": len(currentObj.GetManagedFields()),
 		})
-		// Use the desired YAML to determine paths, but project from actual K8s object
 		paths = extractOwnedPaths(ctx, currentObj.GetManagedFields(), obj.Object)
 	} else {
-		if useFieldOwnership {
-			tflog.Warn(ctx, "Field ownership requested but no managedFields available during Read")
-		}
-		// Fall back to standard extraction from YAML
-		paths = extractFieldPaths(obj.Object, "")
+		tflog.Warn(ctx, "No managedFields available during Read, using all fields from YAML")
+		// When no ownership info, extract all fields from YAML
+		paths = extractOwnedPaths(ctx, []metav1.ManagedFieldsEntry{}, obj.Object)
 	}
 
 	// Project the current state to only include fields we manage
@@ -293,7 +288,6 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 
 	tflog.Debug(ctx, "Updated managed state projection", map[string]interface{}{
 		"id":              data.ID.ValueString(),
-		"use_ownership":   useFieldOwnership,
 		"path_count":      len(paths),
 		"projection_size": len(projectionJSON),
 	})

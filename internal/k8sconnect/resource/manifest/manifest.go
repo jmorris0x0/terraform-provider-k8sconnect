@@ -10,7 +10,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework-validators/mapvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -48,7 +47,6 @@ type manifestResourceModel struct {
 	ImportedWithoutAnnotations types.Bool    `tfsdk:"imported_without_annotations"`
 	WaitFor                    types.Object  `tfsdk:"wait_for"`
 	Status                     types.Dynamic `tfsdk:"status"`
-	UseFieldOwnership          types.Bool    `tfsdk:"use_field_ownership"`
 }
 
 type waitForModel struct {
@@ -197,7 +195,6 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 				Optional:            true,
 				MarkdownDescription: `Force deletion by removing finalizers. ⚠️ **WARNING**: Unlike other providers, this REMOVES finalizers after timeout. May cause data loss and orphaned cloud resources. See docs before using.`,
 			},
-
 			"managed_state_projection": schema.StringAttribute{
 				Computed:    true,
 				Description: "Internal field used to track managed fields for accurate drift detection.",
@@ -213,12 +210,6 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 			"field_ownership": schema.StringAttribute{
 				Computed:    true,
 				Description: "Internal tracking of field ownership by different controllers",
-			},
-			"use_field_ownership": schema.BoolAttribute{
-				Optional:    true,
-				Computed:    true,
-				Default:     booldefault.StaticBool(true),
-				Description: "Use SSA field ownership for projection (experimental). Prevents drift from controller-added fields like nodePort.",
 			},
 			"status": schema.DynamicAttribute{
 				Computed:    true,
