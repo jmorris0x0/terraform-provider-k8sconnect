@@ -4,13 +4,21 @@ MINOR:
 Base64 cert handling: Better error message when cluster_ca_certificate isn't base64 encoded, or auto-detect both formats
 Auth API versions: Handle both v1 and v1beta1. Change tests?
 Add url attribute to yaml_split to load from the web url, OCI, and git repo/path/branch.
-yaml_split intelligent reordering by default? Can't do this if we output to a simple map. (Do we use map? I hope so. Check!)
+
 
 MAJOR:
-Fix flaky test: yaml-split-dependency-ordering fails due to CRD race condition. Add option to yaml_split to order CRD first?
+Fix flaky test: yaml-split-dependency-ordering fails due to CRD race condition. Add option to yaml_split to order CRD first? Similar issue with namespaces.
+
 ignore_field_changes: Surgical field ignores for HPA and controllers
+https://registry.terraform.io/providers/gavinbunney/kubectl/latest/docs/resources/kubectl_manifest#ignore-manifest-fields
+
 Centralize wait/polling/watch code?
 Finish MVP of existing resource datasource and add wait_for
+https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/data-sources/resource
+GB doesn't have one!
+
+
+
 Centralize error messages
 
 DOCUMENTATION & RELEASE
@@ -57,6 +65,11 @@ Datasource args: Flatten nested structure unless adding more attributes
 Better datasource errors: Improve error messages
 Warnings for old versions: Terraform <1.6 or pre-SSA Kubernetes
 Lock down the interface before launch: The attributes and behavior I ship with will haunt me for years.
+https://registry.terraform.io/providers/gavinbunney/kubectl/latest/docs/resources/kubectl_manifest#attribute-reference
+https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/manifest
+GB has many yaml helper datasources. I just have one. Good design decsion? Or no?
+
+
 
 CODE QUALITY
 
@@ -81,6 +94,9 @@ Migration plan for other providers
 Remove imported_without_annotations or make private
 Rename managed_state_projection
 Fix makefile to install all dependencies. Try on fresh laptop.
+Add back cluster_info datasource that has more info than GB:
+https://registry.terraform.io/providers/gavinbunney/kubectl/latest/docs/data-sources/kubectl_server_version
+yaml_split intelligent reordering by default? Can't do this if we output to a simple map. (Do we use map? I hope so. Check!)
 
 
 
