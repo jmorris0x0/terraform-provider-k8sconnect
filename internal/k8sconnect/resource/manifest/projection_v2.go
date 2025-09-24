@@ -291,96 +291,176 @@ func projectFields(source map[string]interface{}, paths []string) (map[string]in
 	return projection, nil
 }
 
-// getFieldByPath retrieves a value from an object using dot notation
-// Must handle all path formats that extractOwnedPaths produces
-func getFieldByPath(obj map[string]interface{}, path string) (interface{}, bool) {
+// ArraySelector handles all array access patterns
+type ArraySelector struct {
+	Type     string // "empty", "positional", "keyed"
+	Index    int    // For positional
+	KeyField string // For keyed (e.g., "name")
+	KeyValue string // For keyed (e.g., "nginx")
+}
+
+// parseArraySelector parses selectors like "0", "name=nginx", or ""
+func parseArraySelector(selector string) ArraySelector {
+	if selector == "" {
+		return ArraySelector{Type: "empty"}
+	}
+
+	if strings.Contains(selector, "=") {
+		parts := strings.SplitN(selector, "=", 2)
+		if len(parts) == 2 {
+			return ArraySelector{
+				Type:     "keyed",
+				KeyField: parts[0],
+				KeyValue: parts[1],
+			}
+		}
+	}
+
+	// Try to parse as number
+	var index int
+	if n, _ := fmt.Sscanf(selector, "%d", &index); n == 1 {
+		return ArraySelector{
+			Type:  "positional",
+			Index: index,
+		}
+	}
+
+	// Fallback - treat as empty
+	return ArraySelector{Type: "empty"}
+}
+
+// findInArray locates an element in an array using the selector
+func findInArray(array []interface{}, selector ArraySelector) (element interface{}, index int, found bool) {
+	switch selector.Type {
+	case "empty":
+		// Return the whole array
+		return array, -1, true
+
+	case "positional":
+		if selector.Index >= 0 && selector.Index < len(array) {
+			return array[selector.Index], selector.Index, true
+		}
+		return nil, -1, false
+
+	case "keyed":
+		for i, item := range array {
+			if obj, ok := item.(map[string]interface{}); ok {
+				if fmt.Sprint(obj[selector.KeyField]) == selector.KeyValue {
+					return obj, i, true
+				}
+			}
+		}
+		return nil, -1, false
+
+	default:
+		return nil, -1, false
+	}
+}
+
+// ensureArrayElement ensures an array element exists, creating if necessary
+func ensureArrayElement(array []interface{}, selector ArraySelector) ([]interface{}, map[string]interface{}, error) {
+	switch selector.Type {
+	case "positional":
+		// Extend array if needed
+		for len(array) <= selector.Index {
+			array = append(array, make(map[string]interface{}))
+		}
+		element, ok := array[selector.Index].(map[string]interface{})
+		if !ok {
+			element = make(map[string]interface{})
+			array[selector.Index] = element
+		}
+		return array, element, nil
+
+	case "keyed":
+		// Look for existing element
+		for _, item := range array {
+			if obj, ok := item.(map[string]interface{}); ok {
+				if fmt.Sprint(obj[selector.KeyField]) == selector.KeyValue {
+					return array, obj, nil
+				}
+			}
+		}
+		// Create new element
+		element := make(map[string]interface{})
+		element[selector.KeyField] = selector.KeyValue
+		array = append(array, element)
+		return array, element, nil
+
+	default:
+		return nil, nil, fmt.Errorf("cannot ensure element for selector type: %s", selector.Type)
+	}
+}
+
+// PathSegment represents one part of a dot-notation path
+type PathSegment struct {
+	Field    string
+	Selector *ArraySelector // nil for non-array fields
+}
+
+// parsePath converts "spec.containers[name=nginx].image" into segments
+func parsePath(path string) []PathSegment {
 	parts := strings.Split(path, ".")
-	current := obj
+	segments := make([]PathSegment, 0, len(parts))
 
-	for i, part := range parts {
-		// Check for array notation
+	for _, part := range parts {
+		segment := PathSegment{Field: part}
+
 		if idx := strings.Index(part, "["); idx >= 0 {
-			fieldName := part[:idx]
-			selector := part[idx+1 : len(part)-1] // Remove [ and ]
+			segment.Field = part[:idx]
+			selectorStr := part[idx+1 : len(part)-1]
+			selector := parseArraySelector(selectorStr)
+			segment.Selector = &selector
+		}
 
-			// Get the array field
-			field, ok := current[fieldName]
+		segments = append(segments, segment)
+	}
+
+	return segments
+}
+
+// getFieldByPath retrieves a value from an object using dot notation
+func getFieldByPath(obj map[string]interface{}, path string) (interface{}, bool) {
+	segments := parsePath(path)
+	var current interface{} = obj
+
+	for i, segment := range segments {
+		// Navigate to the field
+		currentMap, ok := current.(map[string]interface{})
+		if !ok {
+			return nil, false
+		}
+
+		fieldValue, exists := currentMap[segment.Field]
+		if !exists {
+			return nil, false
+		}
+
+		// Handle array selector if present
+		if segment.Selector != nil {
+			array, ok := fieldValue.([]interface{})
 			if !ok {
 				return nil, false
 			}
 
-			array, ok := field.([]interface{})
-			if !ok {
+			// Check if this is the last segment or we want the full array
+			if i == len(segments)-1 || segment.Selector.Type == "empty" {
+				element, _, found := findInArray(array, *segment.Selector)
+				return element, found
+			}
+
+			// Navigate into array element
+			element, _, found := findInArray(array, *segment.Selector)
+			if !found {
 				return nil, false
 			}
-
-			// Check if this is a full array path (no selector details)
-			if selector == "" || i == len(parts)-1 {
-				// Return the entire array
-				return array, true
-			}
-
-			// Handle key-based selector (e.g., name=nginx)
-			if strings.Contains(selector, "=") {
-				keyParts := strings.SplitN(selector, "=", 2)
-				if len(keyParts) != 2 {
-					return nil, false
-				}
-				mergeKey := keyParts[0]
-				keyValue := keyParts[1]
-
-				// Find the item with matching key
-				var found map[string]interface{}
-				for _, item := range array {
-					if obj, ok := item.(map[string]interface{}); ok {
-						if fmt.Sprint(obj[mergeKey]) == keyValue {
-							found = obj
-							break
-						}
-					}
-				}
-
-				if found == nil {
-					return nil, false
-				}
-
-				if i == len(parts)-1 {
-					return found, true
-				}
-
-				current = found
-			} else {
-				// Positional selector (e.g., 0, 1, 2)
-				var index int
-				fmt.Sscanf(selector, "%d", &index)
-				if index >= len(array) || index < 0 {
-					return nil, false
-				}
-
-				if i == len(parts)-1 {
-					return array[index], true
-				}
-
-				current, ok = array[index].(map[string]interface{})
-				if !ok {
-					return nil, false
-				}
-			}
+			current = element
 		} else {
-			// Regular field access
-			field, ok := current[part]
-			if !ok {
-				return nil, false
+			// Regular field - check if we're done
+			if i == len(segments)-1 {
+				return fieldValue, true
 			}
-
-			if i == len(parts)-1 {
-				return field, true
-			}
-
-			current, ok = field.(map[string]interface{})
-			if !ok {
-				return nil, false
-			}
+			current = fieldValue
 		}
 	}
 
@@ -388,101 +468,56 @@ func getFieldByPath(obj map[string]interface{}, path string) (interface{}, bool)
 }
 
 // setFieldByPath sets a value in an object using dot notation
-// Creates intermediate objects as needed
 func setFieldByPath(obj map[string]interface{}, path string, value interface{}) error {
-	parts := strings.Split(path, ".")
+	segments := parsePath(path)
 	current := obj
 
-	for i, part := range parts {
-		if i == len(parts)-1 {
-			// Last part - set the value
-			if idx := strings.Index(part, "["); idx >= 0 {
-				fieldName := part[:idx]
-				// For array paths, we need to set the entire array value
-				// This happens when using array-level tracking
-				current[fieldName] = value
+	for i, segment := range segments {
+		isLast := (i == len(segments)-1)
+
+		if isLast {
+			// Setting the final value
+			if segment.Selector != nil {
+				// Array field - set the whole array
+				current[segment.Field] = value
 			} else {
-				current[part] = value
+				// Regular field
+				current[segment.Field] = value
 			}
 			return nil
 		}
 
-		// Not the last part - ensure the path exists
-		if idx := strings.Index(part, "["); idx >= 0 {
-			fieldName := part[:idx]
-			selector := part[idx+1 : len(part)-1]
-
-			// Ensure array exists
-			if current[fieldName] == nil {
-				current[fieldName] = make([]interface{}, 0)
+		// Not the last segment - ensure path exists
+		if segment.Selector != nil {
+			// Array field - ensure it exists
+			if current[segment.Field] == nil {
+				current[segment.Field] = make([]interface{}, 0)
 			}
 
-			array, ok := current[fieldName].([]interface{})
+			array, ok := current[segment.Field].([]interface{})
 			if !ok {
-				return fmt.Errorf("expected array at %s", fieldName)
+				return fmt.Errorf("field %s is not an array", segment.Field)
 			}
 
-			// Handle key-based selector
-			if strings.Contains(selector, "=") {
-				keyParts := strings.SplitN(selector, "=", 2)
-				if len(keyParts) != 2 {
-					return fmt.Errorf("invalid selector: %s", selector)
-				}
-				mergeKey := keyParts[0]
-				keyValue := keyParts[1]
-
-				// Find or create the item
-				var found map[string]interface{}
-				for _, item := range array {
-					if obj, ok := item.(map[string]interface{}); ok {
-						if fmt.Sprint(obj[mergeKey]) == keyValue {
-							found = obj
-							break
-						}
-					}
-				}
-
-				if found == nil {
-					// Create new item
-					found = make(map[string]interface{})
-					found[mergeKey] = keyValue
-					array = append(array, found)
-					current[fieldName] = array
-				}
-
-				current = found
-			} else {
-				// Positional selector
-				var index int
-				fmt.Sscanf(selector, "%d", &index)
-
-				// Ensure array is large enough
-				for len(array) <= index {
-					array = append(array, make(map[string]interface{}))
-				}
-				current[fieldName] = array
-
-				if array[index] == nil {
-					array[index] = make(map[string]interface{})
-				}
-
-				var ok bool
-				current, ok = array[index].(map[string]interface{})
-				if !ok {
-					return fmt.Errorf("expected object at array index %d", index)
-				}
+			// Ensure the array element exists
+			updatedArray, element, err := ensureArrayElement(array, *segment.Selector)
+			if err != nil {
+				return fmt.Errorf("cannot navigate through array at %s: %w", segment.Field, err)
 			}
+
+			current[segment.Field] = updatedArray
+			current = element
 		} else {
-			// Regular field
-			if current[part] == nil {
-				current[part] = make(map[string]interface{})
+			// Regular field - ensure it exists as a map
+			if current[segment.Field] == nil {
+				current[segment.Field] = make(map[string]interface{})
 			}
 
-			var ok bool
-			current, ok = current[part].(map[string]interface{})
+			next, ok := current[segment.Field].(map[string]interface{})
 			if !ok {
-				return fmt.Errorf("expected object at %s", part)
+				return fmt.Errorf("field %s is not an object", segment.Field)
 			}
+			current = next
 		}
 	}
 

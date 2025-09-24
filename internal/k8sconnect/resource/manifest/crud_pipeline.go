@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
@@ -51,8 +50,8 @@ func (p *OperationPipeline) PrepareContext(
 		Data: data,
 	}
 
-	// Step 1: Resolve connection
-	conn, err := p.resolveEffectiveConnection(ctx, data, requireConnection)
+	// Step 1: Load and validate connection from resource data
+	conn, err := p.loadConnectionFromData(ctx, data, requireConnection)
 	if err != nil {
 		return nil, err
 	}
@@ -99,8 +98,8 @@ func (p *OperationPipeline) PrepareContext(
 	return rc, nil
 }
 
-// resolveEffectiveConnection now just gets the connection from the resource data
-func (p *OperationPipeline) resolveEffectiveConnection(
+// loadConnectionFromData now just gets the connection from the resource data
+func (p *OperationPipeline) loadConnectionFromData(
 	ctx context.Context,
 	data *manifestResourceModel,
 	requireConnection bool,
@@ -291,34 +290,4 @@ func (p *OperationPipeline) isConnectionEmpty(conn auth.ClusterConnectionModel) 
 		conn.KubeconfigFile.IsNull() &&
 		conn.KubeconfigRaw.IsNull() &&
 		(conn.Exec == nil || conn.Exec.APIVersion.IsNull())
-}
-
-// isFieldConflictError checks if error is a field manager conflict
-func isFieldConflictError(err error) bool {
-	// Check if error message indicates field manager conflict
-	return err != nil &&
-		(containsString(err.Error(), "field manager") ||
-			containsString(err.Error(), "conflict"))
-}
-
-func containsString(s, substr string) bool {
-	return len(s) >= len(substr) &&
-		(s == substr || len(s) > 0 && len(substr) > 0 &&
-			(s[0:len(substr)] == substr || containsString(s[1:], substr)))
-}
-
-// Helper function to check if all conflicts are with our own field manager
-func conflictsOnlyWithSelf(err error) bool {
-	errMsg := err.Error()
-	// Check if the error mentions our field manager
-	if !strings.Contains(errMsg, `conflict with "k8sconnect"`) {
-		return false
-	}
-
-	// Count conflicts with our manager vs total conflicts
-	totalConflicts := strings.Count(errMsg, `conflict with "`)
-	ourConflicts := strings.Count(errMsg, `conflict with "k8sconnect"`)
-
-	// If all conflicts are with our manager, the counts should match
-	return totalConflicts == ourConflicts
 }

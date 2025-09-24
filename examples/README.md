@@ -18,7 +18,5 @@ Working examples showing k8sconnect provider usage patterns.
 
 ## Running Examples
 
-Each example requires cluster connection configuration. See individual examples for details.
-
 Examples assume you have the provider installed and cluster access configured.
 
