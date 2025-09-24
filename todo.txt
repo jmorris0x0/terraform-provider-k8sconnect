@@ -1,9 +1,27 @@
 CRITICAL BUGS & FIXES
 
+Eaasy:
 Base64 cert handling: Better error message when cluster_ca_certificate isn't base64 encoded, or auto-detect both formats
-Remove print statements: Convert all debug prints to proper logging or remove them
-Fix flaky test: yaml-split-dependency-ordering fails due to CRD eventual consistency - add wait/retry
-Security scanning alerts: Address current GitHub code scanning issues
+Auth API versions: Handle both v1 and v1beta1. Change tests?
+Add url attribute to yaml_split to load from the web url, OCI, and git repo/path/branch.
+
+
+Hard:
+Fix flaky test: yaml-split-dependency-ordering fails due to CRD race condition. Add option to yaml_split to order CRD first? Similar issue with namespaces.
+
+ignore_fields: Surgical field ignores for HPA and controllers
+You already have a list in the code. You just need to add to it. Might be easier than I thought.
+
+
+https://registry.terraform.io/providers/gavinbunney/kubectl/latest/docs/resources/kubectl_manifest#ignore-manifest-fields
+
+Centralize wait/polling/watch code?
+Finish MVP of existing resource datasource and add wait_for
+https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/data-sources/resource
+GB doesn't have one!
+
+Centralize error messages
+
 
 DOCUMENTATION & RELEASE
 
@@ -13,6 +31,7 @@ Key features placement: Move higher in docs
 Add token example: To connection methods section
 Fill community standards: Issue templates, contributing guide, etc.
 Example improvements: Show both inline and template file patterns
+Don't need the first load balancer example. Find a different one or delete.
 
 TESTING GAPS
 
@@ -23,24 +42,22 @@ Cluster connection validation: Complex attribute combinations need better testin
 Datasource testing: Dependency graph, unknowns handling, interpolation
 OpenTofu tests: Add compatibility testing
 Check for stubs/skips: Audit test suite for forgotten temporary code
-Auth API versions: Handle both v1 and v1beta1
 HPA simulation: Test multiple simultaneous ownership changes
-Don't need the first load balancer example. Find a different one or delete.
-What happens when try to do somehthing not authorized?
+What happens when try to do something is not authorized? Do you find out during plan? Need a test for this!
+It's not just plans and applies that need auth. There is also patch, watch, etc. This will be a very common problem.
 Find a way to test multicluster
+Test very large CRDs. This was an issue in other providers. might need chunking.
+Delayed plan application: Handle out-of-date plans
+Add examples tests for datasource
+On front page, Raw kubeconfig (CI-friendly) add the context var. and mark # Optional so that people understand you can use a multi context file.
+Also do above for file in same example.
 
 FEATURE ADDITIONS
 
-ignore_field_changes: Surgical field ignores for HPA and controllers
 Custom ownership annotations: Solve cross-state conflicts
-Wait_for in datasource: Consider if this makes sense
 Full JSON manifest: Make available as computed attribute
 Status field guardrails: Warn if field doesn't start with "status"
-Large provider chunking: Research how others handle very large resources
-Add kustomize support
-Race condition between CRD and custom resource. Ordering? Retry? Testing? There is currently one flakey test.
-Adding a patch resource would be a big differentiator.
-Finish MVP of existing resorce datasource
+Adding a patch resource would be a big differentiator. Not sure if wise though.
 
 UX IMPROVEMENTS
 
@@ -52,6 +69,13 @@ Datasource args: Flatten nested structure unless adding more attributes
 Better datasource errors: Improve error messages
 Warnings for old versions: Terraform <1.6 or pre-SSA Kubernetes
 Lock down the interface before launch: The attributes and behavior I ship with will haunt me for years.
+https://registry.terraform.io/providers/gavinbunney/kubectl/latest/docs/resources/kubectl_manifest#attribute-reference
+https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/manifest
+GB has many yaml helper datasources. I just have one. Good design decsion? Or no?
+
+
+The readme example: "The yaml_split data source creates stable IDs like deployment.my-app.nginx and service.my-app.nginx, preventing unnecessary resource recreation when manifests are reordered." Can these collide? Do we need more entroy? Should it really be deployment.app.nginx based on the example? Make a runnable example maybe?
+
 
 CODE QUALITY
 
@@ -59,24 +83,31 @@ Cyclomatic complexity: Reduce all functions to <15
 General refactoring: Simplification pass
 Convert to issues: Move this list to GitHub issues
 Share same wait/watch/polling code between all actions. Move to common
+Security scanning alerts: Address current GitHub code scanning issues
+Remove print statements: Convert all debug prints to proper logging or remove them
 
 MARKETING & GROWTH
 
 SEO optimization: Is "k8sconnect" optimal for discovery?
-Tagline: "A Kubernetes Terraform provider built around edge cases"
 Launch content: Medium article, r/kubernetes, r/terraform, HackerNews posts, SweetOps Slack, Kubernetes Slack
 Release pipeline: Add Tofu release, verify Windows/Linux builds
 
 DEFERRED/COMPLEX
 
-Delayed plan application: Handle out-of-date plans
 Dynamic datasource lookup: Use same JSON-to-attribute logic as resource
 Move server-side features up: In feature list
 Migration plan for other providers
 Remove imported_without_annotations or make private
 Rename managed_state_projection
 Fix makefile to install all dependencies. Try on fresh laptop.
+Add back cluster_info datasource that has more info than GB:
+https://registry.terraform.io/providers/gavinbunney/kubectl/latest/docs/data-sources/kubectl_server_version
+yaml_split intelligent reordering by default? Can't do this if we output to a simple map. (Do we use map? I hope so. Check!)
 
+Migration tooling!
+"Stuck with thousands of lines of Kubernetes HCL? We'll help you escape."
+hcl2yaml main.tf > manifests.yaml
+Could probably knock out an MVP using the Terraform provider schema definitions to reverse the translation.
 
 
 k8sconnect_manifest.namespace_k8sconnect: Creating...

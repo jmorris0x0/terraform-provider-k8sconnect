@@ -192,9 +192,10 @@ All `cluster_connection` fields are marked sensitive and won't appear in logs or
 ---
 
 ## Requirements
+- Terraform >= 1.0
+- Kubernetes >= 1.28
 
-- Terraform 1.6+
-- Kubernetes 1.17+ (uses only server-side apply)
+> **Note**: While the provider may function on older versions, only Kubernetes versions currently receiving security updates are tested and supported.
 
 ---
 
