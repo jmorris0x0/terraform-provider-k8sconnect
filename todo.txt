@@ -2,8 +2,11 @@ CRITICAL BUGS & FIXES
 
 Base64 cert handling: Better error message when cluster_ca_certificate isn't base64 encoded, or auto-detect both formats
 Remove print statements: Convert all debug prints to proper logging or remove them
-Fix flaky test: yaml-split-dependency-ordering fails due to CRD eventual consistency - add wait/retry
+Fix flaky test: yaml-split-dependency-ordering fails due to CRD condition
 Security scanning alerts: Address current GitHub code scanning issues
+ignore_field_changes: Surgical field ignores for HPA and controllers
+Finish MVP of existing resorce datasource
+Wait_for in datasource: Consider if this makes sense
 
 DOCUMENTATION & RELEASE
 
@@ -13,6 +16,7 @@ Key features placement: Move higher in docs
 Add token example: To connection methods section
 Fill community standards: Issue templates, contributing guide, etc.
 Example improvements: Show both inline and template file patterns
+Don't need the first load balancer example. Find a different one or delete.
 
 TESTING GAPS
 
@@ -25,22 +29,20 @@ OpenTofu tests: Add compatibility testing
 Check for stubs/skips: Audit test suite for forgotten temporary code
 Auth API versions: Handle both v1 and v1beta1
 HPA simulation: Test multiple simultaneous ownership changes
-Don't need the first load balancer example. Find a different one or delete.
-What happens when try to do somehthing not authorized?
+What happens when try to do something is not authorized? Do you find out during plan? Need a test for this!
+It's not just plans and applies that need auth. There is also patch, watch, etc. This will be a very common problem.
 Find a way to test multicluster
+Test very large CRDs. This was an issue in other providers. might need chunking.
+Delayed plan application: Handle out-of-date plans
 
 FEATURE ADDITIONS
 
-ignore_field_changes: Surgical field ignores for HPA and controllers
 Custom ownership annotations: Solve cross-state conflicts
-Wait_for in datasource: Consider if this makes sense
 Full JSON manifest: Make available as computed attribute
 Status field guardrails: Warn if field doesn't start with "status"
 Large provider chunking: Research how others handle very large resources
 Add kustomize support
-Race condition between CRD and custom resource. Ordering? Retry? Testing? There is currently one flakey test.
 Adding a patch resource would be a big differentiator.
-Finish MVP of existing resorce datasource
 
 UX IMPROVEMENTS
 
@@ -63,13 +65,12 @@ Share same wait/watch/polling code between all actions. Move to common
 MARKETING & GROWTH
 
 SEO optimization: Is "k8sconnect" optimal for discovery?
-Tagline: "A Kubernetes Terraform provider built around edge cases"
 Launch content: Medium article, r/kubernetes, r/terraform, HackerNews posts, SweetOps Slack, Kubernetes Slack
 Release pipeline: Add Tofu release, verify Windows/Linux builds
 
 DEFERRED/COMPLEX
 
-Delayed plan application: Handle out-of-date plans
+
 Dynamic datasource lookup: Use same JSON-to-attribute logic as resource
 Move server-side features up: In feature list
 Migration plan for other providers
