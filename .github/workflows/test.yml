@@ -56,7 +56,7 @@ jobs:
             - 'rancher/k3s:v1.31.2-k3s1'  
             - 'rancher/k3s:v1.32.0-k3s1'
             - 'rancher/k3s:v1.33.0-k3s1'
-            - 'rancher/k3s:v1.34.0-k3s1'
+            - 'rancher/k3s:v1.34.1-k3s1'
     steps:
       - uses: actions/checkout@v5
 
