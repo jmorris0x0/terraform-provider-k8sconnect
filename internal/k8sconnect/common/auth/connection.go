@@ -59,100 +59,156 @@ func CreateRESTConfig(ctx context.Context, conn ClusterConnectionModel) (*rest.C
 
 // createInlineConfig creates a REST config from inline connection settings
 func createInlineConfig(conn ClusterConnectionModel) (*rest.Config, error) {
-	// Build REST config
 	config := &rest.Config{
 		Host: conn.Host.ValueString(),
 	}
 
-	// Handle TLS/CA certificate
-	if !conn.ClusterCACertificate.IsNull() {
-		caData, err := base64.StdEncoding.DecodeString(conn.ClusterCACertificate.ValueString())
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode cluster_ca_certificate: %w", err)
-		}
-		config.TLSClientConfig.CAData = caData
+	// Configure TLS
+	if err := configureTLS(config, conn); err != nil {
+		return nil, err
 	}
 
-	// Handle insecure mode
-	if !conn.Insecure.IsNull() && conn.Insecure.ValueBool() {
-		config.TLSClientConfig.Insecure = true
+	// Configure authentication
+	if err := configureAuth(config, conn); err != nil {
+		return nil, err
 	}
 
-	// Validate CA cert or insecure
-	if conn.ClusterCACertificate.IsNull() && (conn.Insecure.IsNull() || !conn.Insecure.ValueBool()) {
-		return nil, fmt.Errorf("cluster_ca_certificate is required for secure connections (or set insecure=true)")
-	}
-
-	// Handle authentication methods
-
-	// Bearer token
-	if !conn.Token.IsNull() {
-		config.BearerToken = conn.Token.ValueString()
-	}
-
-	// Client certificate authentication
-	if !conn.ClientCertificate.IsNull() && !conn.ClientKey.IsNull() {
-		certData, err := base64.StdEncoding.DecodeString(conn.ClientCertificate.ValueString())
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode client_certificate: %w", err)
-		}
-
-		keyData, err := base64.StdEncoding.DecodeString(conn.ClientKey.ValueString())
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode client_key: %w", err)
-		}
-
-		config.TLSClientConfig.CertData = certData
-		config.TLSClientConfig.KeyData = keyData
-	}
-
-	// Handle proxy
-	if !conn.ProxyURL.IsNull() {
-		proxyURL, err := url.Parse(conn.ProxyURL.ValueString())
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse proxy_url: %w", err)
-		}
-		config.Proxy = http.ProxyURL(proxyURL)
-	}
-
-	// Add exec provider if specified
-	if conn.Exec != nil && !conn.Exec.APIVersion.IsNull() {
-		args := make([]string, len(conn.Exec.Args))
-		for i, arg := range conn.Exec.Args {
-			args[i] = arg.ValueString()
-		}
-
-		var envVars []clientcmdapi.ExecEnvVar
-		if conn.Exec.Env != nil {
-			for name, value := range conn.Exec.Env {
-				if !value.IsNull() {
-					envVars = append(envVars, clientcmdapi.ExecEnvVar{
-						Name:  name,
-						Value: value.ValueString(),
-					})
-				}
-			}
-		}
-
-		config.ExecProvider = &clientcmdapi.ExecConfig{
-			APIVersion:      conn.Exec.APIVersion.ValueString(),
-			Command:         conn.Exec.Command.ValueString(),
-			Args:            args,
-			Env:             envVars,
-			InteractiveMode: clientcmdapi.NeverExecInteractiveMode,
-		}
-	}
-
-	// Validate we have some authentication
-	hasAuth := !conn.Token.IsNull() ||
-		(!conn.ClientCertificate.IsNull() && !conn.ClientKey.IsNull()) ||
-		(conn.Exec != nil && !conn.Exec.APIVersion.IsNull())
-
-	if !hasAuth {
-		return nil, fmt.Errorf("no authentication method specified: provide token, client certificates, or exec configuration")
+	// Configure proxy if present
+	if err := configureProxy(config, conn); err != nil {
+		return nil, err
 	}
 
 	return config, nil
+}
+
+// configureTLS handles all TLS configuration
+func configureTLS(config *rest.Config, conn ClusterConnectionModel) error {
+	// Handle insecure mode
+	if !conn.Insecure.IsNull() && conn.Insecure.ValueBool() {
+		config.TLSClientConfig.Insecure = true
+		return nil
+	}
+
+	// Handle CA certificate
+	if !conn.ClusterCACertificate.IsNull() {
+		caData, err := base64.StdEncoding.DecodeString(conn.ClusterCACertificate.ValueString())
+		if err != nil {
+			return fmt.Errorf("failed to decode cluster_ca_certificate: %w", err)
+		}
+		config.TLSClientConfig.CAData = caData
+		return nil
+	}
+
+	// Neither insecure nor CA cert provided
+	return fmt.Errorf("cluster_ca_certificate is required for secure connections (or set insecure=true)")
+}
+
+// configureAuth handles all authentication methods
+func configureAuth(config *rest.Config, conn ClusterConnectionModel) error {
+	authMethods := 0
+
+	// Token auth
+	if !conn.Token.IsNull() {
+		config.BearerToken = conn.Token.ValueString()
+		authMethods++
+	}
+
+	// Client certificate auth
+	if err := configureClientCerts(config, conn); err != nil {
+		return err
+	} else if config.TLSClientConfig.CertData != nil {
+		authMethods++
+	}
+
+	// Exec auth
+	if err := configureExecAuth(config, conn); err != nil {
+		return err
+	} else if config.ExecProvider != nil {
+		authMethods++
+	}
+
+	if authMethods == 0 {
+		return fmt.Errorf("no authentication method specified: provide token, client certificates, or exec configuration")
+	}
+
+	return nil
+}
+
+// configureClientCerts handles client certificate authentication
+func configureClientCerts(config *rest.Config, conn ClusterConnectionModel) error {
+	// Both must be present or both absent
+	hasCert := !conn.ClientCertificate.IsNull()
+	hasKey := !conn.ClientKey.IsNull()
+
+	if hasCert != hasKey {
+		return fmt.Errorf("client_certificate and client_key must both be provided for client cert auth")
+	}
+
+	if !hasCert {
+		return nil // No client cert auth
+	}
+
+	certData, err := base64.StdEncoding.DecodeString(conn.ClientCertificate.ValueString())
+	if err != nil {
+		return fmt.Errorf("failed to decode client_certificate: %w", err)
+	}
+
+	keyData, err := base64.StdEncoding.DecodeString(conn.ClientKey.ValueString())
+	if err != nil {
+		return fmt.Errorf("failed to decode client_key: %w", err)
+	}
+
+	config.TLSClientConfig.CertData = certData
+	config.TLSClientConfig.KeyData = keyData
+	return nil
+}
+
+// configureExecAuth handles exec authentication
+func configureExecAuth(config *rest.Config, conn ClusterConnectionModel) error {
+	if conn.Exec == nil || conn.Exec.APIVersion.IsNull() {
+		return nil // No exec auth
+	}
+
+	// Build args array
+	args := make([]string, len(conn.Exec.Args))
+	for i, arg := range conn.Exec.Args {
+		args[i] = arg.ValueString()
+	}
+
+	// Build env vars array
+	var envVars []clientcmdapi.ExecEnvVar
+	if conn.Exec.Env != nil {
+		for name, value := range conn.Exec.Env {
+			if !value.IsNull() {
+				envVars = append(envVars, clientcmdapi.ExecEnvVar{
+					Name:  name,
+					Value: value.ValueString(),
+				})
+			}
+		}
+	}
+
+	config.ExecProvider = &clientcmdapi.ExecConfig{
+		APIVersion:      conn.Exec.APIVersion.ValueString(),
+		Command:         conn.Exec.Command.ValueString(),
+		Args:            args,
+		Env:             envVars,
+		InteractiveMode: clientcmdapi.NeverExecInteractiveMode,
+	}
+
+	return nil
+}
+
+// configureProxy sets up proxy configuration
+func configureProxy(config *rest.Config, conn ClusterConnectionModel) error {
+	if !conn.ProxyURL.IsNull() {
+		proxyURL, err := url.Parse(conn.ProxyURL.ValueString())
+		if err != nil {
+			return fmt.Errorf("failed to parse proxy_url: %w", err)
+		}
+		config.Proxy = http.ProxyURL(proxyURL)
+	}
+	return nil
 }
 
 // createFileConfig creates a REST config from kubeconfig file
