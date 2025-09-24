@@ -2,9 +2,12 @@ CRITICAL BUGS & FIXES
 
 MINOR:
 Base64 cert handling: Better error message when cluster_ca_certificate isn't base64 encoded, or auto-detect both formats
+Auth API versions: Handle both v1 and v1beta1. Change tests?
+Add url attribute to yaml_split to load from the web url, OCI, and git repo/path/branch.
+yaml_split intelligent reordering by default? Can't do this if we output to a simple map. (Do we use map? I hope so. Check!)
 
 MAJOR:
-Fix flaky test: yaml-split-dependency-ordering fails due to CRD race condition
+Fix flaky test: yaml-split-dependency-ordering fails due to CRD race condition. Add option to yaml_split to order CRD first?
 ignore_field_changes: Surgical field ignores for HPA and controllers
 Centralize wait/polling/watch code?
 Finish MVP of existing resource datasource and add wait_for
@@ -29,7 +32,6 @@ Cluster connection validation: Complex attribute combinations need better testin
 Datasource testing: Dependency graph, unknowns handling, interpolation
 OpenTofu tests: Add compatibility testing
 Check for stubs/skips: Audit test suite for forgotten temporary code
-Auth API versions: Handle both v1 and v1beta1
 HPA simulation: Test multiple simultaneous ownership changes
 What happens when try to do something is not authorized? Do you find out during plan? Need a test for this!
 It's not just plans and applies that need auth. There is also patch, watch, etc. This will be a very common problem.
@@ -43,8 +45,6 @@ FEATURE ADDITIONS
 Custom ownership annotations: Solve cross-state conflicts
 Full JSON manifest: Make available as computed attribute
 Status field guardrails: Warn if field doesn't start with "status"
-Large provider chunking: Research how others handle very large resources
-Add kustomize support
 Adding a patch resource would be a big differentiator. Not sure if wise though.
 
 UX IMPROVEMENTS
