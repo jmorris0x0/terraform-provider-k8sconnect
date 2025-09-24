@@ -1,10 +1,14 @@
 CRITICAL BUGS & FIXES
 
+MINOR:
 Base64 cert handling: Better error message when cluster_ca_certificate isn't base64 encoded, or auto-detect both formats
+
+MAJOR:
 Fix flaky test: yaml-split-dependency-ordering fails due to CRD race condition
 ignore_field_changes: Surgical field ignores for HPA and controllers
+Centralize wait/polling/watch code?
 Finish MVP of existing resource datasource and add wait_for
-Centralize erorr messages
+Centralize error messages
 
 DOCUMENTATION & RELEASE
 
@@ -32,6 +36,7 @@ It's not just plans and applies that need auth. There is also patch, watch, etc.
 Find a way to test multicluster
 Test very large CRDs. This was an issue in other providers. might need chunking.
 Delayed plan application: Handle out-of-date plans
+Add examples tests for datasource
 
 FEATURE ADDITIONS
 
