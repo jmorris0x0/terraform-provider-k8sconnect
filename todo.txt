@@ -1,6 +1,6 @@
 CRITICAL BUGS & FIXES
 
-Eaasy:
+Easy:
 Base64 cert handling: Better error message when cluster_ca_certificate isn't base64 encoded, or auto-detect both formats
 Auth API versions: Handle both v1 and v1beta1. Change tests?
 Add url attribute to yaml_split to load from the web url, OCI, and git repo/path/branch.
@@ -20,7 +20,7 @@ Finish MVP of existing resource datasource and add wait_for
 https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/data-sources/resource
 GB doesn't have one!
 
-Centralize error messages
+
 
 
 DOCUMENTATION & RELEASE
@@ -63,7 +63,6 @@ UX IMPROVEMENTS
 
 Remove field_ownership from diffs: Just noise in output
 Hide private attributes: Some should not be in UI
-Error harmonization: Single source of truth for error messages
 YAML diff vs dry-run diff: Evaluate which is better UX
 Datasource args: Flatten nested structure unless adding more attributes
 Better datasource errors: Improve error messages

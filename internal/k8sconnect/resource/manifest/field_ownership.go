@@ -108,12 +108,21 @@ func extractFieldOwnership(obj *unstructured.Unstructured) map[string]FieldOwner
 	return parseFieldsV1ToPathMap(obj.GetManagedFields(), obj.Object)
 }
 
+var mergeKeyMatcher = NewMergeKeyMatcher()
+
 // resolveArrayKey handles array keys like k:{"name":"nginx"}
 // Returns empty string and -1 if not an array key or can't resolve
 func resolveArrayKey(key string, prefix string, userJSON interface{}) (string, int) {
-	// TODO: Implement array key resolution
-	// This needs the logic from projection_v2.go's parseOwnedFields
-	return "", -1
+	fieldName, index := mergeKeyMatcher.ResolveArrayKey(key, userJSON)
+	if fieldName == "" {
+		return "", -1
+	}
+
+	arrayPath := fieldName
+	if prefix != "" {
+		arrayPath = prefix + "." + fieldName
+	}
+	return arrayPath, index
 }
 
 // addCoreFields adds fields that are always owned by the creator
