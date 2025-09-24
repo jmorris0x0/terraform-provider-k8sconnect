@@ -53,10 +53,10 @@ jobs:
       matrix:
         terraform: ['1.0.11', '1.13.3']
         k3s:
-          - 'rancher/k3s:v1.17.17-k3s1'   # minimum supported
-          - 'rancher/k3s:v1.25.16-k3s4'   # mid-range
-          - 'rancher/k3s:v1.31.2-k3s1'    # just-before-current
-          - 'rancher/k3s:v1.32.0-k3s1'    # latest
+            - 'rancher/k3s:v1.31.2-k3s1'  
+            - 'rancher/k3s:v1.32.0-k3s1'
+            - 'rancher/k3s:v1.33.0-k3s1'
+            - 'rancher/k3s:v1.34.0-k3s1'
     steps:
       - uses: actions/checkout@v5
 
