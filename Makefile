@@ -170,7 +170,8 @@ testacc: oidc-setup
 	echo "TF_ACC_K8S_CLIENT_CERT=$$(echo $$TF_ACC_K8S_CLIENT_CERT | cut -c1-20)..."; \
 	echo "TF_ACC_K8S_CLIENT_KEY=$$(echo $$TF_ACC_K8S_CLIENT_KEY | cut -c1-20)..."; \
 	echo "Terraform version: $$(terraform version -json | jq -r .terraform_version)"; \
-	go test -cover -v ./internal/k8sconnect/... -timeout 30m -run "$$TEST_FILTER"
+	go test -cover -v ./internal/k8sconnect/... -timeout 30m -run "$$TEST_FILTER" -parallel=1
+
 
 .PHONY: test-examples
 test-examples: oidc-setup install
