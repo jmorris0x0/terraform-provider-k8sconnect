@@ -5,13 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
-	k8sschema "k8s.io/apimachinery/pkg/runtime/schema" // Renamed to avoid conflict
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
@@ -216,16 +215,27 @@ func (d *resourceDataSource) Read(ctx context.Context, req datasource.ReadReques
 		return
 	}
 
-	// Determine GVR from apiVersion/kind
-	gv, err := k8sschema.ParseGroupVersion(data.APIVersion.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("Invalid API version", err.Error())
-		return
+	// Use the client's discovery-based GVR resolution instead of naive pluralization
+	// Create a minimal unstructured object for GVR discovery
+	tempObj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": data.APIVersion.ValueString(),
+			"kind":       data.Kind.ValueString(),
+		},
 	}
 
-	// Simple pluralization (you might want to use the discovery client for accurate pluralization)
-	resource := strings.ToLower(data.Kind.ValueString()) + "s"
-	gvr := gv.WithResource(resource)
+	// Use the client's proper discovery-based resolution
+	gvr, err := client.GetGVR(ctx, tempObj)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Failed to resolve resource type",
+			fmt.Sprintf("Unable to determine resource type for %s/%s: %v. "+
+				"This may indicate the CRD is not installed or the API version is incorrect.",
+				data.APIVersion.ValueString(),
+				data.Kind.ValueString(),
+				err))
+		return
+	}
 
 	// Get namespace (default to "default" for namespaced resources)
 	namespace := metadata.Namespace.ValueString()
