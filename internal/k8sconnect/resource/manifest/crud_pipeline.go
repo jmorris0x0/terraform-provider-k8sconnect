@@ -50,7 +50,7 @@ func (p *OperationPipeline) PrepareContext(
 		Data: data,
 	}
 
-	// Step 1: Resolve connection
+	// Step 1: Load and validate connection from resource data
 	conn, err := p.loadConnectionFromData(ctx, data, requireConnection)
 	if err != nil {
 		return nil, err
