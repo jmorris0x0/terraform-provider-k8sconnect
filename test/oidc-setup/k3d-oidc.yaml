@@ -8,10 +8,13 @@ agents: 0
 kubeAPI:
   hostPort: "6443"
 network: k3d-k8sconnect-test
-# Note: volumes are mounted via command line instead due to absolute path requirement
 options:
   k3s:
     extraArgs:
+      - arg: --pause-image=registry.k8s.io/pause:3.9
+        nodeFilters:
+          - server:*
+          - agent:*
       - arg: --kube-apiserver-arg=oidc-issuer-url=https://dex:5556/dex
         nodeFilters:
           - server:*
@@ -31,5 +34,4 @@ registries:
   create:
     name: k3d-k8sconnect-test-registry
     host: "0.0.0.0"
-    #hostPort: "5000"
 
