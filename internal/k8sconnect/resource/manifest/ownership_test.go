@@ -546,7 +546,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: nginx:1.19
+        image: public.ecr.aws/nginx/nginx:1.21
         resources:
           limits:
             cpu: "100m"
@@ -613,7 +613,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: nginx:1.19
+        image: public.ecr.aws/nginx/nginx:1.21
         resources:
           limits:
             cpu: "100m"

@@ -374,7 +374,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: nginx:1.21
+        image: public.ecr.aws/nginx/nginx:1.21
         ports:
         - containerPort: 80
 YAML
@@ -589,7 +589,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: nginx:1.21
+        image: public.ecr.aws/nginx/nginx:1.21
         ports:
         - containerPort: 80
 YAML
@@ -687,7 +687,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: nginx:1.21
+        image: public.ecr.aws/nginx/nginx:1.21
         ports:
         - containerPort: 80
 YAML
@@ -868,7 +868,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: nginx:1.21
+        image: public.ecr.aws/nginx/nginx:1.21
         ports:
         - containerPort: 80
 YAML
@@ -968,7 +968,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: nginx:1.21
+        image: public.ecr.aws/nginx/nginx:1.21
         ports:
         - containerPort: 80
 YAML
@@ -1086,7 +1086,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: nginx:1.21
+        image: public.ecr.aws/nginx/nginx:1.21
         ports:
         - containerPort: 80
 YAML
@@ -1213,7 +1213,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: nginx:1.21
+        image: public.ecr.aws/nginx/nginx:1.21
         ports:
         - containerPort: 80
 YAML
@@ -1321,7 +1321,7 @@ spec:
     spec:
       containers:
       - name: hello
-        image: busybox:1.28
+        image: public.ecr.aws/docker/library/busybox:1.35
         command: ["sh", "-c", "echo 'Hello World' && sleep 2"]
       restartPolicy: Never
 YAML
@@ -1378,7 +1378,7 @@ spec:
     spec:
       containers:
       - name: hello
-        image: busybox:1.28
+        image: public.ecr.aws/docker/library/busybox:1.35
         command: ["sh", "-c", "echo 'Hello World' && sleep 2"]
       restartPolicy: Never
 YAML

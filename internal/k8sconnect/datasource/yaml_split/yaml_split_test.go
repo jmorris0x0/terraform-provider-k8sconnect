@@ -216,7 +216,7 @@ metadata:
 spec:
   containers:
   - name: nginx
-    image: nginx:1.20
+    image: public.ecr.aws/nginx/nginx:1.21
 ---
 apiVersion: v1
 kind: Pod
@@ -226,7 +226,7 @@ metadata:
 spec:
   containers:
   - name: nginx
-    image: nginx:1.21`
+    image: public.ecr.aws/nginx/nginx:1.21`
 
 	docs, err := d.parseDocuments(content, "test")
 	if err != nil {
@@ -451,7 +451,7 @@ metadata:
 spec:
   containers:
   - name: nginx
-    image: nginx:1.20`
+    image: public.ecr.aws/nginx/nginx:1.21`
 
 	d := &yamlSplitDataSource{}
 

@@ -52,9 +52,9 @@ func (m *MergeKeyMatcher) FindArrayIndex(array []interface{}, mergeKey map[strin
 	return -1
 }
 
-// ItemMatchesMergeKey checks if an item matches all merge key fields
+// ItemMatchesMergeKey checks if an item matches the merge key
+// Allows partial matches when user's fields are a subset of merge key
 func (m *MergeKeyMatcher) ItemMatchesMergeKey(item map[string]interface{}, mergeKey map[string]interface{}) bool {
-	// This is the exact logic from projection_v2.go's matchesMergeKey
 	verifiableFields := 0
 	matchedFields := 0
 
@@ -67,11 +67,11 @@ func (m *MergeKeyMatcher) ItemMatchesMergeKey(item map[string]interface{}, merge
 		}
 	}
 
+	// If we could verify at least one field and all verifiable fields matched
 	return verifiableFields > 0 && verifiableFields == matchedFields
 }
 
 // ResolveArrayKey finds which field contains an array with an item matching the merge key
-// This is what field_ownership.go needs
 func (m *MergeKeyMatcher) ResolveArrayKey(key string, parentValue interface{}) (fieldName string, index int) {
 	mergeKey, err := m.ParseMergeKey(key)
 	if err != nil {

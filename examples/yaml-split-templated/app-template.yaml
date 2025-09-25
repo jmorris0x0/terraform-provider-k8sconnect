@@ -21,4 +21,4 @@ spec:
     spec:
       containers:
       - name: app
-        image: nginx:1.20
+        image: public.ecr.aws/nginx/nginx:1.21

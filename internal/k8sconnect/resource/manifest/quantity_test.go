@@ -302,7 +302,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: nginx:1.20
+        image: public.ecr.aws/nginx/nginx:1.21
         resources:
           requests:
             memory: "64Mi"    # Normalizes to bytes
