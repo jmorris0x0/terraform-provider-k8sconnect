@@ -1,4 +1,4 @@
-// internal/k8sconnect/resource/manifest/projection_v2.go
+// internal/k8sconnect/resource/manifest/projection.go
 package manifest
 
 import (

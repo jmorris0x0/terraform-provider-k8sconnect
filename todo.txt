@@ -1,26 +1,27 @@
 CRITICAL BUGS & FIXES
 
 Easy:
-Base64 cert handling: Better error message when cluster_ca_certificate isn't base64 encoded, or auto-detect both formats
-Auth API versions: Handle both v1 and v1beta1. Change tests?
-Add url attribute to yaml_split to load from the web url, OCI, and git repo/path/branch.
+* Base64 cert handling: Better error message when cluster_ca_certificate isn't base64 encoded, or auto-detect both formats
+
+* Auth API versions: Handle both v1 and v1beta1. Change tests?
+
+* Add url attribute to yaml_split to load from the web url, OCI, and git repo/path/branch.
+
+* Make wait_for timeouts an error. Maybe increase the default timeout as well. 10 minutes?
 
 
 Hard:
-Fix flaky test: yaml-split-dependency-ordering fails due to CRD race condition. Add option to yaml_split to order CRD first? Similar issue with namespaces.
+* Fix flaky test: yaml-split-dependency-ordering fails due to CRD race condition. Add option to yaml_split to order CRD first? Similar issue with namespaces.
 
-ignore_fields: Surgical field ignores for HPA and controllers
+* ignore_fields: Surgical field ignores for HPA and controllers
 You already have a list in the code. You just need to add to it. Might be easier than I thought.
-
-
 https://registry.terraform.io/providers/gavinbunney/kubectl/latest/docs/resources/kubectl_manifest#ignore-manifest-fields
 
-Centralize wait/polling/watch code?
-Finish MVP of existing resource datasource and add wait_for
+* Centralize wait/polling/watch code?
+
+* Finish MVP of existing resource datasource and add wait_for
 https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/data-sources/resource
 GB doesn't have one!
-
-
 
 
 DOCUMENTATION & RELEASE
@@ -72,7 +73,6 @@ Lock down the interface before launch: The attributes and behavior I ship with w
 https://registry.terraform.io/providers/gavinbunney/kubectl/latest/docs/resources/kubectl_manifest#attribute-reference
 https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/manifest
 GB has many yaml helper datasources. I just have one. Good design decsion? Or no?
-
 
 The readme example: "The yaml_split data source creates stable IDs like deployment.my-app.nginx and service.my-app.nginx, preventing unnecessary resource recreation when manifests are reordered." Can these collide? Do we need more entroy? Should it really be deployment.app.nginx based on the example? Make a runnable example maybe?
 
