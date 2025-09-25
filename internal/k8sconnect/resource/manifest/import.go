@@ -200,10 +200,10 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		return
 	}
 
-	// NEW: Extract field paths from the imported object
+	// Extract field paths from the imported object
 	paths := extractAllFieldsFromYAML(liveObj.Object, "")
 
-	// NEW: Project the current state for managed fields
+	// Project the current state for managed fields
 	projection, err := projectFields(liveObj.Object, paths)
 	if err != nil {
 		resp.Diagnostics.AddError("Projection Failed",
@@ -211,7 +211,7 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		return
 	}
 
-	// NEW: Convert projection to JSON
+	// Convert projection to JSON
 	projectionJSON, err := toJSON(projection)
 	if err != nil {
 		resp.Diagnostics.AddError("JSON Conversion Failed",
