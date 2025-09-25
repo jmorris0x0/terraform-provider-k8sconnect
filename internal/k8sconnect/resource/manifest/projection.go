@@ -1,4 +1,4 @@
-// internal/k8sconnect/resource/manifest/projection_v2.go
+// internal/k8sconnect/resource/manifest/projection.go
 package manifest
 
 import (
@@ -81,7 +81,7 @@ func extractOwnedPaths(ctx context.Context, managedFields []metav1.ManagedFields
 		}
 	}
 
-	// FIX: Always add core fields even if not in user's YAML
+	// Always add core fields even if not in user's YAML
 	// This handles cases like namespace inference where Kubernetes adds the field
 	coreFields := []string{
 		"apiVersion",
@@ -115,7 +115,6 @@ func extractOwnedPaths(ctx context.Context, managedFields []metav1.ManagedFields
 }
 
 // extractAllFieldsFromYAML - used when no managedFields available
-// This needs to match the behavior tests expect
 func extractAllFieldsFromYAML(obj map[string]interface{}, prefix string) []string {
 	// Just call the full extractFieldPaths since tests expect that behavior
 	return extractFieldPaths(obj, prefix)
