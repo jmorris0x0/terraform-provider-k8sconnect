@@ -27,7 +27,7 @@ resource "k8sconnect_manifest" "migration_job" {
         spec:
           containers:
           - name: migrate
-            image: busybox:1.28
+            image: public.ecr.aws/docker/library/busybox:1.28
             command: 
             - sh
             - -c

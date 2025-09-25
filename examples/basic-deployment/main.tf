@@ -32,7 +32,7 @@ resource "k8sconnect_manifest" "deployment" {
         spec:
           containers:
           - name: nginx
-            image: nginx:1.20
+            image: public.ecr.aws/nginx/nginx:1.21
   YAML
 
   cluster_connection = var.cluster_connection

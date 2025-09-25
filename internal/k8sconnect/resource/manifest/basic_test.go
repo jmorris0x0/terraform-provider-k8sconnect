@@ -309,7 +309,7 @@ metadata:
 spec:
   containers:
   - name: test
-    image: busybox:1.35
+    image: public.ecr.aws/docker/library/busybox:1.35
     command: ["sleep", "3600"]
 `, podName, namespace)
 }
@@ -351,7 +351,7 @@ metadata:
 spec:
   containers:
   - name: test
-    image: busybox:1.35
+    image: public.ecr.aws/docker/library/busybox:1.35
     command: ["sleep", "3600"]
 YAML
 

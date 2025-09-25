@@ -374,7 +374,7 @@ const driftTestDeploymentPatch = `{
 			"spec": {
 				"containers": [{
 					"name": "nginx",
-					"image": "nginx:1.22"
+					"image": "public.ecr.aws/nginx/nginx:1.22"
 				}]
 			}
 		}
@@ -427,7 +427,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: nginx:1.21
+        image: public.ecr.aws/nginx/nginx:1.21
         ports:
         - containerPort: 80
 YAML
@@ -842,7 +842,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: nginx:1.19
+        image: public.ecr.aws/nginx/nginx:1.21
 YAML
 
   force_conflicts = %s

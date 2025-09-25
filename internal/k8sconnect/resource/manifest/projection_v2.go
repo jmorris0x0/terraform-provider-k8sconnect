@@ -138,6 +138,10 @@ func mergeFields(dest, source map[string]interface{}) {
 	}
 }
 
+// internal/k8sconnect/resource/manifest/projection_v2.go
+
+var matcher = NewMergeKeyMatcher()
+
 func parseOwnedFields(ownership map[string]interface{}, prefix string, userObj interface{}, paths *[]string) {
 	// Handle nil userObj
 	if userObj == nil {
@@ -180,12 +184,11 @@ func parseOwnedFields(ownership map[string]interface{}, prefix string, userObj i
 
 		} else if strings.HasPrefix(key, "k:") {
 			// Array item with merge key
-			mergeKeyJSON := strings.TrimPrefix(key, "k:")
-			fmt.Printf("Processing array key: %s at prefix: %s\n", mergeKeyJSON, prefix)
+			fmt.Printf("Processing array key: %s at prefix: %s\n", key, prefix)
 
-			// Parse the merge key to find which array item this refers to
-			var mergeKey map[string]interface{}
-			if err := json.Unmarshal([]byte(mergeKeyJSON), &mergeKey); err != nil {
+			// Parse the merge key using shared matcher
+			mergeKey, err := matcher.ParseMergeKey(key)
+			if err != nil {
 				fmt.Printf("Failed to parse merge key: %v\n", err)
 				continue
 			}
@@ -196,16 +199,8 @@ func parseOwnedFields(ownership map[string]interface{}, prefix string, userObj i
 				continue
 			}
 
-			arrayIndex := -1
-			for i, item := range userArray {
-				if itemMap, ok := item.(map[string]interface{}); ok {
-					if matchesMergeKey(itemMap, mergeKey) {
-						arrayIndex = i
-						break
-					}
-				}
-			}
-
+			// Use shared matcher to find the array index
+			arrayIndex := matcher.FindArrayIndex(userArray, mergeKey)
 			if arrayIndex == -1 {
 				fmt.Printf("Could not find array item matching merge key: %v\n", mergeKey)
 				continue
@@ -232,24 +227,7 @@ func parseOwnedFields(ownership map[string]interface{}, prefix string, userObj i
 
 // matchesMergeKey checks if an item matches the merge key criteria
 func matchesMergeKey(item map[string]interface{}, mergeKey map[string]interface{}) bool {
-	// Check if the user's specified fields match the corresponding merge key fields
-	// This allows partial matching when user relies on K8s defaults
-
-	// Count how many fields from merge key we can verify
-	verifiableFields := 0
-	matchedFields := 0
-
-	for mergeField, mergeVal := range mergeKey {
-		if itemVal, exists := item[mergeField]; exists {
-			verifiableFields++
-			if fmt.Sprintf("%v", itemVal) == fmt.Sprintf("%v", mergeVal) {
-				matchedFields++
-			}
-		}
-	}
-
-	// If we could verify at least one field and all verifiable fields matched
-	return verifiableFields > 0 && verifiableFields == matchedFields
+	return matcher.ItemMatchesMergeKey(item, mergeKey)
 }
 
 // shouldIncludeUserField checks if a field from user's YAML should always be included

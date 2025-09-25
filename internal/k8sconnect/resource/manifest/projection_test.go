@@ -20,7 +20,7 @@ func TestExtractFieldPaths_StrategicMerge(t *testing.T) {
 					"containers": []interface{}{
 						map[string]interface{}{
 							"name":  "nginx",
-							"image": "nginx:1.20",
+							"image": "public.ecr.aws/nginx/nginx:1.21",
 							"ports": []interface{}{
 								map[string]interface{}{
 									"containerPort": 80,
@@ -216,7 +216,7 @@ func TestProjectFields_StrategicMerge(t *testing.T) {
 						},
 						map[string]interface{}{
 							"name":  "nginx", // Reordered
-							"image": "nginx:1.21",
+							"image": "public.ecr.aws/nginx/nginx:1.21",
 						},
 					},
 				},
@@ -230,7 +230,7 @@ func TestProjectFields_StrategicMerge(t *testing.T) {
 					"containers": []interface{}{
 						map[string]interface{}{
 							"name":  "nginx",
-							"image": "nginx:1.21",
+							"image": "public.ecr.aws/nginx/nginx:1.21",
 						},
 						map[string]interface{}{
 							"name":  "sidecar",
@@ -247,7 +247,7 @@ func TestProjectFields_StrategicMerge(t *testing.T) {
 					"containers": []interface{}{
 						map[string]interface{}{
 							"name":  "nginx",
-							"image": "nginx:1.20",
+							"image": "public.ecr.aws/nginx/nginx:1.21",
 						},
 					},
 				},
@@ -261,7 +261,7 @@ func TestProjectFields_StrategicMerge(t *testing.T) {
 					"containers": []interface{}{
 						map[string]interface{}{
 							"name":  "nginx",
-							"image": "nginx:1.20",
+							"image": "public.ecr.aws/nginx/nginx:1.21",
 						},
 					},
 				},
@@ -325,7 +325,7 @@ func TestGetFieldByPath_KeyBasedSelectors(t *testing.T) {
 				},
 				map[string]interface{}{
 					"name":  "nginx",
-					"image": "nginx:1.20",
+					"image": "public.ecr.aws/nginx/nginx:1.21",
 					"ports": []interface{}{
 						map[string]interface{}{
 							"containerPort": 80,
@@ -348,7 +348,7 @@ func TestGetFieldByPath_KeyBasedSelectors(t *testing.T) {
 	}{
 		{
 			path:     "spec.containers[name=nginx].image",
-			expected: "nginx:1.20",
+			expected: "public.ecr.aws/nginx/nginx:1.21",
 			exists:   true,
 		},
 		{
