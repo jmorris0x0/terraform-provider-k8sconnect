@@ -1321,7 +1321,7 @@ spec:
     spec:
       containers:
       - name: hello
-        image: public.ecr.aws/docker/library/busybox:1.35
+        image: public.ecr.aws/docker/library/busybox:latest
         command: ["sh", "-c", "echo 'Hello World' && sleep 2"]
       restartPolicy: Never
 YAML
@@ -1378,7 +1378,7 @@ spec:
     spec:
       containers:
       - name: hello
-        image: public.ecr.aws/docker/library/busybox:1.35
+        image: public.ecr.aws/docker/library/busybox:latest
         command: ["sh", "-c", "echo 'Hello World' && sleep 2"]
       restartPolicy: Never
 YAML

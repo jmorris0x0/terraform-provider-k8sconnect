@@ -4,25 +4,25 @@ The `k8sconnect_yaml_split` data source intelligently splits multi-document YAML
 
 ## Key Features
 
-### 🔧 Robust YAML Processing
+###  Robust YAML Processing
 - **Smart document separation** - Uses proper regex patterns instead of naive string splitting
 - **Comment-aware splitting** - Handles comments after `---` separators
 - **Quoted string protection** - Won't split on `---` found inside YAML strings
 - **Empty document filtering** - Automatically removes blank and comment-only sections
 - **Cross-platform support** - Handles both Unix (`\n`) and Windows (`\r\n`) line endings
 
-### 🆔 Stable ID Generation
+###  Stable ID Generation
 - **Human-readable IDs** - Format: `kind.name` (cluster-scoped) or `kind.namespace.name` (namespaced)
 - **Duplicate handling** - Automatic numeric suffixes for resources with identical IDs
 - **Deterministic ordering** - Same input always produces same output
 - **Case normalization** - Consistent lowercase kind names
 
-### 📁 Flexible Input Methods
+###  Flexible Input Methods
 - **Inline content** - Embed YAML directly in Terraform configuration
 - **File patterns** - Support for glob patterns including recursive `**` matching
 - **Multiple files** - Automatically combines multiple files into single manifest map
 
-### 🚨 Excellent Error Handling
+###  Excellent Error Handling
 - **Progressive processing** - Continues processing valid documents even if some fail
 - **Detailed error context** - File names, line numbers, and specific error messages
 - **Warning system** - Non-fatal issues reported as warnings, not errors
