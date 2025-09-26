@@ -119,7 +119,7 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 					"cluster_ca_certificate": schema.StringAttribute{
 						Optional:    true,
 						Sensitive:   true,
-						Description: "PEM-encoded root certificate bundle for TLS authentication.",
+						Description: "Root certificate bundle for TLS authentication. Accepts PEM format or base64-encoded PEM - automatically detected.",
 					},
 					"kubeconfig_file": schema.StringAttribute{
 						Optional:    true,
@@ -142,12 +142,12 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 					"client_certificate": schema.StringAttribute{
 						Optional:    true,
 						Sensitive:   true,
-						Description: "PEM-encoded client certificate for TLS authentication.",
+						Description: "Client certificate for TLS authentication. Accepts PEM format or base64-encoded PEM - automatically detected.",
 					},
 					"client_key": schema.StringAttribute{
 						Optional:    true,
 						Sensitive:   true,
-						Description: "PEM-encoded client certificate key for TLS authentication.",
+						Description: "Client certificate key for TLS authentication. Accepts PEM format or base64-encoded PEM - automatically detected.",
 					},
 					"insecure": schema.BoolAttribute{
 						Optional:    true,
