@@ -134,7 +134,7 @@ users:
     token: test-token`
 
 	conn := ClusterConnectionModel{
-		KubeconfigRaw: types.StringValue(kubeconfig),
+		Kubeconfig: types.StringValue(kubeconfig),
 	}
 
 	config, err := CreateRESTConfig(context.Background(), conn)
@@ -224,7 +224,7 @@ func TestValidateConnection_NoMode(t *testing.T) {
 func TestValidateConnection_MultipleModes(t *testing.T) {
 	conn := ClusterConnectionModel{
 		Host:           types.StringValue("https://test.example.com"),
-		KubeconfigFile: types.StringValue("/path/to/kubeconfig"),
+		Kubeconfig: types.StringValue("/path/to/kubeconfig"),
 	}
 
 	err := ValidateConnection(context.Background(), conn)
@@ -292,7 +292,7 @@ func TestValidateConnection_ClientKeyWithoutCert(t *testing.T) {
 func TestValidateConnectionWithUnknowns_SkipsWhenUnknown(t *testing.T) {
 	conn := ClusterConnectionModel{
 		Host:           types.StringUnknown(),
-		KubeconfigFile: types.StringValue("/path/to/kubeconfig"),
+		Kubeconfig: types.StringValue("/path/to/kubeconfig"),
 	}
 
 	// Should not error because host is unknown

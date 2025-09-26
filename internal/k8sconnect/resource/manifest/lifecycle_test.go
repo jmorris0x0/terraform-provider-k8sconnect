@@ -21,9 +21,9 @@ import (
 func TestAccManifestResource_DeleteProtection(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	ns := fmt.Sprintf("delete-protected-ns-%d", time.Now().UnixNano()%1000000)
@@ -95,7 +95,7 @@ YAML
   delete_protection = true
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 `, namespace)
@@ -123,7 +123,7 @@ YAML
   delete_protection = false
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 `, namespace)
@@ -132,9 +132,9 @@ YAML
 func TestAccManifestResource_ConnectionChange(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	ns := fmt.Sprintf("conn-change-ns-%d", time.Now().UnixNano()%1000000)
@@ -145,7 +145,7 @@ func TestAccManifestResource_ConnectionChange(t *testing.T) {
 			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
 		},
 		Steps: []resource.TestStep{
-			// Step 1: Create with kubeconfig_raw
+			// Step 1: Create with kubeconfig
 			{
 				Config: testAccManifestConfigConnectionChange1(ns),
 				ConfigVariables: config.Variables{
@@ -190,7 +190,7 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 `, namespace)
@@ -211,7 +211,7 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
     context        = "k3d-k8sconnect-test"  # Explicit context (connection change)
   }
 }
@@ -221,9 +221,9 @@ YAML
 func TestAccManifestResource_ForceDestroy(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	ns := fmt.Sprintf("force-destroy-ns-%d", time.Now().UnixNano()%1000000)
@@ -276,7 +276,7 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -299,7 +299,7 @@ YAML
   force_destroy = true
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
   
   depends_on = [k8sconnect_manifest.force_namespace]
@@ -310,9 +310,9 @@ YAML
 func TestAccManifestResource_DeleteTimeout(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	ns := fmt.Sprintf("delete-timeout-ns-%d", time.Now().UnixNano()%1000000)
@@ -361,7 +361,7 @@ YAML
   delete_timeout = "2m"
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 `, namespace)

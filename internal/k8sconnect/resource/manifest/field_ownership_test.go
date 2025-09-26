@@ -23,9 +23,9 @@ import (
 func TestAccManifestResource_Ownership(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	ns := fmt.Sprintf("ownership-ns-%d", time.Now().UnixNano()%1000000)
@@ -80,7 +80,7 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -96,7 +96,7 @@ data:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
   
   depends_on = [k8sconnect_manifest.ownership_namespace]
@@ -106,9 +106,9 @@ YAML
 func TestAccManifestResource_OwnershipConflict(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	ns := fmt.Sprintf("ownership-conflict-ns-%d", time.Now().UnixNano()%1000000)
@@ -171,7 +171,7 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -187,7 +187,7 @@ data:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
   
   depends_on = [k8sconnect_manifest.conflict_namespace]
@@ -217,7 +217,7 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -233,7 +233,7 @@ data:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
   
   depends_on = [k8sconnect_manifest.conflict_namespace]
@@ -251,7 +251,7 @@ data:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
   
   depends_on = [k8sconnect_manifest.conflict_namespace]
@@ -261,9 +261,9 @@ YAML
 func TestAccManifestResource_OwnershipImport(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	ns := fmt.Sprintf("ownership-import-ns-%d", time.Now().UnixNano()%1000000)
@@ -351,7 +351,7 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -367,7 +367,7 @@ data:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
   
   depends_on = [k8sconnect_manifest.import_namespace]
@@ -402,9 +402,9 @@ YAML
 func TestAccManifestResource_FieldManagerConflict(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	ns := fmt.Sprintf("field-conflict-ns-%d", time.Now().UnixNano()%1000000)
@@ -523,7 +523,7 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -557,7 +557,7 @@ spec:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 
   force_conflicts = %t
@@ -590,7 +590,7 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -624,7 +624,7 @@ spec:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 
   force_conflicts = %t

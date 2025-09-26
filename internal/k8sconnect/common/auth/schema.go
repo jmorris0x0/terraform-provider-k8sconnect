@@ -19,11 +19,7 @@ func GetConnectionSchemaForResource() map[string]resourceschema.Attribute {
 			Sensitive:   true,
 			Description: "Root certificate bundle for TLS authentication. Accepts PEM format or base64-encoded PEM - automatically detected.",
 		},
-		"kubeconfig_file": resourceschema.StringAttribute{
-			Optional:    true,
-			Description: "Path to the kubeconfig file.",
-		},
-		"kubeconfig_raw": resourceschema.StringAttribute{
+		"kubeconfig": resourceschema.StringAttribute{
 			Optional:    true,
 			Sensitive:   true,
 			Description: "Raw kubeconfig file content.",

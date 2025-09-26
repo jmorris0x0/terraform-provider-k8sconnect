@@ -96,6 +96,16 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		return
 	}
 
+	// Read the kubeconfig file contents
+	kubeconfigData, err := os.ReadFile(kubeconfigPath)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Import Failed: Cannot Read Kubeconfig",
+			fmt.Sprintf("Failed to read kubeconfig file at %s: %s", kubeconfigPath, err.Error()),
+		)
+		return
+	}
+
 	tflog.Info(ctx, "import using kubeconfig", map[string]interface{}{
 		"path":      kubeconfigPath,
 		"context":   kubeContext,
@@ -104,8 +114,14 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		"namespace": namespace,
 	})
 
-	// Create K8s client using kubeconfig file and context
-	client, err := k8sclient.NewDynamicK8sClientFromKubeconfigFile(kubeconfigPath, kubeContext)
+	// Create temporary connection model for import
+	tempConn := auth.ClusterConnectionModel{
+		Kubeconfig: types.StringValue(string(kubeconfigData)),
+		Context:    types.StringValue(kubeContext),
+	}
+
+	// Create REST config from connection model
+	restConfig, err := auth.CreateRESTConfig(ctx, tempConn)
 	if err != nil {
 		// Provide context-specific error messages
 		if strings.Contains(err.Error(), "context") && strings.Contains(err.Error(), "not found") {
@@ -135,6 +151,16 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 					"Details: %s", err.Error()),
 			)
 		}
+		return
+	}
+
+	// Create K8s client
+	client, err := k8sclient.NewDynamicK8sClient(restConfig)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Import Failed: Client Creation Error",
+			fmt.Sprintf("Failed to create Kubernetes client: %s", err.Error()),
+		)
 		return
 	}
 
@@ -219,12 +245,11 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		return
 	}
 
-	// Create connection model for import
+	// Create connection model for import - use the file contents, not the path
 	conn := auth.ClusterConnectionModel{
 		Host:                 types.StringNull(),
 		ClusterCACertificate: types.StringNull(),
-		KubeconfigFile:       types.StringValue(kubeconfigPath),
-		KubeconfigRaw:        types.StringNull(),
+		Kubeconfig:           types.StringValue(string(kubeconfigData)), // Use contents, not path!
 		Context:              types.StringValue(kubeContext),
 		Exec:                 nil,
 	}

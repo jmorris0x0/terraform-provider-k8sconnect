@@ -22,15 +22,15 @@ func TestAccManifestResource_Basic(t *testing.T) {
 	host := os.Getenv("TF_ACC_K8S_HOST")
 	ca := os.Getenv("TF_ACC_K8S_CA")
 	cmd := os.Getenv("TF_ACC_K8S_CMD")
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 
 	fmt.Println("HOST      =", os.Getenv("TF_ACC_K8S_HOST"))
 	fmt.Println("CA prefix =", os.Getenv("TF_ACC_K8S_CA")[:20], "…")
 	fmt.Println("CMD       =", os.Getenv("TF_ACC_K8S_CMD"))
-	fmt.Println("RAW prefix=", os.Getenv("TF_ACC_KUBECONFIG_RAW")[:20], "…")
+	fmt.Println("RAW prefix=", os.Getenv("TF_ACC_KUBECONFIG")[:20], "…")
 
 	if host == "" || ca == "" || cmd == "" || raw == "" {
-		t.Fatal("TF_ACC_K8S_HOST, TF_ACC_K8S_CA, TF_ACC_K8S_CMD and TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_K8S_HOST, TF_ACC_K8S_CA, TF_ACC_K8S_CMD and TF_ACC_KUBECONFIG must be set")
 	}
 
 	ns := fmt.Sprintf("basic-exec-ns-%d", time.Now().UnixNano()%1000000)
@@ -119,9 +119,9 @@ YAML
 func TestAccManifestResource_KubeconfigRaw(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	ns := fmt.Sprintf("kubeconfig-raw-ns-%d", time.Now().UnixNano()%1000000)
@@ -177,57 +177,10 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 `, namespace)
-}
-
-func TestAccManifestResource_KubeconfigFile(t *testing.T) {
-	t.Parallel()
-
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
-	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
-	}
-
-	// Write kubeconfig to temp file
-	tmpfile, err := os.CreateTemp("", "kubeconfig*.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.Remove(tmpfile.Name())
-
-	if _, err := tmpfile.Write([]byte(raw)); err != nil {
-		t.Fatal(err)
-	}
-	if err := tmpfile.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	ns := fmt.Sprintf("kubeconfig-file-ns-%d", time.Now().UnixNano()%1000000)
-	k8sClient := testhelpers.CreateK8sClient(t, raw)
-
-	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
-			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
-		},
-		Steps: []resource.TestStep{
-			{
-				Config: testAccManifestConfigKubeconfigFile(ns),
-				ConfigVariables: config.Variables{
-					"kubeconfig_path": config.StringVariable(tmpfile.Name()),
-					"namespace":       config.StringVariable(ns),
-				},
-				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("k8sconnect_manifest.test_file", "yaml_body", testNamespaceYAMLFile(ns)),
-					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_file", "id"),
-					testhelpers.CheckNamespaceExists(k8sClient, ns),
-				),
-			},
-		},
-		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, ns),
-	})
 }
 
 func testNamespaceYAMLFile(namespace string) string {
@@ -238,39 +191,13 @@ metadata:
 `, namespace)
 }
 
-func testAccManifestConfigKubeconfigFile(namespace string) string {
-	return fmt.Sprintf(`
-variable "kubeconfig_path" {
-  type = string
-}
-variable "namespace" {
-  type = string
-}
-
-provider "k8sconnect" {}
-
-resource "k8sconnect_manifest" "test_file" {
-  yaml_body = <<YAML
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: %s
-YAML
-
-  cluster_connection = {
-    kubeconfig_file = var.kubeconfig_path
-  }
-}
-`, namespace)
-}
-
 // Test different resource types
 func TestAccManifestResource_Pod(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	ns := fmt.Sprintf("pod-test-ns-%d", time.Now().UnixNano()%1000000)
@@ -337,7 +264,7 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -356,7 +283,7 @@ spec:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
   
   depends_on = [k8sconnect_manifest.test_namespace]
@@ -368,9 +295,9 @@ YAML
 func TestAccManifestResource_DefaultNamespaceInference(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Skip("TF_ACC_KUBECONFIG_RAW not set, skipping")
+		t.Skip("TF_ACC_KUBECONFIG not set, skipping")
 	}
 
 	cmName := fmt.Sprintf("acctest-config-%d", time.Now().UnixNano()%1000000)
@@ -431,7 +358,7 @@ data:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 `, cmName)
@@ -440,9 +367,9 @@ YAML
 func TestAccManifestResource_DeferredAuthWithComputedEnvVars(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	ns := fmt.Sprintf("deferred-auth-ns-%d", time.Now().UnixNano()%1000000)
@@ -514,7 +441,7 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -532,7 +459,7 @@ data:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
     
     # This exec block contains env vars that are unknown during plan
     # They're harmless TEST_* vars that won't affect actual authentication

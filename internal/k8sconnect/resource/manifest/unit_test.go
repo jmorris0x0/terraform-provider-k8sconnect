@@ -52,8 +52,7 @@ HZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
 	conn := auth.ClusterConnectionModel{
 		Host:                 types.StringValue("https://test.example.com"),
 		ClusterCACertificate: types.StringValue(encodedCA),
-		KubeconfigFile:       types.StringNull(),
-		KubeconfigRaw:        types.StringNull(),
+		Kubeconfig:           types.StringNull(),
 		Context:              types.StringNull(),
 		Exec: &auth.ExecAuthModel{
 			APIVersion: types.StringValue("client.authentication.k8s.io/v1"),
@@ -183,8 +182,7 @@ func TestConvertObjectToConnectionModel(t *testing.T) {
 	attrTypes := map[string]attr.Type{
 		"host":                   types.StringType,
 		"cluster_ca_certificate": types.StringType,
-		"kubeconfig_file":        types.StringType,
-		"kubeconfig_raw":         types.StringType,
+		"kubeconfig":             types.StringType,
 		"context":                types.StringType,
 		"token":                  types.StringType,
 		"client_certificate":     types.StringType,
@@ -197,8 +195,7 @@ func TestConvertObjectToConnectionModel(t *testing.T) {
 	attrs := map[string]attr.Value{
 		"host":                   types.StringValue("https://test.example.com"),
 		"cluster_ca_certificate": types.StringValue("test-ca"),
-		"kubeconfig_file":        types.StringNull(),
-		"kubeconfig_raw":         types.StringNull(),
+		"kubeconfig":             types.StringNull(),
 		"context":                types.StringNull(),
 		"token":                  types.StringValue("test-token"),
 		"client_certificate":     types.StringNull(),

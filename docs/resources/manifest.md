@@ -48,8 +48,7 @@ Optional:
 - `exec` (Attributes) Configuration for exec-based authentication. (see [below for nested schema](#nestedatt--cluster_connection--exec))
 - `host` (String) The hostname (in form of URI) of the Kubernetes API server.
 - `insecure` (Boolean) Whether server should be accessed without verifying the TLS certificate.
-- `kubeconfig_file` (String) Path to the kubeconfig file.
-- `kubeconfig_raw` (String, Sensitive) Raw kubeconfig file content.
+- `kubeconfig` (String, Sensitive) Raw kubeconfig file content.
 - `proxy_url` (String) URL of the proxy to use for requests.
 - `token` (String, Sensitive) Token to authenticate to the Kubernetes API server.
 

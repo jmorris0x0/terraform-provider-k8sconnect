@@ -15,9 +15,9 @@ import (
 
 func TestExamples(t *testing.T) {
 	// Get kubeconfig from environment
-	kubeconfig := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	kubeconfig := os.Getenv("TF_ACC_KUBECONFIG")
 	if kubeconfig == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set for examples tests")
+		t.Fatal("TF_ACC_KUBECONFIG must be set for examples tests")
 	}
 
 	// Find all example directories
@@ -159,14 +159,14 @@ func writeTestFiles(t *testing.T, dir string, kubeconfig string) {
 	variables := `variable "cluster_connection" {
   description = "Kubernetes cluster connection"
   type = object({
-    kubeconfig_raw = string
+    kubeconfig = string
   })
 }`
 	os.WriteFile(filepath.Join(dir, "variables.tf"), []byte(variables), 0644)
 
 	// Write terraform.tfvars
 	tfvars := fmt.Sprintf(`cluster_connection = {
-  kubeconfig_raw = %q
+  kubeconfig = %q
 }`, kubeconfig)
 	os.WriteFile(filepath.Join(dir, "terraform.tfvars"), []byte(tfvars), 0644)
 }

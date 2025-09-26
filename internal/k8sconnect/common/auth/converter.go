@@ -23,8 +23,7 @@ func ObjectToConnectionModel(ctx context.Context, obj basetypes.ObjectValue) (Cl
 	// Basic fields
 	conn.Host = attrs["host"].(types.String)
 	conn.ClusterCACertificate = attrs["cluster_ca_certificate"].(types.String)
-	conn.KubeconfigFile = attrs["kubeconfig_file"].(types.String)
-	conn.KubeconfigRaw = attrs["kubeconfig_raw"].(types.String)
+	conn.Kubeconfig = attrs["kubeconfig"].(types.String)
 	conn.Context = attrs["context"].(types.String)
 	conn.Token = attrs["token"].(types.String)
 	conn.ClientCertificate = attrs["client_certificate"].(types.String)
@@ -71,8 +70,7 @@ func ConnectionToObject(ctx context.Context, conn ClusterConnectionModel) (types
 	attrs := map[string]attr.Value{
 		"host":                   conn.Host,
 		"cluster_ca_certificate": conn.ClusterCACertificate,
-		"kubeconfig_file":        conn.KubeconfigFile,
-		"kubeconfig_raw":         conn.KubeconfigRaw,
+		"kubeconfig":             conn.Kubeconfig,
 		"context":                conn.Context,
 		"token":                  conn.Token,
 		"client_certificate":     conn.ClientCertificate,
@@ -123,8 +121,7 @@ func GetConnectionAttributeTypes() map[string]attr.Type {
 	return map[string]attr.Type{
 		"host":                   types.StringType,
 		"cluster_ca_certificate": types.StringType,
-		"kubeconfig_file":        types.StringType,
-		"kubeconfig_raw":         types.StringType,
+		"kubeconfig":             types.StringType,
 		"context":                types.StringType,
 		"token":                  types.StringType,
 		"client_certificate":     types.StringType,

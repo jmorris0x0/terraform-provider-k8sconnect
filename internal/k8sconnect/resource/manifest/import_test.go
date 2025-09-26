@@ -19,9 +19,9 @@ import (
 func TestAccManifestResource_Import(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
@@ -93,7 +93,7 @@ metadata:
 YAML
   
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 `, namespaceName)
@@ -102,9 +102,9 @@ YAML
 func TestAccManifestResource_ImportWithManagedFields(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
@@ -180,7 +180,7 @@ resource "k8sconnect_manifest" "import_namespace" {
   YAML
   
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -203,7 +203,7 @@ resource "k8sconnect_manifest" "test_import" {
   YAML
   
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
   
   depends_on = [k8sconnect_manifest.import_namespace]

@@ -56,7 +56,7 @@ locals {
   }
   
   staging_connection = {
-    kubeconfig_raw = file("~/.kube/staging-config")
+    kubeconfig = file("~/.kube/staging-config")
     context        = "staging"
   }
 }
@@ -81,6 +81,15 @@ That's it. No provider aliases, no separate workspaces, no chicken-and-egg depen
 
 The provider supports three ways to connect to clusters:
 
+**Inline with token auth**
+```hcl
+cluster_connection = {
+  host                   = "https://k8s.example.com"
+  cluster_ca_certificate = file("ca.pem")
+  token                  = var.cluster_token
+}
+```
+
 **Inline with exec auth** (AWS EKS, GKE, etc.)
 ```hcl
 cluster_connection = {
@@ -94,18 +103,10 @@ cluster_connection = {
 }
 ```
 
-**Kubeconfig file**
+**kubeconfig**
 ```hcl
 cluster_connection = {
-  kubeconfig_file = "~/.kube/config"
-  context         = "production"
-}
-```
-
-**Raw kubeconfig** (CI-friendly)
-```hcl
-cluster_connection = {
-  kubeconfig_raw = var.kubeconfig_content
+  kubeconfig = var.kubeconfig_content
 }
 ```
 
@@ -128,7 +129,7 @@ resource "k8sconnect_manifest" "app" {
   yaml_body = each.value
   
   cluster_connection = {
-    kubeconfig_raw = var.kubeconfig
+    kubeconfig = var.kubeconfig
   }
 }
 ```

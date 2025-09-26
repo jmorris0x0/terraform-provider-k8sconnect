@@ -66,7 +66,7 @@ resource "k8sconnect_manifest" "app" {
   yaml_body = each.value
   
   cluster_connection = {
-    kubeconfig_raw = var.kubeconfig
+    kubeconfig = var.kubeconfig
   }
 }
 ```
@@ -119,7 +119,7 @@ resource "k8sconnect_manifest" "crds" {
   yaml_body = each.value
   
   cluster_connection = {
-    kubeconfig_raw = var.kubeconfig
+    kubeconfig = var.kubeconfig
   }
 }
 
@@ -134,7 +134,7 @@ resource "k8sconnect_manifest" "resources" {
   yaml_body = each.value
   
   cluster_connection = {
-    kubeconfig_raw = var.kubeconfig
+    kubeconfig = var.kubeconfig
   }
   
   depends_on = [k8sconnect_manifest.crds]
@@ -151,11 +151,11 @@ locals {
   # Define cluster connections
   clusters = {
     prod = {
-      kubeconfig_raw = var.prod_kubeconfig
+      kubeconfig = var.prod_kubeconfig
       context        = "prod-cluster"
     }
     staging = {
-      kubeconfig_raw = var.staging_kubeconfig
+      kubeconfig = var.staging_kubeconfig
       context        = "staging-cluster"
     }
   }

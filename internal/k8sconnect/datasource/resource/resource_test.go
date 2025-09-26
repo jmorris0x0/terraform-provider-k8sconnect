@@ -19,9 +19,9 @@ import (
 func TestAccResourceDataSource_basic(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	ns := fmt.Sprintf("ds-test-%d", time.Now().UnixNano()%1000000)
@@ -81,7 +81,7 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -98,7 +98,7 @@ data:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
   
   depends_on = [k8sconnect_manifest.namespace]
@@ -115,7 +115,7 @@ data "k8sconnect_resource" "test" {
   }
   
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
   
   depends_on = [k8sconnect_manifest.test]

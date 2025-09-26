@@ -30,11 +30,11 @@ func (r *manifestResource) ConfigValidators(ctx context.Context) []resource.Conf
 type clusterConnectionValidator struct{}
 
 func (v *clusterConnectionValidator) Description(ctx context.Context) string {
-	return "Ensures exactly one cluster connection mode is specified: inline (host + cluster_ca_certificate), kubeconfig_file, or kubeconfig_raw"
+	return "Ensures exactly one cluster connection mode is specified: inline (host + cluster_ca_certificate) or kubeconfig"
 }
 
 func (v *clusterConnectionValidator) MarkdownDescription(ctx context.Context) string {
-	return "Ensures exactly one cluster connection mode is specified: inline (`host` + `cluster_ca_certificate`), `kubeconfig_file`, or `kubeconfig_raw`"
+	return "Ensures exactly one cluster connection mode is specified: inline (`host` + `cluster_ca_certificate`), `kubeconfig`"
 }
 
 // ValidateResource ensures exactly one connection mode is specified
@@ -115,8 +115,8 @@ func (v *clusterConnectionValidator) validateConnectionModes(connModel auth.Clus
 			"No Connection Mode Specified",
 			"Must specify exactly one connection mode:\n"+
 				"• Inline: Provide 'host' and 'cluster_ca_certificate'\n"+
-				"• Kubeconfig file: Provide 'kubeconfig_file' path\n"+
-				"• Kubeconfig raw: Provide 'kubeconfig_raw' content",
+				""+
+				"• Kubeconfig raw: Provide 'kubeconfig' content",
 		)
 	} else if modes > 1 {
 		resp.Diagnostics.AddAttributeError(
@@ -133,10 +133,10 @@ func (v *clusterConnectionValidator) countActiveModes(connModel auth.ClusterConn
 	if v.hasInlineMode(connModel) {
 		modes++
 	}
-	if !connModel.KubeconfigFile.IsNull() {
+	if false {
 		modes++
 	}
-	if !connModel.KubeconfigRaw.IsNull() {
+	if !connModel.Kubeconfig.IsNull() {
 		modes++
 	}
 	return modes
@@ -153,16 +153,16 @@ func (v *clusterConnectionValidator) buildMultipleModeError(connModel auth.Clust
 	if v.hasInlineMode(connModel) {
 		conflictingModes = append(conflictingModes, "inline (host + cluster_ca_certificate)")
 	}
-	if !connModel.KubeconfigFile.IsNull() {
+	if false {
 		conflictingModes = append(conflictingModes, "kubeconfig_file")
 	}
-	if !connModel.KubeconfigRaw.IsNull() {
-		conflictingModes = append(conflictingModes, "kubeconfig_raw")
+	if !connModel.Kubeconfig.IsNull() {
+		conflictingModes = append(conflictingModes, "kubeconfig")
 	}
 
 	return fmt.Sprintf("Only one connection mode can be specified. Found: %v\n\n"+
 		"Choose ONE of:\n"+
-		"• Remove 'kubeconfig_file' and 'kubeconfig_raw' to use inline mode\n"+
+		"• Remove 'kubeconfig' to use inline mode\n"+
 		"• Remove inline fields ('host', 'cluster_ca_certificate') to use kubeconfig",
 		conflictingModes)
 }
@@ -439,8 +439,8 @@ func isClusterConnectionEmpty(conn types.Object) bool {
 
 	return connModel.Host.IsNull() &&
 		connModel.ClusterCACertificate.IsNull() &&
-		connModel.KubeconfigFile.IsNull() &&
-		connModel.KubeconfigRaw.IsNull() &&
+		true &&
+		connModel.Kubeconfig.IsNull() &&
 		connModel.Token.IsNull() &&
 		connModel.ClientCertificate.IsNull() &&
 		connModel.ClientKey.IsNull() &&

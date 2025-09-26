@@ -26,11 +26,8 @@ func TestIsClusterConnectionEmpty(t *testing.T) {
 		{"cluster_ca_certificate only", auth.ClusterConnectionModel{
 			ClusterCACertificate: types.StringValue("cert-bytes"),
 		}, false},
-		{"kubeconfig_file only", auth.ClusterConnectionModel{
-			KubeconfigFile: types.StringValue("/path/to/config"),
-		}, false},
-		{"kubeconfig_raw only", auth.ClusterConnectionModel{
-			KubeconfigRaw: types.StringValue("raw-config"),
+		{"kubeconfig only", auth.ClusterConnectionModel{
+			Kubeconfig: types.StringValue("raw-config"),
 		}, false},
 		{"exec present", auth.ClusterConnectionModel{
 			Exec: &auth.ExecAuthModel{
@@ -42,8 +39,7 @@ func TestIsClusterConnectionEmpty(t *testing.T) {
 		{"all nulls", auth.ClusterConnectionModel{
 			Host:                 types.StringNull(),
 			ClusterCACertificate: types.StringNull(),
-			KubeconfigFile:       types.StringNull(),
-			KubeconfigRaw:        types.StringNull(),
+			Kubeconfig:           types.StringNull(),
 		}, true},
 	}
 
@@ -72,7 +68,7 @@ func TestConnectionModeDetection(t *testing.T) {
 	}
 	// multiple modes
 	multi := inline
-	multi.KubeconfigFile = types.StringValue("/tmp/kubeconfig")
+	multi.Kubeconfig = types.StringValue("foo")
 	if countModes(multi) != 2 {
 		t.Errorf("expected 2 active modes, got %d", countModes(multi))
 	}
@@ -133,10 +129,7 @@ func countModes(c auth.ClusterConnectionModel) int {
 	if hasInlineMode(c) {
 		n++
 	}
-	if !c.KubeconfigFile.IsNull() {
-		n++
-	}
-	if !c.KubeconfigRaw.IsNull() {
+	if !c.Kubeconfig.IsNull() {
 		n++
 	}
 	return n

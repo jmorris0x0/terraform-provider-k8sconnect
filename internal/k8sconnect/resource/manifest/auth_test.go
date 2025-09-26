@@ -21,7 +21,7 @@ func TestAccManifestResource_TokenAuth(t *testing.T) {
 	host := os.Getenv("TF_ACC_K8S_HOST")
 	ca := os.Getenv("TF_ACC_K8S_CA")
 	token := os.Getenv("TF_ACC_K8S_TOKEN")
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 
 	if token == "" {
 		t.Skip("TF_ACC_K8S_TOKEN not set")
@@ -85,7 +85,7 @@ func TestAccManifestResource_ClientCertAuth(t *testing.T) {
 	ca := os.Getenv("TF_ACC_K8S_CA")
 	cert := os.Getenv("TF_ACC_K8S_CLIENT_CERT")
 	key := os.Getenv("TF_ACC_K8S_CLIENT_KEY")
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 
 	if cert == "" || key == "" {
 		t.Skip("TF_ACC_K8S_CLIENT_CERT and TF_ACC_K8S_CLIENT_KEY not set")

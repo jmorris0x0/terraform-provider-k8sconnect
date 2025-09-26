@@ -165,14 +165,14 @@ testacc: oidc-setup
 	  TF_ACC_K8S_HOST="$$(cat $(TESTBUILD_DIR)/cluster-endpoint.txt)" \
 	  TF_ACC_K8S_CA="$$(base64 < $(TESTBUILD_DIR)/mock-ca.crt | tr -d '\n')" \
 	  TF_ACC_K8S_CMD="$(OIDC_DIR)/get-token.sh" \
-	  TF_ACC_KUBECONFIG_RAW="$$(cat $(TESTBUILD_DIR)/kubeconfig.yaml)" \
+	  TF_ACC_KUBECONFIG="$$(cat $(TESTBUILD_DIR)/kubeconfig.yaml)" \
 	  TF_ACC_K8S_TOKEN="$$(cat $(TESTBUILD_DIR)/sa-token.txt)" \
 	  TF_ACC_K8S_CLIENT_CERT="$$(base64 < $(TESTBUILD_DIR)/client.crt | tr -d '\n')" \
 	  TF_ACC_K8S_CLIENT_KEY="$$(base64 < $(TESTBUILD_DIR)/client.key | tr -d '\n')"; \
 	echo "TF_ACC_K8S_HOST=$$TF_ACC_K8S_HOST"; \
 	echo "TF_ACC_K8S_CA=$$(echo $$TF_ACC_K8S_CA | cut -c1-20)..."; \
 	echo "TF_ACC_K8S_CMD=$$TF_ACC_K8S_CMD"; \
-	echo "TF_ACC_KUBECONFIG_RAW=$$(echo $$TF_ACC_KUBECONFIG_RAW | cut -c1-20)..."; \
+	echo "TF_ACC_KUBECONFIG=$$(echo $$TF_ACC_KUBECONFIG | cut -c1-20)..."; \
 	echo "TF_ACC_K8S_TOKEN=$$(echo $$TF_ACC_K8S_TOKEN | cut -c1-20)..."; \
 	echo "TF_ACC_K8S_CLIENT_CERT=$$(echo $$TF_ACC_K8S_CLIENT_CERT | cut -c1-20)..."; \
 	echo "TF_ACC_K8S_CLIENT_KEY=$$(echo $$TF_ACC_K8S_CLIENT_KEY | cut -c1-20)..."; \
@@ -183,7 +183,7 @@ testacc: oidc-setup
 test-examples: oidc-setup install
 	@echo "📚 Testing examples directory..."
 	@cd test/examples && \
-	TF_ACC_KUBECONFIG_RAW="$$(cat ../../.testbuild/kubeconfig.yaml)" \
+	TF_ACC_KUBECONFIG="$$(cat ../../.testbuild/kubeconfig.yaml)" \
 	go test -v -timeout 30m
 
 .PHONY: clean
@@ -252,7 +252,7 @@ coverage: oidc-setup
 	  TF_ACC_K8S_HOST="$$(cat $(TESTBUILD_DIR)/cluster-endpoint.txt)" \
 	  TF_ACC_K8S_CA="$$(base64 < $(TESTBUILD_DIR)/mock-ca.crt | tr -d '\n')" \
 	  TF_ACC_K8S_CMD="$(OIDC_DIR)/get-token.sh" \
-	  TF_ACC_KUBECONFIG_RAW="$$(cat $(TESTBUILD_DIR)/kubeconfig.yaml)" \
+	  TF_ACC_KUBECONFIG="$$(cat $(TESTBUILD_DIR)/kubeconfig.yaml)" \
 	  TF_ACC_K8S_TOKEN="$$(cat $(TESTBUILD_DIR)/sa-token.txt)" \
 	  TF_ACC_K8S_CLIENT_CERT="$$(base64 < $(TESTBUILD_DIR)/client.crt | tr -d '\n')" \
 	  TF_ACC_K8S_CLIENT_KEY="$$(base64 < $(TESTBUILD_DIR)/client.key | tr -d '\n')" \

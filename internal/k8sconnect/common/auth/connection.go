@@ -18,8 +18,7 @@ import (
 type ClusterConnectionModel struct {
 	Host                 types.String   `tfsdk:"host"`
 	ClusterCACertificate types.String   `tfsdk:"cluster_ca_certificate"`
-	KubeconfigFile       types.String   `tfsdk:"kubeconfig_file"`
-	KubeconfigRaw        types.String   `tfsdk:"kubeconfig_raw"`
+	Kubeconfig           types.String   `tfsdk:"kubeconfig"`
 	Context              types.String   `tfsdk:"context"`
 	Token                types.String   `tfsdk:"token"`
 	ClientCertificate    types.String   `tfsdk:"client_certificate"`
@@ -38,19 +37,16 @@ type ExecAuthModel struct {
 }
 
 // CreateRESTConfig creates a Kubernetes REST config from the connection model.
-// It determines the appropriate method (inline, file, or raw kubeconfig) and returns
+// It determines the appropriate method (inline or kubeconfig) and returns
 // a configured rest.Config ready for creating a Kubernetes client.
 func CreateRESTConfig(ctx context.Context, conn ClusterConnectionModel) (*rest.Config, error) {
 	// Determine which connection method to use
 	if !conn.Host.IsNull() {
 		// Inline configuration
 		return createInlineConfig(conn)
-	} else if !conn.KubeconfigFile.IsNull() {
-		// File-based kubeconfig
-		return createFileConfig(conn)
-	} else if !conn.KubeconfigRaw.IsNull() {
-		// Raw kubeconfig
-		return createRawConfig(conn)
+	} else if !conn.Kubeconfig.IsNull() {
+		// Kubeconfig (raw content, use file() function to load from file)
+		return createKubeconfigConfig(conn)
 	}
 
 	return nil, fmt.Errorf("no connection configuration provided")
@@ -212,29 +208,9 @@ func configureProxy(config *rest.Config, conn ClusterConnectionModel) error {
 	return nil
 }
 
-// createFileConfig creates a REST config from kubeconfig file
-func createFileConfig(conn ClusterConnectionModel) (*rest.Config, error) {
-	kubeconfigPath := conn.KubeconfigFile.ValueString()
-	context := ""
-	if !conn.Context.IsNull() {
-		context = conn.Context.ValueString()
-	}
-
-	if context != "" {
-		// Load kubeconfig file and set context
-		clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-			&clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfigPath},
-			&clientcmd.ConfigOverrides{CurrentContext: context},
-		)
-		return clientConfig.ClientConfig()
-	}
-
-	return clientcmd.BuildConfigFromFlags("", kubeconfigPath)
-}
-
-// createRawConfig creates a REST config from raw kubeconfig data
-func createRawConfig(conn ClusterConnectionModel) (*rest.Config, error) {
-	kubeconfigData := []byte(conn.KubeconfigRaw.ValueString())
+// createKubeconfigConfig creates a REST config from kubeconfig data
+func createKubeconfigConfig(conn ClusterConnectionModel) (*rest.Config, error) {
+	kubeconfigData := []byte(conn.Kubeconfig.ValueString())
 
 	config, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigData)
 	if err != nil {
