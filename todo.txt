@@ -1,7 +1,7 @@
 CRITICAL BUGS & FIXES
 
 Easy:
-* Base64 cert handling: Better error message when cluster_ca_certificate isn't base64 encoded, or auto-detect both formats
+* Base64 cert handling: Better error message when cluster_ca_certificate isn't base64 encoded, or auto-detect both formats. The docs on the main page are inconsistent. Just autodetect is best, I think. Should pass all auth values through autodetect. Token, ca cert, etc. Add to docs.
 
 * Auth API versions: Handle both v1 and v1beta1. Change tests?
 

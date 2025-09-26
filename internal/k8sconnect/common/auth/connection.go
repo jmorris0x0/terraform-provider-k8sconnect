@@ -3,7 +3,6 @@ package auth
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -89,11 +88,11 @@ func configureTLS(config *rest.Config, conn ClusterConnectionModel) error {
 		return nil
 	}
 
-	// Handle CA certificate
+	// Handle CA certificate with auto-detection
 	if !conn.ClusterCACertificate.IsNull() {
-		caData, err := base64.StdEncoding.DecodeString(conn.ClusterCACertificate.ValueString())
+		caData, err := AutoDecodePEM(conn.ClusterCACertificate.ValueString(), "cluster_ca_certificate")
 		if err != nil {
-			return fmt.Errorf("failed to decode cluster_ca_certificate: %w", err)
+			return fmt.Errorf("failed to process cluster_ca_certificate: %w", err)
 		}
 		config.TLSClientConfig.CAData = caData
 		return nil
@@ -148,14 +147,16 @@ func configureClientCerts(config *rest.Config, conn ClusterConnectionModel) erro
 		return nil // No client cert auth
 	}
 
-	certData, err := base64.StdEncoding.DecodeString(conn.ClientCertificate.ValueString())
+	// Auto-decode certificate
+	certData, err := AutoDecodePEM(conn.ClientCertificate.ValueString(), "client_certificate")
 	if err != nil {
-		return fmt.Errorf("failed to decode client_certificate: %w", err)
+		return fmt.Errorf("failed to process client_certificate: %w", err)
 	}
 
-	keyData, err := base64.StdEncoding.DecodeString(conn.ClientKey.ValueString())
+	// Auto-decode key
+	keyData, err := AutoDecodePEM(conn.ClientKey.ValueString(), "client_key")
 	if err != nil {
-		return fmt.Errorf("failed to decode client_key: %w", err)
+		return fmt.Errorf("failed to process client_key: %w", err)
 	}
 
 	config.TLSClientConfig.CertData = certData
