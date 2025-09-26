@@ -105,6 +105,13 @@ cluster_connection = {
 
 **kubeconfig**
 ```hcl
+# From file
+cluster_connection = {
+  kubeconfig = file("~/.kube/config")
+  context    = "production"  # optional
+}
+
+# From variable (CI-friendly)
 cluster_connection = {
   kubeconfig = var.kubeconfig_content
 }

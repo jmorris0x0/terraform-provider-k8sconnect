@@ -9,6 +9,8 @@ Easy:
 
 * Make wait_for timeouts an error. Maybe increase the default timeout as well. 10 minutes?
 
+* error if more than one context in kubeconfig and context is not given. Plus test.
+
 
 Hard:
 * Fix flaky test: yaml-split-dependency-ordering fails due to CRD race condition. Add option to yaml_split to order CRD first? Similar issue with namespaces.
