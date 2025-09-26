@@ -23,6 +23,8 @@ https://registry.terraform.io/providers/gavinbunney/kubectl/latest/docs/resource
 https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/data-sources/resource
 GB doesn't have one!
 
+Solve import syntax issue for api version
+
 
 DOCUMENTATION & RELEASE
 

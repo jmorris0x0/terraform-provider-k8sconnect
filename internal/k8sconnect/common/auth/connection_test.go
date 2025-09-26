@@ -223,7 +223,7 @@ func TestValidateConnection_NoMode(t *testing.T) {
 
 func TestValidateConnection_MultipleModes(t *testing.T) {
 	conn := ClusterConnectionModel{
-		Host:           types.StringValue("https://test.example.com"),
+		Host:       types.StringValue("https://test.example.com"),
 		Kubeconfig: types.StringValue("/path/to/kubeconfig"),
 	}
 
@@ -291,7 +291,7 @@ func TestValidateConnection_ClientKeyWithoutCert(t *testing.T) {
 
 func TestValidateConnectionWithUnknowns_SkipsWhenUnknown(t *testing.T) {
 	conn := ClusterConnectionModel{
-		Host:           types.StringUnknown(),
+		Host:       types.StringUnknown(),
 		Kubeconfig: types.StringValue("/path/to/kubeconfig"),
 	}
 
