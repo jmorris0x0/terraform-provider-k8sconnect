@@ -92,79 +92,8 @@ func (d *resourceDataSource) Schema(ctx context.Context, req datasource.SchemaRe
 			"cluster_connection": schema.SingleNestedAttribute{
 				Required:    true,
 				Description: "Cluster connection configuration",
-				Attributes: map[string]schema.Attribute{
-					"host": schema.StringAttribute{
-						Optional:    true,
-						Description: "The hostname (in form of URI) of the Kubernetes API server.",
-					},
-					"cluster_ca_certificate": schema.StringAttribute{
-						Optional:    true,
-						Sensitive:   true,
-						Description: "Root certificate bundle for TLS authentication. Accepts PEM format or base64-encoded PEM - automatically detected.",
-					},
-					"kubeconfig_file": schema.StringAttribute{
-						Optional:    true,
-						Description: "Path to the kubeconfig file.",
-					},
-					"kubeconfig_raw": schema.StringAttribute{
-						Optional:    true,
-						Sensitive:   true,
-						Description: "Raw kubeconfig file content.",
-					},
-					"context": schema.StringAttribute{
-						Optional:    true,
-						Description: "Context to use from the kubeconfig.",
-					},
-					"token": schema.StringAttribute{
-						Optional:    true,
-						Sensitive:   true,
-						Description: "Token to authenticate to the Kubernetes API server.",
-					},
-					"client_certificate": schema.StringAttribute{
-						Optional:    true,
-						Sensitive:   true,
-						Description: "Client certificate for TLS authentication. Accepts PEM format or base64-encoded PEM - automatically detected.",
-					},
-					"client_key": schema.StringAttribute{
-						Optional:    true,
-						Sensitive:   true,
-						Description: "Client certificate key for TLS authentication. Accepts PEM format or base64-encoded PEM - automatically detected.",
-					},
-					"insecure": schema.BoolAttribute{
-						Optional:    true,
-						Description: "Whether server should be accessed without verifying the TLS certificate.",
-					},
-					"proxy_url": schema.StringAttribute{
-						Optional:    true,
-						Description: "URL of the proxy to use for requests.",
-					},
-					"exec": schema.SingleNestedAttribute{
-						Optional:    true,
-						Description: "Configuration for exec-based authentication.",
-						Attributes: map[string]schema.Attribute{
-							"api_version": schema.StringAttribute{
-								Required:    true,
-								Description: "API version to use when encoding the ExecCredentials resource.",
-							},
-							"command": schema.StringAttribute{
-								Required:    true,
-								Description: "Command to execute.",
-							},
-							"args": schema.ListAttribute{
-								Optional:    true,
-								ElementType: types.StringType,
-								Description: "Arguments to pass when executing the plugin.",
-							},
-							"env": schema.MapAttribute{
-								Optional:    true,
-								ElementType: types.StringType,
-								Description: "Environment variables to set when executing the plugin.",
-							},
-						},
-					},
-				},
+				Attributes:  auth.GetConnectionSchemaForDataSource(),
 			},
-
 			// Outputs
 			"manifest": schema.StringAttribute{
 				Computed:    true,
