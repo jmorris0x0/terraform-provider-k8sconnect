@@ -64,80 +64,6 @@ func (d *resourceDataSource) Configure(ctx context.Context, req datasource.Confi
 }
 
 func (d *resourceDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
-	// Copy the connection schema attributes from manifest resource
-	// For now, define them here - later we can extract to a shared function
-	connectionAttrs := map[string]schema.Attribute{
-		"host": schema.StringAttribute{
-			Optional:    true,
-			Description: "The hostname (in form of URI) of the Kubernetes API server.",
-		},
-		"cluster_ca_certificate": schema.StringAttribute{
-			Optional:    true,
-			Sensitive:   true,
-			Description: "PEM-encoded root certificate bundle for TLS authentication.",
-		},
-		"kubeconfig_file": schema.StringAttribute{
-			Optional:    true,
-			Description: "Path to the kubeconfig file.",
-		},
-		"kubeconfig_raw": schema.StringAttribute{
-			Optional:    true,
-			Sensitive:   true,
-			Description: "Raw kubeconfig file content.",
-		},
-		"context": schema.StringAttribute{
-			Optional:    true,
-			Description: "Context to use from the kubeconfig.",
-		},
-		"token": schema.StringAttribute{
-			Optional:    true,
-			Sensitive:   true,
-			Description: "Token to authenticate to the Kubernetes API server.",
-		},
-		"client_certificate": schema.StringAttribute{
-			Optional:    true,
-			Sensitive:   true,
-			Description: "PEM-encoded client certificate for TLS authentication.",
-		},
-		"client_key": schema.StringAttribute{
-			Optional:    true,
-			Sensitive:   true,
-			Description: "PEM-encoded client certificate key for TLS authentication.",
-		},
-		"insecure": schema.BoolAttribute{
-			Optional:    true,
-			Description: "Whether server should be accessed without verifying the TLS certificate.",
-		},
-		"proxy_url": schema.StringAttribute{
-			Optional:    true,
-			Description: "URL of the proxy to use for requests.",
-		},
-		"exec": schema.SingleNestedAttribute{
-			Optional:    true,
-			Description: "Configuration for exec-based authentication.",
-			Attributes: map[string]schema.Attribute{
-				"api_version": schema.StringAttribute{
-					Required:    true,
-					Description: "API version to use when encoding the ExecCredentials resource.",
-				},
-				"command": schema.StringAttribute{
-					Required:    true,
-					Description: "Command to execute.",
-				},
-				"args": schema.ListAttribute{
-					Optional:    true,
-					ElementType: types.StringType,
-					Description: "Arguments to pass when executing the plugin.",
-				},
-				"env": schema.MapAttribute{
-					Optional:    true,
-					ElementType: types.StringType,
-					Description: "Environment variables to set when executing the plugin.",
-				},
-			},
-		},
-	}
-
 	resp.Schema = schema.Schema{
 		Description: "Reads an existing Kubernetes resource from the cluster",
 		Attributes: map[string]schema.Attribute{
@@ -166,9 +92,8 @@ func (d *resourceDataSource) Schema(ctx context.Context, req datasource.SchemaRe
 			"cluster_connection": schema.SingleNestedAttribute{
 				Required:    true,
 				Description: "Cluster connection configuration",
-				Attributes:  connectionAttrs,
+				Attributes:  auth.GetConnectionSchemaForDataSource(),
 			},
-
 			// Outputs
 			"manifest": schema.StringAttribute{
 				Computed:    true,

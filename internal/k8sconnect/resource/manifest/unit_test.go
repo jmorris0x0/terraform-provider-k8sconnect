@@ -12,6 +12,20 @@ import (
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 )
 
+const (
+	testCACert = `-----BEGIN CERTIFICATE-----
+MIIBtest
+-----END CERTIFICATE-----`
+
+	testClientCert = `-----BEGIN CERTIFICATE-----
+MIIBtest
+-----END CERTIFICATE-----`
+
+	testClientKey = `-----BEGIN PRIVATE KEY-----
+MIIBtest
+-----END PRIVATE KEY-----`
+)
+
 func TestCreateK8sClient_ExecAuth(t *testing.T) {
 	// Create a test CA certificate PEM
 	testCAPEM := `-----BEGIN CERTIFICATE-----
@@ -38,8 +52,7 @@ HZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
 	conn := auth.ClusterConnectionModel{
 		Host:                 types.StringValue("https://test.example.com"),
 		ClusterCACertificate: types.StringValue(encodedCA),
-		KubeconfigFile:       types.StringNull(),
-		KubeconfigRaw:        types.StringNull(),
+		Kubeconfig:           types.StringNull(),
 		Context:              types.StringNull(),
 		Exec: &auth.ExecAuthModel{
 			APIVersion: types.StringValue("client.authentication.k8s.io/v1"),
@@ -85,7 +98,7 @@ HZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
 func TestCreateRESTConfig_TokenAuth(t *testing.T) {
 	conn := auth.ClusterConnectionModel{
 		Host:                 types.StringValue("https://test.example.com"),
-		ClusterCACertificate: types.StringValue(base64.StdEncoding.EncodeToString([]byte("test-ca"))),
+		ClusterCACertificate: types.StringValue(base64.StdEncoding.EncodeToString([]byte(testCACert))),
 		Token:                types.StringValue("test-bearer-token"),
 	}
 
@@ -102,9 +115,9 @@ func TestCreateRESTConfig_TokenAuth(t *testing.T) {
 func TestCreateRESTConfig_ClientCertAuth(t *testing.T) {
 	conn := auth.ClusterConnectionModel{
 		Host:                 types.StringValue("https://test.example.com"),
-		ClusterCACertificate: types.StringValue(base64.StdEncoding.EncodeToString([]byte("test-ca"))),
-		ClientCertificate:    types.StringValue(base64.StdEncoding.EncodeToString([]byte("test-cert"))),
-		ClientKey:            types.StringValue(base64.StdEncoding.EncodeToString([]byte("test-key"))),
+		ClusterCACertificate: types.StringValue(base64.StdEncoding.EncodeToString([]byte(testCACert))),
+		ClientCertificate:    types.StringValue(base64.StdEncoding.EncodeToString([]byte(testClientCert))),
+		ClientKey:            types.StringValue(base64.StdEncoding.EncodeToString([]byte(testClientKey))),
 	}
 
 	config, err := auth.CreateRESTConfig(context.Background(), conn)
@@ -112,10 +125,10 @@ func TestCreateRESTConfig_ClientCertAuth(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if string(config.TLSClientConfig.CertData) != "test-cert" {
+	if string(config.TLSClientConfig.CertData) != testClientCert {
 		t.Error("cert data mismatch")
 	}
-	if string(config.TLSClientConfig.KeyData) != "test-key" {
+	if string(config.TLSClientConfig.KeyData) != testClientKey {
 		t.Error("key data mismatch")
 	}
 }
@@ -140,7 +153,7 @@ func TestCreateRESTConfig_Insecure(t *testing.T) {
 func TestCreateRESTConfig_NoAuth(t *testing.T) {
 	conn := auth.ClusterConnectionModel{
 		Host:                 types.StringValue("https://test.example.com"),
-		ClusterCACertificate: types.StringValue(base64.StdEncoding.EncodeToString([]byte("test-ca"))),
+		ClusterCACertificate: types.StringValue(base64.StdEncoding.EncodeToString([]byte(testCACert))),
 	}
 
 	_, err := auth.CreateRESTConfig(context.Background(), conn)
@@ -169,8 +182,7 @@ func TestConvertObjectToConnectionModel(t *testing.T) {
 	attrTypes := map[string]attr.Type{
 		"host":                   types.StringType,
 		"cluster_ca_certificate": types.StringType,
-		"kubeconfig_file":        types.StringType,
-		"kubeconfig_raw":         types.StringType,
+		"kubeconfig":             types.StringType,
 		"context":                types.StringType,
 		"token":                  types.StringType,
 		"client_certificate":     types.StringType,
@@ -183,8 +195,7 @@ func TestConvertObjectToConnectionModel(t *testing.T) {
 	attrs := map[string]attr.Value{
 		"host":                   types.StringValue("https://test.example.com"),
 		"cluster_ca_certificate": types.StringValue("test-ca"),
-		"kubeconfig_file":        types.StringNull(),
-		"kubeconfig_raw":         types.StringNull(),
+		"kubeconfig":             types.StringNull(),
 		"context":                types.StringNull(),
 		"token":                  types.StringValue("test-token"),
 		"client_certificate":     types.StringNull(),

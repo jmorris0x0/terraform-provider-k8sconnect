@@ -89,7 +89,7 @@ jobs:
       - name: Run examples tests
         env:
           TF_ACC_TERRAFORM_VERSION: ${{ matrix.terraform }}
-          TF_ACC_KUBECONFIG_RAW: "$(cat .testbuild/kubeconfig.yaml)"
+          TF_ACC_KUBECONFIG: "$(cat .testbuild/kubeconfig.yaml)"
         run: make test-examples
 
       - name: Clean up K3d cluster

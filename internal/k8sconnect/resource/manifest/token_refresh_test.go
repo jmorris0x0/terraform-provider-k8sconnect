@@ -24,10 +24,10 @@ func TestAccManifestResource_ExecTokenRefresh(t *testing.T) {
 	host := os.Getenv("TF_ACC_K8S_HOST")
 	ca := os.Getenv("TF_ACC_K8S_CA")
 	cmd := os.Getenv("TF_ACC_K8S_CMD")
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 
 	if host == "" || ca == "" || cmd == "" || raw == "" {
-		t.Skip("TF_ACC_K8S_HOST, TF_ACC_K8S_CA, TF_ACC_K8S_CMD and TF_ACC_KUBECONFIG_RAW must be set")
+		t.Skip("TF_ACC_K8S_HOST, TF_ACC_K8S_CA, TF_ACC_K8S_CMD and TF_ACC_KUBECONFIG must be set")
 	}
 
 	ns := fmt.Sprintf("token-refresh-ns-%d", time.Now().UnixNano()%1000000)

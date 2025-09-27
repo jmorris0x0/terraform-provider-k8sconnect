@@ -33,15 +33,14 @@ Reads an existing Kubernetes resource from the cluster
 
 Optional:
 
-- `client_certificate` (String, Sensitive) PEM-encoded client certificate for TLS authentication.
-- `client_key` (String, Sensitive) PEM-encoded client certificate key for TLS authentication.
-- `cluster_ca_certificate` (String, Sensitive) PEM-encoded root certificate bundle for TLS authentication.
+- `client_certificate` (String, Sensitive) Client certificate for TLS authentication. Accepts PEM format or base64-encoded PEM - automatically detected.
+- `client_key` (String, Sensitive) Client certificate key for TLS authentication. Accepts PEM format or base64-encoded PEM - automatically detected.
+- `cluster_ca_certificate` (String, Sensitive) Root certificate bundle for TLS authentication. Accepts PEM format or base64-encoded PEM - automatically detected.
 - `context` (String) Context to use from the kubeconfig.
 - `exec` (Attributes) Configuration for exec-based authentication. (see [below for nested schema](#nestedatt--cluster_connection--exec))
 - `host` (String) The hostname (in form of URI) of the Kubernetes API server.
 - `insecure` (Boolean) Whether server should be accessed without verifying the TLS certificate.
-- `kubeconfig_file` (String) Path to the kubeconfig file.
-- `kubeconfig_raw` (String, Sensitive) Raw kubeconfig file content.
+- `kubeconfig` (String, Sensitive) Raw kubeconfig file content.
 - `proxy_url` (String) URL of the proxy to use for requests.
 - `token` (String, Sensitive) Token to authenticate to the Kubernetes API server.
 

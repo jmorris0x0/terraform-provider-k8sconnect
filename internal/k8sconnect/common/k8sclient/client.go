@@ -18,7 +18,6 @@ import (
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 // K8sClient abstracts operations against Kubernetes resources using client-go.
@@ -112,28 +111,6 @@ func NewDynamicK8sClient(config *rest.Config) (*DynamicK8sClient, error) {
 		fieldManager:   "k8sconnect",
 		forceConflicts: false,
 	}, nil
-}
-
-// NewDynamicK8sClientFromKubeconfigFile creates a client from a kubeconfig file path.
-func NewDynamicK8sClientFromKubeconfigFile(kubeconfigPath, context string) (*DynamicK8sClient, error) {
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build config from kubeconfig file %q: %w", kubeconfigPath, err)
-	}
-
-	if context != "" {
-		// Load kubeconfig file and set context
-		clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-			&clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfigPath},
-			&clientcmd.ConfigOverrides{CurrentContext: context},
-		)
-		config, err = clientConfig.ClientConfig()
-		if err != nil {
-			return nil, fmt.Errorf("failed to build config for context %q: %w", context, err)
-		}
-	}
-
-	return NewDynamicK8sClient(config)
 }
 
 func (d *DynamicK8sClient) SetFieldManager(name string) K8sClient {

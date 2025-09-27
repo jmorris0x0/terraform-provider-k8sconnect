@@ -1,13 +1,13 @@
 CRITICAL BUGS & FIXES
 
 Easy:
-* Base64 cert handling: Better error message when cluster_ca_certificate isn't base64 encoded, or auto-detect both formats
-
 * Auth API versions: Handle both v1 and v1beta1. Change tests?
 
 * Add url attribute to yaml_split to load from the web url, OCI, and git repo/path/branch.
 
 * Make wait_for timeouts an error. Maybe increase the default timeout as well. 10 minutes?
+
+* error if more than one context in kubeconfig and context is not given. Plus test.
 
 
 Hard:
@@ -22,6 +22,8 @@ https://registry.terraform.io/providers/gavinbunney/kubectl/latest/docs/resource
 * Finish MVP of existing resource datasource and add wait_for
 https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/data-sources/resource
 GB doesn't have one!
+
+Solve import syntax issue for api version
 
 
 DOCUMENTATION & RELEASE
@@ -50,8 +52,6 @@ Find a way to test multicluster
 Test very large CRDs. This was an issue in other providers. might need chunking.
 Delayed plan application: Handle out-of-date plans
 Add examples tests for datasource
-On front page, Raw kubeconfig (CI-friendly) add the context var. and mark # Optional so that people understand you can use a multi context file.
-Also do above for file in same example.
 Use latest for all example images. Otherwise just making toil for later.
 
 FEATURE ADDITIONS
@@ -110,13 +110,4 @@ hcl2yaml main.tf > manifests.yaml
 Could probably knock out an MVP using the Terraform provider schema definitions to reverse the translation.
 
 
-k8sconnect_manifest.namespace_k8sconnect: Creating...
-╷
-│ Error: Preparation Failed
-│
-│   with k8sconnect_manifest.namespace_k8sconnect,
-│   on main.tf line 64, in resource "k8sconnect_manifest" "namespace_k8sconnect":
-│   64: resource "k8sconnect_manifest" "namespace_k8sconnect" {
-│
-│ failed to create Kubernetes client: failed to create REST config: failed to decode
-│ cluster_ca_certificate: illegal base64 data at input byte 0
+

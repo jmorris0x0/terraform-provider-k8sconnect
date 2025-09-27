@@ -287,7 +287,7 @@ func (p *OperationPipeline) UpdateProjection(rc *ResourceContext) error {
 // isConnectionEmpty checks if connection is empty
 func (p *OperationPipeline) isConnectionEmpty(conn auth.ClusterConnectionModel) bool {
 	return conn.Host.IsNull() &&
-		conn.KubeconfigFile.IsNull() &&
-		conn.KubeconfigRaw.IsNull() &&
+		conn.Kubeconfig.IsNull() &&
+		conn.Kubeconfig.IsNull() &&
 		(conn.Exec == nil || conn.Exec.APIVersion.IsNull())
 }

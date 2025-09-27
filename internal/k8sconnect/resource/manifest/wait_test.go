@@ -29,9 +29,9 @@ import (
 func TestAccManifestResource_NoWaitNoStatus(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	ns := fmt.Sprintf("no-wait-ns-%d", time.Now().UnixNano()%1000000)
@@ -92,7 +92,7 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -111,7 +111,7 @@ YAML
   # No wait_for = no status tracking
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
   
   depends_on = [k8sconnect_manifest.test_namespace]
@@ -139,7 +139,7 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -159,7 +159,7 @@ YAML
   # No wait_for = no status tracking
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
   
   depends_on = [k8sconnect_manifest.test_namespace]
@@ -171,9 +171,9 @@ YAML
 func TestAccManifestResource_WaitForFieldExists(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
@@ -223,7 +223,7 @@ YAML
   }
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -237,9 +237,9 @@ output "namespace_ready" {
 func TestAccManifestResource_WaitForFieldValue(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
@@ -289,7 +289,7 @@ YAML
   }
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 `, name)
@@ -299,9 +299,9 @@ YAML
 func TestAccManifestResource_WaitForCondition(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	ns := fmt.Sprintf("wait-cond-ns-%d", time.Now().UnixNano()%1000000)
@@ -351,7 +351,7 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -387,7 +387,7 @@ YAML
   }
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
   
   depends_on = [k8sconnect_manifest.test_namespace]
@@ -399,9 +399,9 @@ YAML
 func TestAccManifestResource_WaitForPVCBinding(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	ns := fmt.Sprintf("wait-pvc-ns-%d", time.Now().UnixNano()%1000000)
@@ -450,7 +450,7 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -473,7 +473,7 @@ spec:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -502,7 +502,7 @@ YAML
   }
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 
   depends_on = [k8sconnect_manifest.pv, k8sconnect_manifest.test_namespace]
@@ -515,9 +515,9 @@ YAML
 func TestAccManifestResource_ExplicitRollout(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	ns := fmt.Sprintf("explicit-rollout-ns-%d", time.Now().UnixNano()%1000000)
@@ -566,7 +566,7 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -600,7 +600,7 @@ YAML
   }
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
   
   depends_on = [k8sconnect_manifest.test_namespace]
@@ -613,9 +613,9 @@ YAML
 func TestAccManifestResource_NoDefaultRollout(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	ns := fmt.Sprintf("no-rollout-ns-%d", time.Now().UnixNano()%1000000)
@@ -664,7 +664,7 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -695,7 +695,7 @@ YAML
   # NO wait_for - should complete quickly without waiting
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
   
   depends_on = [k8sconnect_manifest.test_namespace]
@@ -707,9 +707,9 @@ YAML
 func TestAccManifestResource_WaitTimeout(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	ns := fmt.Sprintf("wait-timeout-ns-%d", time.Now().UnixNano()%1000000)
@@ -761,7 +761,7 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -782,7 +782,7 @@ YAML
   }
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
   
   depends_on = [k8sconnect_manifest.test_namespace]
@@ -794,9 +794,9 @@ YAML
 func TestAccManifestResource_WaitForMultipleValues(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	ns := fmt.Sprintf("multi-wait-ns-%d", time.Now().UnixNano()%1000000)
@@ -845,7 +845,7 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -881,7 +881,7 @@ YAML
   }
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
   
   depends_on = [k8sconnect_manifest.test_namespace]
@@ -893,9 +893,9 @@ YAML
 func TestAccManifestResource_StatefulSetRollout(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	ns := fmt.Sprintf("sts-rollout-ns-%d", time.Now().UnixNano()%1000000)
@@ -944,7 +944,7 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -979,7 +979,7 @@ YAML
   }
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
   
   depends_on = [k8sconnect_manifest.test_namespace]
@@ -991,9 +991,9 @@ YAML
 func TestAccManifestResource_EmptyWaitForNoStatus(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	ns := fmt.Sprintf("empty-wait-ns-%d", time.Now().UnixNano()%1000000)
@@ -1063,7 +1063,7 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -1095,7 +1095,7 @@ YAML
   wait_for = {}
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
   
   depends_on = [k8sconnect_manifest.test_namespace]
@@ -1107,9 +1107,9 @@ YAML
 func TestAccManifestResource_StatusStability(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	ns := fmt.Sprintf("status-stable-ns-%d", time.Now().UnixNano()%1000000)
@@ -1188,7 +1188,7 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -1223,7 +1223,7 @@ YAML
   }
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
   
   depends_on = [k8sconnect_manifest.test_namespace]
@@ -1239,9 +1239,9 @@ output "stable_replicas" {
 func TestAccManifestResource_StatusRemovedWhenWaitRemoved(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	ns := fmt.Sprintf("status-removal-ns-%d", time.Now().UnixNano()%1000000)
@@ -1304,7 +1304,7 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -1333,7 +1333,7 @@ YAML
   }
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
   
   depends_on = [k8sconnect_manifest.test_namespace]
@@ -1361,7 +1361,7 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -1386,7 +1386,7 @@ YAML
   # wait_for removed - status should be cleared
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
   
   depends_on = [k8sconnect_manifest.test_namespace]
@@ -1398,9 +1398,9 @@ YAML
 func TestAccManifestResource_InvalidFieldPath(t *testing.T) {
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	ns := fmt.Sprintf("invalid-path-ns-%d", time.Now().UnixNano()%1000000)
@@ -1451,7 +1451,7 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -1472,7 +1472,7 @@ YAML
   }
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
   
   depends_on = [k8sconnect_manifest.test_namespace]
@@ -1487,9 +1487,9 @@ func TestAccManifestResource_StatusExternalUpdate(t *testing.T) {
 
 	t.Parallel()
 
-	raw := os.Getenv("TF_ACC_KUBECONFIG_RAW")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG_RAW must be set")
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
 	ns := fmt.Sprintf("status-update-%d", time.Now().UnixNano()%1000000)
@@ -1580,7 +1580,7 @@ metadata:
 YAML
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
 }
 
@@ -1607,7 +1607,7 @@ YAML
   }
 
   cluster_connection = {
-    kubeconfig_raw = var.raw
+    kubeconfig = var.raw
   }
   
   depends_on = [k8sconnect_manifest.test_namespace]

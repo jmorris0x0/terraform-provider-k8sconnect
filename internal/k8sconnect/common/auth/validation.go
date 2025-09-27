@@ -11,9 +11,8 @@ func ValidateConnection(ctx context.Context, conn ClusterConnectionModel) error 
 	// Check for inline mode (host-based)
 	hasInline := !conn.Host.IsNull()
 
-	// Check for kubeconfig modes
-	hasFile := !conn.KubeconfigFile.IsNull()
-	hasRaw := !conn.KubeconfigRaw.IsNull()
+	// Check for kubeconfig mode
+	hasKubeconfig := !conn.Kubeconfig.IsNull()
 
 	// Count active modes
 	modeCount := 0
@@ -24,19 +23,14 @@ func ValidateConnection(ctx context.Context, conn ClusterConnectionModel) error 
 		activeModes = append(activeModes, "inline")
 	}
 
-	if hasFile {
+	if hasKubeconfig {
 		modeCount++
-		activeModes = append(activeModes, "kubeconfig_file")
-	}
-
-	if hasRaw {
-		modeCount++
-		activeModes = append(activeModes, "kubeconfig_raw")
+		activeModes = append(activeModes, "kubeconfig")
 	}
 
 	// Validate exactly one mode is specified
 	if modeCount == 0 {
-		return fmt.Errorf("no cluster connection mode specified: provide host (inline), kubeconfig_file, or kubeconfig_raw")
+		return fmt.Errorf("no cluster connection mode specified: provide host (inline) or kubeconfig")
 	} else if modeCount > 1 {
 		return fmt.Errorf("multiple cluster connection modes specified (%v): use only one", activeModes)
 	}
@@ -120,8 +114,7 @@ func ValidateConnectionWithUnknowns(ctx context.Context, conn ClusterConnectionM
 	// Skip validation if key fields are unknown
 	hasUnknownFields := conn.Host.IsUnknown() ||
 		conn.ClusterCACertificate.IsUnknown() ||
-		conn.KubeconfigFile.IsUnknown() ||
-		conn.KubeconfigRaw.IsUnknown()
+		conn.Kubeconfig.IsUnknown()
 
 	if hasUnknownFields {
 		// Can't validate mode count with unknown values
