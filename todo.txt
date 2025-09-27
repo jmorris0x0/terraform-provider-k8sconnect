@@ -9,6 +9,7 @@ Easy:
 
 * error if more than one context in kubeconfig and context is not given. Plus test.
 
+* Make import datasource use the same pipeline as the manifest?
 
 Hard:
 * Fix flaky test: yaml-split-dependency-ordering fails due to CRD race condition. Add option to yaml_split to order CRD first? Similar issue with namespaces.
