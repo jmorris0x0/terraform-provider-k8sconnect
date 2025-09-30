@@ -1,15 +1,15 @@
 CRITICAL BUGS & FIXES
 
 Easy:
-* Auth API versions: Handle both v1 and v1beta1. Change tests?
-
-* Add url attribute to yaml_split to load from the web url, OCI, and git repo/path/branch.
+* Add url attribute to yaml_split to load from the web url, OCI, and git repo/path/branch. Won't do. There is already an http datasource. Just make an example that uses it.
 
 * Make wait_for timeouts an error. Maybe increase the default timeout as well. 10 minutes?
 
-* error if more than one context in kubeconfig and context is not given. Plus test.
+* error if more than one context in kubeconfig and context is not given. Plus test. Using current context or first context is dangerous.
 
 * Make import datasource use the same pipeline as the manifest?
+
+* The readme example: "The yaml_split data source creates stable IDs like deployment.my-app.nginx and service.my-app.nginx, preventing unnecessary resource recreation when manifests are reordered." Can these collide? Do we need more entroy? Should it really be deployment.app.nginx based on the example? Make a runnable example maybe? what if two yaml_split resources put their output into one map? Would there be dupes?
 
 Hard:
 * Fix flaky test: yaml-split-dependency-ordering fails due to CRD race condition. Add option to yaml_split to order CRD first? Similar issue with namespaces.
@@ -24,7 +24,16 @@ https://registry.terraform.io/providers/gavinbunney/kubectl/latest/docs/resource
 https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/data-sources/resource
 GB doesn't have one!
 
-Solve import syntax issue for api version
+* Solve import syntax issue for api version
+GB does this:
+   # Import the my-namespace Namespace
+   terraform import kubectl_manifest.my-namespace v1//Namespace//my-namespace
+
+   # Import the certmanager Issuer CRD named cluster-selfsigned-issuer-root-ca from the my-namespace namespace
+   $ terraform import -provider kubectl module.kubernetes.kubectl_manifest.crd-example certmanager.k8s.io/v1alpha1//Issuer//cluster-selfsigned-issuer-root-ca//my-namespace
+
+* UX of yaml split needs a lot of work. It works as an MVP but the existing filtering by regex is quite awkward. API needs redesign before alpha. Don't even start with the patch resource until this one is totally polished. At minimum, expose yaml fields as attributes so people can filter. That's easy. Consider adding a filter field of some kind.
+67b38a3f-368f-461d-ad12-ffc7b541cac3
 
 
 DOCUMENTATION & RELEASE
@@ -36,6 +45,12 @@ Add token example: To connection methods section
 Fill community standards: Issue templates, contributing guide, etc.
 Example improvements: Show both inline and template file patterns
 Don't need the first load balancer example. Find a different one or delete.
+
+This docstring is wrong:
+"cluster_connection (Attributes) Cluster connection configuration for this resource. If not specified, uses the provider-level connection."
+
+Nested Schema for wait_for: Needs love
+
 
 TESTING GAPS
 
@@ -58,7 +73,7 @@ Use latest for all example images. Otherwise just making toil for later.
 FEATURE ADDITIONS
 
 Custom ownership annotations: Solve cross-state conflicts
-Full JSON manifest: Make available as computed attribute
+Full JSON manifest: Make available as computed attribute. I think this is table stakes for parity. At least one of the other two have this. Take a look.
 Status field guardrails: Warn if field doesn't start with "status"
 Adding a patch resource would be a big differentiator. Not sure if wise though.
 
@@ -74,8 +89,9 @@ Lock down the interface before launch: The attributes and behavior I ship with w
 https://registry.terraform.io/providers/gavinbunney/kubectl/latest/docs/resources/kubectl_manifest#attribute-reference
 https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/manifest
 GB has many yaml helper datasources. I just have one. Good design decsion? Or no?
+Canonicalize the YAML. Or did I do this already months ago?
 
-The readme example: "The yaml_split data source creates stable IDs like deployment.my-app.nginx and service.my-app.nginx, preventing unnecessary resource recreation when manifests are reordered." Can these collide? Do we need more entroy? Should it really be deployment.app.nginx based on the example? Make a runnable example maybe?
+
 
 
 CODE QUALITY
