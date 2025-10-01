@@ -106,7 +106,10 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 			},
 			"yaml_body": schema.StringAttribute{
 				Required:    true,
-				Description: "UTF‑8 encoded, single‑document Kubernetes YAML. Multi‑doc files will fail validation.",
+				Description: "UTF-8 encoded, single-document Kubernetes YAML. Multi-doc files will fail validation.",
+				Validators: []validator.String{
+					yamlValidator{singleDoc: true},
+				},
 			},
 			"cluster_connection": schema.SingleNestedAttribute{
 				Required:    true,
@@ -120,6 +123,9 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 			"delete_timeout": schema.StringAttribute{
 				Optional:    true,
 				Description: "How long to wait for a resource to be deleted before considering the deletion failed. Defaults to 300s (5 minutes).",
+				Validators: []validator.String{
+					durationValidator{},
+				},
 			},
 			"force_destroy": schema.BoolAttribute{
 				Optional:            true,
@@ -157,6 +163,7 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 								path.MatchRelative().AtParent().AtName("field_value"),
 								path.MatchRelative().AtParent().AtName("condition"),
 							),
+							jsonPathValidator{}, // Already added
 						},
 					},
 					"field_value": schema.MapAttribute{
@@ -168,6 +175,7 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 								path.MatchRelative().AtParent().AtName("field"),
 								path.MatchRelative().AtParent().AtName("condition"),
 							),
+							jsonPathMapKeysValidator{}, // New validator for map keys
 						},
 					},
 					"condition": schema.StringAttribute{
@@ -187,6 +195,9 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 					"timeout": schema.StringAttribute{
 						Optional:    true,
 						Description: "Maximum time to wait. Defaults to 10m. Format: '30s', '5m', '1h'",
+						Validators: []validator.String{
+							durationValidator{},
+						},
 					},
 				},
 			},

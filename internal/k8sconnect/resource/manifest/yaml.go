@@ -160,3 +160,8 @@ func (r *manifestResource) cleanObjectForExport(obj *unstructured.Unstructured) 
 func (r *manifestResource) getGVR(ctx context.Context, client k8sclient.K8sClient, obj *unstructured.Unstructured) (k8sschema.GroupVersionResource, error) {
 	return client.GetGVR(ctx, obj)
 }
+
+// ContainsInterpolation checks if YAML content contains Terraform interpolation syntax
+func ContainsInterpolation(content string) bool {
+	return strings.Contains(content, "${")
+}

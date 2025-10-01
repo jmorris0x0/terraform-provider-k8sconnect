@@ -1,8 +1,10 @@
+// internal/k8sconnect/common/auth/schema.go
 package auth
 
 import (
 	datasourceschema "github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	resourceschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -13,6 +15,9 @@ func GetConnectionSchemaForResource() map[string]resourceschema.Attribute {
 		"host": resourceschema.StringAttribute{
 			Optional:    true,
 			Description: "The hostname (in form of URI) of the Kubernetes API server.",
+			Validators: []validator.String{
+				urlValidator{},
+			},
 		},
 		"cluster_ca_certificate": resourceschema.StringAttribute{
 			Optional:    true,
@@ -23,6 +28,9 @@ func GetConnectionSchemaForResource() map[string]resourceschema.Attribute {
 			Optional:    true,
 			Sensitive:   true,
 			Description: "Raw kubeconfig file content.",
+			Validators: []validator.String{
+				kubeconfigValidator{},
+			},
 		},
 		"context": resourceschema.StringAttribute{
 			Optional:    true,
@@ -50,6 +58,9 @@ func GetConnectionSchemaForResource() map[string]resourceschema.Attribute {
 		"proxy_url": resourceschema.StringAttribute{
 			Optional:    true,
 			Description: "URL of the proxy to use for requests.",
+			Validators: []validator.String{
+				urlValidator{},
+			},
 		},
 		"exec": resourceschema.SingleNestedAttribute{
 			Optional:    true,

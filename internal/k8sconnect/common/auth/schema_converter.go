@@ -1,3 +1,4 @@
+// internal/k8sconnect/common/auth/schema_converter.go
 package auth
 
 import (
