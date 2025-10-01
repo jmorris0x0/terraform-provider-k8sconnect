@@ -157,6 +157,7 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 								path.MatchRelative().AtParent().AtName("field_value"),
 								path.MatchRelative().AtParent().AtName("condition"),
 							),
+							jsonPathValidator{},
 						},
 					},
 					"field_value": schema.MapAttribute{

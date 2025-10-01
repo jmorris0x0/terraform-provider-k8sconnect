@@ -8,7 +8,9 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"k8s.io/client-go/util/jsonpath"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 )
@@ -446,4 +448,30 @@ func isClusterConnectionEmpty(conn types.Object) bool {
 		connModel.ClientKey.IsNull() &&
 		connModel.ProxyURL.IsNull() &&
 		connModel.Exec == nil
+}
+
+type jsonPathValidator struct{}
+
+func (v jsonPathValidator) Description(ctx context.Context) string {
+	return "validates JSONPath syntax"
+}
+
+func (v jsonPathValidator) MarkdownDescription(ctx context.Context) string {
+	return "validates JSONPath syntax"
+}
+
+func (v jsonPathValidator) ValidateString(ctx context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+
+	fieldPath := req.ConfigValue.ValueString()
+	jp := jsonpath.New("validator")
+	if err := jp.Parse(fmt.Sprintf("{.%s}", fieldPath)); err != nil {
+		resp.Diagnostics.AddAttributeError(
+			req.Path,
+			"Invalid JSONPath Syntax",
+			fmt.Sprintf("The field path '%s' is not valid JSONPath: %s", fieldPath, err),
+		)
+	}
 }

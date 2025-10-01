@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -733,8 +734,7 @@ func TestAccManifestResource_WaitTimeout(t *testing.T) {
 					// Status should be null since field doesn't exist
 					resource.TestCheckNoResourceAttr("k8sconnect_manifest.test", "status"),
 				),
-				// Expect a warning but not an error
-				ExpectNonEmptyPlan: false,
+				ExpectError: regexp.MustCompile("Wait condition failed"),
 			},
 		},
 		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, ns, cmName),
@@ -1397,16 +1397,13 @@ YAML
 // TestAccManifestResource_InvalidFieldPath tests error handling for invalid field paths
 func TestAccManifestResource_InvalidFieldPath(t *testing.T) {
 	t.Parallel()
-
 	raw := os.Getenv("TF_ACC_KUBECONFIG")
 	if raw == "" {
 		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
-
 	ns := fmt.Sprintf("invalid-path-ns-%d", time.Now().UnixNano()%1000000)
 	cmName := fmt.Sprintf("invalid-path-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
-
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
 			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
@@ -1418,13 +1415,8 @@ func TestAccManifestResource_InvalidFieldPath(t *testing.T) {
 					"raw":       config.StringVariable(raw),
 					"namespace": config.StringVariable(ns),
 				},
-				// Should create resource but warn about invalid path
-				Check: resource.ComposeTestCheckFunc(
-					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
-					// Status should be null since field doesn't exist
-					resource.TestCheckNoResourceAttr("k8sconnect_manifest.test", "status"),
-				),
-				ExpectNonEmptyPlan: false,
+				// Should fail due to invalid JSONPath syntax
+				ExpectError: regexp.MustCompile("(?i)invalid.*path|parse error|unterminated"),
 			},
 		},
 		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, ns, cmName),
@@ -1467,7 +1459,7 @@ data:
 YAML
 
   wait_for = {
-    field = "status..invalid..path"  # Invalid JSONPath
+    field = "status.field["  # Actually invalid - unclosed bracket
     timeout = "5s"
   }
 
