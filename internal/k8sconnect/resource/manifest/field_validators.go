@@ -4,7 +4,6 @@ package manifest
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -57,23 +56,17 @@ func (v yamlValidator) MarkdownDescription(ctx context.Context) string {
 
 func (v yamlValidator) ValidateString(ctx context.Context, req validator.StringRequest, resp *validator.StringResponse) {
 	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
-		return // Skip validation for unknown/null values
+		return
 	}
 
 	value := req.ConfigValue.ValueString()
 
-	if v.singleDoc {
-		// Check for multi-doc separator
-		if strings.Contains(value, "\n---\n") || strings.HasPrefix(value, "---\n") {
-			resp.Diagnostics.AddAttributeError(
-				req.Path,
-				"Multiple Documents Not Supported",
-				"The YAML contains multiple documents (separated by ---). Only single-document YAML is supported.",
-			)
-			return
-		}
+	// Skip validation if YAML contains interpolations (will be resolved during apply)
+	if ContainsInterpolation(value) {
+		return
 	}
 
+	// Validate YAML syntax
 	var data interface{}
 	if err := yaml.Unmarshal([]byte(value), &data); err != nil {
 		resp.Diagnostics.AddAttributeError(

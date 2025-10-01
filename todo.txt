@@ -9,6 +9,8 @@ Easy:
 
 * The readme example: "The yaml_split data source creates stable IDs like deployment.my-app.nginx and service.my-app.nginx, preventing unnecessary resource recreation when manifests are reordered." Can these collide? Do we need more entroy? Should it really be deployment.app.nginx based on the example? Make a runnable example maybe? what if two yaml_split resources put their output into one map? Would there be dupes?
 
+For yaml interpolations like ${field}, how to handle yaml than contains ${}? Do I need some kind of $${}?
+
 Hard:
 * Fix flaky test: yaml-split-dependency-ordering fails due to CRD race condition. Add option to yaml_split to order CRD first? Similar issue with namespaces.
 
