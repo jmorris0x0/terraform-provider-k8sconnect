@@ -18,7 +18,7 @@ Applies a single‑document Kubernetes YAML manifest to a cluster, with per‑re
 ### Required
 
 - `cluster_connection` (Attributes) Cluster connection configuration for this resource. If not specified, uses the provider-level connection. (see [below for nested schema](#nestedatt--cluster_connection))
-- `yaml_body` (String) UTF‑8 encoded, single‑document Kubernetes YAML. Multi‑doc files will fail validation.
+- `yaml_body` (String) UTF-8 encoded, single-document Kubernetes YAML. Multi-doc files will fail validation.
 
 ### Optional
 
