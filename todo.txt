@@ -3,8 +3,6 @@ CRITICAL BUGS & FIXES
 Easy:
 * Add url attribute to yaml_split to load from the web url, OCI, and git repo/path/branch. Won't do. There is already an http datasource. Just make an example that uses it.
 
-* Make wait_for timeouts an error. Maybe increase the default timeout as well. 10 minutes?
-
 * error if more than one context in kubeconfig and context is not given. Plus test. Using current context or first context is dangerous.
 
 * Make import datasource use the same pipeline as the manifest?
