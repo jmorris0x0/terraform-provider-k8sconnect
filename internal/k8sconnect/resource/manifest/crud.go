@@ -28,9 +28,8 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 	// 2. Generate resource ID
 	data.ID = types.StringValue(r.generateID())
 
-	// 3. Setup pipeline and context
-	pipeline := NewOperationPipeline(r)
-	rc, err := pipeline.PrepareContext(ctx, &data, false)
+	// 3. Setup context (no more pipeline!)
+	rc, err := r.prepareContext(ctx, &data, false)
 	if err != nil {
 		resp.Diagnostics.AddError("Preparation Failed", err.Error())
 		return
@@ -53,13 +52,13 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 	r.readResourceAfterCreate(ctx, rc)
 
 	// 8. Execute wait conditions
-	waited := r.handleWaitExecution(ctx, pipeline, rc, resp, "created")
+	waited := r.handleWaitExecution(ctx, rc, resp, "created")
 
 	// 9. Update status field
 	fmt.Printf("Status BEFORE UpdateStatus - IsNull: %v, IsUnknown: %v\n",
 		rc.Data.Status.IsNull(), rc.Data.Status.IsUnknown())
 
-	if err := pipeline.UpdateStatus(rc, waited); err != nil {
+	if err := r.updateStatus(rc, waited); err != nil {
 		tflog.Warn(ctx, "Failed to update status", map[string]interface{}{"error": err.Error()})
 	}
 
@@ -67,7 +66,7 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		rc.Data.Status.IsNull(), rc.Data.Status.IsUnknown())
 
 	// 10. Update projection
-	if err := pipeline.UpdateProjection(rc); err != nil {
+	if err := r.updateProjection(rc); err != nil {
 		resp.Diagnostics.AddWarning("Projection Update Failed",
 			fmt.Sprintf("Resource created but projection update failed: %s", err))
 	}
@@ -90,9 +89,8 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	// 2. Setup pipeline and context
-	pipeline := NewOperationPipeline(r)
-	rc, err := pipeline.PrepareContext(ctx, &data, false)
+	// 2. Setup context (no more pipeline!)
+	rc, err := r.prepareContext(ctx, &data, false)
 	if err != nil {
 		resp.Diagnostics.AddError("Preparation Failed", err.Error())
 		return
@@ -144,9 +142,8 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	// 2. Setup pipeline and context
-	pipeline := NewOperationPipeline(r)
-	rc, err := pipeline.PrepareContext(ctx, &plan, false)
+	// 2. Setup context (no more pipeline!)
+	rc, err := r.prepareContext(ctx, &plan, false)
 	if err != nil {
 		resp.Diagnostics.AddError("Preparation Failed", err.Error())
 		return
@@ -168,13 +165,13 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 	})
 
 	// 5. Execute wait conditions
-	waited := r.handleWaitExecution(ctx, pipeline, rc, resp, "updated")
+	waited := r.handleWaitExecution(ctx, rc, resp, "updated")
 
 	// 6. Update status
-	pipeline.UpdateStatus(rc, waited)
+	r.updateStatus(rc, waited)
 
 	// 7. Update projection
-	if err := pipeline.UpdateProjection(rc); err != nil {
+	if err := r.updateProjection(rc); err != nil {
 		tflog.Warn(ctx, "Failed to update projection", map[string]interface{}{"error": err.Error()})
 	}
 
@@ -207,9 +204,8 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 		return
 	}
 
-	// 3. Setup pipeline and context
-	pipeline := NewOperationPipeline(r)
-	rc, err := pipeline.PrepareContext(ctx, &data, true)
+	// 3. Setup context (no more pipeline!)
+	rc, err := r.prepareContext(ctx, &data, true)
 	if err != nil {
 		resp.Diagnostics.AddError("Preparation Failed", err.Error())
 		return
