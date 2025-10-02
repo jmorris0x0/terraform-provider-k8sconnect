@@ -28,7 +28,7 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 	// 2. Generate resource ID
 	data.ID = types.StringValue(r.generateID())
 
-	// 3. Setup context (no more pipeline!)
+	// 3. Setup context
 	rc, err := r.prepareContext(ctx, &data, false)
 	if err != nil {
 		resp.Diagnostics.AddError("Preparation Failed", err.Error())
@@ -89,7 +89,7 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	// 2. Setup context (no more pipeline!)
+	// 2. Setup context
 	rc, err := r.prepareContext(ctx, &data, false)
 	if err != nil {
 		resp.Diagnostics.AddError("Preparation Failed", err.Error())
@@ -142,7 +142,7 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	// 2. Setup context (no more pipeline!)
+	// 2. Setup context
 	rc, err := r.prepareContext(ctx, &plan, false)
 	if err != nil {
 		resp.Diagnostics.AddError("Preparation Failed", err.Error())
@@ -204,7 +204,7 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 		return
 	}
 
-	// 3. Setup context (no more pipeline!)
+	// 3. Setup context
 	rc, err := r.prepareContext(ctx, &data, true)
 	if err != nil {
 		resp.Diagnostics.AddError("Preparation Failed", err.Error())
