@@ -110,9 +110,9 @@ func (r *manifestResource) readResourceAfterCreate(ctx context.Context, rc *Reso
 }
 
 // handleWaitExecution handles wait conditions and returns whether waiting occurred
-func (r *manifestResource) handleWaitExecution(ctx context.Context, pipeline *OperationPipeline, rc *ResourceContext, resp interface{}, action string) bool {
+func (r *manifestResource) handleWaitExecution(ctx context.Context, rc *ResourceContext, resp interface{}, action string) bool {
 	waited := false
-	if err := pipeline.ExecuteWait(rc); err != nil {
+	if err := r.executeWait(rc); err != nil {
 		fmt.Printf("Wait error: %v\n", err)
 		r.addWaitError(resp, action, err)
 		waited = true
@@ -122,7 +122,7 @@ func (r *manifestResource) handleWaitExecution(ctx context.Context, pipeline *Op
 		if respWithDiags, ok := resp.(interface{ Append(...interface{}) }); ok {
 			respWithDiags.Append(diags)
 		}
-		if !diags.HasError() && pipeline.hasActiveWaitConditions(waitConfig) {
+		if !diags.HasError() && r.hasActiveWaitConditions(waitConfig) {
 			waited = true
 			fmt.Printf("Parsed wait_for - Field: %v\n", waitConfig.Field)
 		}

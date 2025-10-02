@@ -1,4 +1,4 @@
-// internal/k8sconnect/resource/manifest/crud_pipeline.go
+// internal/k8sconnect/resource/manifest/crud_operations.go
 package manifest
 
 import (
@@ -28,18 +28,8 @@ type ResourceContext struct {
 	GVR        schema.GroupVersionResource
 }
 
-// OperationPipeline orchestrates common patterns across CRUD operations
-type OperationPipeline struct {
-	resource *manifestResource
-}
-
-// NewOperationPipeline creates a new pipeline instance
-func NewOperationPipeline(r *manifestResource) *OperationPipeline {
-	return &OperationPipeline{resource: r}
-}
-
-// PrepareContext sets up the ResourceContext with all common elements
-func (p *OperationPipeline) PrepareContext(
+// prepareContext sets up the ResourceContext with all common elements
+func (r *manifestResource) prepareContext(
 	ctx context.Context,
 	data *manifestResourceModel,
 	requireConnection bool,
@@ -51,7 +41,7 @@ func (p *OperationPipeline) PrepareContext(
 	}
 
 	// Step 1: Load and validate connection from resource data
-	conn, err := p.loadConnectionFromData(ctx, data, requireConnection)
+	conn, err := r.loadConnectionFromData(ctx, data, requireConnection)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +49,7 @@ func (p *OperationPipeline) PrepareContext(
 
 	// Step 2: Parse YAML (if present)
 	if !data.YAMLBody.IsNull() && data.YAMLBody.ValueString() != "" {
-		obj, err := p.resource.parseYAML(data.YAMLBody.ValueString())
+		obj, err := r.parseYAML(data.YAMLBody.ValueString())
 		if err != nil {
 			return nil, fmt.Errorf("invalid YAML: %w", err)
 		}
@@ -67,15 +57,15 @@ func (p *OperationPipeline) PrepareContext(
 	}
 
 	// Step 3: Create client (if we have a connection)
-	if !p.isConnectionEmpty(conn) {
+	if !r.isConnectionEmpty(conn) {
 		// Try clientFactory first, fall back to clientGetter
 		var client k8sclient.K8sClient
 		var err error
 
-		if p.resource.clientFactory != nil {
-			client, err = p.resource.clientFactory.GetClient(conn)
-		} else if p.resource.clientGetter != nil {
-			client, err = p.resource.clientGetter(conn)
+		if r.clientFactory != nil {
+			client, err = r.clientFactory.GetClient(conn)
+		} else if r.clientGetter != nil {
+			client, err = r.clientGetter(conn)
 		} else {
 			return nil, fmt.Errorf("no client factory or getter configured")
 		}
@@ -99,7 +89,7 @@ func (p *OperationPipeline) PrepareContext(
 }
 
 // loadConnectionFromData now just gets the connection from the resource data
-func (p *OperationPipeline) loadConnectionFromData(
+func (r *manifestResource) loadConnectionFromData(
 	ctx context.Context,
 	data *manifestResourceModel,
 	requireConnection bool,
@@ -115,7 +105,7 @@ func (p *OperationPipeline) loadConnectionFromData(
 	}
 
 	// Convert the connection object to our model
-	conn, err := p.resource.convertObjectToConnectionModel(ctx, data.ClusterConnection)
+	conn, err := r.convertObjectToConnectionModel(ctx, data.ClusterConnection)
 	if err != nil {
 		return auth.ClusterConnectionModel{}, fmt.Errorf("invalid connection: %w", err)
 	}
@@ -123,8 +113,8 @@ func (p *OperationPipeline) loadConnectionFromData(
 	return conn, nil
 }
 
-// ExecuteWait handles wait conditions
-func (p *OperationPipeline) ExecuteWait(rc *ResourceContext) error {
+// executeWait handles wait conditions
+func (r *manifestResource) executeWait(rc *ResourceContext) error {
 	if rc.Data.WaitFor.IsNull() {
 		return nil
 	}
@@ -136,25 +126,25 @@ func (p *OperationPipeline) ExecuteWait(rc *ResourceContext) error {
 	}
 
 	// Check if we have actual conditions
-	if !p.hasActiveWaitConditions(waitConfig) {
+	if !r.hasActiveWaitConditions(waitConfig) {
 		tflog.Debug(rc.Ctx, "wait_for configured but no active conditions")
 		return nil
 	}
 
 	// Execute the wait
-	return p.resource.waitForResource(rc.Ctx, rc.Client, rc.GVR, rc.Object, waitConfig)
+	return r.waitForResource(rc.Ctx, rc.Client, rc.GVR, rc.Object, waitConfig)
 }
 
 // hasActiveWaitConditions checks if there are real conditions to wait for
-func (p *OperationPipeline) hasActiveWaitConditions(waitConfig waitForModel) bool {
+func (r *manifestResource) hasActiveWaitConditions(waitConfig waitForModel) bool {
 	return (!waitConfig.Field.IsNull() && waitConfig.Field.ValueString() != "") ||
 		!waitConfig.FieldValue.IsNull() ||
 		(!waitConfig.Condition.IsNull() && waitConfig.Condition.ValueString() != "") ||
 		(!waitConfig.Rollout.IsNull() && waitConfig.Rollout.ValueBool())
 }
 
-// UpdateStatus updates the status field based on wait results
-func (p *OperationPipeline) UpdateStatus(rc *ResourceContext, waited bool) error {
+// updateStatus updates the status field based on wait results
+func (r *manifestResource) updateStatus(rc *ResourceContext, waited bool) error {
 	// No wait = no status
 	if !waited {
 		rc.Data.Status = types.DynamicNull()
@@ -215,8 +205,8 @@ func (p *OperationPipeline) UpdateStatus(rc *ResourceContext, waited bool) error
 	return nil
 }
 
-// UpdateProjection updates managed state projection and field ownership
-func (p *OperationPipeline) UpdateProjection(rc *ResourceContext) error {
+// updateProjection updates managed state projection and field ownership
+func (r *manifestResource) updateProjection(rc *ResourceContext) error {
 	// Get current state - but we may already have it from two-phase create
 	var currentObj *unstructured.Unstructured
 	if len(rc.Object.GetManagedFields()) > 0 {
@@ -285,7 +275,7 @@ func (p *OperationPipeline) UpdateProjection(rc *ResourceContext) error {
 }
 
 // isConnectionEmpty checks if connection is empty
-func (p *OperationPipeline) isConnectionEmpty(conn auth.ClusterConnectionModel) bool {
+func (r *manifestResource) isConnectionEmpty(conn auth.ClusterConnectionModel) bool {
 	return conn.Host.IsNull() &&
 		conn.Kubeconfig.IsNull() &&
 		conn.Kubeconfig.IsNull() &&
