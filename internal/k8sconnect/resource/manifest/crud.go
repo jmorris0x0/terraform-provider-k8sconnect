@@ -4,7 +4,6 @@ package manifest
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -15,8 +14,6 @@ import (
 )
 
 func (r *manifestResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	fmt.Printf("=== ACTUAL CREATE FUNCTION CALLED ===\n")
-
 	// 1. Setup and extract plan data
 	var data manifestResourceModel
 	diags := req.Plan.Get(ctx, &data)
@@ -74,8 +71,6 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 	// 11. Save state
 	fmt.Printf("FINAL Status before State.Set - IsNull: %v, IsUnknown: %v\n",
 		rc.Data.Status.IsNull(), rc.Data.Status.IsUnknown())
-	fmt.Printf("=== END Create ===\n\n")
-
 	diags = resp.State.Set(ctx, rc.Data)
 	resp.Diagnostics.Append(diags...)
 }
@@ -99,7 +94,7 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 	// 3. Read current state from Kubernetes
 	currentObj, err := rc.Client.Get(ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName())
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.IsNotFound(err) {
 			// Resource was deleted outside Terraform
 			resp.State.RemoveResource(ctx)
 			return
@@ -130,8 +125,6 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 }
 
 func (r *manifestResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	fmt.Printf("=== ACTUAL UPDATE FUNCTION CALLED ===\n")
-
 	// 1. Setup and extract state/plan data
 	var state, plan manifestResourceModel
 	diags := req.State.Get(ctx, &state)
