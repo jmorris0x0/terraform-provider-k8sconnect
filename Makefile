@@ -290,5 +290,6 @@ complexity: ## Check code complexity
 
 .PHONY: loc
 loc: ## Count lines of code by file type
+	#@go run github.com/boyter/scc/v3@latest . --exclude-dir=vendor,node_modules,.git --not-match=".*[Tt]est.*" --sort lines
 	@go run github.com/boyter/scc/v3@latest . --exclude-dir=vendor,node_modules,.git --sort lines
 

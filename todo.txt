@@ -94,9 +94,6 @@ https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resourc
 GB has many yaml helper datasources. I just have one. Good design decsion? Or no?
 Canonicalize the YAML. Or did I do this already months ago?
 
-
-
-
 CODE QUALITY
 
 Cyclomatic complexity: Reduce all functions to <15
