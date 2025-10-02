@@ -110,11 +110,11 @@ func (r *manifestResource) readResourceAfterCreate(ctx context.Context, rc *Reso
 }
 
 // handleWaitExecution handles wait conditions and returns whether waiting occurred
-func (r *manifestResource) handleWaitExecution(ctx context.Context, pipeline *OperationPipeline, rc *ResourceContext, resp interface{}, action string) bool {
+func (r *manifestResource) handleWaitExecution(ctx context.Context, rc *ResourceContext, resp interface{}, action string) bool {
 	waited := false
-	if err := pipeline.ExecuteWait(rc); err != nil {
+	if err := r.executeWait(rc); err != nil {
 		fmt.Printf("Wait error: %v\n", err)
-		r.addWaitWarning(resp, action, err)
+		r.addWaitError(resp, action, err)
 		waited = true
 	} else if !rc.Data.WaitFor.IsNull() {
 		var waitConfig waitForModel
@@ -122,7 +122,7 @@ func (r *manifestResource) handleWaitExecution(ctx context.Context, pipeline *Op
 		if respWithDiags, ok := resp.(interface{ Append(...interface{}) }); ok {
 			respWithDiags.Append(diags)
 		}
-		if !diags.HasError() && pipeline.hasActiveWaitConditions(waitConfig) {
+		if !diags.HasError() && r.hasActiveWaitConditions(waitConfig) {
 			waited = true
 			fmt.Printf("Parsed wait_for - Field: %v\n", waitConfig.Field)
 		}
@@ -238,12 +238,18 @@ func (r *manifestResource) addOperationError(resp interface{}, operation string,
 	}
 }
 
-func (r *manifestResource) addWaitWarning(resp interface{}, action string, err error) {
-	msg := fmt.Sprintf("Resource %s but wait failed: %s", action, err)
+func (r *manifestResource) addWaitError(resp interface{}, action string, err error) {
+	msg := fmt.Sprintf("Wait condition failed after resource was %s", action)
+	detailMsg := fmt.Sprintf("The resource was successfully %s, but the wait condition failed: %s\n\n"+
+		"You need to either:\n"+
+		"1. Increase the timeout if more time is needed\n"+
+		"2. Fix the underlying issue preventing the condition from being met\n"+
+		"3. Review your wait_for configuration", action, err)
+
 	if createResp, ok := resp.(*resource.CreateResponse); ok {
-		createResp.Diagnostics.AddWarning("Wait Failed", msg)
+		createResp.Diagnostics.AddError(msg, detailMsg)
 	} else if updateResp, ok := resp.(*resource.UpdateResponse); ok {
-		updateResp.Diagnostics.AddWarning("Wait Failed", msg)
+		updateResp.Diagnostics.AddError(msg, detailMsg)
 	}
 }
 

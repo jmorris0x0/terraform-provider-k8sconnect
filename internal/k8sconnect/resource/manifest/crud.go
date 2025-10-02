@@ -28,9 +28,8 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 	// 2. Generate resource ID
 	data.ID = types.StringValue(r.generateID())
 
-	// 3. Setup pipeline and context
-	pipeline := NewOperationPipeline(r)
-	rc, err := pipeline.PrepareContext(ctx, &data, false)
+	// 3. Setup context
+	rc, err := r.prepareContext(ctx, &data, false)
 	if err != nil {
 		resp.Diagnostics.AddError("Preparation Failed", err.Error())
 		return
@@ -53,19 +52,13 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 	r.readResourceAfterCreate(ctx, rc)
 
 	// 8. Execute wait conditions
-	fmt.Printf("=== Create BEFORE WAIT ===\n")
-	fmt.Printf("wait_for IsNull: %v\n", rc.Data.WaitFor.IsNull())
-
-	waited := r.handleWaitExecution(ctx, pipeline, rc, resp, "created")
-
-	fmt.Printf("=== Create AFTER WAIT ===\n")
-	fmt.Printf("Waited flag: %v\n", waited)
+	waited := r.handleWaitExecution(ctx, rc, resp, "created")
 
 	// 9. Update status field
 	fmt.Printf("Status BEFORE UpdateStatus - IsNull: %v, IsUnknown: %v\n",
 		rc.Data.Status.IsNull(), rc.Data.Status.IsUnknown())
 
-	if err := pipeline.UpdateStatus(rc, waited); err != nil {
+	if err := r.updateStatus(rc, waited); err != nil {
 		tflog.Warn(ctx, "Failed to update status", map[string]interface{}{"error": err.Error()})
 	}
 
@@ -73,7 +66,7 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		rc.Data.Status.IsNull(), rc.Data.Status.IsUnknown())
 
 	// 10. Update projection
-	if err := pipeline.UpdateProjection(rc); err != nil {
+	if err := r.updateProjection(rc); err != nil {
 		resp.Diagnostics.AddWarning("Projection Update Failed",
 			fmt.Sprintf("Resource created but projection update failed: %s", err))
 	}
@@ -96,40 +89,15 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	// 2. Parse connection and handle connection errors
-	conn, err := r.convertObjectToConnectionModel(ctx, data.ClusterConnection)
+	// 2. Setup context
+	rc, err := r.prepareContext(ctx, &data, false)
 	if err != nil {
-		// Connection error - likely removed resource
-		resp.State.RemoveResource(ctx)
+		resp.Diagnostics.AddError("Preparation Failed", err.Error())
 		return
 	}
 
-	// 3. Create client
-	client, err := r.clientGetter(conn)
-	if err != nil {
-		// Can't connect - resource might be gone
-		resp.State.RemoveResource(ctx)
-		return
-	}
-
-	// 4. Parse YAML to get object identity
-	obj, err := r.parseYAML(data.YAMLBody.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("Invalid YAML",
-			fmt.Sprintf("Failed to parse YAML from state: %s", err))
-		return
-	}
-
-	// 5. Get GVR
-	gvr, err := client.GetGVR(ctx, obj)
-	if err != nil {
-		resp.Diagnostics.AddError("Resource Discovery Failed",
-			fmt.Sprintf("Failed to get resource type: %s", err))
-		return
-	}
-
-	// 6. Read current state from Kubernetes
-	currentObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
+	// 3. Read current state from Kubernetes
+	currentObj, err := rc.Client.Get(ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName())
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			// Resource was deleted outside Terraform
@@ -137,26 +105,26 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 			return
 		}
 		resp.Diagnostics.AddError("Read Failed",
-			fmt.Sprintf("Failed to read %s: %s", obj.GetKind(), err))
+			fmt.Sprintf("Failed to read %s: %s", rc.Object.GetKind(), err))
 		return
 	}
 
-	// 7. Check ownership
-	if err := r.verifyOwnership(currentObj, data.ID.ValueString(), obj, resp); err != nil {
+	// 4. Check ownership
+	if err := r.verifyOwnership(currentObj, data.ID.ValueString(), rc.Object, resp); err != nil {
 		return
 	}
 
-	// 8. Update projection
-	if err := r.updateProjectionFromCurrent(ctx, &data, currentObj, obj); err != nil {
+	// 5. Update projection
+	if err := r.updateProjectionFromCurrent(ctx, &data, currentObj, rc.Object); err != nil {
 		resp.Diagnostics.AddError("Projection Failed",
 			fmt.Sprintf("Failed to project managed fields: %s", err))
 		return
 	}
 
-	// 9. Update field ownership
+	// 6. Update field ownership
 	r.updateFieldOwnershipData(ctx, &data, currentObj)
 
-	// 10. Save refreshed state
+	// 7. Save refreshed state
 	diags = resp.State.Set(ctx, &data)
 	resp.Diagnostics.Append(diags...)
 }
@@ -174,9 +142,8 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	// 2. Setup pipeline and context
-	pipeline := NewOperationPipeline(r)
-	rc, err := pipeline.PrepareContext(ctx, &plan, false)
+	// 2. Setup context
+	rc, err := r.prepareContext(ctx, &plan, false)
 	if err != nil {
 		resp.Diagnostics.AddError("Preparation Failed", err.Error())
 		return
@@ -198,13 +165,13 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 	})
 
 	// 5. Execute wait conditions
-	waited := r.handleWaitExecution(ctx, pipeline, rc, resp, "updated")
+	waited := r.handleWaitExecution(ctx, rc, resp, "updated")
 
 	// 6. Update status
-	pipeline.UpdateStatus(rc, waited)
+	r.updateStatus(rc, waited)
 
 	// 7. Update projection
-	if err := pipeline.UpdateProjection(rc); err != nil {
+	if err := r.updateProjection(rc); err != nil {
 		tflog.Warn(ctx, "Failed to update projection", map[string]interface{}{"error": err.Error()})
 	}
 
@@ -237,9 +204,8 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 		return
 	}
 
-	// 3. Setup pipeline and context
-	pipeline := NewOperationPipeline(r)
-	rc, err := pipeline.PrepareContext(ctx, &data, true)
+	// 3. Setup context
+	rc, err := r.prepareContext(ctx, &data, true)
 	if err != nil {
 		resp.Diagnostics.AddError("Preparation Failed", err.Error())
 		return

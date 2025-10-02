@@ -125,8 +125,15 @@ func (d *DynamicK8sClient) WithForceConflicts(force bool) K8sClient {
 
 // getResourceInterface returns the appropriate ResourceInterface, handling default namespace inference
 func (d *DynamicK8sClient) getResourceInterface(ctx context.Context, gvr schema.GroupVersionResource, obj *unstructured.Unstructured) (dynamic.ResourceInterface, error) {
-	// Use discovery to check if this resource type is namespaced
-	resourceList, err := d.discovery.ServerResourcesForGroupVersion(gvr.GroupVersion().String())
+	var resourceList *metav1.APIResourceList
+
+	// Wrap the discovery call in retry
+	err := withRetry(ctx, DefaultRetryConfig, func() error {
+		var err error
+		resourceList, err = d.discovery.ServerResourcesForGroupVersion(gvr.GroupVersion().String())
+		return err
+	})
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to get resource info: %w", err)
 	}
@@ -155,7 +162,15 @@ func (d *DynamicK8sClient) getResourceInterface(ctx context.Context, gvr schema.
 func (d *DynamicK8sClient) getResourceInterfaceByNamespace(ctx context.Context, gvr schema.GroupVersionResource, namespace string) (dynamic.ResourceInterface, error) {
 	// If namespace is empty, check if the resource is namespaced and use default
 	if namespace == "" {
-		resourceList, err := d.discovery.ServerResourcesForGroupVersion(gvr.GroupVersion().String())
+		var resourceList *metav1.APIResourceList
+
+		// Wrap the discovery call in retry
+		err := withRetry(ctx, DefaultRetryConfig, func() error {
+			var err error
+			resourceList, err = d.discovery.ServerResourcesForGroupVersion(gvr.GroupVersion().String())
+			return err
+		})
+
 		if err != nil {
 			return nil, fmt.Errorf("failed to get resource info: %w", err)
 		}
@@ -177,90 +192,108 @@ func (d *DynamicK8sClient) getResourceInterfaceByNamespace(ctx context.Context, 
 
 // Apply performs server-side apply on the given object.
 func (d *DynamicK8sClient) Apply(ctx context.Context, obj *unstructured.Unstructured, options ApplyOptions) error {
-	gvr, err := d.getGVR(ctx, obj)
-	if err != nil {
-		return fmt.Errorf("failed to determine GVR: %w", err)
-	}
+	return withRetry(ctx, DefaultRetryConfig, func() error {
+		gvr, err := d.getGVR(ctx, obj)
+		if err != nil {
+			return fmt.Errorf("failed to determine GVR: %w", err)
+		}
 
-	fieldManager := options.FieldManager
-	if fieldManager == "" {
-		fieldManager = d.fieldManager
-	}
+		fieldManager := options.FieldManager
+		if fieldManager == "" {
+			fieldManager = d.fieldManager
+		}
 
-	force := options.Force || d.forceConflicts
+		force := options.Force || d.forceConflicts
 
-	applyOpts := metav1.ApplyOptions{
-		FieldManager: fieldManager,
-		Force:        force,
-	}
+		applyOpts := metav1.ApplyOptions{
+			FieldManager: fieldManager,
+			Force:        force,
+		}
 
-	if len(options.DryRun) > 0 {
-		applyOpts.DryRun = options.DryRun
-	}
+		if len(options.DryRun) > 0 {
+			applyOpts.DryRun = options.DryRun
+		}
 
-	resource, err := d.getResourceInterface(ctx, gvr, obj)
-	if err != nil {
+		resource, err := d.getResourceInterface(ctx, gvr, obj)
+		if err != nil {
+			return err
+		}
+
+		_, err = resource.Apply(ctx, obj.GetName(), obj, applyOpts)
 		return err
-	}
-
-	_, err = resource.Apply(ctx, obj.GetName(), obj, applyOpts)
-	return err
+	})
 }
 
 // DryRunApply performs a dry-run server-side apply.
 func (d *DynamicK8sClient) DryRunApply(ctx context.Context, obj *unstructured.Unstructured, options ApplyOptions) (*unstructured.Unstructured, error) {
-	gvr, err := d.getGVR(ctx, obj)
-	if err != nil {
-		return nil, fmt.Errorf("failed to determine GVR: %w", err)
-	}
+	var result *unstructured.Unstructured
 
-	fieldManager := options.FieldManager
-	if fieldManager == "" {
-		fieldManager = d.fieldManager
-	}
+	err := withRetry(ctx, DefaultRetryConfig, func() error {
+		gvr, err := d.getGVR(ctx, obj)
+		if err != nil {
+			return fmt.Errorf("failed to determine GVR: %w", err)
+		}
 
-	force := options.Force || d.forceConflicts
+		fieldManager := options.FieldManager
+		if fieldManager == "" {
+			fieldManager = d.fieldManager
+		}
 
-	applyOpts := metav1.ApplyOptions{
-		FieldManager: fieldManager,
-		Force:        force,
-		DryRun:       []string{metav1.DryRunAll},
-	}
+		force := options.Force || d.forceConflicts
 
-	resource, err := d.getResourceInterface(ctx, gvr, obj)
-	if err != nil {
-		return nil, err
-	}
+		applyOpts := metav1.ApplyOptions{
+			FieldManager: fieldManager,
+			Force:        force,
+			DryRun:       []string{metav1.DryRunAll},
+		}
 
-	return resource.Apply(ctx, obj.GetName(), obj, applyOpts)
+		resource, err := d.getResourceInterface(ctx, gvr, obj)
+		if err != nil {
+			return err
+		}
+
+		result, err = resource.Apply(ctx, obj.GetName(), obj, applyOpts)
+		return err
+	})
+
+	return result, err
 }
 
 // Get retrieves an object from the cluster.
 func (d *DynamicK8sClient) Get(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string) (*unstructured.Unstructured, error) {
-	resource, err := d.getResourceInterfaceByNamespace(ctx, gvr, namespace)
-	if err != nil {
-		return nil, err
-	}
+	var result *unstructured.Unstructured
 
-	return resource.Get(ctx, name, metav1.GetOptions{})
+	err := withRetry(ctx, DefaultRetryConfig, func() error {
+		resource, err := d.getResourceInterfaceByNamespace(ctx, gvr, namespace)
+		if err != nil {
+			return err
+		}
+
+		result, err = resource.Get(ctx, name, metav1.GetOptions{})
+		return err
+	})
+
+	return result, err
 }
 
 // Delete removes an object from the cluster.
 func (d *DynamicK8sClient) Delete(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string, options DeleteOptions) error {
-	deleteOpts := metav1.DeleteOptions{}
-	if options.GracePeriodSeconds != nil {
-		deleteOpts.GracePeriodSeconds = options.GracePeriodSeconds
-	}
-	if options.PropagationPolicy != nil {
-		deleteOpts.PropagationPolicy = options.PropagationPolicy
-	}
+	return withRetry(ctx, DefaultRetryConfig, func() error {
+		deleteOpts := metav1.DeleteOptions{}
+		if options.GracePeriodSeconds != nil {
+			deleteOpts.GracePeriodSeconds = options.GracePeriodSeconds
+		}
+		if options.PropagationPolicy != nil {
+			deleteOpts.PropagationPolicy = options.PropagationPolicy
+		}
 
-	resource, err := d.getResourceInterfaceByNamespace(ctx, gvr, namespace)
-	if err != nil {
-		return err
-	}
+		resource, err := d.getResourceInterfaceByNamespace(ctx, gvr, namespace)
+		if err != nil {
+			return err
+		}
 
-	return resource.Delete(ctx, name, deleteOpts)
+		return resource.Delete(ctx, name, deleteOpts)
+	})
 }
 
 // GetGVR determines the GroupVersionResource for an unstructured object.
@@ -279,8 +312,15 @@ func (d *DynamicK8sClient) getGVR(ctx context.Context, obj *unstructured.Unstruc
 		"gvk": gvk.String(),
 	})
 
-	// Use discovery to map GVK to GVR - fresh call each time, simple and predictable
-	resources, err := d.discovery.ServerResourcesForGroupVersion(gvk.GroupVersion().String())
+	var resources *metav1.APIResourceList
+
+	// Wrap the discovery call in retry
+	err := withRetry(ctx, DefaultRetryConfig, func() error {
+		var err error
+		resources, err = d.discovery.ServerResourcesForGroupVersion(gvk.GroupVersion().String())
+		return err
+	})
+
 	if err != nil {
 		// Provide helpful error message for common scenarios
 		if d.isDiscoveryError(err) {
@@ -512,13 +552,16 @@ func (d *DynamicK8sClient) tryGetResource(ctx context.Context, gvr schema.GroupV
 
 func (d *DynamicK8sClient) Patch(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string, patchType types.PatchType, data []byte, options metav1.PatchOptions) (*unstructured.Unstructured, error) {
 	var result *unstructured.Unstructured
-	var err error
 
-	if namespace == "" {
-		result, err = d.client.Resource(gvr).Patch(ctx, name, patchType, data, options)
-	} else {
-		result, err = d.client.Resource(gvr).Namespace(namespace).Patch(ctx, name, patchType, data, options)
-	}
+	err := withRetry(ctx, DefaultRetryConfig, func() error {
+		var err error
+		if namespace == "" {
+			result, err = d.client.Resource(gvr).Patch(ctx, name, patchType, data, options)
+		} else {
+			result, err = d.client.Resource(gvr).Namespace(namespace).Patch(ctx, name, patchType, data, options)
+		}
+		return err
+	})
 
 	return result, err
 }
@@ -593,13 +636,16 @@ func (rw *resilientWatcher) run() {
 
 func (d *DynamicK8sClient) PatchStatus(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string, patchType types.PatchType, data []byte, options metav1.PatchOptions) (*unstructured.Unstructured, error) {
 	var result *unstructured.Unstructured
-	var err error
 
-	if namespace == "" {
-		result, err = d.client.Resource(gvr).Patch(ctx, name, patchType, data, options, "status")
-	} else {
-		result, err = d.client.Resource(gvr).Namespace(namespace).Patch(ctx, name, patchType, data, options, "status")
-	}
+	err := withRetry(ctx, DefaultRetryConfig, func() error {
+		var err error
+		if namespace == "" {
+			result, err = d.client.Resource(gvr).Patch(ctx, name, patchType, data, options, "status")
+		} else {
+			result, err = d.client.Resource(gvr).Namespace(namespace).Patch(ctx, name, patchType, data, options, "status")
+		}
+		return err
+	})
 
 	return result, err
 }
