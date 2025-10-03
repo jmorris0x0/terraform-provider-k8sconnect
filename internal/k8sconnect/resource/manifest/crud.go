@@ -50,8 +50,26 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 
 	// 8. Update projection BEFORE state save
 	if err := r.updateProjection(rc); err != nil {
-		resp.Diagnostics.AddWarning("Projection Update Failed",
-			fmt.Sprintf("Resource created but projection update failed: %s", err))
+		// Projection failed - save state with recovery flag (ADR-006)
+		tflog.Warn(ctx, "Projection calculation failed, will retry on next apply", map[string]interface{}{
+			"error": err.Error(),
+		})
+
+		// Set empty projection
+		rc.Data.ManagedStateProjection = types.StringValue("{}")
+
+		// Save state with pending projection flag in Private state
+		resp.Private.SetKey(ctx, "pending_projection", []byte("true"))
+		diags = resp.State.Set(ctx, rc.Data)
+		resp.Diagnostics.Append(diags...)
+
+		// Return error to stop CI/CD pipeline
+		resp.Diagnostics.AddError(
+			"Projection Calculation Failed",
+			fmt.Sprintf("Resource was created successfully but projection calculation failed: %s\n\n"+
+				"This is typically caused by network issues. Run 'terraform apply' again to complete the operation.", err),
+		)
+		return
 	}
 
 	// 9. SAVE STATE IMMEDIATELY after successful creation
@@ -63,20 +81,12 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 	waited := r.handleWaitExecution(ctx, rc, resp, "created")
 
 	// 11. Update status field
-	fmt.Printf("Status BEFORE UpdateStatus - IsNull: %v, IsUnknown: %v\n",
-		rc.Data.Status.IsNull(), rc.Data.Status.IsUnknown())
-
 	if err := r.updateStatus(rc, waited); err != nil {
 		tflog.Warn(ctx, "Failed to update status", map[string]interface{}{"error": err.Error()})
 	}
 
-	fmt.Printf("Status AFTER UpdateStatus - IsNull: %v, IsUnknown: %v\n",
-		rc.Data.Status.IsNull(), rc.Data.Status.IsUnknown())
-
 	// 12. Save state again with status update
 	if waited {
-		fmt.Printf("FINAL Status before State.Set - IsNull: %v, IsUnknown: %v\n",
-			rc.Data.Status.IsNull(), rc.Data.Status.IsUnknown())
 		diags = resp.State.Set(ctx, rc.Data)
 		resp.Diagnostics.Append(diags...)
 	}
@@ -89,6 +99,13 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
+	}
+
+	// 1a. Check for pending projection (opportunistic recovery - ADR-006)
+	pendingProjection, _ := req.Private.GetKey(ctx, "pending_projection")
+	hasPendingProjection := pendingProjection != nil && string(pendingProjection) == "true"
+	if hasPendingProjection {
+		tflog.Info(ctx, "Detected pending projection during refresh, will attempt recovery")
 	}
 
 	// 2. Setup context
@@ -116,11 +133,24 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	// 5. Update projection
+	// 5. Update projection (with opportunistic recovery)
 	if err := r.updateProjectionFromCurrent(ctx, &data, currentObj, rc.Object); err != nil {
-		resp.Diagnostics.AddError("Projection Failed",
-			fmt.Sprintf("Failed to project managed fields: %s", err))
-		return
+		// If we had a pending projection, keep the flag and continue (don't fail refresh)
+		if hasPendingProjection {
+			tflog.Warn(ctx, "Projection still failing during refresh, keeping pending flag", map[string]interface{}{
+				"error": err.Error(),
+			})
+			data.ManagedStateProjection = types.StringValue("{}")
+			resp.Private.SetKey(ctx, "pending_projection", []byte("true"))
+		} else {
+			resp.Diagnostics.AddError("Projection Failed",
+				fmt.Sprintf("Failed to project managed fields: %s", err))
+			return
+		}
+	} else if hasPendingProjection {
+		// Projection succeeded - clear the pending flag
+		tflog.Info(ctx, "Successfully recovered pending projection during refresh")
+		resp.Private.SetKey(ctx, "pending_projection", nil)
 	}
 
 	// 6. Update field ownership
@@ -140,6 +170,13 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
+	}
+
+	// 1a. Check for pending projection from previous failed apply (ADR-006)
+	pendingProjection, _ := req.Private.GetKey(ctx, "pending_projection")
+	hasPendingProjection := pendingProjection != nil && string(pendingProjection) == "true"
+	if hasPendingProjection {
+		tflog.Info(ctx, "Detected pending projection from previous apply, will retry")
 	}
 
 	// 2. Setup context
@@ -170,9 +207,33 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 	// 6. Update status
 	r.updateStatus(rc, waited)
 
-	// 7. Update projection
+	// 7. Update projection (with recovery logic - ADR-006)
 	if err := r.updateProjection(rc); err != nil {
-		tflog.Warn(ctx, "Failed to update projection", map[string]interface{}{"error": err.Error()})
+		tflog.Warn(ctx, "Projection update failed, will retry on next apply", map[string]interface{}{
+			"error": err.Error(),
+		})
+
+		// Set empty projection and keep/set pending flag
+		rc.Data.ManagedStateProjection = types.StringValue("{}")
+		resp.Private.SetKey(ctx, "pending_projection", []byte("true"))
+
+		// Save state before returning error
+		diags = resp.State.Set(ctx, rc.Data)
+		resp.Diagnostics.Append(diags...)
+
+		// Return error
+		resp.Diagnostics.AddError(
+			"Projection Calculation Failed",
+			fmt.Sprintf("Resource was updated but projection calculation failed: %s\n\n"+
+				"This is typically caused by network issues. Run 'terraform apply' again to complete the operation.", err),
+		)
+		return
+	}
+
+	// Projection succeeded - clear pending flag if it was set
+	if hasPendingProjection {
+		tflog.Info(ctx, "Successfully completed pending projection from previous apply")
+		resp.Private.SetKey(ctx, "pending_projection", nil)
 	}
 
 	// 8. Handle status transitions

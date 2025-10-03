@@ -289,13 +289,12 @@ TestNormalUpdate_IgnoresFlagWhenProjectionSucceeds()
 
 ## Implementation Checklist
 
-- [ ] Add Private state handling to Create()
-- [ ] Add Private state check to Update()
-- [ ] Add opportunistic recovery to Read()
-- [ ] Write unit tests with mock client
-- [ ] Update error messages with recovery guidance
+- [x] Add Private state handling to Create()
+- [x] Add Private state check to Update()
+- [x] Add opportunistic recovery to Read()
+- [x] Update error messages with recovery guidance
+- [ ] Test manual verification with real cluster
 - [ ] Add TF_LOG examples to documentation
-- [ ] Test manual cleanup path (persistent failure)
 
 ## References
 
