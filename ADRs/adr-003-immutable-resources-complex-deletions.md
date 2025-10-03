@@ -2,6 +2,7 @@
 
 ## Status
 Draft - Open Questions
+Only enhanced error messages implemented. No automatic recreation or dry-run detection.
 
 ## Context
 

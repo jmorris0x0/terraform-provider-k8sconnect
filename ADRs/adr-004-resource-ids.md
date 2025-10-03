@@ -1,7 +1,7 @@
 # ADR-004: Terraform Resource ID Strategy for Kubernetes Providers
 
 ## Status
-Proposed
+Accepted
 
 ## Context
 
