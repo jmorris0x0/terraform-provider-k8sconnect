@@ -35,12 +35,12 @@ type manifestResource struct {
 }
 
 type manifestResourceModel struct {
-	ID                         types.String  `tfsdk:"id"`
-	YAMLBody                   types.String  `tfsdk:"yaml_body"`
-	ClusterConnection          types.Object  `tfsdk:"cluster_connection"`
-	DeleteProtection           types.Bool    `tfsdk:"delete_protection"`
-	DeleteTimeout              types.String  `tfsdk:"delete_timeout"`
-	FieldOwnership             types.String  `tfsdk:"field_ownership"`
+	ID                     types.String  `tfsdk:"id"`
+	YAMLBody               types.String  `tfsdk:"yaml_body"`
+	ClusterConnection      types.Object  `tfsdk:"cluster_connection"`
+	DeleteProtection       types.Bool    `tfsdk:"delete_protection"`
+	DeleteTimeout          types.String  `tfsdk:"delete_timeout"`
+	FieldOwnership         types.String  `tfsdk:"field_ownership"`
 	ForceDestroy           types.Bool    `tfsdk:"force_destroy"`
 	ForceConflicts         types.Bool    `tfsdk:"force_conflicts"`
 	ManagedStateProjection types.String  `tfsdk:"managed_state_projection"`

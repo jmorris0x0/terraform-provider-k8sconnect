@@ -210,7 +210,7 @@ lint: vet
 		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | \
 			sh -s -- -b $$(go env GOPATH)/bin; \
 	fi
-	golangci-lint run --timeout=5m
+	golangci-lint run --timeout=5m --fix
 
 .PHONY: security-scan
 security-scan:
