@@ -71,10 +71,8 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 	}
 
 	// 12. Save state again with status update
-	if waited {
-		diags = resp.State.Set(ctx, rc.Data)
-		resp.Diagnostics.Append(diags...)
-	}
+	diags = resp.State.Set(ctx, rc.Data)
+	resp.Diagnostics.Append(diags...)
 }
 
 func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
