@@ -142,4 +142,31 @@ hcl2yaml main.tf > manifests.yaml
 Could probably knock out an MVP using the Terraform provider schema definitions to reverse the translation.
 
 
+  Critical Gaps to Address
 
+  Must-Have Before Release:
+
+  1. ignore_fields - kubectl has this, you don't
+    - Workaround for lifecycle.ignore_changes issues
+    - Essential for operator-managed fields
+    - High priority - this will be requested immediately
+  2. create_timeout and update_timeout
+    - You only have delete_timeout
+    - HashiCorp has all three
+    - Medium priority - needed for slow-applying resources
+  3. Import documentation
+    - Your format, examples, behavior
+    - The imported_without_annotations flag needs explanation
+    - Critical - people need to migrate existing resources
+
+  Should Consider:
+
+  4. field_manager_name - let users control the field manager identity
+    - Useful for debugging SSA conflicts
+    - HashiCorp has this, you auto-generate
+  5. sensitive_fields - mask arbitrary fields in state
+    - kubectl has this for custom masking
+    - You only mask connection credentials
+  6. override_namespace - apply to different namespace than YAML specifies
+    - kubectl has this
+    - Useful for multi-tenancy patterns

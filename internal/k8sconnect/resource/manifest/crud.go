@@ -48,10 +48,21 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 	// 7. Phase 2 - Read back to get managedFields
 	r.readResourceAfterCreate(ctx, rc)
 
-	// 8. Execute wait conditions
+	// 8. Update projection BEFORE state save
+	if err := r.updateProjection(rc); err != nil {
+		resp.Diagnostics.AddWarning("Projection Update Failed",
+			fmt.Sprintf("Resource created but projection update failed: %s", err))
+	}
+
+	// 9. SAVE STATE IMMEDIATELY after successful creation
+	// This ensures state is saved even if wait operations fail
+	diags = resp.State.Set(ctx, rc.Data)
+	resp.Diagnostics.Append(diags...)
+
+	// 10. Execute wait conditions (now AFTER state save)
 	waited := r.handleWaitExecution(ctx, rc, resp, "created")
 
-	// 9. Update status field
+	// 11. Update status field
 	fmt.Printf("Status BEFORE UpdateStatus - IsNull: %v, IsUnknown: %v\n",
 		rc.Data.Status.IsNull(), rc.Data.Status.IsUnknown())
 
@@ -62,17 +73,13 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 	fmt.Printf("Status AFTER UpdateStatus - IsNull: %v, IsUnknown: %v\n",
 		rc.Data.Status.IsNull(), rc.Data.Status.IsUnknown())
 
-	// 10. Update projection
-	if err := r.updateProjection(rc); err != nil {
-		resp.Diagnostics.AddWarning("Projection Update Failed",
-			fmt.Sprintf("Resource created but projection update failed: %s", err))
+	// 12. Save state again with status update
+	if waited {
+		fmt.Printf("FINAL Status before State.Set - IsNull: %v, IsUnknown: %v\n",
+			rc.Data.Status.IsNull(), rc.Data.Status.IsUnknown())
+		diags = resp.State.Set(ctx, rc.Data)
+		resp.Diagnostics.Append(diags...)
 	}
-
-	// 11. Save state
-	fmt.Printf("FINAL Status before State.Set - IsNull: %v, IsUnknown: %v\n",
-		rc.Data.Status.IsNull(), rc.Data.Status.IsUnknown())
-	diags = resp.State.Set(ctx, rc.Data)
-	resp.Diagnostics.Append(diags...)
 }
 
 func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
