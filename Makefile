@@ -210,7 +210,7 @@ lint: vet
 		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | \
 			sh -s -- -b $$(go env GOPATH)/bin; \
 	fi
-	golangci-lint run --timeout=5m
+	golangci-lint run --timeout=5m --fix
 
 .PHONY: security-scan
 security-scan:
@@ -290,5 +290,6 @@ complexity: ## Check code complexity
 
 .PHONY: loc
 loc: ## Count lines of code by file type
+	#@go run github.com/boyter/scc/v3@latest . --exclude-dir=vendor,node_modules,.git --not-match=".*[Tt]est.*" --sort lines
 	@go run github.com/boyter/scc/v3@latest . --exclude-dir=vendor,node_modules,.git --sort lines
 

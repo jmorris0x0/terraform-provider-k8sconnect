@@ -20,12 +20,13 @@ import (
 
 // ResourceContext contains everything needed for any CRUD operation
 type ResourceContext struct {
-	Ctx        context.Context
-	Data       *manifestResourceModel
-	Connection auth.ClusterConnectionModel
-	Client     k8sclient.K8sClient
-	Object     *unstructured.Unstructured
-	GVR        schema.GroupVersionResource
+	Ctx                        context.Context
+	Data                       *manifestResourceModel
+	Connection                 auth.ClusterConnectionModel
+	Client                     k8sclient.K8sClient
+	Object                     *unstructured.Unstructured
+	GVR                        schema.GroupVersionResource
+	ImportedWithoutAnnotations bool // Private state flag
 }
 
 // prepareContext sets up the ResourceContext with all common elements
@@ -264,12 +265,7 @@ func (r *manifestResource) updateProjection(rc *ResourceContext) error {
 		rc.Data.FieldOwnership = types.StringValue(string(ownershipJSON))
 	}
 
-	// Clear ImportedWithoutAnnotations after first update (existing code)
-	if !rc.Data.ImportedWithoutAnnotations.IsNull() && rc.Data.ImportedWithoutAnnotations.ValueBool() {
-		rc.Data.ImportedWithoutAnnotations = types.BoolNull()
-	} else if rc.Data.ImportedWithoutAnnotations.IsUnknown() {
-		rc.Data.ImportedWithoutAnnotations = types.BoolNull()
-	}
+	// Clear ImportedWithoutAnnotations after first update (will be handled by Update function)
 
 	return nil
 }

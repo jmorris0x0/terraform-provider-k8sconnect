@@ -57,7 +57,6 @@ func TestAccManifestResource_Import(t *testing.T) {
 				ImportStateId:     fmt.Sprintf("k3d-k8sconnect-test/%s/%s", "Namespace", namespaceName),
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
-					"imported_without_annotations",
 					"cluster_connection",
 					"yaml_body",
 					"managed_state_projection",
@@ -145,11 +144,10 @@ func TestAccManifestResource_ImportWithManagedFields(t *testing.T) {
 				ImportStateId:     fmt.Sprintf("k3d-k8sconnect-test/%s/ConfigMap/%s", ns, configMapName),
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
-					"imported_without_annotations", // This field is set during import
-					"cluster_connection",           // Import uses file, config uses raw
-					"yaml_body",                    // Formatting and annotations differ
-					"managed_state_projection",     // Import includes extra K8s fields
-					"delete_protection",            // Only in import, not in config
+					"cluster_connection",       // Import uses file, config uses raw
+					"yaml_body",                // Formatting and annotations differ
+					"managed_state_projection", // Import includes extra K8s fields
+					"delete_protection",        // Only in import, not in config
 					"force_conflicts",
 				},
 			},

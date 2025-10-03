@@ -42,3 +42,6 @@ Thumbs.db
 test/oidc-setup/ssl/
 .testbuild/
 bin/
+
+# AI
+.claude/

@@ -35,18 +35,17 @@ type manifestResource struct {
 }
 
 type manifestResourceModel struct {
-	ID                         types.String  `tfsdk:"id"`
-	YAMLBody                   types.String  `tfsdk:"yaml_body"`
-	ClusterConnection          types.Object  `tfsdk:"cluster_connection"`
-	DeleteProtection           types.Bool    `tfsdk:"delete_protection"`
-	DeleteTimeout              types.String  `tfsdk:"delete_timeout"`
-	FieldOwnership             types.String  `tfsdk:"field_ownership"`
-	ForceDestroy               types.Bool    `tfsdk:"force_destroy"`
-	ForceConflicts             types.Bool    `tfsdk:"force_conflicts"`
-	ManagedStateProjection     types.String  `tfsdk:"managed_state_projection"`
-	ImportedWithoutAnnotations types.Bool    `tfsdk:"imported_without_annotations"`
-	WaitFor                    types.Object  `tfsdk:"wait_for"`
-	Status                     types.Dynamic `tfsdk:"status"`
+	ID                     types.String  `tfsdk:"id"`
+	YAMLBody               types.String  `tfsdk:"yaml_body"`
+	ClusterConnection      types.Object  `tfsdk:"cluster_connection"`
+	DeleteProtection       types.Bool    `tfsdk:"delete_protection"`
+	DeleteTimeout          types.String  `tfsdk:"delete_timeout"`
+	FieldOwnership         types.String  `tfsdk:"field_ownership"`
+	ForceDestroy           types.Bool    `tfsdk:"force_destroy"`
+	ForceConflicts         types.Bool    `tfsdk:"force_conflicts"`
+	ManagedStateProjection types.String  `tfsdk:"managed_state_projection"`
+	WaitFor                types.Object  `tfsdk:"wait_for"`
+	Status                 types.Dynamic `tfsdk:"status"`
 }
 
 type waitForModel struct {
@@ -134,10 +133,6 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 			"managed_state_projection": schema.StringAttribute{
 				Computed:    true,
 				Description: "Internal field used to track managed fields for accurate drift detection.",
-			},
-			"imported_without_annotations": schema.BoolAttribute{
-				Computed:    true,
-				Description: "Internal flag tracking if resource was imported without ownership annotations",
 			},
 			"force_conflicts": schema.BoolAttribute{
 				Optional:    true,
