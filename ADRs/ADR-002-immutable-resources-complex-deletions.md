@@ -1,4 +1,4 @@
-# ADR-003: Handling Immutable Resources and Complex Deletions
+# ADR-002: Handling Immutable Resources and Complex Deletions
 
 ## Status
 Draft - Open Questions
