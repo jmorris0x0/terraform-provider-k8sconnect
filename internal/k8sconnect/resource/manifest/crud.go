@@ -242,7 +242,13 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 		tflog.Info(ctx, "Clearing status - wait_for was removed")
 	}
 
-	// 9. Save updated state
+	// 9. Clear ImportedWithoutAnnotations flag after first update
+	importedWithoutAnnotations, _ := req.Private.GetKey(ctx, "imported_without_annotations")
+	if importedWithoutAnnotations != nil && string(importedWithoutAnnotations) == "true" {
+		resp.Private.SetKey(ctx, "imported_without_annotations", nil)
+	}
+
+	// 10. Save updated state
 	diags = resp.State.Set(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
 }

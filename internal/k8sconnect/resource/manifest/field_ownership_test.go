@@ -302,7 +302,6 @@ func TestAccManifestResource_OwnershipImport(t *testing.T) {
 				ImportStateId:     fmt.Sprintf("k3d-k8sconnect-test/%s/ConfigMap/%s", ns, cmName),
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
-					"imported_without_annotations",
 					"cluster_connection",
 					"yaml_body",
 					"managed_state_projection",

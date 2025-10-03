@@ -192,7 +192,7 @@ func (r *manifestResource) checkDriftAndPreserveState(ctx context.Context, req r
 				plannedData.YAMLBody = stateData.YAMLBody
 				plannedData.ManagedStateProjection = stateData.ManagedStateProjection
 				plannedData.FieldOwnership = stateData.FieldOwnership
-				plannedData.ImportedWithoutAnnotations = stateData.ImportedWithoutAnnotations
+				// Note: ImportedWithoutAnnotations is now in private state, not model
 				// But still allow terraform-specific settings to update
 				// (delete_protection, force_conflicts, etc. are not preserved)
 			} else {

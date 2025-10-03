@@ -266,12 +266,11 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 
 	// Create imported data with managed state projection
 	importedData := manifestResourceModel{
-		ID:                         types.StringValue(resourceID),
-		YAMLBody:                   types.StringValue(string(yamlBytes)),
-		ClusterConnection:          connectionObj,
-		DeleteProtection:           types.BoolValue(false),
-		ManagedStateProjection:     types.StringValue(projectionJSON),
-		ImportedWithoutAnnotations: types.BoolValue(true),
+		ID:                     types.StringValue(resourceID),
+		YAMLBody:               types.StringValue(string(yamlBytes)),
+		ClusterConnection:      connectionObj,
+		DeleteProtection:       types.BoolValue(false),
+		ManagedStateProjection: types.StringValue(projectionJSON),
 		WaitFor: types.ObjectNull(map[string]attr.Type{
 			"condition":   types.StringType,
 			"field":       types.StringType,
@@ -283,6 +282,10 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 	}
 
 	diags := resp.State.Set(ctx, &importedData)
+	resp.Diagnostics.Append(diags...)
+
+	// Store imported_without_annotations in private state
+	diags = resp.Private.SetKey(ctx, "imported_without_annotations", []byte("true"))
 	resp.Diagnostics.Append(diags...)
 
 	if resp.Diagnostics.HasError() {
