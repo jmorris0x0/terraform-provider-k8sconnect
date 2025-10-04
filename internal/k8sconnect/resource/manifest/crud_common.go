@@ -58,18 +58,10 @@ func (r *manifestResource) applyResourceWithConflictHandling(ctx context.Context
 	// On Create, send everything to establish initial state
 	if operation == "Update" {
 		if ignoreFields := getIgnoreFields(ctx, data); ignoreFields != nil {
-			// Debug: show before filtering
-			beforeJSON, _ := objToApply.MarshalJSON()
-			fmt.Printf("DEBUG %s: Object BEFORE filtering ignore_fields:\n%s\n", operation, string(beforeJSON))
-
 			objToApply = removeFieldsFromObject(objToApply, ignoreFields)
 			tflog.Debug(ctx, "Filtered ignored fields from Apply patch", map[string]interface{}{
 				"ignored_fields": ignoreFields,
 			})
-
-			// Debug: show after filtering
-			afterJSON, _ := objToApply.MarshalJSON()
-			fmt.Printf("DEBUG %s: Object AFTER filtering ignore_fields:\n%s\n", operation, string(afterJSON))
 		}
 	}
 
@@ -81,22 +73,17 @@ func (r *manifestResource) applyResourceWithConflictHandling(ctx context.Context
 
 	// THIS IS THE MISSING LOGIC FROM THE ORIGINAL:
 	if err != nil && isFieldConflictError(err) && !forceConflicts {
-		fmt.Printf("Checking if conflicts are only with self: %v\n", err.Error())
 		if conflictsOnlyWithSelf(err) {
-			fmt.Printf("Self-conflict detected, forcing update\n")
 			tflog.Info(ctx, "Detected drift in fields we own, forcing update")
 			err = rc.Client.Apply(ctx, rc.Object, k8sclient.ApplyOptions{
 				FieldManager: "k8sconnect",
 				Force:        true,
 			})
-		} else {
-			fmt.Printf("Not a self-conflict, not forcing\n")
 		}
 	}
 
 	if err != nil {
 		if isFieldConflictError(err) {
-			fmt.Printf("DEBUG %s: Field conflict error details: %v\n", operation, err)
 			r.addFieldConflictError(resp, operation)
 		} else {
 			r.addOperationError(resp, operation, err)
@@ -136,7 +123,6 @@ func (r *manifestResource) readResourceAfterCreate(ctx context.Context, rc *Reso
 func (r *manifestResource) handleWaitExecution(ctx context.Context, rc *ResourceContext, resp interface{}, action string) bool {
 	waited := false
 	if err := r.executeWait(rc); err != nil {
-		fmt.Printf("Wait error: %v\n", err)
 		r.addWaitError(resp, action, err)
 		waited = true
 	} else if !rc.Data.WaitFor.IsNull() {
@@ -147,7 +133,6 @@ func (r *manifestResource) handleWaitExecution(ctx context.Context, rc *Resource
 		}
 		if !diags.HasError() && r.hasActiveWaitConditions(waitConfig) {
 			waited = true
-			fmt.Printf("Parsed wait_for - Field: %v\n", waitConfig.Field)
 		}
 	}
 	return waited
@@ -217,10 +202,6 @@ func (r *manifestResource) updateProjectionFromCurrent(ctx context.Context, data
 	if err != nil {
 		return err
 	}
-
-	fmt.Printf("=== READ: Projection for %s/%s ===\n", currentObj.GetKind(), currentObj.GetName())
-	fmt.Printf("Projection: %s\n", projectionJSON[:min(500, len(projectionJSON))])
-	fmt.Printf("=== END READ ===\n")
 
 	// Update the projection in state - this is what enables drift detection
 	data.ManagedStateProjection = types.StringValue(projectionJSON)

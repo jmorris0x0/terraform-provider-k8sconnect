@@ -392,7 +392,6 @@ func (v *requiredFieldsValidator) ValidateResource(ctx context.Context, req reso
 		// If YAML contains interpolations, skip ALL validation
 		// These will be resolved during apply phase
 		if strings.Contains(yamlStr, "${") {
-			fmt.Printf("DEBUG requiredFieldsValidator: Skipping YAML validation due to interpolation syntax\n")
 			return
 		}
 
