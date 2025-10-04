@@ -584,3 +584,163 @@ YAML
 }
 `, namespace, name, namespace, ignoreFieldsLine)
 }
+
+// TestAccManifestResource_IgnoreFieldsValidation tests that validation blocks
+// attempts to ignore provider internal annotations
+func TestAccManifestResource_IgnoreFieldsValidation(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("ignore-validation-ns-%d", time.Now().UnixNano()%1000000)
+	cmName := fmt.Sprintf("ignore-validation-%d", time.Now().UnixNano()%1000000)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Test 1: Block ignoring created-at annotation
+			{
+				Config: testAccManifestConfigIgnoreFieldsConfigMap(ns, cmName, []string{
+					"metadata.annotations.k8sconnect.terraform.io/created-at",
+				}),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				ExpectError: regexp.MustCompile("Cannot ignore provider internal annotations"),
+			},
+			// Test 2: Block ignoring terraform-id annotation
+			{
+				Config: testAccManifestConfigIgnoreFieldsConfigMap(ns, cmName, []string{
+					"metadata.annotations.k8sconnect.terraform.io/terraform-id",
+				}),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				ExpectError: regexp.MustCompile("Cannot ignore provider internal annotations"),
+			},
+			// Test 3: Block any annotation under our namespace
+			{
+				Config: testAccManifestConfigIgnoreFieldsConfigMap(ns, cmName, []string{
+					"metadata.annotations.k8sconnect.terraform.io/something-else",
+				}),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				ExpectError: regexp.MustCompile("Cannot ignore provider internal annotations"),
+			},
+		},
+	})
+}
+
+// TestAccManifestResource_YAMLBodyValidation tests that validation blocks
+// server-managed fields and provider internal annotations in yaml_body
+func TestAccManifestResource_YAMLBodyValidation(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Test 1: Block provider annotation in yaml_body
+			{
+				Config: testAccManifestConfigWithYAMLBody(raw, `
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-cm
+  annotations:
+    k8sconnect.terraform.io/created-at: "2025-01-01"
+data:
+  key: value
+`),
+				ExpectError: regexp.MustCompile("Provider internal annotations not allowed in yaml_body"),
+			},
+			// Test 2: Block uid in yaml_body
+			{
+				Config: testAccManifestConfigWithYAMLBody(raw, `
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-cm
+  uid: abc-123
+data:
+  key: value
+`),
+				ExpectError: regexp.MustCompile("Server-managed fields not allowed in yaml_body"),
+			},
+			// Test 3: Block resourceVersion in yaml_body
+			{
+				Config: testAccManifestConfigWithYAMLBody(raw, `
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-cm
+  resourceVersion: "12345"
+data:
+  key: value
+`),
+				ExpectError: regexp.MustCompile("Server-managed fields not allowed in yaml_body"),
+			},
+			// Test 4: Block managedFields in yaml_body
+			{
+				Config: testAccManifestConfigWithYAMLBody(raw, `
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-cm
+  managedFields:
+    - manager: kubectl
+data:
+  key: value
+`),
+				ExpectError: regexp.MustCompile("Server-managed fields not allowed in yaml_body"),
+			},
+			// Test 5: Block status in yaml_body
+			{
+				Config: testAccManifestConfigWithYAMLBody(raw, `
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pod
+spec:
+  containers:
+  - name: nginx
+    image: nginx
+status:
+  phase: Running
+`),
+				ExpectError: regexp.MustCompile("Server-managed fields not allowed in yaml_body"),
+			},
+		},
+	})
+}
+
+func testAccManifestConfigWithYAMLBody(kubeconfig, yamlBody string) string {
+	return fmt.Sprintf(`
+variable "raw" {
+  type = string
+  default = %q
+}
+
+resource "k8sconnect_manifest" "test" {
+  yaml_body = <<YAML
+%s
+YAML
+
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+`, kubeconfig, yamlBody)
+}
