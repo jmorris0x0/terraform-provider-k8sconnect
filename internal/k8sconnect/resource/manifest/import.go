@@ -290,9 +290,6 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 	resp.Diagnostics.Append(diags...)
 
 	if resp.Diagnostics.HasError() {
-		for _, diag := range resp.Diagnostics.Errors() {
-			fmt.Printf("DEBUG: Diagnostic error: %s - %s\n", diag.Summary(), diag.Detail())
-		}
 		return
 	}
 

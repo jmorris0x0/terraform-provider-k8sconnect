@@ -12,58 +12,36 @@ import (
 )
 
 func extractOwnedPaths(ctx context.Context, managedFields []metav1.ManagedFieldsEntry, userJSON map[string]interface{}) []string {
-	fmt.Printf("\n=== extractOwnedPaths START ===\n")
-
-	// Debug: show what's in userJSON
-	userJSONBytes, _ := json.MarshalIndent(userJSON, "", "  ")
-	fmt.Printf("UserJSON input:\n%s\n", userJSONBytes)
-
 	// Collect ALL fields from ALL k8sconnect entries (both Apply and Update operations)
 	allOwnedFields := make(map[string]interface{})
 
 	for _, mf := range managedFields {
-		fmt.Printf("Found manager: %s, operation: %s\n", mf.Manager, mf.Operation)
 		if mf.Manager == "k8sconnect" && mf.FieldsV1 != nil {
 			// Parse this entry's fields
 			var fields map[string]interface{}
 			if err := json.Unmarshal(mf.FieldsV1.Raw, &fields); err != nil {
-				fmt.Printf("Failed to parse FieldsV1 for %s/%s: %v\n", mf.Manager, mf.Operation, err)
 				continue
 			}
 
-			fmt.Printf("Merging fields from k8sconnect/%s\n", mf.Operation)
 			// Merge these fields into our accumulated ownership
 			mergeFields(allOwnedFields, fields)
 		}
 	}
 
 	if len(allOwnedFields) == 0 {
-		fmt.Printf("No managedFields for k8sconnect, using all fields from YAML\n")
 		// When no ownership info, extract ALL fields from user's YAML
 		return extractAllFieldsFromYAML(userJSON, "")
 	}
-
-	// Show what we own (combined from all k8sconnect entries)
-	fieldsJSON, _ := json.MarshalIndent(allOwnedFields, "", "  ")
-	fmt.Printf("Combined field ownership from k8sconnect:\n%s\n", fieldsJSON)
 
 	// Extract owned paths
 	paths := []string{}
 	parseOwnedFields(allOwnedFields, "", userJSON, &paths)
 
-	fmt.Printf("Extracted owned paths (%d total):\n", len(paths))
-	for _, p := range paths {
-		fmt.Printf("  - %s\n", p)
-	}
-
 	// Compare with what extractAllFieldsFromYAML would give us
 	standardPaths := extractAllFieldsFromYAML(userJSON, "")
-	fmt.Printf("Standard extractAllFieldsFromYAML would give %d paths\n", len(standardPaths))
 
 	// ALSO include fields from user's YAML that aren't covered by managedFields
 	// These are fields like apiVersion, kind, metadata.name that are "owned" by creation
-	fmt.Printf("Adding core fields...\n")
-
 	for _, userPath := range standardPaths {
 		// Add if not already in paths
 		found := false
@@ -76,7 +54,6 @@ func extractOwnedPaths(ctx context.Context, managedFields []metav1.ManagedFields
 		if !found {
 			// Check if this is a basic field we should always include
 			if shouldIncludeUserField(userPath) {
-				fmt.Printf("Adding core field: %s\n", userPath)
 				paths = append(paths, userPath)
 			}
 		}
@@ -100,17 +77,9 @@ func extractOwnedPaths(ctx context.Context, managedFields []metav1.ManagedFields
 			}
 		}
 		if !found {
-			fmt.Printf("Adding core field (always required): %s\n", coreField)
 			paths = append(paths, coreField)
 		}
 	}
-
-	fmt.Printf("Final extracted paths (%d total):\n", len(paths))
-	for _, p := range paths {
-		fmt.Printf("  - %s\n", p)
-	}
-
-	fmt.Printf("=== extractOwnedPaths END ===\n\n")
 
 	return paths
 }
@@ -184,25 +153,21 @@ func parseOwnedFields(ownership map[string]interface{}, prefix string, userObj i
 
 		} else if strings.HasPrefix(key, "k:") {
 			// Array item with merge key
-			fmt.Printf("Processing array key: %s at prefix: %s\n", key, prefix)
 
 			// Parse the merge key using shared matcher
 			mergeKey, err := matcher.ParseMergeKey(key)
 			if err != nil {
-				fmt.Printf("Failed to parse merge key: %v\n", err)
 				continue
 			}
 
 			// Find the matching array index in userObj
 			if !isArray {
-				fmt.Printf("Expected array but got %T\n", userObj)
 				continue
 			}
 
 			// Use shared matcher to find the array index
 			arrayIndex := matcher.FindArrayIndex(userArray, mergeKey)
 			if arrayIndex == -1 {
-				fmt.Printf("Could not find array item matching merge key: %v\n", mergeKey)
 				continue
 			}
 
@@ -219,8 +184,6 @@ func parseOwnedFields(ownership map[string]interface{}, prefix string, userObj i
 		} else if key == "." {
 			// Skip the "." marker - it just indicates the parent field itself is owned
 			continue
-		} else {
-			fmt.Printf("Unknown key format: %s\n", key)
 		}
 	}
 }

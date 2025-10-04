@@ -3,7 +3,6 @@ package manifest
 
 import (
 	"context"
-	"crypto/md5"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -40,11 +39,9 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 
 	// Parse the desired YAML
 	yamlStr := plannedData.YAMLBody.ValueString()
-	fmt.Printf("DEBUG ModifyPlan: About to parse YAML, content:\n%s\n", yamlStr)
 
 	// Check if YAML is empty (can happen with unresolved interpolations during planning)
 	if yamlStr == "" {
-		fmt.Printf("DEBUG ModifyPlan: YAML is empty, likely due to unresolved interpolations\n")
 		// Mark computed fields as unknown
 		plannedData.ManagedStateProjection = types.StringUnknown()
 		plannedData.FieldOwnership = types.StringUnknown()
@@ -66,7 +63,6 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 	if err != nil {
 		// Check if this might be due to unresolved interpolations
 		if strings.Contains(yamlStr, "${") {
-			fmt.Printf("DEBUG ModifyPlan: YAML parsing failed with interpolation syntax present, deferring to apply: %v\n", err)
 			// During plan with interpolations to computed values, we can't parse/validate
 			// Mark computed fields as unknown
 			plannedData.ManagedStateProjection = types.StringUnknown()
@@ -101,31 +97,14 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 	// Determine status field behavior based on wait_for
 	r.determineStatusField(ctx, req, &plannedData, resp)
 
-	// Debug: Check projection before saving
-	fmt.Printf("BEFORE Plan.Set - plan projection hash: %x\n",
-		md5.Sum([]byte(plannedData.ManagedStateProjection.ValueString())))
-
 	// Save the modified plan
 	diags = resp.Plan.Set(ctx, &plannedData)
 	resp.Diagnostics.Append(diags...)
-
-	// Debug: Check projection after saving
-	var checkPlan manifestResourceModel
-	resp.Plan.Get(ctx, &checkPlan)
-	fmt.Printf("AFTER Plan.Set - plan projection hash: %x\n",
-		md5.Sum([]byte(checkPlan.ManagedStateProjection.ValueString())))
-
-	// Verify what was actually set
-	var finalPlan manifestResourceModel
-	resp.Plan.Get(ctx, &finalPlan)
-	fmt.Printf("After Plan.Set - Status IsNull: %v, IsUnknown: %v\n", finalPlan.Status.IsNull(), finalPlan.Status.IsUnknown())
 
 	// Check field ownership conflicts for updates
 	if !req.State.Raw.IsNull() {
 		r.checkFieldOwnershipConflicts(ctx, req, resp)
 	}
-
-	fmt.Printf("=== END ModifyPlan ===\n\n")
 }
 
 // setProjectionUnknown sets projection to unknown and saves plan
@@ -204,13 +183,6 @@ func (r *manifestResource) checkDriftAndPreserveState(ctx context.Context, req r
 				// But still allow terraform-specific settings to update
 				// (delete_protection, force_conflicts, etc. are not preserved)
 			}
-
-			// ADD THIS LOGGING HERE (still inside the if block where stateData exists)
-			fmt.Printf("=== checkDriftAndPreserveState END ===\n")
-			fmt.Printf("Final plan projection hash: %x\n",
-				md5.Sum([]byte(plannedData.ManagedStateProjection.ValueString())))
-			fmt.Printf("Are projections equal at end? %v\n",
-				stateData.ManagedStateProjection.Equal(plannedData.ManagedStateProjection))
 		}
 	}
 }
@@ -258,26 +230,16 @@ func (r *manifestResource) setupDryRunClient(ctx context.Context, plannedData *m
 func (r *manifestResource) calculateProjection(ctx context.Context, req resource.ModifyPlanRequest, plannedData *manifestResourceModel, desiredObj, dryRunResult *unstructured.Unstructured, client k8sclient.K8sClient, resp *resource.ModifyPlanResponse) bool {
 	isCreate := isCreateOperation(req)
 
-	// Enhanced logging
-	fmt.Printf("\n=== ModifyPlan PROJECTION LOGIC ===\n")
-	fmt.Printf("isCreate: %v\n", isCreate)
-	fmt.Printf("State.Raw.IsNull: %v\n", req.State.Raw.IsNull())
-
 	// CREATE operations: Set projection to Unknown (will be populated after create)
 	if isCreate {
-		fmt.Printf("Decision: CREATE - setting projection to Unknown\n")
 		tflog.Debug(ctx, "CREATE - setting projection to unknown")
 		plannedData.ManagedStateProjection = types.StringUnknown()
-		fmt.Printf("=== END ModifyPlan PROJECTION LOGIC ===\n\n")
 		return true
 	}
 
 	// UPDATE operations: Use field ownership from dry-run result
-	fmt.Printf("Decision: UPDATE - using field ownership from dry-run\n")
-
 	// Extract ownership from dry-run result (what ownership WILL BE after apply)
 	paths := extractOwnedPaths(ctx, dryRunResult.GetManagedFields(), desiredObj.Object)
-	fmt.Printf("extractOwnedPaths from dry-run returned %d paths\n", len(paths))
 
 	// Apply projection
 	return r.applyProjection(ctx, dryRunResult, paths, plannedData, resp)
@@ -310,38 +272,29 @@ func (r *manifestResource) performDryRun(ctx context.Context, client k8sclient.K
 func (r *manifestResource) getFieldOwnershipPaths(ctx context.Context, plannedData *manifestResourceModel, desiredObj *unstructured.Unstructured, client k8sclient.K8sClient) []string {
 	// Check force_conflicts setting FIRST
 	forceConflicts := !plannedData.ForceConflicts.IsNull() && plannedData.ForceConflicts.ValueBool()
-	fmt.Printf("force_conflicts setting: %v\n", forceConflicts)
 
 	if forceConflicts {
 		// When force_conflicts is true, use ALL fields from YAML
-		fmt.Printf("force_conflicts=true: Using ALL fields from YAML (not checking ownership)\n")
 		paths := extractFieldPaths(desiredObj.Object, "")
-		fmt.Printf("extractOwnedPaths returned %d paths (forcing ownership of all)\n", len(paths))
 		return paths
 	}
 
 	// Try to get current object for ownership info
 	gvr, err := client.GetGVR(ctx, desiredObj)
 	if err != nil {
-		fmt.Printf("Could not get GVR: %v\n", err)
 		paths := extractFieldPaths(desiredObj.Object, "")
-		fmt.Printf("extractOwnedPaths (GVR error) returned %d paths\n", len(paths))
 		return paths
 	}
 
 	currentObj, err := client.Get(ctx, gvr, desiredObj.GetNamespace(), desiredObj.GetName())
 	if err != nil {
-		fmt.Printf("Could not get current object: %v\n", err)
 		tflog.Debug(ctx, "Could not get current object, falling back to YAML paths")
 		paths := extractFieldPaths(desiredObj.Object, "")
-		fmt.Printf("extractOwnedPaths (fallback) returned %d paths\n", len(paths))
 		return paths
 	}
 
-	fmt.Printf("Got current object with %d managedFields entries\n", len(currentObj.GetManagedFields()))
 	tflog.Debug(ctx, "Using field ownership for projection")
 	paths := extractOwnedPaths(ctx, currentObj.GetManagedFields(), desiredObj.Object)
-	fmt.Printf("extractOwnedPaths returned %d paths\n", len(paths))
 	return paths
 }
 
@@ -370,9 +323,6 @@ func (r *manifestResource) applyProjection(ctx context.Context, dryRunResult *un
 		return false
 	}
 
-	// Log the projection content for debugging
-	fmt.Printf("Projection includes nodePort: %v\n", strings.Contains(projectionJSON, "nodePort"))
-
 	// Update the plan with projection
 	plannedData.ManagedStateProjection = types.StringValue(projectionJSON)
 	tflog.Debug(ctx, "Dry-run projection complete", map[string]interface{}{
@@ -380,24 +330,16 @@ func (r *manifestResource) applyProjection(ctx context.Context, dryRunResult *un
 		"projection_size": len(projectionJSON),
 	})
 
-	fmt.Printf("=== END ModifyPlan PROJECTION LOGIC ===\n\n")
 	return true
 }
 
 // determineStatusField handles complex status field logic based on wait_for
 func (r *manifestResource) determineStatusField(ctx context.Context, req resource.ModifyPlanRequest, plannedData *manifestResourceModel, resp *resource.ModifyPlanResponse) {
-	fmt.Printf("\n=== ModifyPlan STATUS DECISION ")
-
 	if isCreateOperation(req) {
-		fmt.Printf("(CREATE - alternate path) ===\n")
 		r.determineCreateStatus(ctx, plannedData)
 	} else {
-		fmt.Printf("(UPDATE) ===\n")
 		r.determineUpdateStatus(ctx, req, plannedData, resp)
 	}
-
-	fmt.Printf("\n=== ModifyPlan FINAL STATUS ===\n")
-	fmt.Printf("Status IsNull: %v, IsUnknown: %v\n", plannedData.Status.IsNull(), plannedData.Status.IsUnknown())
 }
 
 // determineCreateStatus handles status for CREATE operations
@@ -405,26 +347,21 @@ func (r *manifestResource) determineCreateStatus(ctx context.Context, plannedDat
 	waitConfig, ok := parseWaitConfig(ctx, plannedData.WaitFor)
 	if !ok {
 		plannedData.Status = types.DynamicNull()
-		fmt.Printf("Setting status to: DynamicNull (no wait_for)\n")
 		tflog.Debug(ctx, "CREATE: No wait_for configured, status will be null")
 		return
 	}
 
-	// Check and log wait conditions
+	// Check wait conditions
 	hasConditions := hasActiveWaitConditions(waitConfig)
-	r.logWaitConditions(waitConfig, hasConditions)
 
 	if hasConditions && isFieldWait(waitConfig) {
 		plannedData.Status = types.DynamicUnknown()
-		fmt.Printf("Setting status to: DynamicUnknown (has field wait)\n")
 		tflog.Debug(ctx, "CREATE: wait_for.field configured, marking status as unknown")
 	} else {
 		plannedData.Status = types.DynamicNull()
 		if hasConditions {
-			fmt.Printf("Setting status to: DynamicNull (no field wait)\n")
 			tflog.Debug(ctx, "CREATE: non-field wait type, status will be null")
 		} else {
-			fmt.Printf("Setting status to: DynamicNull (no actual conditions)\n")
 			tflog.Debug(ctx, "CREATE: wait_for has no actual conditions, status will be null")
 		}
 	}
@@ -438,13 +375,6 @@ func (r *manifestResource) determineUpdateStatus(ctx context.Context, req resour
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
-	}
-
-	// Log current state
-	if !stateData.Status.IsNull() {
-		fmt.Printf("State has existing status\n")
-	} else {
-		fmt.Printf("State has no existing status\n")
 	}
 
 	// Parse configurations
@@ -461,13 +391,10 @@ func (r *manifestResource) determineUpdateStatus(ctx context.Context, req resour
 	// Apply the status decision
 	if status.preserve {
 		plannedData.Status = stateData.Status
-		fmt.Printf("Setting status to: preserved from state (%s)\n", status.reason)
 	} else if status.unknown {
 		plannedData.Status = types.DynamicUnknown()
-		fmt.Printf("Setting status to: DynamicUnknown (%s)\n", status.reason)
 	} else {
 		plannedData.Status = types.DynamicNull()
-		fmt.Printf("Setting status to: DynamicNull (%s)\n", status.reason)
 	}
 
 	tflog.Debug(ctx, fmt.Sprintf("UPDATE: %s", status.reason))
@@ -488,7 +415,6 @@ func (r *manifestResource) calculateUpdateStatus(hasPlanWait, hasStateWait bool,
 	}
 
 	planIsFieldWait := isFieldWait(planConfig)
-	fmt.Printf("wait_for.field = '%v', isFieldWait = %v\n", planConfig.Field.ValueString(), planIsFieldWait)
 
 	// Not a field wait
 	if !planIsFieldWait {
@@ -502,8 +428,6 @@ func (r *manifestResource) calculateUpdateStatus(hasPlanWait, hasStateWait bool,
 
 	// Compare with previous wait_for
 	stateIsFieldWait := isFieldWait(stateConfig)
-	fmt.Printf("Comparing fields - plan: '%v', state: '%v'\n",
-		planConfig.Field.ValueString(), stateConfig.Field.ValueString())
 
 	// Check if field unchanged
 	if stateIsFieldWait && planConfig.Field.Equal(stateConfig.Field) {
@@ -517,18 +441,8 @@ func (r *manifestResource) calculateUpdateStatus(hasPlanWait, hasStateWait bool,
 	return statusDecision{unknown: true, reason: "field changed or new"}
 }
 
-// logWaitConditions logs detailed wait condition info
-func (r *manifestResource) logWaitConditions(waitConfig waitForModel, hasConditions bool) {
-	fmt.Printf("hasWaitConditions = %v\n", hasConditions)
-	fmt.Printf("  Field: '%v'\n", waitConfig.Field.ValueString())
-	fmt.Printf("  FieldValue IsNull: %v\n", waitConfig.FieldValue.IsNull())
-	fmt.Printf("  Condition: '%v'\n", waitConfig.Condition.ValueString())
-	fmt.Printf("  Rollout: %v\n", waitConfig.Rollout.ValueBool())
-}
-
 // checkFieldOwnershipConflicts detects when fields managed by other controllers are being changed
 func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	fmt.Printf("=== checkFieldOwnershipConflicts START ===\n")
 	// Get state and plan projections
 	var stateData, planData manifestResourceModel
 	diags := req.State.Get(ctx, &stateData)
@@ -536,52 +450,43 @@ func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req
 	diags = resp.Plan.Get(ctx, &planData)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
-		fmt.Printf("Has diagnostics error, returning\n")
 		return
 	}
-	fmt.Printf("Projections - state hash: %x, plan hash: %x\n",
-		md5.Sum([]byte(stateData.ManagedStateProjection.ValueString())),
-		md5.Sum([]byte(planData.ManagedStateProjection.ValueString())))
+
 	// Skip if projections are not available
 	if stateData.ManagedStateProjection.IsNull() || planData.ManagedStateProjection.IsNull() {
-		fmt.Printf("Projections not available (state null: %v, plan null: %v), returning\n",
-			stateData.ManagedStateProjection.IsNull(), planData.ManagedStateProjection.IsNull())
 		return
 	}
+
 	// NOTE: We do NOT skip when projections are equal!
 	// Even if there's no drift, we need to check if user's YAML contains fields
 	// owned by other controllers and warn/error appropriately.
-	fmt.Printf("Projections equal: %v - checking for conflicts anyway\n",
-		stateData.ManagedStateProjection.Equal(planData.ManagedStateProjection))
+
 	// Get field ownership from state
 	if stateData.FieldOwnership.IsNull() {
-		fmt.Printf("field_ownership is null, returning\n")
 		return
 	}
-	fmt.Printf("field_ownership value: %s\n", stateData.FieldOwnership.ValueString())
+
 	var ownership map[string]FieldOwnership
 	if err := json.Unmarshal([]byte(stateData.FieldOwnership.ValueString()), &ownership); err != nil {
 		tflog.Warn(ctx, "Failed to unmarshal field ownership", map[string]interface{}{
 			"error": err.Error(),
 		})
-		fmt.Printf("Failed to unmarshal field ownership: %v\n", err)
 		return
 	}
-	fmt.Printf("Parsed ownership map with %d entries\n", len(ownership))
+
 	// Parse the user's desired YAML to see what fields they want
 	desiredObj, err := r.parseYAML(planData.YAMLBody.ValueString())
 	if err != nil {
-		fmt.Printf("Failed to parse user's YAML: %v\n", err)
 		return
 	}
+
 	// Extract all paths the user wants to manage
 	userWantsPaths := extractAllFieldsFromYAML(desiredObj.Object, "")
-	fmt.Printf("User wants to manage %d paths\n", len(userWantsPaths))
 
 	// Filter out ignored fields - we don't check ownership for fields we're explicitly ignoring
 	if ignoreFields := getIgnoreFields(ctx, &planData); ignoreFields != nil {
 		userWantsPaths = filterIgnoredPaths(userWantsPaths, ignoreFields)
-		fmt.Printf("After filtering ignore_fields, checking %d paths\n", len(userWantsPaths))
 	}
 
 	// Check each path the user wants against ownership
@@ -596,30 +501,19 @@ func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req
 			continue
 		}
 
-		// ADD DETAILED LOGGING HERE
 		if owner, exists := ownership[path]; exists {
-			fmt.Printf("  Path %s: owned by '%s', checking against 'k8sconnect', equal? %v\n",
-				path, owner.Manager, owner.Manager == "k8sconnect")
 			if owner.Manager != "k8sconnect" {
-				fmt.Printf("  CONFLICT DETECTED: Field %s owned by %s (not k8sconnect)\n", path, owner.Manager)
 				conflicts = append(conflicts, FieldConflict{
 					Path:  path,
 					Owner: owner.Manager,
 				})
-			} else {
-				fmt.Printf("  OK: Field %s correctly owned by k8sconnect\n", path)
 			}
-		} else {
-			// Field not in ownership map - might be a new field or not tracked
-			fmt.Printf("  NO OWNERSHIP DATA: Field %s not in ownership map (likely ok - new or untracked)\n", path)
 		}
 	}
-	fmt.Printf("Total conflicts: %d\n", len(conflicts))
+
 	if len(conflicts) > 0 {
-		fmt.Printf("Calling addConflictWarning with force_conflicts=%v\n", planData.ForceConflicts.ValueBool())
 		addConflictWarning(resp, conflicts, planData.ForceConflicts)
 	}
-	fmt.Printf("=== checkFieldOwnershipConflicts END ===\n")
 }
 
 // filterFieldOwnership filters a field_ownership value to remove ignored fields
