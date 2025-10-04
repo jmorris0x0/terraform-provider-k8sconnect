@@ -237,6 +237,15 @@ func (r *manifestResource) updateProjection(rc *ResourceContext) error {
 		paths = extractOwnedPaths(rc.Ctx, []metav1.ManagedFieldsEntry{}, rc.Object.Object)
 	}
 
+	// Apply ignore_fields filtering if specified
+	if ignoreFields := getIgnoreFields(rc.Ctx, rc.Data); ignoreFields != nil {
+		paths = filterIgnoredPaths(paths, ignoreFields)
+		tflog.Debug(rc.Ctx, "Applied ignore_fields filtering in projection update", map[string]interface{}{
+			"ignored_count":  len(ignoreFields),
+			"filtered_paths": len(paths),
+		})
+	}
+
 	// Create projection - always project from the current K8s object
 	projection, err := projectFields(currentObj.Object, paths)
 	if err != nil {

@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 func TestExtractFieldPaths_StrategicMerge(t *testing.T) {
@@ -468,4 +470,587 @@ func TestProjection_QuantityNormalization(t *testing.T) {
 	if _, hasStatus := projection["status"]; hasStatus {
 		t.Error("projection should not include status")
 	}
+}
+// TestFilterIgnoredPaths tests the core logic of filtering paths based on ignore patterns
+func TestFilterIgnoredPaths(t *testing.T) {
+	tests := []struct {
+		name          string
+		allPaths      []string
+		ignoreFields  []string
+		expectedPaths []string
+	}{
+		{
+			name: "ignore simple field",
+			allPaths: []string{
+				"metadata.name",
+				"metadata.namespace",
+				"metadata.annotations",
+				"spec.replicas",
+			},
+			ignoreFields: []string{
+				"metadata.annotations",
+			},
+			expectedPaths: []string{
+				"metadata.name",
+				"metadata.namespace",
+				"spec.replicas",
+			},
+		},
+		{
+			name: "ignore nested field",
+			allPaths: []string{
+				"spec.replicas",
+				"spec.template.metadata.labels",
+				"spec.template.spec.containers[name=nginx].image",
+			},
+			ignoreFields: []string{
+				"spec.replicas",
+			},
+			expectedPaths: []string{
+				"spec.template.metadata.labels",
+				"spec.template.spec.containers[name=nginx].image",
+			},
+		},
+		{
+			name: "ignore array element by index",
+			allPaths: []string{
+				"webhooks[0].clientConfig.service.name",
+				"webhooks[0].clientConfig.caBundle",
+				"webhooks[0].name",
+				"webhooks[1].name",
+			},
+			ignoreFields: []string{
+				"webhooks[0].clientConfig.caBundle",
+			},
+			expectedPaths: []string{
+				"webhooks[0].clientConfig.service.name",
+				"webhooks[0].name",
+				"webhooks[1].name",
+			},
+		},
+		{
+			name: "ignore multiple fields",
+			allPaths: []string{
+				"metadata.annotations",
+				"metadata.labels",
+				"spec.replicas",
+				"spec.template.spec.containers[name=nginx].image",
+			},
+			ignoreFields: []string{
+				"metadata.annotations",
+				"spec.replicas",
+			},
+			expectedPaths: []string{
+				"metadata.labels",
+				"spec.template.spec.containers[name=nginx].image",
+			},
+		},
+		{
+			name: "ignore field with children removes all children",
+			allPaths: []string{
+				"metadata.name",
+				"metadata.annotations.app",
+				"metadata.annotations.version",
+				"spec.replicas",
+			},
+			ignoreFields: []string{
+				"metadata.annotations",
+			},
+			expectedPaths: []string{
+				"metadata.name",
+				"spec.replicas",
+			},
+		},
+		{
+			name: "no ignore fields returns all paths",
+			allPaths: []string{
+				"metadata.name",
+				"spec.replicas",
+			},
+			ignoreFields: []string{},
+			expectedPaths: []string{
+				"metadata.name",
+				"spec.replicas",
+			},
+		},
+		{
+			name: "ignore non-existent field doesn't break",
+			allPaths: []string{
+				"metadata.name",
+				"spec.replicas",
+			},
+			ignoreFields: []string{
+				"spec.nonexistent",
+			},
+			expectedPaths: []string{
+				"metadata.name",
+				"spec.replicas",
+			},
+		},
+		{
+			name: "ignore field used by HPA",
+			allPaths: []string{
+				"metadata.name",
+				"spec.replicas",
+				"spec.template.spec.containers[name=nginx].image",
+			},
+			ignoreFields: []string{
+				"spec.replicas", // HPA modifies this
+			},
+			expectedPaths: []string{
+				"metadata.name",
+				"spec.template.spec.containers[name=nginx].image",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := filterIgnoredPaths(tt.allPaths, tt.ignoreFields)
+
+			// Sort for comparison
+			sort.Strings(result)
+			sort.Strings(tt.expectedPaths)
+
+			if !reflect.DeepEqual(result, tt.expectedPaths) {
+				t.Errorf("filterIgnoredPaths() mismatch\nGot:      %v\nExpected: %v", result, tt.expectedPaths)
+			}
+		})
+	}
+}
+
+// TestPathMatchesIgnorePattern tests the matching logic
+func TestPathMatchesIgnorePattern(t *testing.T) {
+	tests := []struct {
+		name          string
+		path          string
+		ignorePattern string
+		shouldMatch   bool
+	}{
+		{
+			name:          "exact match",
+			path:          "metadata.annotations",
+			ignorePattern: "metadata.annotations",
+			shouldMatch:   true,
+		},
+		{
+			name:          "parent should match child",
+			path:          "metadata.annotations.app",
+			ignorePattern: "metadata.annotations",
+			shouldMatch:   true,
+		},
+		{
+			name:          "deep child should match parent",
+			path:          "metadata.annotations.app.kubernetes.io/name",
+			ignorePattern: "metadata.annotations",
+			shouldMatch:   true,
+		},
+		{
+			name:          "different field no match",
+			path:          "metadata.labels",
+			ignorePattern: "metadata.annotations",
+			shouldMatch:   false,
+		},
+		{
+			name:          "array index exact match",
+			path:          "webhooks[0].clientConfig.caBundle",
+			ignorePattern: "webhooks[0].clientConfig.caBundle",
+			shouldMatch:   true,
+		},
+		{
+			name:          "array index different index",
+			path:          "webhooks[1].clientConfig.caBundle",
+			ignorePattern: "webhooks[0].clientConfig.caBundle",
+			shouldMatch:   false,
+		},
+		{
+			name:          "strategic merge key exact match",
+			path:          "spec.containers[name=nginx].image",
+			ignorePattern: "spec.containers[name=nginx].image",
+			shouldMatch:   true,
+		},
+		{
+			name:          "strategic merge key child match",
+			path:          "spec.containers[name=nginx].env[name=LOG_LEVEL].value",
+			ignorePattern: "spec.containers[name=nginx].env",
+			shouldMatch:   true,
+		},
+		{
+			name:          "strategic merge key different name",
+			path:          "spec.containers[name=sidecar].image",
+			ignorePattern: "spec.containers[name=nginx].image",
+			shouldMatch:   false,
+		},
+		{
+			name:          "prefix match without full segment",
+			path:          "metadata.labels",
+			ignorePattern: "metadata.label",
+			shouldMatch:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := pathMatchesIgnorePattern(tt.path, tt.ignorePattern)
+			if result != tt.shouldMatch {
+				t.Errorf("pathMatchesIgnorePattern(%q, %q) = %v, want %v",
+					tt.path, tt.ignorePattern, result, tt.shouldMatch)
+			}
+		})
+	}
+}
+
+// TestProjectFieldsWithIgnore tests that projectFields respects ignore_fields
+func TestProjectFieldsWithIgnore(t *testing.T) {
+	tests := []struct {
+		name         string
+		source       map[string]interface{}
+		paths        []string
+		ignoreFields []string
+		expected     map[string]interface{}
+	}{
+		{
+			name: "ignore annotations in projection",
+			source: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"name":      "test",
+					"namespace": "default",
+					"annotations": map[string]interface{}{
+						"controller.io/modified": "true",
+					},
+				},
+				"spec": map[string]interface{}{
+					"replicas": float64(3),
+				},
+			},
+			paths: []string{
+				"metadata.name",
+				"metadata.namespace",
+				"metadata.annotations.controller.io/modified",
+				"spec.replicas",
+			},
+			ignoreFields: []string{
+				"metadata.annotations",
+			},
+			expected: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"name":      "test",
+					"namespace": "default",
+				},
+				"spec": map[string]interface{}{
+					"replicas": float64(3),
+				},
+			},
+		},
+		{
+			name: "ignore replicas modified by HPA",
+			source: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"name": "deployment",
+				},
+				"spec": map[string]interface{}{
+					"replicas": float64(5), // Modified by HPA
+				},
+			},
+			paths: []string{
+				"metadata.name",
+				"spec.replicas",
+			},
+			ignoreFields: []string{
+				"spec.replicas",
+			},
+			expected: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"name": "deployment",
+				},
+				// spec is omitted when all its fields are ignored
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Filter paths first
+			filteredPaths := filterIgnoredPaths(tt.paths, tt.ignoreFields)
+
+			// Then project
+			result, err := projectFields(tt.source, filteredPaths)
+			if err != nil {
+				t.Fatalf("projectFields() error = %v", err)
+			}
+
+			if !reflect.DeepEqual(result, tt.expected) {
+				t.Errorf("projectFields() with ignore mismatch\nGot:      %+v\nExpected: %+v", result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestIgnoreFieldsIntegration tests the full integration with extractOwnedPaths
+func TestIgnoreFieldsIntegration(t *testing.T) {
+	t.Run("HPA modifies replicas - should not show drift when ignored", func(t *testing.T) {
+		// User's YAML
+		userYAML := map[string]interface{}{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata": map[string]interface{}{
+				"name": "nginx",
+			},
+			"spec": map[string]interface{}{
+				"replicas": float64(3),
+			},
+		}
+
+		// Current state in cluster (HPA changed replicas)
+		clusterState := map[string]interface{}{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata": map[string]interface{}{
+				"name": "nginx",
+			},
+			"spec": map[string]interface{}{
+				"replicas": float64(5), // HPA changed this
+			},
+		}
+
+		ignoreFields := []string{"spec.replicas"}
+
+		// Extract paths from user YAML
+		allPaths := extractFieldPaths(userYAML, "")
+
+		// Filter ignored paths
+		filteredPaths := filterIgnoredPaths(allPaths, ignoreFields)
+
+		// Project both states
+		userProjection, err := projectFields(userYAML, filteredPaths)
+		if err != nil {
+			t.Fatalf("Failed to project user state: %v", err)
+		}
+
+		clusterProjection, err := projectFields(clusterState, filteredPaths)
+		if err != nil {
+			t.Fatalf("Failed to project cluster state: %v", err)
+		}
+
+		// They should match because we ignored the field that changed
+		if !reflect.DeepEqual(userProjection, clusterProjection) {
+			t.Errorf("Projections should match when ignoring changed field\nUser:    %+v\nCluster: %+v",
+				userProjection, clusterProjection)
+		}
+
+		// Verify spec.replicas is NOT in the projection
+		if spec, ok := userProjection["spec"].(map[string]interface{}); ok {
+			if _, hasReplicas := spec["replicas"]; hasReplicas {
+				t.Error("spec.replicas should not be in projection when ignored")
+			}
+		}
+	})
+}
+
+// TestRemoveFieldsFromObject tests removing fields from unstructured objects
+func TestRemoveFieldsFromObject(t *testing.T) {
+	tests := []struct {
+		name           string
+		input          map[string]interface{}
+		ignorePatterns []string
+		expected       map[string]interface{}
+	}{
+		{
+			name: "remove simple field",
+			input: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"name":      "test",
+					"namespace": "default",
+				},
+				"spec": map[string]interface{}{
+					"replicas": float64(3),
+					"selector": map[string]interface{}{
+						"app": "nginx",
+					},
+				},
+			},
+			ignorePatterns: []string{"spec.replicas"},
+			expected: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"name":      "test",
+					"namespace": "default",
+				},
+				"spec": map[string]interface{}{
+					"selector": map[string]interface{}{
+						"app": "nginx",
+					},
+				},
+			},
+		},
+		{
+			name: "remove deeply nested field",
+			input: map[string]interface{}{
+				"spec": map[string]interface{}{
+					"template": map[string]interface{}{
+						"spec": map[string]interface{}{
+							"containers": []interface{}{
+								map[string]interface{}{
+									"name":  "nginx",
+									"image": "nginx:1.21",
+								},
+							},
+						},
+					},
+				},
+			},
+			ignorePatterns: []string{"spec.template.spec.containers"},
+			expected: map[string]interface{}{
+				"spec": map[string]interface{}{
+					"template": map[string]interface{}{
+						"spec": map[string]interface{}{},
+					},
+				},
+			},
+		},
+		{
+			name: "remove multiple fields",
+			input: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"name":        "test",
+					"annotations": map[string]interface{}{"foo": "bar"},
+				},
+				"spec": map[string]interface{}{
+					"replicas": float64(3),
+					"selector": map[string]interface{}{"app": "nginx"},
+				},
+			},
+			ignorePatterns: []string{"metadata.annotations", "spec.replicas"},
+			expected: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"name": "test",
+				},
+				"spec": map[string]interface{}{
+					"selector": map[string]interface{}{"app": "nginx"},
+				},
+			},
+		},
+		{
+			name: "remove array element by index",
+			input: map[string]interface{}{
+				"webhooks": []interface{}{
+					map[string]interface{}{
+						"name": "webhook1",
+						"clientConfig": map[string]interface{}{
+							"caBundle": "base64data",
+							"url":      "https://example.com",
+						},
+					},
+				},
+			},
+			ignorePatterns: []string{"webhooks[0].clientConfig.caBundle"},
+			expected: map[string]interface{}{
+				"webhooks": []interface{}{
+					map[string]interface{}{
+						"name": "webhook1",
+						"clientConfig": map[string]interface{}{
+							"url": "https://example.com",
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "remove array element by key",
+			input: map[string]interface{}{
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name":  "nginx",
+							"image": "nginx:1.21",
+							"resources": map[string]interface{}{
+								"requests": map[string]interface{}{
+									"cpu": "100m",
+								},
+							},
+						},
+					},
+				},
+			},
+			ignorePatterns: []string{"spec.containers[name=nginx].resources"},
+			expected: map[string]interface{}{
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name":  "nginx",
+							"image": "nginx:1.21",
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "nonexistent field - no error",
+			input: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"name": "test",
+				},
+			},
+			ignorePatterns: []string{"spec.replicas"},
+			expected: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"name": "test",
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			obj := &unstructured.Unstructured{Object: tt.input}
+			result := removeFieldsFromObject(obj, tt.ignorePatterns)
+
+			if !reflect.DeepEqual(result.Object, tt.expected) {
+				t.Errorf("removeFieldsFromObject() mismatch\nGot:      %+v\nExpected: %+v",
+					result.Object, tt.expected)
+			}
+
+			// Verify original object wasn't modified (DeepCopy test)
+			if reflect.DeepEqual(obj.Object, result.Object) && len(tt.ignorePatterns) > 0 {
+				// Only fail if we actually removed something
+				if !reflect.DeepEqual(tt.input, tt.expected) {
+					t.Error("removeFieldsFromObject() modified the original object")
+				}
+			}
+		})
+	}
+}
+
+// TestRemoveFieldsTransition tests that removing ignore_fields allows reclaiming ownership
+func TestRemoveFieldsTransition(t *testing.T) {
+	t.Run("removing ignore_fields reclaims field in next update", func(t *testing.T) {
+		input := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"replicas": float64(3),
+				"selector": map[string]interface{}{
+					"app": "nginx",
+				},
+			},
+		}
+
+		// Step 1: With ignore_fields set, spec.replicas is omitted
+		obj1 := &unstructured.Unstructured{Object: input}
+		result1 := removeFieldsFromObject(obj1, []string{"spec.replicas"})
+
+		if _, hasReplicas := result1.Object["spec"].(map[string]interface{})["replicas"]; hasReplicas {
+			t.Error("spec.replicas should be removed when in ignore_fields")
+		}
+
+		// Step 2: With ignore_fields removed/empty, spec.replicas is included
+		obj2 := &unstructured.Unstructured{Object: input}
+		result2 := removeFieldsFromObject(obj2, []string{}) // Empty ignore list
+
+		if _, hasReplicas := result2.Object["spec"].(map[string]interface{})["replicas"]; !hasReplicas {
+			t.Error("spec.replicas should be present when ignore_fields is empty")
+		}
+
+		// Verify the value is correct
+		if replicas := result2.Object["spec"].(map[string]interface{})["replicas"]; replicas != float64(3) {
+			t.Errorf("Expected replicas=3, got %v", replicas)
+		}
+	})
 }

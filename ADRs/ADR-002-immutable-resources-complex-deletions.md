@@ -1,7 +1,7 @@
 # ADR-002: Handling Immutable Resources and Complex Deletions
 
 ## Status
-Draft - Open Questions
+Deferred - Open Questions
 Only enhanced error messages implemented. No automatic recreation or dry-run detection.
 
 ## Context
@@ -86,20 +86,7 @@ When resources get stuck during deletion:
 - No built-in finalizer handling
 - Users often resort to local-exec provisioners
 
-### 2. Crossplane Provider
-
-**Immutable Fields**:
-- Plans to use CEL (Common Expression Language) rules for immutability validation
-- Allows editing immutable fields but doesn't apply the changes
-- Never automatically deletes resources based on forProvider changes (unlike Terraform)
-- Treats managed resources as source of truth, expects all values under spec.forProvider
-
-**Complex Deletions**:
-- Implements cascading deletion policies
-- Handles finalizers intelligently
-- Provides deletion ordering
-
-### 3. Kubectl Provider (Gavin Bunney)
+### 2. Kubectl Provider (Gavin Bunney)
 
 **Immutable Fields**:
 - No special handling - errors bubble up from Kubernetes
@@ -108,10 +95,10 @@ When resources get stuck during deletion:
 
 **Complex Deletions**:
 - Simple timeout mechanism
-- `force_delete` option that patches finalizers
+- `force_delete` option that patches finalizers (Is this really true?)
 - Limited intelligence about deletion order
 
-### 4. ArgoCD
+### 3. ArgoCD
 
 **Immutable Fields**:
 - Detects immutable field changes via dry-run
@@ -123,7 +110,7 @@ When resources get stuck during deletion:
 - Cascading deletion with proper ordering
 - Retry logic with exponential backoff
 
-### 5. Flux
+### 4. Flux
 
 **Immutable Fields**:
 - Uses server-side dry-run to detect issues

@@ -332,6 +332,15 @@ func (r *manifestResource) getFieldOwnershipPaths(ctx context.Context, plannedDa
 
 // applyProjection projects fields and updates plan
 func (r *manifestResource) applyProjection(ctx context.Context, dryRunResult *unstructured.Unstructured, paths []string, plannedData *manifestResourceModel, resp *resource.ModifyPlanResponse) bool {
+	// Apply ignore_fields filtering if specified
+	if ignoreFields := getIgnoreFields(ctx, plannedData); ignoreFields != nil {
+		paths = filterIgnoredPaths(paths, ignoreFields)
+		tflog.Debug(ctx, "Applied ignore_fields filtering in plan modifier", map[string]interface{}{
+			"ignored_count":  len(ignoreFields),
+			"filtered_paths": len(paths),
+		})
+	}
+
 	// Project the dry-run result
 	projection, err := projectFields(dryRunResult.Object, paths)
 	if err != nil {

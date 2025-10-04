@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 func extractOwnedPaths(ctx context.Context, managedFields []metav1.ManagedFieldsEntry, userJSON map[string]interface{}) []string {
@@ -510,6 +511,87 @@ func toJSON(obj map[string]interface{}) (string, error) {
 	return string(bytes), nil
 }
 
+// filterIgnoredPaths removes paths that match any ignore pattern
+func filterIgnoredPaths(allPaths []string, ignoreFields []string) []string {
+	if len(ignoreFields) == 0 {
+		return allPaths
+	}
+
+	filtered := make([]string, 0, len(allPaths))
+	for _, path := range allPaths {
+		ignored := false
+		for _, ignorePattern := range ignoreFields {
+			if pathMatchesIgnorePattern(path, ignorePattern) {
+				ignored = true
+				break
+			}
+		}
+		if !ignored {
+			filtered = append(filtered, path)
+		}
+	}
+	return filtered
+}
+
+// pathMatchesIgnorePattern checks if a path matches an ignore pattern
+// Pattern matches if it's a prefix of the path (allowing parent fields to ignore children)
+func pathMatchesIgnorePattern(path, pattern string) bool {
+	pathSegments := parsePath(path)
+	patternSegments := parsePath(pattern)
+
+	// Pattern must be <= path length (prefix or exact match)
+	if len(patternSegments) > len(pathSegments) {
+		return false
+	}
+
+	// Compare each segment of the pattern
+	for i, patternSeg := range patternSegments {
+		if !segmentsMatch(pathSegments[i], patternSeg) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// segmentsMatch checks if two path segments match
+func segmentsMatch(pathSeg, patternSeg PathSegment) bool {
+	// Field names must match
+	if pathSeg.Field != patternSeg.Field {
+		return false
+	}
+
+	// If pattern has selector, it must match exactly
+	if patternSeg.Selector != nil {
+		if pathSeg.Selector == nil {
+			return false
+		}
+		return selectorsMatch(pathSeg.Selector, patternSeg.Selector)
+	}
+
+	// Pattern has no selector - matches regardless of path's selector
+	return true
+}
+
+// selectorsMatch checks if two array selectors match
+func selectorsMatch(pathSel, patternSel *ArraySelector) bool {
+	if pathSel.Type != patternSel.Type {
+		return false
+	}
+
+	switch patternSel.Type {
+	case "positional":
+		return pathSel.Index == patternSel.Index
+	case "keyed":
+		return pathSel.KeyField == patternSel.KeyField &&
+			pathSel.KeyValue == patternSel.KeyValue
+	case "empty":
+		return true
+	default:
+		return false
+	}
+}
+
 // absolutelyCertainStrategicMergeKeys maps field names to their merge keys
 // Only include fields we're 100% certain about
 var absolutelyCertainStrategicMergeKeys = map[string]string{
@@ -612,4 +694,91 @@ func extractFieldPaths(obj map[string]interface{}, prefix string) []string {
 	}
 
 	return paths
+}
+
+// removeFieldsFromObject creates a copy of the object with specified fields removed.
+// This is used to omit ignored fields from SSA Apply patches, allowing other controllers
+// to manage those fields without ownership conflicts.
+func removeFieldsFromObject(obj *unstructured.Unstructured, ignorePatterns []string) *unstructured.Unstructured {
+	result := obj.DeepCopy()
+
+	for _, pattern := range ignorePatterns {
+		segments := parsePath(pattern)
+		removeFieldFromUnstructured(result.Object, segments, 0)
+	}
+
+	return result
+}
+
+// removeFieldFromUnstructured recursively removes a field from an unstructured map
+func removeFieldFromUnstructured(obj map[string]interface{}, segments []PathSegment, depth int) {
+	if depth >= len(segments) {
+		return
+	}
+
+	seg := segments[depth]
+	isLastSegment := depth == len(segments)-1
+
+	// Handle array selector
+	if seg.Selector != nil {
+		arr, ok := obj[seg.Field].([]interface{})
+		if !ok {
+			return // Field doesn't exist or isn't an array
+		}
+
+		switch seg.Selector.Type {
+		case "positional":
+			// Remove specific array element
+			if isLastSegment {
+				// Remove the entire indexed element
+				if seg.Selector.Index >= 0 && seg.Selector.Index < len(arr) {
+					obj[seg.Field] = append(arr[:seg.Selector.Index], arr[seg.Selector.Index+1:]...)
+				}
+			} else {
+				// Traverse into the array element
+				if seg.Selector.Index >= 0 && seg.Selector.Index < len(arr) {
+					if item, ok := arr[seg.Selector.Index].(map[string]interface{}); ok {
+						removeFieldFromUnstructured(item, segments, depth+1)
+					}
+				}
+			}
+
+		case "keyed":
+			// Find and remove matching array element
+			for i, item := range arr {
+				if itemMap, ok := item.(map[string]interface{}); ok {
+					if keyVal, exists := itemMap[seg.Selector.KeyField]; exists {
+						if keyVal == seg.Selector.KeyValue {
+							if isLastSegment {
+								// Remove this array element
+								obj[seg.Field] = append(arr[:i], arr[i+1:]...)
+							} else {
+								// Traverse into this element
+								removeFieldFromUnstructured(itemMap, segments, depth+1)
+							}
+							return
+						}
+					}
+				}
+			}
+
+		case "empty":
+			// Remove entire array
+			if isLastSegment {
+				delete(obj, seg.Field)
+			}
+		}
+		return
+	}
+
+	// Handle regular field
+	if isLastSegment {
+		// Remove the field
+		delete(obj, seg.Field)
+	} else {
+		// Traverse deeper
+		if nested, ok := obj[seg.Field].(map[string]interface{}); ok {
+			removeFieldFromUnstructured(nested, segments, depth+1)
+		}
+	}
 }
