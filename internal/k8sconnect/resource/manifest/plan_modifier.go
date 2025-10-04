@@ -702,7 +702,8 @@ func addConflictWarning(resp *resource.ModifyPlanResponse, conflicts []FieldConf
 		resp.Diagnostics.AddWarning(
 			"Field Ownership Override",
 			fmt.Sprintf("Forcing ownership of fields managed by other controllers:\n%s\n\n"+
-				"These fields will be forcibly taken over. The other controllers may fight back.",
+				"These fields will be forcibly taken over. The other controllers may fight back.\n"+
+				"Consider adding these paths to ignore_fields to release ownership instead.",
 				strings.Join(conflictDetails, "\n")),
 		)
 	} else {
@@ -714,7 +715,7 @@ func addConflictWarning(resp *resource.ModifyPlanResponse, conflicts []FieldConf
 		resp.Diagnostics.AddError(
 			"Field Ownership Conflict",
 			fmt.Sprintf("Cannot modify fields owned by other controllers:\n%s\n\n"+
-				"To force ownership, set force_conflicts = true",
+				"To resolve: add conflicting paths to ignore_fields to release ownership, or set force_conflicts = true to override.",
 				strings.Join(conflictDetails, "\n")),
 		)
 	}

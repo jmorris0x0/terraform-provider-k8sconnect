@@ -246,11 +246,11 @@ func (r *manifestResource) addFieldConflictError(resp interface{}, operation str
 	if createResp, ok := resp.(*resource.CreateResponse); ok {
 		createResp.Diagnostics.AddError("Field Manager Conflict",
 			"Another controller owns fields you're trying to set. "+
-				"Set force_conflicts = true to override.")
+				"Add conflicting paths to ignore_fields to release ownership, or set force_conflicts = true to override.")
 	} else if updateResp, ok := resp.(*resource.UpdateResponse); ok {
 		updateResp.Diagnostics.AddError("Field Manager Conflict",
 			"Another controller owns fields you're trying to set. "+
-				"Set force_conflicts = true to override.")
+				"Add conflicting paths to ignore_fields to release ownership, or set force_conflicts = true to override.")
 	}
 }
 
