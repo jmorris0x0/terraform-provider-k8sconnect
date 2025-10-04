@@ -36,13 +36,9 @@ DOCUMENTATION & RELEASE
 Registry landing page: Write main docs
 Verify attribute docs: Status changes need documentation updates
 Key features placement: Move higher in docs
-Add token example: To connection methods section
 Fill community standards: Issue templates, contributing guide, etc.
 Example improvements: Show both inline and template file patterns
 Don't need the first load balancer example. Find a different one or delete.
-
-This docstring is wrong:
-"cluster_connection (Attributes) Cluster connection configuration for this resource. If not specified, uses the provider-level connection."
 
 Nested Schema for wait_for: Needs love
 
@@ -57,8 +53,6 @@ Datasource testing: Dependency graph, unknowns handling, interpolation
 OpenTofu tests: Add compatibility testing
 Check for stubs/skips: Audit test suite for forgotten temporary code
 HPA simulation: Test multiple simultaneous ownership changes
-What happens when try to do something is not authorized? Do you find out during plan? Need a test for this!
-It's not just plans and applies that need auth. There is also patch, watch, etc. This will be a very common problem.
 Find a way to test multicluster
 Test very large CRDs. This was an issue in other providers. might need chunking.
 Delayed plan application: Handle out-of-date plans
@@ -106,7 +100,6 @@ DEFERRED/COMPLEX
 Dynamic datasource lookup: Use same JSON-to-attribute logic as resource
 Move server-side features up: In feature list
 Migration plan for other providers
-Remove imported_without_annotations or make private
 Rename managed_state_projection
 Fix makefile to install all dependencies. Try on fresh laptop.
 Add back cluster_info datasource that has more info than GB:
@@ -123,17 +116,12 @@ Could probably knock out an MVP using the Terraform provider schema definitions 
 
   Must-Have Before Release:
 
-  1. ignore_fields - kubectl has this, you don't
-    - Workaround for lifecycle.ignore_changes issues
-    - Essential for operator-managed fields
-    - High priority - this will be requested immediately
   2. create_timeout and update_timeout
     - You only have delete_timeout
     - HashiCorp has all three
     - Medium priority - needed for slow-applying resources
   3. Import documentation
     - Your format, examples, behavior
-    - The imported_without_annotations flag needs explanation
     - Critical - people need to migrate existing resources
 
   Should Consider:

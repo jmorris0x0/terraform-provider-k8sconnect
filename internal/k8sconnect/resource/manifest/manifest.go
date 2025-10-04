@@ -113,7 +113,7 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 			},
 			"cluster_connection": schema.SingleNestedAttribute{
 				Required:    true,
-				Description: "Cluster connection configuration for this resource. If not specified, uses the provider-level connection.",
+				Description: "Cluster connection configuration for this resource.",
 				Attributes:  auth.GetConnectionSchemaForResource(),
 			},
 			"delete_protection": schema.BoolAttribute{
