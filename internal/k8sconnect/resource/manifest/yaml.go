@@ -14,6 +14,18 @@ import (
 	sigsyaml "sigs.k8s.io/yaml"
 )
 
+// Provider annotation prefix for internal tracking
+const providerAnnotationPrefix = "k8sconnect.terraform.io/"
+
+// Server-managed metadata fields that will cause apply failures or are noise
+var serverManagedMetadataFields = []string{
+	"uid",
+	"resourceVersion",
+	"generation",
+	"creationTimestamp",
+	"managedFields",
+}
+
 // isMultiDocumentYAML checks if the YAML content contains multiple documents
 func isMultiDocumentYAML(yamlStr string) bool {
 	// Use yaml decoder to properly detect multiple documents
@@ -140,12 +152,10 @@ func (r *manifestResource) cleanObjectForExport(obj *unstructured.Unstructured) 
 	// Remove only the fields that will definitely cause problems on re-apply
 	metadata := cleaned.Object["metadata"].(map[string]interface{})
 
-	// Must be removed or kubectl apply fails
-	delete(metadata, "uid")
-	delete(metadata, "resourceVersion")
-	delete(metadata, "generation")
-	delete(metadata, "creationTimestamp")
-	delete(metadata, "managedFields")
+	// Remove server-managed metadata fields using shared constant list
+	for _, field := range serverManagedMetadataFields {
+		delete(metadata, field)
+	}
 
 	// Remove status field entirely (never needed for apply)
 	delete(cleaned.Object, "status")

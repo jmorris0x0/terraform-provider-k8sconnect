@@ -7,6 +7,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/mapvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -109,11 +110,12 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 				Description: "UTF-8 encoded, single-document Kubernetes YAML. Multi-doc files will fail validation.",
 				Validators: []validator.String{
 					yamlValidator{singleDoc: true},
+					serverManagedFieldsValidator{},
 				},
 			},
 			"cluster_connection": schema.SingleNestedAttribute{
 				Required:    true,
-				Description: "Cluster connection configuration for this resource. If not specified, uses the provider-level connection.",
+				Description: "Cluster connection configuration for this resource.",
 				Attributes:  auth.GetConnectionSchemaForResource(),
 			},
 			"delete_protection": schema.BoolAttribute{
@@ -143,6 +145,9 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 				Optional:    true,
 				ElementType: types.StringType,
 				Description: "List of field paths to ignore. On Create, these fields are sent to establish initial state. On Update, they are omitted from the Apply patch (releasing ownership to other controllers) and excluded from drift detection. Use dot notation for nested fields (e.g., 'metadata.annotations', 'spec.replicas'). Supports array indices like 'webhooks[0].clientConfig.caBundle' and strategic merge keys like 'spec.containers[name=nginx].image'. Useful for fields modified by controllers (e.g., HPA changing replicas) or operators injecting values.",
+				Validators: []validator.List{
+					listvalidator.ValueStringsAre(ignoreFieldsValidator{}),
+				},
 			},
 			"field_ownership": schema.StringAttribute{
 				Computed:    true,
