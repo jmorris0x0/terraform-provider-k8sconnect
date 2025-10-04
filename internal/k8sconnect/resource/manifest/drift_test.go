@@ -697,6 +697,8 @@ func TestAccManifestResource_CombinedDriftScenarios(t *testing.T) {
 				),
 			},
 			// Step 2: Simulate BOTH types of drift
+			// Note: We use force_conflicts=true here to avoid ERROR when HPA owns replicas field.
+			// With force_conflicts, we get a WARNING instead, allowing plan to succeed.
 			{
 				PreConfig: func() {
 					ctx := context.Background()
@@ -751,7 +753,7 @@ func TestAccManifestResource_CombinedDriftScenarios(t *testing.T) {
 						t.Logf("  Manager: %s, Operation: %s", mf.Manager, mf.Operation)
 					}
 				},
-				Config: testAccCombinedDriftConfig(ns, deployName, cmName, false),
+				Config: testAccCombinedDriftConfig(ns, deployName, cmName, true), // force_conflicts=true to avoid error
 				ConfigVariables: config.Variables{
 					"raw":         config.StringVariable(raw),
 					"namespace":   config.StringVariable(ns),

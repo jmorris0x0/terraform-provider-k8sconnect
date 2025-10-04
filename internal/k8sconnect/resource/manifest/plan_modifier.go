@@ -533,12 +533,11 @@ func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req
 			stateData.ManagedStateProjection.IsNull(), planData.ManagedStateProjection.IsNull())
 		return
 	}
-	// Skip if projections are the same
-	if stateData.ManagedStateProjection.Equal(planData.ManagedStateProjection) {
-		fmt.Printf("Projections are equal, returning\n")
-		return
-	}
-	fmt.Printf("Projections differ - checking for conflicts\n")
+	// NOTE: We do NOT skip when projections are equal!
+	// Even if there's no drift, we need to check if user's YAML contains fields
+	// owned by other controllers and warn/error appropriately.
+	fmt.Printf("Projections equal: %v - checking for conflicts anyway\n",
+		stateData.ManagedStateProjection.Equal(planData.ManagedStateProjection))
 	// Get field ownership from state
 	if stateData.FieldOwnership.IsNull() {
 		fmt.Printf("field_ownership is null, returning\n")
