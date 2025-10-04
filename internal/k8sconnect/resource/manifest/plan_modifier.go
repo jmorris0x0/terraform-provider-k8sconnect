@@ -563,6 +563,13 @@ func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req
 	// Extract all paths the user wants to manage
 	userWantsPaths := extractAllFieldsFromYAML(desiredObj.Object, "")
 	fmt.Printf("User wants to manage %d paths\n", len(userWantsPaths))
+
+	// Filter out ignored fields - we don't check ownership for fields we're explicitly ignoring
+	if ignoreFields := getIgnoreFields(ctx, &planData); ignoreFields != nil {
+		userWantsPaths = filterIgnoredPaths(userWantsPaths, ignoreFields)
+		fmt.Printf("After filtering ignore_fields, checking %d paths\n", len(userWantsPaths))
+	}
+
 	// Check each path the user wants against ownership
 	var conflicts []FieldConflict
 	for _, path := range userWantsPaths {
