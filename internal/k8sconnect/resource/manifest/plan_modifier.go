@@ -191,7 +191,14 @@ func (r *manifestResource) checkDriftAndPreserveState(ctx context.Context, req r
 				// Preserve the original YAML and internal fields since no actual changes will occur
 				plannedData.YAMLBody = stateData.YAMLBody
 				plannedData.ManagedStateProjection = stateData.ManagedStateProjection
-				plannedData.FieldOwnership = stateData.FieldOwnership
+
+				// Only preserve field_ownership if ignore_fields hasn't changed
+				// When ignore_fields changes, field_ownership will change even if projection doesn't
+				ignoreFieldsChanged := !stateData.IgnoreFields.Equal(plannedData.IgnoreFields)
+				if !ignoreFieldsChanged {
+					plannedData.FieldOwnership = stateData.FieldOwnership
+				}
+				// else: leave field_ownership as Unknown (default), Apply will compute it
 
 				// Note: ImportedWithoutAnnotations is now in private state, not model
 				// But still allow terraform-specific settings to update
@@ -265,9 +272,12 @@ func (r *manifestResource) calculateProjection(ctx context.Context, req resource
 		return true
 	}
 
-	// UPDATE operations: Use field ownership
-	fmt.Printf("Decision: UPDATE - using field ownership\n")
-	paths := r.getFieldOwnershipPaths(ctx, plannedData, desiredObj, client)
+	// UPDATE operations: Use field ownership from dry-run result
+	fmt.Printf("Decision: UPDATE - using field ownership from dry-run\n")
+
+	// Extract ownership from dry-run result (what ownership WILL BE after apply)
+	paths := extractOwnedPaths(ctx, dryRunResult.GetManagedFields(), desiredObj.Object)
+	fmt.Printf("extractOwnedPaths from dry-run returned %d paths\n", len(paths))
 
 	// Apply projection
 	return r.applyProjection(ctx, dryRunResult, paths, plannedData, resp)
