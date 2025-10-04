@@ -471,6 +471,7 @@ func TestProjection_QuantityNormalization(t *testing.T) {
 		t.Error("projection should not include status")
 	}
 }
+
 // TestFilterIgnoredPaths tests the core logic of filtering paths based on ignore patterns
 func TestFilterIgnoredPaths(t *testing.T) {
 	tests := []struct {
