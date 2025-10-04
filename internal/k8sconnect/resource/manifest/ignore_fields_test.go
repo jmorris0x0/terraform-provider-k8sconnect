@@ -16,7 +16,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect"
@@ -53,6 +52,9 @@ func TestAccManifestResource_IgnoreFields(t *testing.T) {
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.ignore_test", "id"),
 					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 					testhelpers.CheckDeploymentReplicaCount(k8sClientset, ns, deployName, 3),
+					// Verify we own spec.selector (but not spec.replicas which is ignored)
+					resource.TestMatchResourceAttr("k8sconnect_manifest.ignore_test", "field_ownership",
+						regexp.MustCompile(`"spec\.selector".*"manager":"k8sconnect"`)),
 				),
 			},
 			// Step 2: Re-apply without changes - should show no drift
@@ -132,6 +134,9 @@ func TestAccManifestResource_IgnoreFieldsTransition(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "ignore_fields.#", "1"),
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "ignore_fields.0", "spec.replicas"),
+					// Verify field_ownership shows hpa-controller owns spec.replicas
+					resource.TestMatchResourceAttr("k8sconnect_manifest.test", "field_ownership",
+						regexp.MustCompile(`"spec\.replicas".*"manager":"hpa-controller"`)),
 				),
 			},
 			// Step 4: Verify no drift even though replicas differ
@@ -248,6 +253,11 @@ func TestAccManifestResource_IgnoreFieldsRemoveWhileOwned(t *testing.T) {
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
+				Check: resource.ComposeTestCheckFunc(
+					// Verify field_ownership shows hpa-controller owns spec.replicas
+					resource.TestMatchResourceAttr("k8sconnect_manifest.test", "field_ownership",
+						regexp.MustCompile(`"spec\.replicas".*"manager":"hpa-controller"`)),
+				),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectEmptyPlan(),
@@ -279,7 +289,7 @@ func TestAccManifestResource_IgnoreFieldsModifyList(t *testing.T) {
 	ns := fmt.Sprintf("ignore-modify-ns-%d", time.Now().UnixNano()%1000000)
 	cmName := fmt.Sprintf("ignore-modify-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
-	k8sClientset := k8sClient.(*kubernetes.Clientset)
+	ssaClient := testhelpers.NewSSATestClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -296,16 +306,23 @@ func TestAccManifestResource_IgnoreFieldsModifyList(t *testing.T) {
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test", "id"),
 					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "ignore_fields.#", "1"),
+					// Verify field_ownership includes key2 (but not key1 which is ignored)
+					resource.TestMatchResourceAttr("k8sconnect_manifest.test", "field_ownership",
+						regexp.MustCompile(`"data\.key2".*"manager":"k8sconnect"`)),
 				),
 			},
-			// Step 2: Modify external field, then ADD another field to ignore list
+			// Step 2: Use SSA to simulate external controller taking ownership of data.key2
 			{
 				PreConfig: func() {
 					ctx := context.Background()
-					cm, _ := k8sClientset.CoreV1().ConfigMaps(ns).Get(ctx, cmName, metav1.GetOptions{})
-					cm.Data["key2"] = "externally-modified"
-					k8sClientset.CoreV1().ConfigMaps(ns).Update(ctx, cm, metav1.UpdateOptions{})
-					t.Logf("✓ Modified data.key2 externally")
+					// Use SSA with FORCE to transfer ownership to external-controller (like other tests do)
+					err := ssaClient.ForceApplyConfigMapDataSSA(ctx, ns, cmName, map[string]string{
+						"key2": "externally-modified",
+					}, "external-controller")
+					if err != nil {
+						t.Fatalf("Failed to apply with external-controller: %v", err)
+					}
+					t.Logf("✓ external-controller took ownership of data.key2 via SSA")
 				},
 				Config: testAccManifestConfigIgnoreFieldsConfigMap(ns, cmName, []string{"data.key1", "data.key2"}),
 				ConfigVariables: config.Variables{
@@ -313,6 +330,9 @@ func TestAccManifestResource_IgnoreFieldsModifyList(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "ignore_fields.#", "2"),
+					// Verify field_ownership shows key2 is owned by external-controller
+					resource.TestMatchResourceAttr("k8sconnect_manifest.test", "field_ownership",
+						regexp.MustCompile(`"data\.key2".*"manager":"external-controller"`)),
 				),
 			},
 			// Step 3: REMOVE one field from ignore list - should reclaim it
@@ -327,6 +347,134 @@ func TestAccManifestResource_IgnoreFieldsModifyList(t *testing.T) {
 					testhelpers.CheckConfigMapData(k8sClient, ns, cmName, map[string]string{
 						"key1": "value1",
 					}),
+					// Verify field_ownership shows k8sconnect owns key1 again
+					resource.TestMatchResourceAttr("k8sconnect_manifest.test", "field_ownership",
+						regexp.MustCompile(`"data\.key1".*"manager":"k8sconnect"`)),
+					// key2 should still be owned by external-controller
+					resource.TestMatchResourceAttr("k8sconnect_manifest.test", "field_ownership",
+						regexp.MustCompile(`"data\.key2".*"manager":"external-controller"`)),
+				),
+			},
+		},
+	})
+}
+
+// TestAccManifestResource_IgnoreFieldsModifyListError tests removing a field from ignore_fields
+// when an external controller owns it - should ERROR (Gap 1 from test coverage doc)
+func TestAccManifestResource_IgnoreFieldsModifyListError(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("ignore-modify-error-ns-%d", time.Now().UnixNano()%1000000)
+	cmName := fmt.Sprintf("ignore-modify-error-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+	ssaClient := testhelpers.NewSSATestClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create with both fields ignored
+			{
+				Config: testAccManifestConfigIgnoreFieldsConfigMap(ns, cmName, []string{"data.key1", "data.key2"}),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test", "id"),
+					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "ignore_fields.#", "2"),
+				),
+			},
+			// Step 2: External controller takes ownership of data.key2
+			{
+				PreConfig: func() {
+					ctx := context.Background()
+					// Use SSA with FORCE to transfer ownership to external-controller
+					err := ssaClient.ForceApplyConfigMapDataSSA(ctx, ns, cmName, map[string]string{
+						"key2": "externally-owned",
+					}, "external-controller")
+					if err != nil {
+						t.Fatalf("Failed to apply with external-controller: %v", err)
+					}
+					t.Logf("✓ external-controller took ownership of data.key2 via SSA")
+				},
+				Config: testAccManifestConfigIgnoreFieldsConfigMap(ns, cmName, []string{"data.key1", "data.key2"}),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					// Verify field_ownership shows external-controller owns data.key2
+					resource.TestMatchResourceAttr("k8sconnect_manifest.test", "field_ownership",
+						regexp.MustCompile(`"data\.key2".*"manager":"external-controller"`)),
+				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+			},
+			// Step 3: Try to REMOVE data.key2 from ignore list - should ERROR because external owns it
+			{
+				Config: testAccManifestConfigIgnoreFieldsConfigMap(ns, cmName, []string{"data.key1"}),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				ExpectError: regexp.MustCompile("Field Ownership Conflict|Cannot modify fields owned by other controllers"),
+			},
+		},
+	})
+}
+
+// TestAccManifestResource_IgnoreFieldsRemoveWhenOwned tests removing ignore_fields
+// when WE still own the field - should succeed cleanly (Gap 3 from test coverage doc)
+func TestAccManifestResource_IgnoreFieldsRemoveWhenOwned(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("ignore-noop-ns-%d", time.Now().UnixNano()%1000000)
+	deployName := fmt.Sprintf("ignore-noop-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create with ignore_fields
+			{
+				Config: testAccManifestConfigIgnoreFieldsTransition(ns, deployName, 3, true),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test", "id"),
+					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "ignore_fields.#", "1"),
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "ignore_fields.0", "spec.replicas"),
+				),
+			},
+			// Step 2: REMOVE ignore_fields immediately (no external controller took over) - should succeed
+			{
+				Config: testAccManifestConfigIgnoreFieldsTransition(ns, deployName, 3, false),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "ignore_fields.#", "0"),
+					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
+					// Verify field_ownership shows k8sconnect owns spec.replicas again
+					resource.TestMatchResourceAttr("k8sconnect_manifest.test", "field_ownership",
+						regexp.MustCompile(`"spec\.replicas".*"manager":"k8sconnect"`)),
 				),
 			},
 		},
