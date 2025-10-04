@@ -899,13 +899,9 @@ func TestRemoveFieldsFromObject(t *testing.T) {
 				},
 			},
 			ignorePatterns: []string{"spec.template.spec.containers"},
-			expected: map[string]interface{}{
-				"spec": map[string]interface{}{
-					"template": map[string]interface{}{
-						"spec": map[string]interface{}{},
-					},
-				},
-			},
+			// Expected: empty map because removing the only field leaves empty parents,
+			// which are cleaned up to prevent SSA field ownership consolidation
+			expected: map[string]interface{}{},
 		},
 		{
 			name: "remove multiple fields",

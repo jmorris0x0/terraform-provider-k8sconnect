@@ -779,6 +779,14 @@ func removeFieldFromUnstructured(obj map[string]interface{}, segments []PathSegm
 		// Traverse deeper
 		if nested, ok := obj[seg.Field].(map[string]interface{}); ok {
 			removeFieldFromUnstructured(nested, segments, depth+1)
+
+			// CRITICAL: If removing the child field left the parent map empty,
+			// remove the parent too. Otherwise SSA will interpret the empty map
+			// as "claim ownership of the parent and set it to empty", causing
+			// field ownership consolidation.
+			if len(nested) == 0 {
+				delete(obj, seg.Field)
+			}
 		}
 	}
 }

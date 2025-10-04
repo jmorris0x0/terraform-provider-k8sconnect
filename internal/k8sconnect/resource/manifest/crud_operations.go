@@ -266,6 +266,7 @@ func (r *manifestResource) updateProjection(rc *ResourceContext) error {
 
 	// Update field ownership (existing code continues...)
 	ownership := extractFieldOwnership(currentObj)
+
 	ownershipJSON, err := json.Marshal(ownership)
 	if err != nil {
 		tflog.Warn(rc.Ctx, "Failed to marshal field ownership", map[string]interface{}{"error": err.Error()})

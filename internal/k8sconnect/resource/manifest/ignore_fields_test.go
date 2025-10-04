@@ -269,9 +269,6 @@ func TestAccManifestResource_IgnoreFieldsRemoveWhileOwned(t *testing.T) {
 // TestAccManifestResource_IgnoreFieldsModifyList tests modifying the ignore_fields list
 // This test verifies adding/removing fields from ignore_fields works correctly
 func TestAccManifestResource_IgnoreFieldsModifyList(t *testing.T) {
-	t.Skip("TODO: This test exposes field ownership consolidation issues with ConfigMap data fields. " +
-		"Need to either use a different resource type or investigate how SSA handles map field ownership.")
-
 	t.Parallel()
 
 	raw := os.Getenv("TF_ACC_KUBECONFIG")

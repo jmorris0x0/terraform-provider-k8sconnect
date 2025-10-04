@@ -43,8 +43,7 @@ func (r *manifestResource) checkResourceExistenceAndOwnership(ctx context.Contex
 }
 
 // applyResourceWithConflictHandling applies resource and handles field conflicts.
-// On Create operations, sends all fields to establish initial state.
-// On Update operations, omits ignore_fields from the Apply patch to release ownership to other controllers.
+// Omits ignore_fields from the Apply patch to avoid taking ownership of those fields.
 func (r *manifestResource) applyResourceWithConflictHandling(ctx context.Context, rc *ResourceContext, data *manifestResourceModel, resp interface{}, operation string) error {
 	// Check force conflicts from the data parameter
 	forceConflicts := false
@@ -56,13 +55,21 @@ func (r *manifestResource) applyResourceWithConflictHandling(ctx context.Context
 	objToApply := rc.Object.DeepCopy()
 
 	// On Update, filter out ignored fields to release ownership to other controllers
-	// On Create, send everything to set initial state
+	// On Create, send everything to establish initial state
 	if operation == "Update" {
 		if ignoreFields := getIgnoreFields(ctx, data); ignoreFields != nil {
+			// Debug: show before filtering
+			beforeJSON, _ := objToApply.MarshalJSON()
+			fmt.Printf("DEBUG %s: Object BEFORE filtering ignore_fields:\n%s\n", operation, string(beforeJSON))
+
 			objToApply = removeFieldsFromObject(objToApply, ignoreFields)
 			tflog.Debug(ctx, "Filtered ignored fields from Apply patch", map[string]interface{}{
 				"ignored_fields": ignoreFields,
 			})
+
+			// Debug: show after filtering
+			afterJSON, _ := objToApply.MarshalJSON()
+			fmt.Printf("DEBUG %s: Object AFTER filtering ignore_fields:\n%s\n", operation, string(afterJSON))
 		}
 	}
 
@@ -230,6 +237,7 @@ func (r *manifestResource) updateProjectionFromCurrent(ctx context.Context, data
 // updateFieldOwnershipData updates field ownership tracking data
 func (r *manifestResource) updateFieldOwnershipData(ctx context.Context, data *manifestResourceModel, currentObj *unstructured.Unstructured) {
 	ownership := extractFieldOwnership(currentObj)
+
 	ownershipJSON, err := json.Marshal(ownership)
 	if err != nil {
 		tflog.Warn(ctx, "Failed to marshal field ownership", map[string]interface{}{

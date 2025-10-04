@@ -192,14 +192,10 @@ func (r *manifestResource) checkDriftAndPreserveState(ctx context.Context, req r
 				plannedData.YAMLBody = stateData.YAMLBody
 				plannedData.ManagedStateProjection = stateData.ManagedStateProjection
 				plannedData.FieldOwnership = stateData.FieldOwnership
+
 				// Note: ImportedWithoutAnnotations is now in private state, not model
 				// But still allow terraform-specific settings to update
 				// (delete_protection, force_conflicts, etc. are not preserved)
-			} else {
-				// Log what's different
-				fmt.Printf("=== PROJECTION MISMATCH ===\n")
-				fmt.Printf("State projection: %s\n", stateData.ManagedStateProjection.ValueString())
-				fmt.Printf("Plan projection: %s\n", plannedData.ManagedStateProjection.ValueString())
 			}
 
 			// ADD THIS LOGGING HERE (still inside the if block where stateData exists)
@@ -279,7 +275,16 @@ func (r *manifestResource) calculateProjection(ctx context.Context, req resource
 
 // performDryRun executes the dry-run against k8s
 func (r *manifestResource) performDryRun(ctx context.Context, client k8sclient.K8sClient, desiredObj *unstructured.Unstructured, plannedData *manifestResourceModel, resp *resource.ModifyPlanResponse) (*unstructured.Unstructured, error) {
-	dryRunResult, err := client.DryRunApply(ctx, desiredObj, k8sclient.ApplyOptions{
+	// Filter ignored fields before dry-run to match what we'll actually apply
+	objToApply := desiredObj.DeepCopy()
+	if ignoreFields := getIgnoreFields(ctx, plannedData); ignoreFields != nil {
+		objToApply = removeFieldsFromObject(objToApply, ignoreFields)
+		tflog.Debug(ctx, "Filtered ignore_fields before dry-run", map[string]interface{}{
+			"ignored_count": len(ignoreFields),
+		})
+	}
+
+	dryRunResult, err := client.DryRunApply(ctx, objToApply, k8sclient.ApplyOptions{
 		FieldManager: "k8sconnect",
 		Force:        true,
 	})
@@ -518,7 +523,7 @@ func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req
 	var stateData, planData manifestResourceModel
 	diags := req.State.Get(ctx, &stateData)
 	resp.Diagnostics.Append(diags...)
-	diags = req.Plan.Get(ctx, &planData)
+	diags = resp.Plan.Get(ctx, &planData)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		fmt.Printf("Has diagnostics error, returning\n")
@@ -605,6 +610,35 @@ func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req
 		addConflictWarning(resp, conflicts, planData.ForceConflicts)
 	}
 	fmt.Printf("=== checkFieldOwnershipConflicts END ===\n")
+}
+
+// filterFieldOwnership filters a field_ownership value to remove ignored fields
+func (r *manifestResource) filterFieldOwnership(ctx context.Context, ownershipValue types.String, data *manifestResourceModel) types.String {
+	if ownershipValue.IsNull() || ownershipValue.IsUnknown() {
+		return ownershipValue
+	}
+
+	// Parse the ownership map
+	var ownership map[string]FieldOwnership
+	if err := json.Unmarshal([]byte(ownershipValue.ValueString()), &ownership); err != nil {
+		// If we can't parse, just return the original value
+		return ownershipValue
+	}
+
+	// Filter out ignored fields
+	if ignoreFields := getIgnoreFields(ctx, data); ignoreFields != nil {
+		for _, ignorePath := range ignoreFields {
+			delete(ownership, ignorePath)
+		}
+	}
+
+	// Marshal back to JSON
+	filteredJSON, err := json.Marshal(ownership)
+	if err != nil {
+		return ownershipValue
+	}
+
+	return types.StringValue(string(filteredJSON))
 }
 
 // FieldConflict represents a field that user wants but is owned by another controller
