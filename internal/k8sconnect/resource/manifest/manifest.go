@@ -43,6 +43,7 @@ type manifestResourceModel struct {
 	FieldOwnership         types.String  `tfsdk:"field_ownership"`
 	ForceDestroy           types.Bool    `tfsdk:"force_destroy"`
 	ForceConflicts         types.Bool    `tfsdk:"force_conflicts"`
+	IgnoreFields           types.List    `tfsdk:"ignore_fields"`
 	ManagedStateProjection types.String  `tfsdk:"managed_state_projection"`
 	WaitFor                types.Object  `tfsdk:"wait_for"`
 	Status                 types.Dynamic `tfsdk:"status"`
@@ -137,6 +138,11 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 			"force_conflicts": schema.BoolAttribute{
 				Optional:    true,
 				Description: "Force field manager conflicts during server-side apply. When false (default), operations will fail if another field manager owns the field. When true, forcibly takes ownership of conflicting fields.",
+			},
+			"ignore_fields": schema.ListAttribute{
+				Optional:    true,
+				ElementType: types.StringType,
+				Description: "List of field paths to ignore. On Create, these fields are sent to establish initial state. On Update, they are omitted from the Apply patch (releasing ownership to other controllers) and excluded from drift detection. Use dot notation for nested fields (e.g., 'metadata.annotations', 'spec.replicas'). Supports array indices like 'webhooks[0].clientConfig.caBundle' and strategic merge keys like 'spec.containers[name=nginx].image'. Useful for fields modified by controllers (e.g., HPA changing replicas) or operators injecting values.",
 			},
 			"field_ownership": schema.StringAttribute{
 				Computed:    true,

@@ -270,6 +270,7 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		YAMLBody:               types.StringValue(string(yamlBytes)),
 		ClusterConnection:      connectionObj,
 		DeleteProtection:       types.BoolValue(false),
+		IgnoreFields:           types.ListNull(types.StringType),
 		ManagedStateProjection: types.StringValue(projectionJSON),
 		WaitFor: types.ObjectNull(map[string]attr.Type{
 			"condition":   types.StringType,

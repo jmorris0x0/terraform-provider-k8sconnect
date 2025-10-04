@@ -1,4 +1,4 @@
-# ADR-005: Cross-State Resource Ownership Conflicts in Kubernetes Terraform Providers
+# ADR-004: Cross-State Resource Ownership Conflicts in Kubernetes Terraform Providers
 
 ## Status
 Proposed

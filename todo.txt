@@ -5,33 +5,10 @@ Easy:
 
 * error if more than one context in kubeconfig and context is not given. Plus test. Using current context or first context is dangerous.
 
-* Make import datasource use the same pipeline as the manifest?
-
 * The readme example: "The yaml_split data source creates stable IDs like deployment.my-app.nginx and service.my-app.nginx, preventing unnecessary resource recreation when manifests are reordered." Can these collide? Do we need more entroy? Should it really be deployment.app.nginx based on the example? Make a runnable example maybe? what if two yaml_split resources put their output into one map? Would there be dupes?
-
-For yaml interpolations like ${field}, how to handle yaml than contains ${}? Do I need some kind of $${}?
 
 Hard:
 * Fix flaky test: yaml-split-dependency-ordering fails due to CRD race condition. Add option to yaml_split to order CRD first? Similar issue with namespaces.
-
-* ignore_fields: Surgical field ignores for HPA and controllers
-You already have a list in the code. You just need to add to it. Might be easier than I thought.
-https://registry.terraform.io/providers/gavinbunney/kubectl/latest/docs/resources/kubectl_manifest#ignore-manifest-fields
-
-When ignore is finished, there are some messages to update:
-	case errors.IsConflict(err):
-		return "error", fmt.Sprintf("%s: Field Manager Conflict", operation),
-			fmt.Sprintf("Server-side apply conflict detected for %s.\n"+
-				"Another controller is managing one or more fields in this resource.\n\n"+
-				"To resolve this conflict do one of the following:\n"+
-				"1. Remove the conflicting fields from your Terraform configuration\n"+
-				"2. Set 'force_conflicts = true' to override (may cause persistent conflicts)\n"+
-				"3. Ensure only one controller manages these fields\n\n"+
-				"Details: %v",
-				resourceDesc, err)
-
-
-
 
 * Centralize wait/polling/watch code?
 
