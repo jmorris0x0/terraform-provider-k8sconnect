@@ -42,7 +42,8 @@ func (r *manifestResource) checkResourceExistenceAndOwnership(ctx context.Contex
 	return nil
 }
 
-// applyResourceWithConflictHandling applies resource and handles field conflicts
+// applyResourceWithConflictHandling applies resource and handles field conflicts.
+// Omits ignore_fields from the Apply patch to avoid taking ownership of those fields.
 func (r *manifestResource) applyResourceWithConflictHandling(ctx context.Context, rc *ResourceContext, data *manifestResourceModel, resp interface{}, operation string) error {
 	// Check force conflicts from the data parameter
 	forceConflicts := false
@@ -50,8 +51,30 @@ func (r *manifestResource) applyResourceWithConflictHandling(ctx context.Context
 		forceConflicts = data.ForceConflicts.ValueBool()
 	}
 
-	// Apply the resource
-	err := rc.Client.Apply(ctx, rc.Object, k8sclient.ApplyOptions{
+	// Prepare the object to apply
+	objToApply := rc.Object.DeepCopy()
+
+	// On Update, filter out ignored fields to release ownership to other controllers
+	// On Create, send everything to establish initial state
+	if operation == "Update" {
+		if ignoreFields := getIgnoreFields(ctx, data); ignoreFields != nil {
+			// Debug: show before filtering
+			beforeJSON, _ := objToApply.MarshalJSON()
+			fmt.Printf("DEBUG %s: Object BEFORE filtering ignore_fields:\n%s\n", operation, string(beforeJSON))
+
+			objToApply = removeFieldsFromObject(objToApply, ignoreFields)
+			tflog.Debug(ctx, "Filtered ignored fields from Apply patch", map[string]interface{}{
+				"ignored_fields": ignoreFields,
+			})
+
+			// Debug: show after filtering
+			afterJSON, _ := objToApply.MarshalJSON()
+			fmt.Printf("DEBUG %s: Object AFTER filtering ignore_fields:\n%s\n", operation, string(afterJSON))
+		}
+	}
+
+	// Apply the resource (with ignored fields filtered out on Update)
+	err := rc.Client.Apply(ctx, objToApply, k8sclient.ApplyOptions{
 		FieldManager: "k8sconnect",
 		Force:        forceConflicts,
 	})
@@ -174,6 +197,15 @@ func (r *manifestResource) updateProjectionFromCurrent(ctx context.Context, data
 		paths = extractOwnedPaths(ctx, []metav1.ManagedFieldsEntry{}, obj.Object)
 	}
 
+	// Apply ignore_fields filtering if specified
+	if ignoreFields := getIgnoreFields(ctx, data); ignoreFields != nil {
+		paths = filterIgnoredPaths(paths, ignoreFields)
+		tflog.Debug(ctx, "Applied ignore_fields filtering", map[string]interface{}{
+			"ignored_count":  len(ignoreFields),
+			"filtered_paths": len(paths),
+		})
+	}
+
 	// Project the current state to only include fields we manage
 	projection, err := projectFields(currentObj.Object, paths)
 	if err != nil {
@@ -205,6 +237,7 @@ func (r *manifestResource) updateProjectionFromCurrent(ctx context.Context, data
 // updateFieldOwnershipData updates field ownership tracking data
 func (r *manifestResource) updateFieldOwnershipData(ctx context.Context, data *manifestResourceModel, currentObj *unstructured.Unstructured) {
 	ownership := extractFieldOwnership(currentObj)
+
 	ownershipJSON, err := json.Marshal(ownership)
 	if err != nil {
 		tflog.Warn(ctx, "Failed to marshal field ownership", map[string]interface{}{
@@ -221,11 +254,11 @@ func (r *manifestResource) addFieldConflictError(resp interface{}, operation str
 	if createResp, ok := resp.(*resource.CreateResponse); ok {
 		createResp.Diagnostics.AddError("Field Manager Conflict",
 			"Another controller owns fields you're trying to set. "+
-				"Set force_conflicts = true to override.")
+				"Add conflicting paths to ignore_fields to release ownership, or set force_conflicts = true to override.")
 	} else if updateResp, ok := resp.(*resource.UpdateResponse); ok {
 		updateResp.Diagnostics.AddError("Field Manager Conflict",
 			"Another controller owns fields you're trying to set. "+
-				"Set force_conflicts = true to override.")
+				"Add conflicting paths to ignore_fields to release ownership, or set force_conflicts = true to override.")
 	}
 }
 
@@ -279,4 +312,20 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// getIgnoreFields extracts the ignore_fields list from the model.
+// Returns nil if ignore_fields is not set or empty.
+func getIgnoreFields(ctx context.Context, data *manifestResourceModel) []string {
+	if data.IgnoreFields.IsNull() || data.IgnoreFields.IsUnknown() {
+		return nil
+	}
+
+	var ignoreFields []string
+	diags := data.IgnoreFields.ElementsAs(ctx, &ignoreFields, false)
+	if diags.HasError() || len(ignoreFields) == 0 {
+		return nil
+	}
+
+	return ignoreFields
 }

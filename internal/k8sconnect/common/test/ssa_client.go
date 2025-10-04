@@ -158,6 +158,41 @@ func (c *SSATestClient) ApplyConfigMapDataSSA(ctx context.Context, namespace, na
 	return nil
 }
 
+// ForceApplyConfigMapDataSSA is like ApplyConfigMapDataSSA but forces the ownership transfer.
+// This simulates a controller that forcibly takes ownership of ConfigMap data fields.
+func (c *SSATestClient) ForceApplyConfigMapDataSSA(ctx context.Context, namespace, name string, data map[string]string, fieldManager string) error {
+	patch := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata": map[string]interface{}{
+			"name":      name,
+			"namespace": namespace,
+		},
+		"data": data,
+	}
+
+	patchData, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("failed to marshal patch: %w", err)
+	}
+
+	result := c.clientset.CoreV1().RESTClient().
+		Patch(types.ApplyPatchType).
+		Namespace(namespace).
+		Resource("configmaps").
+		Name(name).
+		Param("fieldManager", fieldManager).
+		Param("force", "true"). // Force ownership transfer
+		Body(patchData).
+		Do(ctx)
+
+	if err := result.Error(); err != nil {
+		return fmt.Errorf("SSA patch failed: %w", err)
+	}
+
+	return nil
+}
+
 // ForceApplyDeploymentReplicasSSA is like ApplyDeploymentReplicasSSA but forces the ownership transfer.
 // This simulates a controller that forcibly takes ownership of a field.
 func (c *SSATestClient) ForceApplyDeploymentReplicasSSA(ctx context.Context, namespace, name string, replicas int32, fieldManager string) error {

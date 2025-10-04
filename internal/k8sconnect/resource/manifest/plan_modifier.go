@@ -191,15 +191,18 @@ func (r *manifestResource) checkDriftAndPreserveState(ctx context.Context, req r
 				// Preserve the original YAML and internal fields since no actual changes will occur
 				plannedData.YAMLBody = stateData.YAMLBody
 				plannedData.ManagedStateProjection = stateData.ManagedStateProjection
-				plannedData.FieldOwnership = stateData.FieldOwnership
+
+				// Only preserve field_ownership if ignore_fields hasn't changed
+				// When ignore_fields changes, field_ownership will change even if projection doesn't
+				ignoreFieldsChanged := !stateData.IgnoreFields.Equal(plannedData.IgnoreFields)
+				if !ignoreFieldsChanged {
+					plannedData.FieldOwnership = stateData.FieldOwnership
+				}
+				// else: leave field_ownership as Unknown (default), Apply will compute it
+
 				// Note: ImportedWithoutAnnotations is now in private state, not model
 				// But still allow terraform-specific settings to update
 				// (delete_protection, force_conflicts, etc. are not preserved)
-			} else {
-				// Log what's different
-				fmt.Printf("=== PROJECTION MISMATCH ===\n")
-				fmt.Printf("State projection: %s\n", stateData.ManagedStateProjection.ValueString())
-				fmt.Printf("Plan projection: %s\n", plannedData.ManagedStateProjection.ValueString())
 			}
 
 			// ADD THIS LOGGING HERE (still inside the if block where stateData exists)
@@ -269,9 +272,12 @@ func (r *manifestResource) calculateProjection(ctx context.Context, req resource
 		return true
 	}
 
-	// UPDATE operations: Use field ownership
-	fmt.Printf("Decision: UPDATE - using field ownership\n")
-	paths := r.getFieldOwnershipPaths(ctx, plannedData, desiredObj, client)
+	// UPDATE operations: Use field ownership from dry-run result
+	fmt.Printf("Decision: UPDATE - using field ownership from dry-run\n")
+
+	// Extract ownership from dry-run result (what ownership WILL BE after apply)
+	paths := extractOwnedPaths(ctx, dryRunResult.GetManagedFields(), desiredObj.Object)
+	fmt.Printf("extractOwnedPaths from dry-run returned %d paths\n", len(paths))
 
 	// Apply projection
 	return r.applyProjection(ctx, dryRunResult, paths, plannedData, resp)
@@ -279,7 +285,16 @@ func (r *manifestResource) calculateProjection(ctx context.Context, req resource
 
 // performDryRun executes the dry-run against k8s
 func (r *manifestResource) performDryRun(ctx context.Context, client k8sclient.K8sClient, desiredObj *unstructured.Unstructured, plannedData *manifestResourceModel, resp *resource.ModifyPlanResponse) (*unstructured.Unstructured, error) {
-	dryRunResult, err := client.DryRunApply(ctx, desiredObj, k8sclient.ApplyOptions{
+	// Filter ignored fields before dry-run to match what we'll actually apply
+	objToApply := desiredObj.DeepCopy()
+	if ignoreFields := getIgnoreFields(ctx, plannedData); ignoreFields != nil {
+		objToApply = removeFieldsFromObject(objToApply, ignoreFields)
+		tflog.Debug(ctx, "Filtered ignore_fields before dry-run", map[string]interface{}{
+			"ignored_count": len(ignoreFields),
+		})
+	}
+
+	dryRunResult, err := client.DryRunApply(ctx, objToApply, k8sclient.ApplyOptions{
 		FieldManager: "k8sconnect",
 		Force:        true,
 	})
@@ -332,6 +347,15 @@ func (r *manifestResource) getFieldOwnershipPaths(ctx context.Context, plannedDa
 
 // applyProjection projects fields and updates plan
 func (r *manifestResource) applyProjection(ctx context.Context, dryRunResult *unstructured.Unstructured, paths []string, plannedData *manifestResourceModel, resp *resource.ModifyPlanResponse) bool {
+	// Apply ignore_fields filtering if specified
+	if ignoreFields := getIgnoreFields(ctx, plannedData); ignoreFields != nil {
+		paths = filterIgnoredPaths(paths, ignoreFields)
+		tflog.Debug(ctx, "Applied ignore_fields filtering in plan modifier", map[string]interface{}{
+			"ignored_count":  len(ignoreFields),
+			"filtered_paths": len(paths),
+		})
+	}
+
 	// Project the dry-run result
 	projection, err := projectFields(dryRunResult.Object, paths)
 	if err != nil {
@@ -509,7 +533,7 @@ func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req
 	var stateData, planData manifestResourceModel
 	diags := req.State.Get(ctx, &stateData)
 	resp.Diagnostics.Append(diags...)
-	diags = req.Plan.Get(ctx, &planData)
+	diags = resp.Plan.Get(ctx, &planData)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		fmt.Printf("Has diagnostics error, returning\n")
@@ -524,12 +548,11 @@ func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req
 			stateData.ManagedStateProjection.IsNull(), planData.ManagedStateProjection.IsNull())
 		return
 	}
-	// Skip if projections are the same
-	if stateData.ManagedStateProjection.Equal(planData.ManagedStateProjection) {
-		fmt.Printf("Projections are equal, returning\n")
-		return
-	}
-	fmt.Printf("Projections differ - checking for conflicts\n")
+	// NOTE: We do NOT skip when projections are equal!
+	// Even if there's no drift, we need to check if user's YAML contains fields
+	// owned by other controllers and warn/error appropriately.
+	fmt.Printf("Projections equal: %v - checking for conflicts anyway\n",
+		stateData.ManagedStateProjection.Equal(planData.ManagedStateProjection))
 	// Get field ownership from state
 	if stateData.FieldOwnership.IsNull() {
 		fmt.Printf("field_ownership is null, returning\n")
@@ -554,6 +577,13 @@ func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req
 	// Extract all paths the user wants to manage
 	userWantsPaths := extractAllFieldsFromYAML(desiredObj.Object, "")
 	fmt.Printf("User wants to manage %d paths\n", len(userWantsPaths))
+
+	// Filter out ignored fields - we don't check ownership for fields we're explicitly ignoring
+	if ignoreFields := getIgnoreFields(ctx, &planData); ignoreFields != nil {
+		userWantsPaths = filterIgnoredPaths(userWantsPaths, ignoreFields)
+		fmt.Printf("After filtering ignore_fields, checking %d paths\n", len(userWantsPaths))
+	}
+
 	// Check each path the user wants against ownership
 	var conflicts []FieldConflict
 	for _, path := range userWantsPaths {
@@ -590,6 +620,35 @@ func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req
 		addConflictWarning(resp, conflicts, planData.ForceConflicts)
 	}
 	fmt.Printf("=== checkFieldOwnershipConflicts END ===\n")
+}
+
+// filterFieldOwnership filters a field_ownership value to remove ignored fields
+func (r *manifestResource) filterFieldOwnership(ctx context.Context, ownershipValue types.String, data *manifestResourceModel) types.String {
+	if ownershipValue.IsNull() || ownershipValue.IsUnknown() {
+		return ownershipValue
+	}
+
+	// Parse the ownership map
+	var ownership map[string]FieldOwnership
+	if err := json.Unmarshal([]byte(ownershipValue.ValueString()), &ownership); err != nil {
+		// If we can't parse, just return the original value
+		return ownershipValue
+	}
+
+	// Filter out ignored fields
+	if ignoreFields := getIgnoreFields(ctx, data); ignoreFields != nil {
+		for _, ignorePath := range ignoreFields {
+			delete(ownership, ignorePath)
+		}
+	}
+
+	// Marshal back to JSON
+	filteredJSON, err := json.Marshal(ownership)
+	if err != nil {
+		return ownershipValue
+	}
+
+	return types.StringValue(string(filteredJSON))
 }
 
 // FieldConflict represents a field that user wants but is owned by another controller
@@ -693,7 +752,8 @@ func addConflictWarning(resp *resource.ModifyPlanResponse, conflicts []FieldConf
 		resp.Diagnostics.AddWarning(
 			"Field Ownership Override",
 			fmt.Sprintf("Forcing ownership of fields managed by other controllers:\n%s\n\n"+
-				"These fields will be forcibly taken over. The other controllers may fight back.",
+				"These fields will be forcibly taken over. The other controllers may fight back.\n"+
+				"Consider adding these paths to ignore_fields to release ownership instead.",
 				strings.Join(conflictDetails, "\n")),
 		)
 	} else {
@@ -705,7 +765,7 @@ func addConflictWarning(resp *resource.ModifyPlanResponse, conflicts []FieldConf
 		resp.Diagnostics.AddError(
 			"Field Ownership Conflict",
 			fmt.Sprintf("Cannot modify fields owned by other controllers:\n%s\n\n"+
-				"To force ownership, set force_conflicts = true",
+				"To resolve: add conflicting paths to ignore_fields to release ownership, or set force_conflicts = true to override.",
 				strings.Join(conflictDetails, "\n")),
 		)
 	}

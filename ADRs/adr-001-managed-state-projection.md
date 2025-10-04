@@ -1,4 +1,4 @@
-# Architecture Decision Record: Kubernetes Terraform Provider with Managed State Projection
+# ADR-001: Kubernetes Terraform Provider with Managed State Projection
 
 ## Status
 Accepted
