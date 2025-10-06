@@ -32,6 +32,16 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 		return
 	}
 
+	// ADR-010: Detect resource identity changes for UPDATE operations
+	// This must happen BEFORE dry-run to avoid wasting API calls when replacement is needed
+	if !req.State.Raw.IsNull() {
+		if requiresReplacement := r.checkResourceIdentityChanges(ctx, req, &plannedData, resp); requiresReplacement {
+			// Early return - skip dry-run when resource will be replaced
+			// Terraform will orchestrate delete → create
+			return
+		}
+	}
+
 	// Validate connection is ready for operations
 	if !r.validateConnectionReady(ctx, &plannedData, resp) {
 		return
