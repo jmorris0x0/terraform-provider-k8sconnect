@@ -9,10 +9,10 @@ import (
 
 func TestDetectIdentityChanges(t *testing.T) {
 	tests := []struct {
-		name      string
-		stateYAML string
-		planYAML  string
-		wantCount int
+		name       string
+		stateYAML  string
+		planYAML   string
+		wantCount  int
 		wantFields []string
 	}{
 		{
@@ -25,7 +25,7 @@ metadata:
 kind: ConfigMap
 metadata:
   name: test`,
-			wantCount: 1,
+			wantCount:  1,
 			wantFields: []string{"kind"},
 		},
 		{
@@ -38,7 +38,7 @@ metadata:
 kind: Pod
 metadata:
   name: new-name`,
-			wantCount: 1,
+			wantCount:  1,
 			wantFields: []string{"metadata.name"},
 		},
 		{
@@ -53,7 +53,7 @@ kind: Pod
 metadata:
   name: test
   namespace: production`,
-			wantCount: 1,
+			wantCount:  1,
 			wantFields: []string{"metadata.namespace"},
 		},
 		{
@@ -66,7 +66,7 @@ metadata:
 kind: Deployment
 metadata:
   name: test`,
-			wantCount: 1,
+			wantCount:  1,
 			wantFields: []string{"apiVersion"},
 		},
 		{
@@ -81,7 +81,7 @@ kind: ConfigMap
 metadata:
   name: new-name
   namespace: default`,
-			wantCount: 2,
+			wantCount:  2,
 			wantFields: []string{"kind", "metadata.name"},
 		},
 		{
@@ -96,7 +96,7 @@ kind: Deployment
 metadata:
   name: new-name
   namespace: production`,
-			wantCount: 4,
+			wantCount:  4,
 			wantFields: []string{"kind", "apiVersion", "metadata.name", "metadata.namespace"},
 		},
 		{
@@ -113,7 +113,7 @@ metadata:
   name: test
   labels:
     app: new`,
-			wantCount: 0,
+			wantCount:  0,
 			wantFields: []string{},
 		},
 		{
@@ -130,7 +130,7 @@ metadata:
   name: test
 data:
   key: new-value`,
-			wantCount: 0,
+			wantCount:  0,
 			wantFields: []string{},
 		},
 		{
@@ -143,7 +143,7 @@ metadata:
 kind: ClusterRole
 metadata:
   name: test-role`,
-			wantCount: 0,
+			wantCount:  0,
 			wantFields: []string{},
 		},
 		{
@@ -157,7 +157,7 @@ kind: ClusterRole
 metadata:
   name: test-role
   namespace: default`,
-			wantCount: 1,
+			wantCount:  1,
 			wantFields: []string{"metadata.namespace"},
 		},
 		{
@@ -171,7 +171,7 @@ metadata:
 kind: Pod
 metadata:
   name: test`,
-			wantCount: 1,
+			wantCount:  1,
 			wantFields: []string{"metadata.namespace"},
 		},
 	}

@@ -622,11 +622,11 @@ func TestAccManifestResource_IdentityChange_Namespace(t *testing.T) {
 			{
 				Config: testAccManifestConfigIdentityNamespace(oldNs, newNs, cmName, oldNs),
 				ConfigVariables: config.Variables{
-					"raw":      config.StringVariable(raw),
-					"old_ns":   config.StringVariable(oldNs),
-					"new_ns":   config.StringVariable(newNs),
-					"cm_name":  config.StringVariable(cmName),
-					"use_ns":   config.StringVariable(oldNs),
+					"raw":     config.StringVariable(raw),
+					"old_ns":  config.StringVariable(oldNs),
+					"new_ns":  config.StringVariable(newNs),
+					"cm_name": config.StringVariable(cmName),
+					"use_ns":  config.StringVariable(oldNs),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckConfigMapExists(k8sClient, oldNs, cmName),
@@ -636,11 +636,11 @@ func TestAccManifestResource_IdentityChange_Namespace(t *testing.T) {
 			{
 				Config: testAccManifestConfigIdentityNamespace(oldNs, newNs, cmName, newNs),
 				ConfigVariables: config.Variables{
-					"raw":      config.StringVariable(raw),
-					"old_ns":   config.StringVariable(oldNs),
-					"new_ns":   config.StringVariable(newNs),
-					"cm_name":  config.StringVariable(cmName),
-					"use_ns":   config.StringVariable(newNs),
+					"raw":     config.StringVariable(raw),
+					"old_ns":  config.StringVariable(oldNs),
+					"new_ns":  config.StringVariable(newNs),
+					"cm_name": config.StringVariable(cmName),
+					"use_ns":  config.StringVariable(newNs),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckConfigMapExists(k8sClient, newNs, cmName),
