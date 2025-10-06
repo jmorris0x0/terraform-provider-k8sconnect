@@ -24,6 +24,7 @@ Traditional providers force cluster configuration into the provider block; **k8s
 | Cluster‑first dependency hell         | ❌ Two-phase workflow: deploy cluster, configure provider, then deploy apps | ✅ Single apply handles cluster creation and workloads together             |
 | Module & multi-cluster limits         | ❌ Providers at root only, requires aliases for multiple clusters           | ✅ Self-contained resources work in any module, any cluster                 |
 | Static provider configuration         | ❌ Provider config must be hardcoded at plan time                           | ✅ Use outputs, computed values, and loops dynamically                      |
+| CRD + CR in single apply              | ❌ Manual workaround or requires config                                     | ✅ Auto-retry, zero configuration                                           |
 | Field management conflicts            | ❌ Replace entire objects, conflicts with controllers                       | ✅ Server-Side Apply manages only your fields                               |
 | Unpredictable plan diffs              | ❌ Plan shows what you send, not what K8s will do                           | ✅ Dry-run projections show exact changes before apply                      |
 
@@ -147,19 +148,6 @@ resource "k8sconnect_manifest" "app" {
 The `yaml_split` data source creates stable IDs like `deployment.my-app.nginx` and `service.my-app.nginx`, preventing unnecessary resource recreation when manifests are reordered.
 
 **→ [Complete examples and patterns](examples/)**
-
----
-
-## Key Features
-
-- ✅ **Multi-cluster support** - Each resource can connect to a different cluster, no provider aliases needed
-- ✅ **True field management** - Only diffs and manages fields you define, coexists with other controllers
-- ✅ **Module-friendly** - Resources with connections work inside modules, apply everything in one phase
-- ✅ **Native YAML support** - Use your existing Kubernetes YAML directly, no HCL conversion needed
-- ✅ **Server-side apply only** - No client-side logic, uses Kubernetes' native conflict resolution
-- ✅ **Accurate drift detection** - Dry-run ensures diffs always show exactly what will change
-- ✅ **Ownership tracking** - Prevents conflicts between Terraform states and unmanaged resources
-- ✅ **Status tracking** - Optional access to resource status fields (LoadBalancer IPs, conditions, etc.)
 
 ---
 

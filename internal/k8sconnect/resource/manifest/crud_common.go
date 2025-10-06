@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -43,6 +44,77 @@ func (r *manifestResource) checkResourceExistenceAndOwnership(ctx context.Contex
 
 // applyResourceWithConflictHandling applies resource and handles field conflicts.
 // Omits ignore_fields from the Apply patch to avoid taking ownership of those fields.
+// applyWithCRDRetry applies a resource with automatic retry for missing CRD errors
+// This enables CRD and CR to be applied together in a single terraform apply
+func (r *manifestResource) applyWithCRDRetry(ctx context.Context, client k8sclient.K8sClient, obj *unstructured.Unstructured, opts k8sclient.ApplyOptions) error {
+	// CRD retry backoff schedule: fast initial retries, ~30s total
+	backoff := []time.Duration{
+		100 * time.Millisecond,
+		500 * time.Millisecond,
+		1 * time.Second,
+		2 * time.Second,
+		5 * time.Second,
+		10 * time.Second,
+		10 * time.Second,
+	}
+
+	var lastErr error
+	for attempt, delay := range backoff {
+		// Try the apply operation
+		err := client.Apply(ctx, obj, opts)
+		if err == nil {
+			// Success!
+			if attempt > 0 {
+				tflog.Info(ctx, "Resource applied successfully after CRD retry", map[string]interface{}{
+					"attempts": attempt + 1,
+					"kind":     obj.GetKind(),
+					"name":     obj.GetName(),
+				})
+			}
+			return nil
+		}
+
+		// Check if this is a CRD not found error
+		if !r.isCRDNotFoundError(err) {
+			// Different error type - return immediately
+			return err
+		}
+
+		lastErr = err
+
+		// Log retry attempt
+		tflog.Debug(ctx, "CRD not ready, retrying", map[string]interface{}{
+			"attempt": attempt + 1,
+			"delay":   delay,
+			"kind":    obj.GetKind(),
+			"name":    obj.GetName(),
+		})
+
+		// Wait before retry, respecting context cancellation
+		select {
+		case <-time.After(delay):
+			continue
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
+	// All retries exhausted - return enhanced error
+	return fmt.Errorf(
+		"CRD for %s/%s not found after 30s.\n\n"+
+			"This usually means:\n"+
+			"1. The CRD doesn't exist and won't be created\n"+
+			"2. The CRD is being created but needs more time to establish\n"+
+			"3. There's a typo in the apiVersion or kind\n\n"+
+			"Solutions:\n"+
+			"- Ensure CRD resource has depends_on relationship\n"+
+			"- Verify the CRD name matches the CR's apiVersion\n"+
+			"- Apply CRDs first: terraform apply -target=<crd_resource>\n\n"+
+			"Original error: %v",
+		obj.GetKind(), obj.GetName(), lastErr,
+	)
+}
+
 func (r *manifestResource) applyResourceWithConflictHandling(ctx context.Context, rc *ResourceContext, data *manifestResourceModel, resp interface{}, operation string) error {
 	// Check force conflicts from the data parameter
 	forceConflicts := false
@@ -64,8 +136,8 @@ func (r *manifestResource) applyResourceWithConflictHandling(ctx context.Context
 		}
 	}
 
-	// Apply the resource (with ignored fields filtered out on Update)
-	err := rc.Client.Apply(ctx, objToApply, k8sclient.ApplyOptions{
+	// Apply the resource with CRD retry (with ignored fields filtered out on Update)
+	err := r.applyWithCRDRetry(ctx, rc.Client, objToApply, k8sclient.ApplyOptions{
 		FieldManager: "k8sconnect",
 		Force:        forceConflicts,
 	})
@@ -73,7 +145,7 @@ func (r *manifestResource) applyResourceWithConflictHandling(ctx context.Context
 	if err != nil && isFieldConflictError(err) && !forceConflicts {
 		if conflictsOnlyWithSelf(err) {
 			tflog.Info(ctx, "Detected drift in fields we own, forcing update")
-			err = rc.Client.Apply(ctx, rc.Object, k8sclient.ApplyOptions{
+			err = r.applyWithCRDRetry(ctx, rc.Client, rc.Object, k8sclient.ApplyOptions{
 				FieldManager: "k8sconnect",
 				Force:        true,
 			})

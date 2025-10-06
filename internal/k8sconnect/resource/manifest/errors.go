@@ -71,6 +71,17 @@ func (r *manifestResource) classifyK8sError(err error, operation, resourceDesc s
 			fmt.Sprintf("The %s already exists in the cluster and cannot be created. Use import to manage existing resources with Terraform. Details: %v",
 				resourceDesc, err)
 
+	case r.isCRDNotFoundError(err):
+		return "error", fmt.Sprintf("%s: Custom Resource Definition Not Found", operation),
+			fmt.Sprintf("The Custom Resource Definition (CRD) for %s does not exist in the cluster.\n\n"+
+				"This usually means:\n"+
+				"1. The CRD hasn't been installed yet\n"+
+				"2. The CRD is being created in the same apply (will auto-retry for up to 30 seconds)\n"+
+				"3. There's a typo in apiVersion or kind\n\n"+
+				"If the CRD is being created in this same Terraform config, the provider will automatically "+
+				"retry while the CRD becomes established.",
+				resourceDesc)
+
 	default:
 		return "error", fmt.Sprintf("%s: Kubernetes API Error", operation),
 			fmt.Sprintf("An unexpected error occurred while performing %s on %s. Details: %v",
@@ -87,6 +98,17 @@ func (r *manifestResource) isImmutableFieldError(err error) bool {
 				strings.Contains(msg, "cannot be changed") ||
 				strings.Contains(msg, "may not be modified")
 		}
+	}
+	return false
+}
+
+// isCRDNotFoundError detects when a Custom Resource Definition doesn't exist yet
+func (r *manifestResource) isCRDNotFoundError(err error) bool {
+	if statusErr, ok := err.(*errors.StatusError); ok {
+		msg := strings.ToLower(statusErr.ErrStatus.Message)
+		// Kubernetes returns these messages when the CRD doesn't exist
+		return strings.Contains(msg, "no matches for kind") ||
+			strings.Contains(msg, "could not find the requested resource")
 	}
 	return false
 }
