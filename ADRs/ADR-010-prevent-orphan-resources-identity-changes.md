@@ -1,7 +1,7 @@
 # ADR-010: Preventing Orphan Resources on Identity Changes
 
 ## Status
-Proposed
+Accepted - Implemented (2025-10-06)
 
 ## Context
 

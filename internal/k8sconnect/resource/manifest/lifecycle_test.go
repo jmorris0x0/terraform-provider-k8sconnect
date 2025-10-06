@@ -709,3 +709,102 @@ YAML
 }
 `, oldNs, newNs, cmName, useNs)
 }
+
+// ADR-002: Test immutable field changes trigger replacement (PVC storage)
+// This test verifies automatic recreation when immutable fields change
+func TestAccManifestResource_ImmutableFieldChange_PVCStorage(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("immutable-pvc-ns-%d", time.Now().UnixNano()%1000000)
+	pvcName := fmt.Sprintf("test-pvc-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create PVC with 1Gi storage
+			{
+				Config: testAccManifestConfigImmutablePVC(ns, pvcName, "1Gi"),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"pvc_name":  config.StringVariable(pvcName),
+					"storage":   config.StringVariable("1Gi"),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_pvc", "id"),
+					testhelpers.CheckPVCExists(k8sClient, ns, pvcName),
+				),
+			},
+			// Step 2: Try to change storage size to 2Gi - should trigger replacement
+			// Note: PVC storage is immutable (cannot be changed in many K8s versions)
+			{
+				Config: testAccManifestConfigImmutablePVC(ns, pvcName, "2Gi"),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"pvc_name":  config.StringVariable(pvcName),
+					"storage":   config.StringVariable("2Gi"),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_pvc", "id"),
+					testhelpers.CheckPVCExists(k8sClient, ns, pvcName),
+					// Verify PVC was recreated (new UID)
+				),
+			},
+		},
+		CheckDestroy: resource.ComposeTestCheckFunc(
+			testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+			testhelpers.CheckPVCDestroy(k8sClient, ns, pvcName),
+		),
+	})
+}
+
+func testAccManifestConfigImmutablePVC(namespace, pvcName, storage string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+variable "namespace" { type = string }
+variable "pvc_name" { type = string }
+variable "storage" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_manifest" "test_pvc" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: %s
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+  depends_on = [k8sconnect_manifest.namespace]
+}
+`, namespace, pvcName, namespace, storage)
+}

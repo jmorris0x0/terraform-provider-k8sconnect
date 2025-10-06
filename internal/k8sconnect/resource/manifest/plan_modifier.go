@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
@@ -211,6 +212,12 @@ func (r *manifestResource) executeDryRunAndProjection(ctx context.Context, req r
 		return false
 	}
 
+	// If dryRunResult is nil, it means replacement was triggered (e.g., immutable field)
+	// In this case, projection is not needed
+	if dryRunResult == nil {
+		return true
+	}
+
 	// Calculate and apply projection
 	return r.calculateProjection(ctx, req, plannedData, desiredObj, dryRunResult, client, resp)
 }
@@ -271,6 +278,41 @@ func (r *manifestResource) performDryRun(ctx context.Context, client k8sclient.K
 		Force:        true,
 	})
 	if err != nil {
+		// ADR-002: Check if this is an immutable field error
+		// If so, trigger automatic resource replacement instead of failing
+		if r.isImmutableFieldError(err) {
+			immutableFields := r.extractImmutableFields(err)
+			resourceDesc := fmt.Sprintf("%s/%s %s/%s",
+				desiredObj.GetAPIVersion(), desiredObj.GetKind(),
+				desiredObj.GetNamespace(), desiredObj.GetName())
+
+			tflog.Info(ctx, "Immutable field changed, triggering replacement",
+				map[string]interface{}{
+					"resource": resourceDesc,
+					"fields":   immutableFields,
+				})
+
+			// Mark resource for replacement
+			resp.RequiresReplace = append(resp.RequiresReplace, path.Root("yaml_body"))
+
+			// Add informative warning to explain why replacement is happening
+			resp.Diagnostics.AddWarning(
+				"Immutable Field Changed - Replacement Required",
+				fmt.Sprintf("Cannot modify immutable field(s): %v on %s\n\n"+
+					"Immutable fields cannot be changed after resource creation.\n"+
+					"Terraform will delete the existing resource and create a new one.\n\n"+
+					"This is the correct behavior - Kubernetes does not allow these fields to be modified in-place.",
+					immutableFields, resourceDesc))
+
+			// Set projection to unknown (replacement doesn't need projection)
+			plannedData.ManagedStateProjection = types.StringUnknown()
+
+			// Return success (nil error) to allow planning to continue
+			// The replacement will be shown in the plan output
+			return nil, nil
+		}
+
+		// Non-immutable errors: existing behavior (fail the dry-run)
 		r.setProjectionUnknown(ctx, plannedData, resp,
 			fmt.Sprintf("Dry-run failed: %s", err))
 		return nil, err

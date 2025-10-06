@@ -1,8 +1,11 @@
 # ADR-002: Handling Immutable Resources and Complex Deletions
 
 ## Status
-Deferred - Open Questions
-Only enhanced error messages implemented. No automatic recreation or dry-run detection.
+Accepted - Implemented (2025-10-06)
+
+**Implementation:** Option A - ModifyPlan with RequiresReplace (Terraform Framework)
+
+Immutable field changes are now detected during the plan phase via dry-run and automatically trigger resource replacement with clear user warnings.
 
 ## Context
 
