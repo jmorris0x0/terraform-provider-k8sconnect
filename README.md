@@ -10,9 +10,10 @@ Traditional providers force cluster configuration into the provider block; **k8s
 
 
 > ### ⚠️ ALPHA RELEASE
-> **This provider is in alpha and not suitable for production use.** Breaking changes may occur without notice. Use at your own risk.
-> 
-> Targeting December 2025 for feature complete release announcement.
+> **This provider is in alpha with limited production usage.** APIs and state formats may change before v1.0.
+> We recommend testing thoroughly and pinning to exact versions.
+>
+> Targeting feature-complete release in December 2025.
 
 ---
 
@@ -21,8 +22,10 @@ Traditional providers force cluster configuration into the provider block; **k8s
 | Pain point                            | Conventional providers                                                      | **`k8sconnect`**                                                            |
 | ------------------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | Cluster‑first dependency hell         | ❌ Two-phase workflow: deploy cluster, configure provider, then deploy apps | ✅ Single apply handles cluster creation and workloads together             |
-| Module & multi-cluster limits         | ❌ Providers at root only, requires aliases for multiple clusters                  | ✅ Self-contained resources work in any module, any cluster               |
-| Static provider configuration         | ❌ Provider config must be hardcoded at plan time                             | ✅ Use outputs, computed values, and loops dynamically                    |
+| Module & multi-cluster limits         | ❌ Providers at root only, requires aliases for multiple clusters           | ✅ Self-contained resources work in any module, any cluster                 |
+| Static provider configuration         | ❌ Provider config must be hardcoded at plan time                           | ✅ Use outputs, computed values, and loops dynamically                      |
+| Field management conflicts            | ❌ Replace entire objects, conflicts with controllers                       | ✅ Server-Side Apply manages only your fields                               |
+| Unpredictable plan diffs              | ❌ Plan shows what you send, not what K8s will do                           | ✅ Dry-run projections show exact changes before apply                      |
 
 
 **Stop fighting [Terraform's provider model](https://news.ycombinator.com/item?id=27434363). Start deploying to any cluster, from any module, in any order.**
@@ -157,6 +160,23 @@ The `yaml_split` data source creates stable IDs like `deployment.my-app.nginx` a
 - ✅ **Accurate drift detection** - Dry-run ensures diffs always show exactly what will change
 - ✅ **Ownership tracking** - Prevents conflicts between Terraform states and unmanaged resources
 - ✅ **Status tracking** - Optional access to resource status fields (LoadBalancer IPs, conditions, etc.)
+
+---
+
+## How It Works: SSA + Dry-Run = Predictable Infrastructure
+
+k8sconnect uses **Server-Side Apply with Dry-Run** for every operation, giving you:
+
+1. **Accurate plan diffs** - The `managed_state_projection` attribute shows exactly what Kubernetes will change, computed via dry-run. No surprises between plan and apply.
+
+2. **SSA-aware field ownership** - The `field_ownership` attribute tracks which controller owns each field. See when HPA takes over replicas, when webhooks modify annotations, or when another Terraform state conflicts with yours.
+
+3. **True drift detection** - Only diffs fields you actually manage. If a controller updates status or another field manager changes something, you'll see it clearly separated:
+   - `yaml_body` diffs = Changes you made to your config
+   - `managed_state_projection` diffs = External changes that will be corrected
+   - `field_ownership` diffs = Ownership changes between controllers
+
+This is the first Terraform provider to combine SSA field management with dry-run projections for plan-time accuracy.
 
 ---
 

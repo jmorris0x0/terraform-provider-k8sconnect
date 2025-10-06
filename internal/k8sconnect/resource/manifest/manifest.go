@@ -114,9 +114,10 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 				},
 			},
 			"cluster_connection": schema.SingleNestedAttribute{
-				Required:    true,
-				Description: "Cluster connection configuration for this resource.",
-				Attributes:  auth.GetConnectionSchemaForResource(),
+				Required: true,
+				Description: "Kubernetes cluster connection for this specific resource. Can be different per-resource, enabling multi-cluster " +
+					"deployments without provider aliases. Supports inline credentials (token, exec, client certs) or kubeconfig.",
+				Attributes: auth.GetConnectionSchemaForResource(),
 			},
 			"delete_protection": schema.BoolAttribute{
 				Optional:    true,
@@ -134,17 +135,27 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 				MarkdownDescription: `Force deletion by removing finalizers. ⚠️ **WARNING**: Unlike other providers, this REMOVES finalizers after timeout. May cause data loss and orphaned cloud resources. See docs before using.`,
 			},
 			"managed_state_projection": schema.StringAttribute{
-				Computed:    true,
-				Description: "Internal field used to track managed fields for accurate drift detection.",
+				Computed: true,
+				Description: "Snapshot of resource state from the last Server-Side Apply dry-run, containing only fields managed by k8sconnect. " +
+					"When this differs from current cluster state, it indicates drift - someone modified your managed fields outside Terraform. " +
+					"During plan, diffs in this attribute show exactly what Kubernetes will change when you apply, computed via dry-run for accuracy. " +
+					"This enables precise drift detection without false positives from fields managed by other controllers.",
 			},
 			"force_conflicts": schema.BoolAttribute{
-				Optional:    true,
-				Description: "Force field manager conflicts during server-side apply. When false (default), operations will fail if another field manager owns the field. When true, forcibly takes ownership of conflicting fields.",
+				Optional: true,
+				Description: "Force ownership of fields currently managed by other controllers during Server-Side Apply. " +
+					"When false (default), apply fails if another field manager owns a field, protecting against accidental takeovers. " +
+					"When true, forcibly claims ownership of conflicting fields. Useful when intentionally taking control from controllers " +
+					"like HPA or when migrating resources from other Terraform states.",
 			},
 			"ignore_fields": schema.ListAttribute{
 				Optional:    true,
 				ElementType: types.StringType,
-				Description: "List of field paths to ignore. On Create, these fields are sent to establish initial state. On Update, they are omitted from the Apply patch (releasing ownership to other controllers) and excluded from drift detection. Use dot notation for nested fields (e.g., 'metadata.annotations', 'spec.replicas'). Supports array indices like 'webhooks[0].clientConfig.caBundle' and strategic merge keys like 'spec.containers[name=nginx].image'. Useful for fields modified by controllers (e.g., HPA changing replicas) or operators injecting values.",
+				Description: "Field paths to exclude from management. On Create, fields are sent to establish initial state; " +
+					"on Update, they're omitted from the Apply patch, releasing ownership to other controllers and excluding them from drift detection. " +
+					"Supports dot notation (e.g., 'metadata.annotations', 'spec.replicas'), array indices ('webhooks[0].clientConfig.caBundle'), " +
+					"and strategic merge keys ('spec.containers[name=nginx].image'). Use for fields managed by controllers (e.g., HPA modifying replicas) " +
+					"or when operators inject values.",
 				Validators: []validator.List{
 					listvalidator.ValueStringsAre(ignoreFieldsValidator{}),
 				},
@@ -152,11 +163,17 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 			"field_ownership": schema.MapAttribute{
 				Computed:    true,
 				ElementType: types.StringType,
-				Description: "Field ownership tracking - shows which controller manages each field",
+				Description: "Tracks which controller owns each managed field using Server-Side Apply field management. " +
+					"Shows as a map of 'field.path': 'controller-name'. Only appears in plan diffs when ownership actually changes " +
+					"(e.g., when HPA takes ownership of spec.replicas). Empty/hidden when ownership is unchanged. " +
+					"Critical for understanding SSA conflicts and knowing which controller controls what.",
 			},
 			"status": schema.DynamicAttribute{
-				Computed:    true,
-				Description: "Status subresource from the live cluster state. Contains conditions, phase, and resource-specific fields like loadBalancer for Services.",
+				Computed: true,
+				Description: "Resource status from the cluster, populated only when using wait_for with field='status.path'. " +
+					"Contains resource-specific runtime information like LoadBalancer IPs, Pod conditions, Deployment replicas. " +
+					"Follows the principle: 'You get only what you wait for' to avoid storing volatile status fields that cause drift. " +
+					"Returns null when wait_for is not configured or uses non-field wait types.",
 			},
 			"wait_for": schema.SingleNestedAttribute{
 				Optional:    true,
@@ -196,8 +213,9 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 						},
 					},
 					"rollout": schema.BoolAttribute{
-						Optional:    true,
-						Description: "Wait for Deployment/StatefulSet/DaemonSet rollout. Auto-enabled for these types unless set to false.",
+						Optional: true,
+						Description: "Wait for Deployment/StatefulSet/DaemonSet to complete rollout before considering the resource ready. " +
+							"Optional - rollout waiting is not automatic. Checks that all replicas are updated and available.",
 					},
 					"timeout": schema.StringAttribute{
 						Optional:    true,
