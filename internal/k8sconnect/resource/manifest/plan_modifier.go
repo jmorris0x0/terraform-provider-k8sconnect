@@ -256,6 +256,20 @@ func (r *manifestResource) calculateProjection(ctx context.Context, req resource
 	// Extract ownership from dry-run result (what ownership WILL BE after apply)
 	paths := extractOwnedPaths(ctx, dryRunResult.GetManagedFields(), desiredObj.Object)
 
+	// Preserve field_ownership from state for UPDATE operations
+	// Only mark as unknown if ignore_fields changed or force_conflicts is set (both could affect ownership)
+	var stateData manifestResourceModel
+	if diags := req.State.Get(ctx, &stateData); !diags.HasError() {
+		ignoreFieldsChanged := !stateData.IgnoreFields.Equal(plannedData.IgnoreFields)
+		forceConflicts := !plannedData.ForceConflicts.IsNull() && plannedData.ForceConflicts.ValueBool()
+
+		if !ignoreFieldsChanged && !forceConflicts && !stateData.FieldOwnership.IsNull() {
+			plannedData.FieldOwnership = stateData.FieldOwnership
+			tflog.Debug(ctx, "Preserved field_ownership from state for UPDATE")
+		}
+		// else: leave field_ownership as Unknown, Apply will compute it
+	}
+
 	// Apply projection
 	return r.applyProjection(ctx, dryRunResult, paths, plannedData, resp)
 }
