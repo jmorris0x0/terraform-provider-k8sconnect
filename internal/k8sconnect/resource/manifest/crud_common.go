@@ -71,7 +71,6 @@ func (r *manifestResource) applyResourceWithConflictHandling(ctx context.Context
 		Force:        forceConflicts,
 	})
 
-	// THIS IS THE MISSING LOGIC FROM THE ORIGINAL:
 	if err != nil && isFieldConflictError(err) && !forceConflicts {
 		if conflictsOnlyWithSelf(err) {
 			tflog.Info(ctx, "Detected drift in fields we own, forcing update")

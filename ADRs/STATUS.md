@@ -1,16 +1,18 @@
 # ADR Implementation Status
 
-Last updated: 2025-10-03
+Last updated: 2025-10-05
 
 ## Summary
 
 | ADR | Title | Status in File | Actually Implemented | Notes |
 |-----|-------|---------------|---------------------|-------|
 | ADR-001 | Managed State Projection | Accepted | ✅ **ADOPTED** | Core architecture fully implemented |
-| ADR-003 | Immutable Resources | Draft | ⚠️ **PARTIAL** | Enhanced error messages only |
-| ADR-004 | Random ID Strategy | Proposed | ✅ **ADOPTED** | Random IDs + ownership annotations |
-| ADR-005 | Cross-State Ownership | Proposed | ❌ **NOT ADOPTED** | Context annotations not implemented |
+| ADR-002 | Immutable Resources & Complex Deletions | Deferred | ⚠️ **PARTIAL** | Enhanced error messages only |
+| ADR-003 | Resource IDs | Accepted | ✅ **ADOPTED** | Random UUIDs + ownership annotations |
+| ADR-004 | Cross-State Conflicts | Proposed | ❌ **NOT ADOPTED** | Context annotations not implemented |
+| ADR-005 | Field Ownership Strategy | Accepted | ✅ **ADOPTED** | Server-side apply field management |
 | ADR-006 | State Safety & Projection Recovery | Accepted | ✅ **ADOPTED** | Private state recovery pattern |
+| ADR-010 | Prevent Orphan Resources (Identity Changes) | Proposed | ❌ **NOT IMPLEMENTED** | **CRITICAL BUG** - needs immediate attention |
 
 ## Detailed Status
 
@@ -110,16 +112,64 @@ Last updated: 2025-10-03
 - Helper functions for clean ADR-006 pattern (refactoring from 2025-10-02)
 - Extracted `handleProjectionFailure()` and `handleProjectionSuccess()`
 
+### ❌ ADR-010: Prevent Orphan Resources (Identity Changes) - NOT IMPLEMENTED ⚠️ CRITICAL
+
+**Status:** Proposed (2025-10-05)
+
+**Problem:** Provider has a critical bug where changing resource identity fields (kind, apiVersion, metadata.name, metadata.namespace) in yaml_body creates orphan resources in Kubernetes cluster.
+
+**Evidence of bug:**
+- `ModifyPlan()` performs dry-run but never checks identity changes (plan_modifier.go:21-108)
+- `Update()` preserves same Terraform ID but applies different K8s resource (crud.go:170)
+- No `RequiresReplace` logic anywhere in codebase
+- Orphan scenario confirmed via code analysis and comparison with kubectl/kubernetes providers
+
+**What's NOT implemented:**
+- Identity change detection in ModifyPlan
+- RequiresReplace on yaml_body when identity changes
+- Diagnostic messages explaining replacement
+- Protection against accidental orphan creation
+
+**Security impact:**
+- Users can accidentally leave privileged resources orphaned (ServiceAccounts, ClusterRoles)
+- Silent failure mode - no warning that old resource still exists
+- Orphaned resources remain in cluster indefinitely
+
+**Comparison with other providers:**
+- kubectl provider: Uses `ForceNew: true` on computed kind/name/namespace fields ✅
+- kubernetes provider: Uses `RequiresReplace` in PlanResourceChange ✅
+- k8sconnect: No protection ❌
+
+**Proposed solution:** Add identity change detection to ModifyPlan, set RequiresReplace when kind/apiVersion/name/namespace changes
+
+**Priority:** **CRITICAL** - This is a security and correctness issue
+
+**Relationship to ADR-002:**
+- ADR-002 addresses immutable _fields_ (K8s returns 422 error)
+- ADR-010 addresses resource _identity_ (K8s creates new resource, orphans old one)
+- Both should be implemented but ADR-010 is more critical
+
 ## Recommendations
+
+### Critical Priority 🚨
+
+1. **Implement ADR-010 immediately**
+   - **CRITICAL BUG** - orphan resources are a security and correctness issue
+   - Affects all users who change resource identity in yaml_body
+   - Other providers (kubectl, kubernetes) already solve this
+   - Solution is well-defined: RequiresReplace in ModifyPlan
+   - Estimated effort: 1-2 days (implementation + tests)
+   - Zero breaking changes - only fixes existing bug
 
 ### High Priority
 
-1. **Update ADR-003 status** to "Rejected" or "Deferred"
-   - Current "Draft" status is misleading
-   - Enhanced errors are good enough for now
-   - Full implementation would add significant complexity
+2. **Update ADR-002 status** to reflect current implementation
+   - Currently marked "Deferred - Open Questions"
+   - Enhanced error messages are implemented
+   - Full dry-run detection and automatic recreation not implemented
+   - Related to ADR-010 but distinct concerns
 
-2. **Consider ADR-005 implementation**
+3. **Consider ADR-004 implementation** (Cross-State Conflicts)
    - Cross-state conflicts are a real problem
    - Low implementation cost (just context annotations)
    - High value for multi-state/multi-team scenarios
@@ -127,9 +177,9 @@ Last updated: 2025-10-03
 
 ### Low Priority
 
-3. **Mark ADR-004 as "Accepted"**
-   - Currently says "Proposed" but fully implemented
-   - Should match implementation reality
+4. **Update ADR-003 status in file**
+   - Currently marked "Accepted" - correct
+   - Fully implemented with random UUIDs + ownership annotations
 
 ## Migration Path
 
@@ -142,6 +192,9 @@ If implementing ADR-005 later:
 ## Notes
 
 - ADR-001 and ADR-006 form the core safety architecture
-- ADR-004 provides stable resource identity
-- ADR-003 partial implementation is acceptable (error messages help)
-- ADR-005 is the main gap but not critical for single-state usage
+- ADR-003 provides stable resource identity across configuration changes
+- **ADR-010 is a critical gap** - orphan resources are a security/correctness issue
+- ADR-002 and ADR-010 are related but distinct:
+  - ADR-002: Immutable fields (K8s rejects with 422) - enhanced errors implemented
+  - ADR-010: Identity changes (K8s accepts, creates orphan) - NOT implemented
+- ADR-004 (cross-state conflicts) is a gap but not critical for single-state usage
