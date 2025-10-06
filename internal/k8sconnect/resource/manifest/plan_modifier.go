@@ -3,7 +3,6 @@ package manifest
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -14,7 +13,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
-	//metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -55,7 +53,7 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 	if yamlStr == "" {
 		// Mark computed fields as unknown
 		plannedData.ManagedStateProjection = types.StringUnknown()
-		plannedData.FieldOwnership = types.StringUnknown()
+		plannedData.FieldOwnership = types.MapUnknown(types.StringType)
 
 		// Handle status based on wait_for
 		if !plannedData.WaitFor.IsNull() {
@@ -77,7 +75,7 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 			// During plan with interpolations to computed values, we can't parse/validate
 			// Mark computed fields as unknown
 			plannedData.ManagedStateProjection = types.StringUnknown()
-			plannedData.FieldOwnership = types.StringUnknown()
+			plannedData.FieldOwnership = types.MapUnknown(types.StringType)
 
 			// Handle status based on wait_for
 			if !plannedData.WaitFor.IsNull() {
@@ -519,12 +517,20 @@ func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req
 		return
 	}
 
-	var ownership map[string]FieldOwnership
-	if err := json.Unmarshal([]byte(stateData.FieldOwnership.ValueString()), &ownership); err != nil {
-		tflog.Warn(ctx, "Failed to unmarshal field ownership", map[string]interface{}{
-			"error": err.Error(),
+	// Convert types.Map to map[string]string
+	var ownershipMap map[string]string
+	diags = stateData.FieldOwnership.ElementsAs(ctx, &ownershipMap, false)
+	if diags.HasError() {
+		tflog.Warn(ctx, "Failed to extract field ownership map", map[string]interface{}{
+			"diagnostics": diags,
 		})
 		return
+	}
+
+	// Convert map[string]string (manager names) to map[string]FieldOwnership for compatibility
+	ownership := make(map[string]FieldOwnership, len(ownershipMap))
+	for path, manager := range ownershipMap {
+		ownership[path] = FieldOwnership{Manager: manager}
 	}
 
 	// Parse the user's desired YAML to see what fields they want
@@ -569,14 +575,15 @@ func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req
 }
 
 // filterFieldOwnership filters a field_ownership value to remove ignored fields
-func (r *manifestResource) filterFieldOwnership(ctx context.Context, ownershipValue types.String, data *manifestResourceModel) types.String {
+func (r *manifestResource) filterFieldOwnership(ctx context.Context, ownershipValue types.Map, data *manifestResourceModel) types.Map {
 	if ownershipValue.IsNull() || ownershipValue.IsUnknown() {
 		return ownershipValue
 	}
 
-	// Parse the ownership map
-	var ownership map[string]FieldOwnership
-	if err := json.Unmarshal([]byte(ownershipValue.ValueString()), &ownership); err != nil {
+	// Convert to map[string]string
+	var ownershipMap map[string]string
+	diags := ownershipValue.ElementsAs(ctx, &ownershipMap, false)
+	if diags.HasError() {
 		// If we can't parse, just return the original value
 		return ownershipValue
 	}
@@ -584,17 +591,17 @@ func (r *manifestResource) filterFieldOwnership(ctx context.Context, ownershipVa
 	// Filter out ignored fields
 	if ignoreFields := getIgnoreFields(ctx, data); ignoreFields != nil {
 		for _, ignorePath := range ignoreFields {
-			delete(ownership, ignorePath)
+			delete(ownershipMap, ignorePath)
 		}
 	}
 
-	// Marshal back to JSON
-	filteredJSON, err := json.Marshal(ownership)
-	if err != nil {
+	// Convert back to types.Map
+	filteredMap, diags := types.MapValueFrom(ctx, types.StringType, ownershipMap)
+	if diags.HasError() {
 		return ownershipValue
 	}
 
-	return types.StringValue(string(filteredJSON))
+	return filteredMap
 }
 
 // FieldConflict represents a field that user wants but is owned by another controller

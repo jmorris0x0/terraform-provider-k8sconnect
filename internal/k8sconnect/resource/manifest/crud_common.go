@@ -3,7 +3,6 @@ package manifest
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -218,14 +217,23 @@ func (r *manifestResource) updateProjectionFromCurrent(ctx context.Context, data
 func (r *manifestResource) updateFieldOwnershipData(ctx context.Context, data *manifestResourceModel, currentObj *unstructured.Unstructured) {
 	ownership := extractFieldOwnership(currentObj)
 
-	ownershipJSON, err := json.Marshal(ownership)
-	if err != nil {
-		tflog.Warn(ctx, "Failed to marshal field ownership", map[string]interface{}{
-			"error": err.Error(),
+	// Convert map[string]FieldOwnership to map[string]string (just manager names)
+	ownershipMap := make(map[string]string, len(ownership))
+	for path, owner := range ownership {
+		ownershipMap[path] = owner.Manager
+	}
+
+	// Convert to types.Map
+	mapValue, diags := types.MapValueFrom(ctx, types.StringType, ownershipMap)
+	if diags.HasError() {
+		tflog.Warn(ctx, "Failed to convert field ownership to map", map[string]interface{}{
+			"diagnostics": diags,
 		})
-		data.FieldOwnership = types.StringValue("{}")
+		// Set empty map on error
+		emptyMap, _ := types.MapValueFrom(ctx, types.StringType, map[string]string{})
+		data.FieldOwnership = emptyMap
 	} else {
-		data.FieldOwnership = types.StringValue(string(ownershipJSON))
+		data.FieldOwnership = mapValue
 	}
 }
 

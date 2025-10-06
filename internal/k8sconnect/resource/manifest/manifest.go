@@ -41,7 +41,7 @@ type manifestResourceModel struct {
 	ClusterConnection      types.Object  `tfsdk:"cluster_connection"`
 	DeleteProtection       types.Bool    `tfsdk:"delete_protection"`
 	DeleteTimeout          types.String  `tfsdk:"delete_timeout"`
-	FieldOwnership         types.String  `tfsdk:"field_ownership"`
+	FieldOwnership         types.Map     `tfsdk:"field_ownership"`
 	ForceDestroy           types.Bool    `tfsdk:"force_destroy"`
 	ForceConflicts         types.Bool    `tfsdk:"force_conflicts"`
 	IgnoreFields           types.List    `tfsdk:"ignore_fields"`
@@ -149,9 +149,10 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 					listvalidator.ValueStringsAre(ignoreFieldsValidator{}),
 				},
 			},
-			"field_ownership": schema.StringAttribute{
+			"field_ownership": schema.MapAttribute{
 				Computed:    true,
-				Description: "Internal tracking of field ownership by different controllers",
+				ElementType: types.StringType,
+				Description: "Field ownership tracking - shows which controller manages each field",
 			},
 			"status": schema.DynamicAttribute{
 				Computed:    true,

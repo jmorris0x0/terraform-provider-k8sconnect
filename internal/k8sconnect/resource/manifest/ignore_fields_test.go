@@ -53,8 +53,7 @@ func TestAccManifestResource_IgnoreFields(t *testing.T) {
 					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 					testhelpers.CheckDeploymentReplicaCount(k8sClientset, ns, deployName, 3),
 					// Verify we own spec.selector (but not spec.replicas which is ignored)
-					resource.TestMatchResourceAttr("k8sconnect_manifest.ignore_test", "field_ownership",
-						regexp.MustCompile(`"spec\.selector".*"manager":"k8sconnect"`)),
+					resource.TestCheckResourceAttr("k8sconnect_manifest.ignore_test", "field_ownership.spec.selector", "k8sconnect"),
 				),
 			},
 			// Step 2: Re-apply without changes - should show no drift
@@ -135,8 +134,7 @@ func TestAccManifestResource_IgnoreFieldsTransition(t *testing.T) {
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "ignore_fields.#", "1"),
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "ignore_fields.0", "spec.replicas"),
 					// Verify field_ownership shows hpa-controller owns spec.replicas
-					resource.TestMatchResourceAttr("k8sconnect_manifest.test", "field_ownership",
-						regexp.MustCompile(`"spec\.replicas".*"manager":"hpa-controller"`)),
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "field_ownership.spec.replicas", "hpa-controller"),
 				),
 			},
 			// Step 4: Verify no drift even though replicas differ
@@ -255,8 +253,7 @@ func TestAccManifestResource_IgnoreFieldsRemoveWhileOwned(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					// Verify field_ownership shows hpa-controller owns spec.replicas
-					resource.TestMatchResourceAttr("k8sconnect_manifest.test", "field_ownership",
-						regexp.MustCompile(`"spec\.replicas".*"manager":"hpa-controller"`)),
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "field_ownership.spec.replicas", "hpa-controller"),
 				),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
@@ -307,8 +304,7 @@ func TestAccManifestResource_IgnoreFieldsModifyList(t *testing.T) {
 					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "ignore_fields.#", "1"),
 					// Verify field_ownership includes key2 (but not key1 which is ignored)
-					resource.TestMatchResourceAttr("k8sconnect_manifest.test", "field_ownership",
-						regexp.MustCompile(`"data\.key2".*"manager":"k8sconnect"`)),
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "field_ownership.data.key2", "k8sconnect"),
 				),
 			},
 			// Step 2: Use SSA to simulate external controller taking ownership of data.key2
@@ -331,8 +327,7 @@ func TestAccManifestResource_IgnoreFieldsModifyList(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "ignore_fields.#", "2"),
 					// Verify field_ownership shows key2 is owned by external-controller
-					resource.TestMatchResourceAttr("k8sconnect_manifest.test", "field_ownership",
-						regexp.MustCompile(`"data\.key2".*"manager":"external-controller"`)),
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "field_ownership.data.key2", "external-controller"),
 				),
 			},
 			// Step 3: REMOVE one field from ignore list - should reclaim it
@@ -348,11 +343,9 @@ func TestAccManifestResource_IgnoreFieldsModifyList(t *testing.T) {
 						"key1": "value1",
 					}),
 					// Verify field_ownership shows k8sconnect owns key1 again
-					resource.TestMatchResourceAttr("k8sconnect_manifest.test", "field_ownership",
-						regexp.MustCompile(`"data\.key1".*"manager":"k8sconnect"`)),
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "field_ownership.data.key1", "k8sconnect"),
 					// key2 should still be owned by external-controller
-					resource.TestMatchResourceAttr("k8sconnect_manifest.test", "field_ownership",
-						regexp.MustCompile(`"data\.key2".*"manager":"external-controller"`)),
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "field_ownership.data.key2", "external-controller"),
 				),
 			},
 		},
@@ -410,8 +403,7 @@ func TestAccManifestResource_IgnoreFieldsModifyListError(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					// Verify field_ownership shows external-controller owns data.key2
-					resource.TestMatchResourceAttr("k8sconnect_manifest.test", "field_ownership",
-						regexp.MustCompile(`"data\.key2".*"manager":"external-controller"`)),
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "field_ownership.data.key2", "external-controller"),
 				),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
@@ -473,8 +465,7 @@ func TestAccManifestResource_IgnoreFieldsRemoveWhenOwned(t *testing.T) {
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "ignore_fields.#", "0"),
 					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 					// Verify field_ownership shows k8sconnect owns spec.replicas again
-					resource.TestMatchResourceAttr("k8sconnect_manifest.test", "field_ownership",
-						regexp.MustCompile(`"spec\.replicas".*"manager":"k8sconnect"`)),
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "field_ownership.spec.replicas", "k8sconnect"),
 				),
 			},
 		},

@@ -3,7 +3,6 @@ package manifest
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -267,12 +266,23 @@ func (r *manifestResource) updateProjection(rc *ResourceContext) error {
 	// Update field ownership (existing code continues...)
 	ownership := extractFieldOwnership(currentObj)
 
-	ownershipJSON, err := json.Marshal(ownership)
-	if err != nil {
-		tflog.Warn(rc.Ctx, "Failed to marshal field ownership", map[string]interface{}{"error": err.Error()})
-		rc.Data.FieldOwnership = types.StringValue("{}")
+	// Convert map[string]FieldOwnership to map[string]string (just manager names)
+	ownershipMap := make(map[string]string, len(ownership))
+	for path, owner := range ownership {
+		ownershipMap[path] = owner.Manager
+	}
+
+	// Convert to types.Map
+	mapValue, diags := types.MapValueFrom(rc.Ctx, types.StringType, ownershipMap)
+	if diags.HasError() {
+		tflog.Warn(rc.Ctx, "Failed to convert field ownership to map", map[string]interface{}{
+			"diagnostics": diags,
+		})
+		// Set empty map on error
+		emptyMap, _ := types.MapValueFrom(rc.Ctx, types.StringType, map[string]string{})
+		rc.Data.FieldOwnership = emptyMap
 	} else {
-		rc.Data.FieldOwnership = types.StringValue(string(ownershipJSON))
+		rc.Data.FieldOwnership = mapValue
 	}
 
 	// Clear ImportedWithoutAnnotations after first update (will be handled by Update function)
