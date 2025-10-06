@@ -3,7 +3,6 @@ package manifest
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 
@@ -51,8 +50,14 @@ func (r *manifestResource) analyzeDrift(ctx context.Context,
 
 	// Ownership drift detection - check if fields we want are owned by others
 	if !stateData.FieldOwnership.IsNull() {
-		var ownership map[string]FieldOwnership
-		json.Unmarshal([]byte(stateData.FieldOwnership.ValueString()), &ownership)
+		var ownershipMap map[string]string
+		stateData.FieldOwnership.ElementsAs(ctx, &ownershipMap, false)
+
+		// Convert to map[string]FieldOwnership for compatibility
+		ownership := make(map[string]FieldOwnership, len(ownershipMap))
+		for path, manager := range ownershipMap {
+			ownership[path] = FieldOwnership{Manager: manager}
+		}
 
 		// Get fields we want to manage from the desired object
 		desiredPaths := extractAllFieldsFromYAML(desiredObj.Object, "")

@@ -245,6 +245,21 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		return
 	}
 
+	// Extract field ownership from the imported object
+	ownership := extractFieldOwnership(liveObj)
+	ownershipMap := make(map[string]string, len(ownership))
+	for path, owner := range ownership {
+		ownershipMap[path] = owner.Manager
+	}
+	fieldOwnershipMap, ownershipDiags := types.MapValueFrom(ctx, types.StringType, ownershipMap)
+	if ownershipDiags.HasError() {
+		tflog.Warn(ctx, "Failed to convert field ownership during import", map[string]interface{}{
+			"diagnostics": ownershipDiags,
+		})
+		// Set empty map on error
+		fieldOwnershipMap, _ = types.MapValueFrom(ctx, types.StringType, map[string]string{})
+	}
+
 	// Create connection model for import - use the file contents, not the path
 	conn := auth.ClusterConnectionModel{
 		Host:                 types.StringNull(),
@@ -272,6 +287,7 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		DeleteProtection:       types.BoolValue(false),
 		IgnoreFields:           types.ListNull(types.StringType),
 		ManagedStateProjection: types.StringValue(projectionJSON),
+		FieldOwnership:         fieldOwnershipMap,
 		WaitFor: types.ObjectNull(map[string]attr.Type{
 			"condition":   types.StringType,
 			"field":       types.StringType,

@@ -3,7 +3,6 @@ package manifest
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -71,7 +70,6 @@ func (r *manifestResource) applyResourceWithConflictHandling(ctx context.Context
 		Force:        forceConflicts,
 	})
 
-	// THIS IS THE MISSING LOGIC FROM THE ORIGINAL:
 	if err != nil && isFieldConflictError(err) && !forceConflicts {
 		if conflictsOnlyWithSelf(err) {
 			tflog.Info(ctx, "Detected drift in fields we own, forcing update")
@@ -219,14 +217,29 @@ func (r *manifestResource) updateProjectionFromCurrent(ctx context.Context, data
 func (r *manifestResource) updateFieldOwnershipData(ctx context.Context, data *manifestResourceModel, currentObj *unstructured.Unstructured) {
 	ownership := extractFieldOwnership(currentObj)
 
-	ownershipJSON, err := json.Marshal(ownership)
-	if err != nil {
-		tflog.Warn(ctx, "Failed to marshal field ownership", map[string]interface{}{
-			"error": err.Error(),
+	// Convert map[string]FieldOwnership to map[string]string (just manager names)
+	// Filter out status fields - they're always owned by controllers and provide no actionable information
+	ownershipMap := make(map[string]string, len(ownership))
+	for path, owner := range ownership {
+		// Skip status fields - they're read-only subresources managed by controllers
+		// (similar to how status is filtered in yaml.go during object cleanup)
+		if strings.HasPrefix(path, "status.") || path == "status" {
+			continue
+		}
+		ownershipMap[path] = owner.Manager
+	}
+
+	// Convert to types.Map
+	mapValue, diags := types.MapValueFrom(ctx, types.StringType, ownershipMap)
+	if diags.HasError() {
+		tflog.Warn(ctx, "Failed to convert field ownership to map", map[string]interface{}{
+			"diagnostics": diags,
 		})
-		data.FieldOwnership = types.StringValue("{}")
+		// Set empty map on error
+		emptyMap, _ := types.MapValueFrom(ctx, types.StringType, map[string]string{})
+		data.FieldOwnership = emptyMap
 	} else {
-		data.FieldOwnership = types.StringValue(string(ownershipJSON))
+		data.FieldOwnership = mapValue
 	}
 }
 

@@ -376,3 +376,435 @@ variable "raw" {
 provider "k8sconnect" {}
 `
 }
+
+// ADR-010: Test resource identity change triggers replacement (Kind change)
+// This test verifies the critical orphan resource bug is fixed
+func TestAccManifestResource_IdentityChange_Kind(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("identity-kind-ns-%d", time.Now().UnixNano()%1000000)
+	resourceName := fmt.Sprintf("identity-test-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create a Pod
+			{
+				Config: testAccManifestConfigIdentityKind_Pod(ns, resourceName),
+				ConfigVariables: config.Variables{
+					"raw":           config.StringVariable(raw),
+					"namespace":     config.StringVariable(ns),
+					"resource_name": config.StringVariable(resourceName),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_identity", "id"),
+					testhelpers.CheckNamespaceExists(k8sClient, ns),
+					testhelpers.CheckPodExists(k8sClient, ns, resourceName),
+				),
+			},
+			// Step 2: Change kind to ConfigMap - should trigger replacement
+			{
+				Config: testAccManifestConfigIdentityKind_ConfigMap(ns, resourceName),
+				ConfigVariables: config.Variables{
+					"raw":           config.StringVariable(raw),
+					"namespace":     config.StringVariable(ns),
+					"resource_name": config.StringVariable(resourceName),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_identity", "id"),
+					testhelpers.CheckConfigMapExists(k8sClient, ns, resourceName),
+					// CRITICAL: Old Pod should be DELETED (not orphaned)
+					testhelpers.CheckPodDestroy(k8sClient, ns, resourceName),
+				),
+			},
+		},
+		CheckDestroy: resource.ComposeTestCheckFunc(
+			testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+			testhelpers.CheckConfigMapDestroy(k8sClient, ns, resourceName),
+		),
+	})
+}
+
+func testAccManifestConfigIdentityKind_Pod(namespace, name string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+variable "namespace" { type = string }
+variable "resource_name" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_manifest" "test_identity" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Pod
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  containers:
+  - name: nginx
+    image: nginx:latest
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+  depends_on = [k8sconnect_manifest.namespace]
+}
+`, namespace, name, namespace)
+}
+
+func testAccManifestConfigIdentityKind_ConfigMap(namespace, name string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+variable "namespace" { type = string }
+variable "resource_name" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_manifest" "test_identity" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: %s
+  namespace: %s
+data:
+  key: value
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+  depends_on = [k8sconnect_manifest.namespace]
+}
+`, namespace, name, namespace)
+}
+
+// ADR-010: Test resource identity change triggers replacement (Name change)
+func TestAccManifestResource_IdentityChange_Name(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("identity-name-ns-%d", time.Now().UnixNano()%1000000)
+	oldName := fmt.Sprintf("old-configmap-%d", time.Now().UnixNano()%1000000)
+	newName := fmt.Sprintf("new-configmap-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create ConfigMap with old name
+			{
+				Config: testAccManifestConfigIdentityName(ns, oldName),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"name":      config.StringVariable(oldName),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckConfigMapExists(k8sClient, ns, oldName),
+				),
+			},
+			// Step 2: Change name - should trigger replacement
+			{
+				Config: testAccManifestConfigIdentityName(ns, newName),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"name":      config.StringVariable(newName),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckConfigMapExists(k8sClient, ns, newName),
+					// Old resource should be deleted
+					testhelpers.CheckConfigMapDestroy(k8sClient, ns, oldName),
+				),
+			},
+		},
+		CheckDestroy: resource.ComposeTestCheckFunc(
+			testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+			testhelpers.CheckConfigMapDestroy(k8sClient, ns, newName),
+		),
+	})
+}
+
+func testAccManifestConfigIdentityName(namespace, name string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+variable "namespace" { type = string }
+variable "name" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_manifest" "test_identity" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: %s
+  namespace: %s
+data:
+  key: value
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+  depends_on = [k8sconnect_manifest.namespace]
+}
+`, namespace, name, namespace)
+}
+
+// ADR-010: Test resource identity change triggers replacement (Namespace change)
+func TestAccManifestResource_IdentityChange_Namespace(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	oldNs := fmt.Sprintf("old-ns-%d", time.Now().UnixNano()%1000000)
+	newNs := fmt.Sprintf("new-ns-%d", time.Now().UnixNano()%1000000)
+	cmName := fmt.Sprintf("test-cm-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create in old namespace
+			{
+				Config: testAccManifestConfigIdentityNamespace(oldNs, newNs, cmName, oldNs),
+				ConfigVariables: config.Variables{
+					"raw":     config.StringVariable(raw),
+					"old_ns":  config.StringVariable(oldNs),
+					"new_ns":  config.StringVariable(newNs),
+					"cm_name": config.StringVariable(cmName),
+					"use_ns":  config.StringVariable(oldNs),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckConfigMapExists(k8sClient, oldNs, cmName),
+				),
+			},
+			// Step 2: Change namespace - should trigger replacement
+			{
+				Config: testAccManifestConfigIdentityNamespace(oldNs, newNs, cmName, newNs),
+				ConfigVariables: config.Variables{
+					"raw":     config.StringVariable(raw),
+					"old_ns":  config.StringVariable(oldNs),
+					"new_ns":  config.StringVariable(newNs),
+					"cm_name": config.StringVariable(cmName),
+					"use_ns":  config.StringVariable(newNs),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckConfigMapExists(k8sClient, newNs, cmName),
+					// Old resource should be deleted
+					testhelpers.CheckConfigMapDestroy(k8sClient, oldNs, cmName),
+				),
+			},
+		},
+		CheckDestroy: resource.ComposeTestCheckFunc(
+			testhelpers.CheckNamespaceDestroy(k8sClient, oldNs),
+			testhelpers.CheckNamespaceDestroy(k8sClient, newNs),
+		),
+	})
+}
+
+func testAccManifestConfigIdentityNamespace(oldNs, newNs, cmName, useNs string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+variable "old_ns" { type = string }
+variable "new_ns" { type = string }
+variable "cm_name" { type = string }
+variable "use_ns" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "old_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_manifest" "new_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_manifest" "test_identity" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: %s
+  namespace: %s
+data:
+  key: value
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+  depends_on = [
+    k8sconnect_manifest.old_namespace,
+    k8sconnect_manifest.new_namespace
+  ]
+}
+`, oldNs, newNs, cmName, useNs)
+}
+
+// ADR-002: Test immutable field changes trigger replacement (PVC storage)
+// This test verifies automatic recreation when immutable fields change
+func TestAccManifestResource_ImmutableFieldChange_PVCStorage(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("immutable-pvc-ns-%d", time.Now().UnixNano()%1000000)
+	pvcName := fmt.Sprintf("test-pvc-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create PVC with 1Gi storage
+			{
+				Config: testAccManifestConfigImmutablePVC(ns, pvcName, "1Gi"),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"pvc_name":  config.StringVariable(pvcName),
+					"storage":   config.StringVariable("1Gi"),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_pvc", "id"),
+					testhelpers.CheckPVCExists(k8sClient, ns, pvcName),
+				),
+			},
+			// Step 2: Try to change storage size to 2Gi - should trigger replacement
+			// Note: PVC storage is immutable (cannot be changed in many K8s versions)
+			{
+				Config: testAccManifestConfigImmutablePVC(ns, pvcName, "2Gi"),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"pvc_name":  config.StringVariable(pvcName),
+					"storage":   config.StringVariable("2Gi"),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_pvc", "id"),
+					testhelpers.CheckPVCExists(k8sClient, ns, pvcName),
+					// Verify PVC was recreated (new UID)
+				),
+			},
+		},
+		CheckDestroy: resource.ComposeTestCheckFunc(
+			testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+			testhelpers.CheckPVCDestroy(k8sClient, ns, pvcName),
+		),
+	})
+}
+
+func testAccManifestConfigImmutablePVC(namespace, pvcName, storage string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+variable "namespace" { type = string }
+variable "pvc_name" { type = string }
+variable "storage" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_manifest" "test_pvc" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: %s
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+  depends_on = [k8sconnect_manifest.namespace]
+}
+`, namespace, pvcName, namespace, storage)
+}

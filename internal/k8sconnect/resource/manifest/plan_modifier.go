@@ -3,17 +3,16 @@ package manifest
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
-	//metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -32,6 +31,16 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 		return
 	}
 
+	// ADR-010: Detect resource identity changes for UPDATE operations
+	// This must happen BEFORE dry-run to avoid wasting API calls when replacement is needed
+	if !req.State.Raw.IsNull() {
+		if requiresReplacement := r.checkResourceIdentityChanges(ctx, req, &plannedData, resp); requiresReplacement {
+			// Early return - skip dry-run when resource will be replaced
+			// Terraform will orchestrate delete → create
+			return
+		}
+	}
+
 	// Validate connection is ready for operations
 	if !r.validateConnectionReady(ctx, &plannedData, resp) {
 		return
@@ -44,7 +53,7 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 	if yamlStr == "" {
 		// Mark computed fields as unknown
 		plannedData.ManagedStateProjection = types.StringUnknown()
-		plannedData.FieldOwnership = types.StringUnknown()
+		plannedData.FieldOwnership = types.MapUnknown(types.StringType)
 
 		// Handle status based on wait_for
 		if !plannedData.WaitFor.IsNull() {
@@ -66,7 +75,7 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 			// During plan with interpolations to computed values, we can't parse/validate
 			// Mark computed fields as unknown
 			plannedData.ManagedStateProjection = types.StringUnknown()
-			plannedData.FieldOwnership = types.StringUnknown()
+			plannedData.FieldOwnership = types.MapUnknown(types.StringType)
 
 			// Handle status based on wait_for
 			if !plannedData.WaitFor.IsNull() {
@@ -201,6 +210,12 @@ func (r *manifestResource) executeDryRunAndProjection(ctx context.Context, req r
 		return false
 	}
 
+	// If dryRunResult is nil, it means replacement was triggered (e.g., immutable field)
+	// In this case, projection is not needed
+	if dryRunResult == nil {
+		return true
+	}
+
 	// Calculate and apply projection
 	return r.calculateProjection(ctx, req, plannedData, desiredObj, dryRunResult, client, resp)
 }
@@ -241,6 +256,20 @@ func (r *manifestResource) calculateProjection(ctx context.Context, req resource
 	// Extract ownership from dry-run result (what ownership WILL BE after apply)
 	paths := extractOwnedPaths(ctx, dryRunResult.GetManagedFields(), desiredObj.Object)
 
+	// Preserve field_ownership from state for UPDATE operations
+	// Only mark as unknown if ignore_fields changed or force_conflicts is set (both could affect ownership)
+	var stateData manifestResourceModel
+	if diags := req.State.Get(ctx, &stateData); !diags.HasError() {
+		ignoreFieldsChanged := !stateData.IgnoreFields.Equal(plannedData.IgnoreFields)
+		forceConflicts := !plannedData.ForceConflicts.IsNull() && plannedData.ForceConflicts.ValueBool()
+
+		if !ignoreFieldsChanged && !forceConflicts && !stateData.FieldOwnership.IsNull() {
+			plannedData.FieldOwnership = stateData.FieldOwnership
+			tflog.Debug(ctx, "Preserved field_ownership from state for UPDATE")
+		}
+		// else: leave field_ownership as Unknown, Apply will compute it
+	}
+
 	// Apply projection
 	return r.applyProjection(ctx, dryRunResult, paths, plannedData, resp)
 }
@@ -261,6 +290,41 @@ func (r *manifestResource) performDryRun(ctx context.Context, client k8sclient.K
 		Force:        true,
 	})
 	if err != nil {
+		// ADR-002: Check if this is an immutable field error
+		// If so, trigger automatic resource replacement instead of failing
+		if r.isImmutableFieldError(err) {
+			immutableFields := r.extractImmutableFields(err)
+			resourceDesc := fmt.Sprintf("%s/%s %s/%s",
+				desiredObj.GetAPIVersion(), desiredObj.GetKind(),
+				desiredObj.GetNamespace(), desiredObj.GetName())
+
+			tflog.Info(ctx, "Immutable field changed, triggering replacement",
+				map[string]interface{}{
+					"resource": resourceDesc,
+					"fields":   immutableFields,
+				})
+
+			// Mark resource for replacement
+			resp.RequiresReplace = append(resp.RequiresReplace, path.Root("yaml_body"))
+
+			// Add informative warning to explain why replacement is happening
+			resp.Diagnostics.AddWarning(
+				"Immutable Field Changed - Replacement Required",
+				fmt.Sprintf("Cannot modify immutable field(s): %v on %s\n\n"+
+					"Immutable fields cannot be changed after resource creation.\n"+
+					"Terraform will delete the existing resource and create a new one.\n\n"+
+					"This is the correct behavior - Kubernetes does not allow these fields to be modified in-place.",
+					immutableFields, resourceDesc))
+
+			// Set projection to unknown (replacement doesn't need projection)
+			plannedData.ManagedStateProjection = types.StringUnknown()
+
+			// Return success (nil error) to allow planning to continue
+			// The replacement will be shown in the plan output
+			return nil, nil
+		}
+
+		// Non-immutable errors: existing behavior (fail the dry-run)
 		r.setProjectionUnknown(ctx, plannedData, resp,
 			fmt.Sprintf("Dry-run failed: %s", err))
 		return nil, err
@@ -467,12 +531,20 @@ func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req
 		return
 	}
 
-	var ownership map[string]FieldOwnership
-	if err := json.Unmarshal([]byte(stateData.FieldOwnership.ValueString()), &ownership); err != nil {
-		tflog.Warn(ctx, "Failed to unmarshal field ownership", map[string]interface{}{
-			"error": err.Error(),
+	// Convert types.Map to map[string]string
+	var ownershipMap map[string]string
+	diags = stateData.FieldOwnership.ElementsAs(ctx, &ownershipMap, false)
+	if diags.HasError() {
+		tflog.Warn(ctx, "Failed to extract field ownership map", map[string]interface{}{
+			"diagnostics": diags,
 		})
 		return
+	}
+
+	// Convert map[string]string (manager names) to map[string]FieldOwnership for compatibility
+	ownership := make(map[string]FieldOwnership, len(ownershipMap))
+	for path, manager := range ownershipMap {
+		ownership[path] = FieldOwnership{Manager: manager}
 	}
 
 	// Parse the user's desired YAML to see what fields they want
@@ -517,14 +589,15 @@ func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req
 }
 
 // filterFieldOwnership filters a field_ownership value to remove ignored fields
-func (r *manifestResource) filterFieldOwnership(ctx context.Context, ownershipValue types.String, data *manifestResourceModel) types.String {
+func (r *manifestResource) filterFieldOwnership(ctx context.Context, ownershipValue types.Map, data *manifestResourceModel) types.Map {
 	if ownershipValue.IsNull() || ownershipValue.IsUnknown() {
 		return ownershipValue
 	}
 
-	// Parse the ownership map
-	var ownership map[string]FieldOwnership
-	if err := json.Unmarshal([]byte(ownershipValue.ValueString()), &ownership); err != nil {
+	// Convert to map[string]string
+	var ownershipMap map[string]string
+	diags := ownershipValue.ElementsAs(ctx, &ownershipMap, false)
+	if diags.HasError() {
 		// If we can't parse, just return the original value
 		return ownershipValue
 	}
@@ -532,17 +605,17 @@ func (r *manifestResource) filterFieldOwnership(ctx context.Context, ownershipVa
 	// Filter out ignored fields
 	if ignoreFields := getIgnoreFields(ctx, data); ignoreFields != nil {
 		for _, ignorePath := range ignoreFields {
-			delete(ownership, ignorePath)
+			delete(ownershipMap, ignorePath)
 		}
 	}
 
-	// Marshal back to JSON
-	filteredJSON, err := json.Marshal(ownership)
-	if err != nil {
+	// Convert back to types.Map
+	filteredMap, diags := types.MapValueFrom(ctx, types.StringType, ownershipMap)
+	if diags.HasError() {
 		return ownershipValue
 	}
 
-	return types.StringValue(string(filteredJSON))
+	return filteredMap
 }
 
 // FieldConflict represents a field that user wants but is owned by another controller
