@@ -4,9 +4,9 @@
 ![Security](https://github.com/jmorris0x0/terraform-provider-k8sconnect/actions/workflows/security.yml/badge.svg)
 ![Release](https://github.com/jmorris0x0/terraform-provider-k8sconnect/actions/workflows/release.yml/badge.svg)
 
-A modern Terraform provider for applying Kubernetes YAML manifests **with inline, per‑resource connection settings**.
+Bootstrap Kubernetes clusters and workloads in a **single `terraform apply`**—no two-phase deployments.
 
-Traditional providers force cluster configuration into the provider block; **k8sconnect** pushes it down into each resource, freeing you to target *any* cluster from *any* module without aliases, workspaces, or wrapper hacks.
+**k8sconnect** uses inline, per-resource connections to break Terraform's provider dependency hell. Create a cluster and deploy to it immediately, target multiple clusters from one module, or use dynamic outputs for authentication.
 
 
 > ### ⚠️ ALPHA RELEASE
@@ -29,7 +29,7 @@ Traditional providers force cluster configuration into the provider block; **k8s
 | Unpredictable plan diffs              | ❌ Plan shows what you send, not what K8s will do                           | ✅ Dry-run projections show exact changes before apply                      |
 
 
-**Stop fighting [Terraform's provider model](https://news.ycombinator.com/item?id=27434363). Start deploying to any cluster, from any module, in any order.**
+**Stop fighting [Terraform's provider model](https://news.ycombinator.com/item?id=27434363). Create clusters and bootstrap workloads in one apply.**
 
 ---
 
@@ -47,37 +47,30 @@ terraform {
 
 provider "k8sconnect" {}
 
-# Store connections for multiple clusters
-locals {
-  prod_connection = {
-    host                   = aws_eks_cluster.prod.endpoint
-    cluster_ca_certificate = aws_eks_cluster.prod.certificate_authority[0].data
+# Create a new cluster
+resource "aws_eks_cluster" "main" {
+  name     = "my-cluster"
+  role_arn = aws_iam_role.cluster.arn
+  # ... (cluster configuration)
+}
+
+# Deploy workloads immediately - no waiting for provider configuration!
+resource "k8sconnect_manifest" "cert_manager" {
+  yaml_body = file("cert-manager.yaml")
+
+  cluster_connection = {
+    host                   = aws_eks_cluster.main.endpoint
+    cluster_ca_certificate = aws_eks_cluster.main.certificate_authority[0].data
     exec = {
       api_version = "client.authentication.k8s.io/v1"
       command     = "aws"
-      args        = ["eks", "get-token", "--cluster-name", "prod"]
+      args        = ["eks", "get-token", "--cluster-name", aws_eks_cluster.main.name]
     }
   }
-  
-  staging_connection = {
-    kubeconfig = file("~/.kube/staging-config")
-    context        = "staging"
-  }
-}
-
-# Deploy to different clusters in one apply
-resource "k8sconnect_manifest" "prod_app" {
-  yaml_body          = file("app.yaml")
-  cluster_connection = local.prod_connection
-}
-
-resource "k8sconnect_manifest" "staging_app" {
-  yaml_body          = file("app.yaml")  
-  cluster_connection = local.staging_connection
 }
 ```
 
-That's it. No provider aliases, no separate workspaces, no chicken-and-egg dependency issues.
+That's it. The connection is inline—Terraform can resolve the outputs, and everything applies in one run.
 
 ---
 
@@ -118,6 +111,40 @@ cluster_connection = {
 # From variable (CI-friendly)
 cluster_connection = {
   kubeconfig = var.kubeconfig_content
+}
+```
+
+**Multi-cluster deployments**
+
+Since connections are per-resource, you can target multiple clusters from a single module:
+
+```hcl
+locals {
+  prod_connection = {
+    host                   = aws_eks_cluster.prod.endpoint
+    cluster_ca_certificate = aws_eks_cluster.prod.certificate_authority[0].data
+    exec = {
+      api_version = "client.authentication.k8s.io/v1"
+      command     = "aws"
+      args        = ["eks", "get-token", "--cluster-name", "prod"]
+    }
+  }
+
+  staging_connection = {
+    kubeconfig = file("~/.kube/staging-config")
+    context    = "staging"
+  }
+}
+
+# Deploy to different clusters in one apply
+resource "k8sconnect_manifest" "prod_app" {
+  yaml_body          = file("app.yaml")
+  cluster_connection = local.prod_connection
+}
+
+resource "k8sconnect_manifest" "staging_app" {
+  yaml_body          = file("app.yaml")
+  cluster_connection = local.staging_connection
 }
 ```
 
