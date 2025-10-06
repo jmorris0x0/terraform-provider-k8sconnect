@@ -31,6 +31,7 @@ coverage.html
 *.tfstate.*
 .terraform/
 *.terraform.lock.hcl
+*provider-comparison-config
 
 # Log files
 *.log

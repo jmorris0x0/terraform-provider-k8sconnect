@@ -218,8 +218,14 @@ func (r *manifestResource) updateFieldOwnershipData(ctx context.Context, data *m
 	ownership := extractFieldOwnership(currentObj)
 
 	// Convert map[string]FieldOwnership to map[string]string (just manager names)
+	// Filter out status fields - they're always owned by controllers and provide no actionable information
 	ownershipMap := make(map[string]string, len(ownership))
 	for path, owner := range ownership {
+		// Skip status fields - they're read-only subresources managed by controllers
+		// (similar to how status is filtered in yaml.go during object cleanup)
+		if strings.HasPrefix(path, "status.") || path == "status" {
+			continue
+		}
 		ownershipMap[path] = owner.Manager
 	}
 
