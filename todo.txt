@@ -8,10 +8,6 @@ Easy:
 * The readme example: "The yaml_split data source creates stable IDs like deployment.my-app.nginx and service.my-app.nginx, preventing unnecessary resource recreation when manifests are reordered." Can these collide? Do we need more entroy? Should it really be deployment.app.nginx based on the example? Make a runnable example maybe? what if two yaml_split resources put their output into one map? Would there be dupes?
 
 Hard:
-* Fix flaky test: yaml-split-dependency-ordering fails due to CRD race condition. Add option to yaml_split to order CRD first? Similar issue with namespaces.
-
-* Centralize wait/polling/watch code?
-
 * Finish MVP of existing resource datasource and add wait_for. Actually, this might not be a good idea. 
 Datasources run during plan phase even with depends_on, so they can't wait for resources that don't exist yet. The only exception is when datasource inputs are unknown (forcing deferral to apply), but "resource might not exist" isn't the same as "input value unknown". For waiting on resources created by other systems, you'd need a separate wait resource, not a waiting datasource.
 
@@ -35,7 +31,6 @@ DOCUMENTATION & RELEASE
 
 Registry landing page: Write main docs
 Verify attribute docs: Status changes need documentation updates
-Key features placement: Move higher in docs
 Fill community standards: Issue templates, contributing guide, etc.
 Example improvements: Show both inline and template file patterns
 Don't need the first load balancer example. Find a different one or delete.
@@ -62,13 +57,13 @@ Use latest for all example images. Otherwise just making toil for later.
 FEATURE ADDITIONS
 
 Custom ownership annotations: Solve cross-state conflicts
-Full JSON manifest: Make available as computed attribute. I think this is table stakes for parity. At least one of the other two have this. Take a look.
+Full JSON manifest: Make available as computed attribute. I think this is table stakes for parity. At least one of the other two have this. Take a look. I might already have this?
 Status field guardrails: Warn if field doesn't start with "status"
 Adding a patch resource would be a big differentiator. Not sure if wise though.
 
 UX IMPROVEMENTS
 
-Remove field_ownership from diffs: Just noise in output
+Remove field_ownership from diffs: Just noise in output. This is fixed by moving to map.
 Hide private attributes: Some should not be in UI
 YAML diff vs dry-run diff: Evaluate which is better UX
 Datasource args: Flatten nested structure unless adding more attributes
@@ -78,14 +73,14 @@ Lock down the interface before launch: The attributes and behavior I ship with w
 https://registry.terraform.io/providers/gavinbunney/kubectl/latest/docs/resources/kubectl_manifest#attribute-reference
 https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/manifest
 GB has many yaml helper datasources. I just have one. Good design decsion? Or no?
-Canonicalize the YAML. Or did I do this already months ago?
+
 
 CODE QUALITY
 
 Cyclomatic complexity: Reduce all functions to <15
 General refactoring: Simplification pass
 Convert to issues: Move this list to GitHub issues
-Share same wait/watch/polling code between all actions. Move to common
+Share same wait/watch/polling code between all actions. Move to common?
 Security scanning alerts: Address current GitHub code scanning issues
 
 MARKETING & GROWTH
@@ -97,9 +92,8 @@ Release pipeline: Add Tofu release, verify Windows/Linux builds
 DEFERRED/COMPLEX
 
 Dynamic datasource lookup: Use same JSON-to-attribute logic as resource
-Move server-side features up: In feature list
 Migration plan for other providers
-Rename managed_state_projection
+Rename managed_state_projection. No!
 Fix makefile to install all dependencies. Try on fresh laptop.
 Add back cluster_info datasource that has more info than GB:
 https://registry.terraform.io/providers/gavinbunney/kubectl/latest/docs/data-sources/kubectl_server_version
@@ -115,11 +109,7 @@ Could probably knock out an MVP using the Terraform provider schema definitions 
 
   Must-Have Before Release:
 
-  2. create_timeout and update_timeout
-    - You only have delete_timeout
-    - HashiCorp has all three
-    - Medium priority - needed for slow-applying resources
-  3. Import documentation
+  1. Import documentation
     - Your format, examples, behavior
     - Critical - people need to migrate existing resources
 
@@ -127,10 +117,13 @@ Could probably knock out an MVP using the Terraform provider schema definitions 
 
   4. field_manager_name - let users control the field manager identity
     - Useful for debugging SSA conflicts
-    - HashiCorp has this, you auto-generate
+    - HashiCorp has this, I auto-generate
+    - Could be quite complex?
   5. sensitive_fields - mask arbitrary fields in state
     - kubectl has this for custom masking
     - You only mask connection credentials
+    - Meh. Easy to add later if people complain.
   6. override_namespace - apply to different namespace than YAML specifies
     - kubectl has this
     - Useful for multi-tenancy patterns
+    - Could be nice. Not sure how hard.

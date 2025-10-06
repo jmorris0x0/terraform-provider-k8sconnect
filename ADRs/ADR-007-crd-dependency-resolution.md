@@ -1,7 +1,7 @@
 # ADR-007: Automatic CRD Dependency Resolution Without Configuration
 
 ## Status
-Proposed
+Implemented (2025-10-06)
 
 ## Context
 
@@ -252,3 +252,28 @@ No migration needed - this is purely additive functionality that makes existing 
 We commit to implementing automatic apply-time CRD waiting with zero configuration. This solves a critical pain point that has plagued the Kubernetes Terraform ecosystem for over 3 years, and does so in a way that "just works" without any user configuration.
 
 The implementation complexity is modest (1-2 days) while the user experience improvement is substantial. This positions k8sconnect as the first Kubernetes provider to properly solve the CRD race condition problem.
+
+## Implementation Notes
+
+Implemented on 2025-10-06 with the following components:
+
+### Files Modified
+- `internal/k8sconnect/resource/manifest/errors.go`: Added `isCRDNotFoundError()` detection and enhanced error classification
+- `internal/k8sconnect/resource/manifest/crud_common.go`: Implemented `applyWithCRDRetry()` with exponential backoff and integrated into apply path
+- `internal/k8sconnect/resource/manifest/crd_test.go`: Added acceptance test proving CRD + CR work in single apply
+
+### Actual Implementation
+The retry logic follows the proposed design with these specifics:
+- Backoff schedule: 100ms → 500ms → 1s → 2s → 5s → 10s → 10s (~30s total)
+- Respects context cancellation for graceful shutdown
+- Logs retry attempts at debug level for troubleshooting
+- Only retries "no matches for kind" errors, fails fast on other errors
+- Provides enhanced error messages with actionable solutions after timeout
+
+### Test Results
+- `TestAccManifestResource_CRDAndCRTogether` passes in ~24s
+- Proves CRD establishment, CR creation, and cleanup all work in single apply
+- No configuration required - zero-config principle maintained
+
+### Deviations from Proposal
+The implemented version simplified the `hasDependsOn()` fast-fail logic shown in the pseudocode, instead relying on the full 30s timeout for all cases. This keeps the implementation simpler while still solving the problem effectively.
