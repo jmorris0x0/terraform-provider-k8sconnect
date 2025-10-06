@@ -62,8 +62,8 @@ resource "k8sconnect_manifest" "namespace_k8sconnect" {
   YAML
   cluster_connection = local.cluster_connection
 }
-resource "k8sconnect_manifest" "namespace_kubectl" {
-  yaml_body          = <<-YAML
+resource "kubectl_manifest" "namespace_kubectl" {
+  yaml_body = <<-YAML
     apiVersion: v1
     kind: Namespace
     metadata:
@@ -71,7 +71,6 @@ resource "k8sconnect_manifest" "namespace_kubectl" {
       labels:
         provider: kubectl
   YAML
-  cluster_connection = local.cluster_connection
 }
 #############################################
 # Deploy SAME manifests with different providers
@@ -107,9 +106,9 @@ resource "k8sconnect_manifest" "nginx_service" {
 # Using kubectl provider - requires provider configuration
 resource "kubectl_manifest" "nginx_deployment" {
   yaml_body  = local.deployment_kubectl
-  depends_on = [k8sconnect_manifest.namespace_kubectl]
+  depends_on = [kubectl_manifest.namespace_kubectl]
 }
 resource "kubectl_manifest" "nginx_service" {
   yaml_body  = local.service_kubectl
-  depends_on = [k8sconnect_manifest.namespace_kubectl]
+  depends_on = [kubectl_manifest.namespace_kubectl]
 }
