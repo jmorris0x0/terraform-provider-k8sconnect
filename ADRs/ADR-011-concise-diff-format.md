@@ -1,9 +1,413 @@
 # ADR-011: Concise Diff Format for Plan Output
 
 ## Status
-Partially Implemented
+PARTIALLY IMPLEMENTED - Option 4 Required (Contract Compliance)
 
 ## Implementation Updates (2025-10-06)
+
+### CRITICAL: Current Implementation Violates Terraform Contract
+
+**Problem discovered:** The current implementation (Option F variant) filters state by managedFields, hiding K8s defaults and other controller fields from users. This violates Terraform's fundamental contract (see ADR-012).
+
+**Correct Solution:** Option 4 - Complete State + Bootstrap UX + Maintainability
+
+### Current Implementation (Option F with String Format - INCOMPLETE)
+
+Partially implemented Option F concept (yaml_body sensitive + managed_state_projection as single source of truth) but **MISSING critical requirement**: State must show ALL fields from cluster, not filtered by managedFields.
+
+**Key Decision: Skip Dry-Run for CREATE Operations**
+
+After discovering that bootstrap scenarios cause inconsistent plan errors, we made the critical decision to **never use dry-run for CREATE operations**. This preserves the first-use experience while maintaining all core value propositions.
+
+**The Problem:**
+1. During `terraform plan`: Cluster doesn't exist → uses yaml fallback → projection without K8s defaults (e.g., no `protocol: TCP`)
+2. During `terraform apply`: Cluster now exists (created by dependency) → Terraform re-calls plan modifier → would use dry-run → projection WITH K8s defaults
+3. Result: Projection changed between plan and apply → "inconsistent plan" error → **fatal UX failure on first use**
+
+**The Solution:**
+- CREATE operations: Always use parsed yaml as projection (never dry-run)
+- UPDATE operations: Always use server-side dry-run (accurate predictions - core value prop!)
+- This ensures consistent plan/apply behavior during bootstrap while preserving accuracy where it matters most
+
+**Trade-offs Accepted:**
+
+✅ **What we preserve:**
+- Clean UX: Only managed_state_projection visible (no dual-diff confusion)
+- First-use success: No errors during bootstrap scenarios
+- UPDATE accuracy: Dry-run predictions for updates (core value prop)
+- SSA semantics: Only track fields we own (managedFields)
+- Terraform contract: HCL = desired state, drift detected for owned fields
+- Maintenance-free: No hardcoded K8s defaults for CRDs
+
+⚠️ **What we accept:**
+- CREATE projections don't show K8s defaults during plan
+- Admission controller mutations during CREATE discovered on first refresh (not in plan)
+- User sees what they wrote, not what K8s will add as defaults
+
+**The ACTUAL Impossible Triangle: Bootstrap UX vs Complete State vs Clean UX**
+
+**CRITICAL DISCOVERY:** After deep research into terraform-plugin-framework (see `docs/research/diff-suppression-investigation.md`), we discovered that Option 4 is **NOT technically feasible** with current framework architecture.
+
+**Initial Hope (Option 4 - PROVEN INFEASIBLE):**
+
+We hoped to achieve:
+- Bootstrap UX: No errors on first use ✅
+- Complete State: Store ALL cluster fields ✅
+- Clean UX: Suppress diffs for ignored fields ❌ **NOT SUPPORTED BY FRAMEWORK**
+
+**Why Option 4 Cannot Work:**
+
+1. **terraform-plugin-framework has no diff suppression API**
+   - No equivalent to SDK v2's `DiffSuppressFunc`
+   - Plan modifiers operate at attribute level, cannot suppress sub-paths within JSON
+   - Semantic equality cannot access other attributes (like `ignore_fields`)
+
+2. **Terraform's consistency requirement prevents it**
+   - If we store complete state (all fields)
+   - But suppress diffs during plan (hide ignored fields)
+   - Apply returns complete state (including ignored fields)
+   - Terraform detects: "Plan said X, Apply returned Y" → Error
+
+3. **We already learned this lesson (ADR-009)**
+   - 3-hour debugging session documented the issue
+   - "Provider produced inconsistent result after apply"
+   - Solution: Filter identically in Plan and Apply phases
+   - **Cannot filter during plan but store complete during apply**
+
+**Research Certainty: 99%+** - Based on:
+- Official framework documentation
+- GitHub issues from maintainers
+- Our own experience (ADR-009)
+- Comprehensive investigation of all alternatives
+
+**See:** `docs/research/diff-suppression-investigation.md` for complete findings.
+
+---
+
+**The REAL Triangle (All Technically Feasible Options):**
+
+```
+        Bootstrap UX
+       (No errors on first use)
+              /\
+             /  \
+            /    \
+           /      \
+          /        \
+         /          \
+        /____________\
+  Complete State    Clean UX
+(Show all fields)  (Suppress ignored diffs)
+```
+
+**Framework Reality: Pick any TWO**
+
+1. **Bootstrap UX + Clean UX** (CURRENT CHOICE)
+   - ✅ No errors during first use
+   - ✅ No noise from ignored fields
+   - ❌ State filtered to managed fields (not complete cluster object)
+   - **Pragmatic interpretation of Terraform's contract**
+
+2. **Bootstrap UX + Complete State** (Rejected - Bad UX)
+   - ✅ No errors during first use
+   - ✅ State shows all fields
+   - ❌ Users see drift for every K8s default and system field
+   - ❌ ignore_fields cannot suppress diffs (framework limitation)
+   - ❌ Plan output overwhelmed with noise
+
+3. **Complete State + Clean UX** (Impossible with Current Framework)
+   - ✅ State shows all fields
+   - ✅ No noise from ignored fields
+   - ❌ **Framework does not support this pattern**
+   - ❌ Would require APIs that don't exist
+
+**Key Insight:** The framework's architecture makes Option 3 impossible. We must choose between complete state (noisy UX) or filtered state (clean UX).
+
+---
+
+**Previous Options (Based on False Dichotomy):**
+
+1. **Bootstrap UX + Maintainability, SACRIFICE Contract** (PREVIOUS CHOICE - WRONG)
+   - ✅ No errors during first use
+   - ✅ No maintenance burden for CRDs
+   - ❌ CREATE projections miss K8s defaults/mutations
+   - ❌ **State filtered by managedFields (CONTRACT VIOLATION)**
+
+2. **Bootstrap UX + CREATE Accuracy** (Rejected - Unmaintainable)
+   - ✅ No errors during first use
+   - ✅ Show accurate K8s defaults in CREATE plans
+   - ❌ Requires hardcoding defaults for all K8s types and CRDs (unmaintainable)
+
+3. **CREATE Accuracy + Maintainability** (Rejected - Bootstrap Errors)
+   - ✅ Accurate CREATE projections via dry-run
+   - ✅ No hardcoded defaults
+   - ❌ Inconsistent plan errors during bootstrap (fatal for adoption)
+
+**Why Current Implementation (Option 1) Is The Pragmatic Choice:**
+
+**After discovering Option 4 is technically infeasible**, we must accept Option 1 with its trade-offs:
+
+1. **Bootstrap UX Preserved**: ✅ No inconsistent plan errors during first apply. Critical for adoption.
+
+2. **Clean UX**: ✅ No noise from K8s defaults and other controller fields. Users see only meaningful drift.
+
+3. **Maintainability**: ✅ No hardcoded K8s defaults. Works for any K8s resource type or CRD.
+
+4. **SSA Semantics**: ✅ Aligns with Kubernetes Server-Side Apply field ownership model. State shows what provider manages.
+
+5. **User Control**: ✅ Users can take ownership (add to YAML) or release ownership (ignore_fields) of any field.
+
+**Trade-off Accepted:**
+
+❌ **State does NOT show complete cluster object** - Shows managed fields only (per SSA managedFields).
+
+**Is this acceptable?**
+
+- **Strict contract interpretation (ADR-012 original):** No - violates requirement to show all fields
+- **Pragmatic interpretation (ADR-012 updated):** Yes - framework limitations make strict interpretation technically infeasible
+- **See ADR-012 "Framework Limitations and Pragmatic Interpretation" section for full analysis**
+
+**This is the only approach that:**
+- Works within framework constraints (proven)
+- Provides acceptable UX (clean diffs)
+- Avoids bootstrap errors (critical)
+- Respects SSA field ownership (K8s semantics)
+
+**Current Implementation (Option 1 - Pragmatic Approach):**
+
+1. **yaml_body marked sensitive** - ✅ Hidden from plan output, users review changes in git
+2. **CREATE operations skip dry-run for projection** - ✅ Always use parsed yaml as projection (plan_modifier.go:51-53, 217-220)
+3. **UPDATE operations use dry-run** - ✅ Server-side dry-run for accurate predictions (plan_modifier.go:297+)
+4. **String format retained** - ✅ Hierarchical JSON more readable than flattened Map for CREATE/DESTROY operations
+5. **Fixed field_ownership null error** - ✅ Added updateFieldOwnershipData call after CREATE (crud.go:72)
+6. **State filtered to managedFields** - ✅ Only stores fields provider manages via SSA
+
+**Key Implementation Detail:**
+
+State is filtered to show only managed fields (per SSA managedFields). This is:
+- ❌ A violation of strict contract interpretation (ADR-012 original)
+- ✅ The only technically feasible approach given framework limitations
+- ✅ A pragmatic interpretation aligned with SSA semantics (ADR-012 updated)
+
+Files implementing this:
+- `crud.go` - Reads cluster state
+- `crud_common.go` - Filters to managedFields before storing
+- `plan_modifier.go` - Uses managed projection for drift detection
+- `projection.go` - Implements filtering logic based on managedFields and ignore_fields
+
+**Why not store complete state?**
+
+Research proved (99%+ certainty) that storing complete state while suppressing diffs for ignored fields is not supported by terraform-plugin-framework. See `docs/research/diff-suppression-investigation.md` for complete analysis.
+
+**Implementation files:**
+- `internal/k8sconnect/resource/manifest/manifest.go:110` - Added Sensitive: true to yaml_body
+- `internal/k8sconnect/resource/manifest/plan_modifier.go:51-53` - Force connectionReady=false for CREATE operations
+- `internal/k8sconnect/resource/manifest/plan_modifier.go:217-220` - Skip dry-run for CREATE in executeDryRunAndProjection
+- `internal/k8sconnect/resource/manifest/plan_modifier.go:270-294` - calculateProjection uses parsed yaml for CREATE
+- `internal/k8sconnect/resource/manifest/crud.go:72` - Call updateFieldOwnershipData after CREATE
+
+**Results:**
+- **Bootstrap scenario**: Works perfectly, no inconsistent plan errors ✅
+- **CREATE projection**: Shows parsed yaml (cluster doesn't exist, best available) ✅
+- **CREATE state**: Shows COMPLETE cluster reality after apply (contract compliance) ✅
+- **UPDATE**: Shows server-side dry-run projection (accurate, includes K8s mutations) ✅
+- **Single diff**: Only managed_state_projection shown, no dual-diff confusion ✅
+- **Readable format**: Hierarchical JSON, not flattened paths ✅
+- **Drift detection**: Shows ALL fields including K8s defaults - user uses ignore_fields to handle ⚠️
+
+### User Experience: What Friction Will Users Encounter?
+
+**Scenario 1: K8s Defaults Shown After CREATE (Contract-Compliant Behavior)**
+
+```terraform
+# User's YAML - doesn't specify protocol
+resource "k8sconnect_manifest" "service" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: Service
+    spec:
+      ports:
+      - port: 80
+        name: http
+  YAML
+}
+```
+
+**What happens:**
+1. **Plan phase (CREATE)**: Shows projection WITHOUT `protocol` field (cluster doesn't exist, using yaml fallback)
+2. **Apply phase**: Resource created, K8s adds `protocol: TCP` as default
+3. **State after apply**: Shows COMPLETE cluster state including `protocol: TCP` (CONTRACT COMPLIANCE)
+4. **First plan/refresh**: Shows DRIFT - state has protocol, HCL doesn't
+
+```terraform
+~ resource "k8sconnect_manifest" "service" {
+    ~ managed_state_projection = jsonencode({
+        ~ spec = {
+            ~ ports = [
+                ~ {
+                    + protocol = "TCP"  # K8s added this as default
+                    # ... other fields
+                  }
+              ]
+          }
+      })
+  }
+```
+
+**User reaction:** ❓ "Why is terraform showing drift? I didn't change anything!"
+
+**Answer (from documentation):**
+- This is correct behavior (ADR-012)
+- State shows complete infrastructure reality, including K8s defaults
+- You have three choices:
+  1. Add `protocol: TCP` to your YAML (explicitly manage it)
+  2. Add to `ignore_fields: ["spec.ports[*].protocol"]` (explicitly ignore it)
+  3. Accept seeing it in every plan (acknowledge it exists)
+
+**If user ignores it:**
+```terraform
+resource "k8sconnect_manifest" "service" {
+  yaml_body = <<-YAML
+    # ... same YAML
+  YAML
+  ignore_fields = ["spec.ports[*].protocol"]
+}
+```
+
+**What if protocol changes to UDP after ignoring?**
+- We DON'T detect this as drift (user explicitly ignored it)
+- **This is correct** - user made explicit choice to not manage this field
+- User can remove from ignore_fields anytime to start tracking it again
+
+**Scenario 2: User Explicitly Specifies Defaults**
+
+```terraform
+resource "k8sconnect_manifest" "service" {
+  yaml_body = <<-YAML
+    spec:
+      ports:
+      - port: 80
+        protocol: TCP  # Explicitly specified
+  YAML
+}
+```
+
+**What happens:**
+1. **Plan phase**: Shows projection WITH `protocol: TCP` (user specified it)
+2. **Apply phase**: We send it, K8s accepts it, we own it (in managedFields)
+3. **Something changes it to UDP**: Next plan shows drift!
+
+**User reaction:** ✅ "Perfect, terraform detected the change to my field."
+
+**Scenario 3: Admission Controller Mutations During CREATE**
+
+```terraform
+resource "k8sconnect_manifest" "pod" {
+  yaml_body = <<-YAML
+    spec:
+      containers:
+      - name: app
+        image: nginx:1.21
+        # User specifies no securityContext
+  YAML
+}
+```
+
+**What happens:**
+1. **Plan phase**: Shows projection without securityContext (user didn't specify it)
+2. **Apply phase**: Admission controller adds `securityContext: {runAsNonRoot: true}`
+3. **First refresh**: Projection updates to show securityContext (we now own it - it's in managedFields)
+
+**User reaction:** ❓ "Wait, why does the projection show securityContext now? I didn't add it to my YAML!"
+
+**Explanation needed:**
+- Admission controller mutated your resource during CREATE
+- The mutated fields became part of your managedFields
+- Next apply will send them (and might conflict with admission controller)
+- **Recommended action:** Add the fields to your YAML to match reality, or add to `ignore_fields` to release ownership
+
+**Scenario 4: Projection Changes After First Apply (Bootstrap)**
+
+```terraform
+# During terraform plan (cluster doesn't exist yet)
++ managed_state_projection = jsonencode({
+    apiVersion = "apps/v1"
+    kind = "Deployment"
+    spec = {
+      replicas = 3
+      # ... user's fields only
+    }
+  })
+
+# After terraform apply (cluster now exists)
+# First refresh shows exact same projection
+~ managed_state_projection = jsonencode({
+    apiVersion = "apps/v1"
+    kind = "Deployment"
+    spec = {
+      replicas = 3
+      # ... still just user's fields
+    }
+  })
+```
+
+**User reaction:** ✅ "Projection stayed consistent - good!"
+
+**BUT if admission controller mutated:**
+```terraform
+# After apply, first refresh
+~ managed_state_projection = jsonencode({
+    spec = {
+      replicas = 3
+      template = {
+        spec = {
++         securityContext = { runAsNonRoot = true }
+        }
+      }
+    }
+  })
+```
+
+**User reaction:** ❓ "Why did the projection change? I didn't modify my YAML!"
+
+**Explanation needed:** Admission controller added this during CREATE. You now own it. Either:
+1. Add it to your YAML (recommended - makes desired state explicit)
+2. Add to `ignore_fields` (if you want admission controller to manage it)
+
+### Documentation Requirements for Users
+
+To minimize confusion, we must document:
+
+1. **State shows complete infrastructure reality (Terraform Contract)**:
+   - "State reflects ALL fields in the cluster, even ones you didn't specify"
+   - "This includes K8s defaults, admission controller mutations, and other controller changes"
+   - "This is Terraform's contract: state = infrastructure reality, always"
+
+2. **CREATE behavior**:
+   - "During CREATE plan: Shows what you wrote (cluster doesn't exist yet)"
+   - "After CREATE apply: State populated with complete cluster reality"
+   - "First plan after CREATE: May show drift for K8s defaults you didn't specify"
+   - "This is expected - use ignore_fields to handle fields you don't want to manage"
+
+3. **UPDATE behavior**:
+   - "During UPDATE plan: Shows accurate server-side dry-run predictions"
+   - "Includes all K8s behavior, defaults, and mutations"
+
+4. **How to handle drift for K8s defaults**:
+   - "Option 1: Add field to your YAML (explicitly manage it)"
+   - "Option 2: Add to ignore_fields (explicitly don't manage it)"
+   - "Option 3: Accept seeing it in every plan (acknowledge it exists)"
+   - "All three are valid choices - pick what makes sense for your use case"
+
+5. **ignore_fields is explicit choice, not automatic**:
+   - "You WILL see drift first, then you decide"
+   - "This ensures no surprises - you're always informed"
+   - "ignore_fields documents your choice: 'I see this field, I choose not to manage it'"
+
+6. **When another controller takes a field**:
+   - "If field ownership changes, you'll see it in plan (field_ownership attribute)"
+   - "You can take it back (force_conflicts) or release it (ignore_fields)"
+   - "Both choices are explicit and documented in your HCL"
 
 ### Completed: field_ownership Map Format
 
@@ -25,6 +429,8 @@ Implemented Map format for `field_ownership` with additional UX enhancements bey
 ### Not Yet Implemented: managed_state_projection Map Format
 
 Still using JSON String format. The `field_ownership` improvements proved sufficient for reducing noise, so converting `managed_state_projection` is deferred until proven necessary.
+
+**Update (2025-10-06):** Options E and F have been added to address both the verbosity issue AND the bootstrap "(known after apply)" problem. Option E converts `managed_state_projection` to Map format while intelligently populating it from yaml_body when cluster doesn't exist yet. Option F extends this by making `yaml_body` sensitive, eliminating dual-diff confusion and providing a single source of truth (managed_state_projection) in plan output. Both options under consideration.
 
 ### Results
 
@@ -240,13 +646,207 @@ After research, we found:
 
 **Verdict:** ❌ Technical feasibility unknown, still verbose
 
+### Option E: Populate managed_state_projection from yaml_body During Bootstrap
+
+**Change:** Convert `managed_state_projection` to Map format (like Option B), but populate it intelligently based on cluster availability:
+- When cluster is accessible (normal updates): Use server-side dry-run (accurate)
+- When cluster doesn't exist (bootstrap): Parse yaml_body and convert to Map format
+
+**Schema:**
+```go
+"managed_state_projection": schema.MapAttribute{
+    Computed:    true,
+    ElementType: types.StringType,
+    Description: "Field-by-field projection of managed state. Shows server-side dry-run results when cluster is accessible, or yaml_body fields when cluster doesn't exist yet.",
+}
+```
+
+**Result during bootstrap (cluster doesn't exist):**
+```terraform
++ resource "k8sconnect_manifest" "nginx" {
+    + yaml_body = <<-EOT
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: nginx
+        spec:
+          replicas: 2
+      EOT
+    + managed_state_projection = {
+        + "apiVersion" = "apps/v1"
+        + "kind" = "Deployment"
+        + "metadata.name" = "nginx"
+        + "spec.replicas" = "2"
+      }
+  }
+```
+**Total: ~15 lines** (shows both YAML and flat map view of same content)
+
+**Result during update (cluster exists):**
+```terraform
+~ resource "k8sconnect_manifest" "nginx" {
+    ~ yaml_body = <<-EOT
+        - replicas: 2
+        + replicas: 3
+      EOT
+    ~ managed_state_projection = {
+        ~ "spec.replicas" = "2 → 3"
+        # ... accurate dry-run results from server
+      }
+  }
+```
+**Total: ~53 lines** (same as Option B)
+
+**Pros:**
+- ✅ **Solves the bootstrap problem** - No more "(known after apply)" showing nothing useful
+- ✅ **Always shows meaningful information** - Either dry-run results or yaml content
+- ✅ **Correct semantics** - "projection" means subset of fields; yaml fields ARE the managed fields during create
+- ✅ **Graceful degradation** - Best available data in all scenarios
+- ✅ **Two views of same data** - YAML (familiar) + Map (scannable) complement each other
+- ✅ **No user education needed** - Naturally makes sense (shows what you're creating)
+- ✅ **Maintains all value props** - SSA awareness, accurate predictions when possible, user intent
+- ✅ **Clean implementation** - Parse yaml_body to Map when dry-run unavailable
+
+**Cons:**
+- Different data sources (yaml vs dry-run) for same attribute depending on context
+- During bootstrap, managed_state_projection shows "intended state" not "actual cluster response"
+- May surprise users if they expect dry-run accuracy in all cases
+- Slight implementation complexity handling two code paths
+
+**Mitigation:**
+- Clear documentation explaining the fallback behavior
+- During apply, always use actual dry-run once cluster is accessible (update state with accurate values)
+- Add note in plan output or description when showing yaml-sourced projection vs dry-run projection
+
+**Implementation approach:**
+```go
+func (r *manifestResource) planManagedStateProjection(ctx context.Context, yaml string, conn types.Object) (types.Map, error) {
+    // Try to get cluster client
+    client, err := r.getClient(conn)
+
+    if err == nil && client != nil {
+        // Cluster accessible - use server-side dry-run (accurate)
+        dryRunResult := doServerSideDryRun(ctx, client, yaml)
+        return extractManagedFieldsAsMap(dryRunResult), nil
+    }
+
+    // Cluster not accessible (bootstrap scenario)
+    // Parse yaml and return all fields as map - these ARE the managed fields we'll create
+    parsed := parseYaml(yaml)
+    return convertToFlatMap(parsed), nil
+}
+```
+
+**Verdict:** ⚠️ **Promising - solves bootstrap UX problem while maintaining value props**
+
+Combines the verbosity wins from Option B with a solution to the "(known after apply)" problem. Semantic correctness is maintained since yaml fields ARE the projection of managed fields during create. Requires careful documentation but provides superior UX in both bootstrap and update scenarios.
+
+### Option F: Hide yaml_body, Show Only managed_state_projection (Option E + Sensitive)
+
+**Change:** Combine Option E (Map format with bootstrap support) and make `yaml_body` sensitive so users only see `managed_state_projection` in diffs.
+
+**Schema:**
+```go
+"yaml_body": schema.StringAttribute{
+    Required:  true,
+    Sensitive: true,  // Hidden from plan output
+    Description: "Your manifest input. Changes tracked internally via managed_state_projection. Use git diff to review your HCL changes.",
+}
+
+"managed_state_projection": schema.MapAttribute{
+    Computed:    true,
+    ElementType: types.StringType,
+    Description: "Field-by-field projection of managed state showing exactly what Kubernetes will apply. Single source of truth in plan diffs.",
+}
+```
+
+**Result during bootstrap (cluster doesn't exist):**
+```terraform
++ resource "k8sconnect_manifest" "nginx" {
+    + yaml_body = (sensitive value)
+    + managed_state_projection = {
+        + "apiVersion" = "apps/v1"
+        + "kind" = "Deployment"
+        + "metadata.name" = "nginx"
+        + "spec.replicas" = "2"
+      }
+  }
+```
+**Total: ~8 lines** (only projection shown)
+
+**Result during update (cluster exists):**
+```terraform
+~ resource "k8sconnect_manifest" "nginx" {
+    ~ yaml_body = (sensitive value)
+    ~ managed_state_projection = {
+        ~ "spec.replicas" = "2 → 3"
+        ~ "spec.template.spec.containers[0].resources.requests.cpu" = "50m → 100m"
+      }
+  }
+```
+**Total: ~5 lines** (only projection shown)
+
+**Pros:**
+- ✅ **Single source of truth** - Only one diff to review (managed_state_projection)
+- ✅ **Maximum clarity** - No dual-diff confusion
+- ✅ **Minimal verbosity** - ~5-8 lines for typical changes
+- ✅ **Separation of concerns** - Git shows config changes, Terraform shows cluster changes
+- ✅ **No whitespace noise** - Formatting changes in YAML don't show (already suppressed internally)
+- ✅ **Scannable Map format** - Field-by-field changes easy to review
+- ✅ **Bootstrap works** - Shows parsed yaml as projection when cluster doesn't exist
+- ✅ **Aligns with gavinbunney pattern** - Similar to yaml_body (sensitive) + yaml_body_parsed approach
+- ✅ **Users already primed** - Familiar pattern from other providers
+
+**Cons:**
+- Users can't see their original YAML in plan output (must check git/HCL)
+- May feel "hidden" to users unfamiliar with the pattern
+- Debug complexity: must expose sensitive values to see actual yaml_body
+- Breaking change: existing users see yaml_body diffs currently
+
+**Rationale:**
+Users already have git for tracking "what did I change in my config". Terraform should show "what will Kubernetes actually do". The managed_state_projection is computed via server-side dry-run (when available) or parsed yaml (during bootstrap), making it the most accurate view of what will happen. Hiding yaml_body eliminates duplicate information and focuses users on the actual cluster changes.
+
+**Implementation notes:**
+- Already have projection comparison logic that suppresses yaml_body diffs when projection unchanged (plan_modifier.go:177)
+- Just need to add `Sensitive: true` to yaml_body schema
+- Complete Option E implementation (Map format + bootstrap population)
+- Document: "Use git diff to see config changes, terraform plan to see cluster changes"
+
+**Verdict:** ⭐ **Strongest option - clean separation of concerns with minimal verbosity**
+
+This approach provides the clearest UX by showing exactly one thing: what Kubernetes will change. It leverages existing version control (git) for tracking config changes and positions Terraform as the infrastructure control plane showing actual cluster state changes. Combined with Map format and bootstrap support, it solves all identified problems while maintaining semantic correctness.
+
+### Option Progression Summary
+
+The options build on each other progressively:
+
+- **Option A**: Remove field_ownership → ❌ Loses SSA value prop
+- **Option B**: Convert to Map format → ✅ 61% verbosity reduction, but still dual-diff
+- **Option C**: Summary strings → ❌ Loses detail
+- **Option D**: Hide yaml_body conditionally → ❌ Technically complex, still verbose
+- **Option E**: Option B + bootstrap support → ✅ Solves "(known after apply)", maintains dual-diff
+- **Option F**: Option E + sensitive yaml_body → ⭐ **Single source of truth, maximum clarity**
+
+Each option addresses different aspects of the UX problem, with Option F providing the most comprehensive solution by combining all improvements while maintaining semantic correctness and aligning with user workflows (git for config, terraform for cluster state).
+
 ## Decision
 
-**Recommendation: Option B - Flat Map Format for both attributes**
+**Final Decision: Option F with String Format**
 
-Implement `Map[String]String` for both `field_ownership` and `managed_state_projection`.
+Implemented Option F concept (hiding yaml_body, showing only managed_state_projection) but retained String format for managed_state_projection instead of converting to Map. This decision was made after recognizing that:
 
-### Rationale
+1. **Map format is excellent for UPDATEs** (shows only changed fields) but **poor for CREATE/DESTROY** (shows all fields flattened)
+2. **String format with hierarchical JSON** is more readable for showing complete resource structure during CREATE
+3. **Updates are already optimized** - The existing projection comparison logic suppresses yaml_body changes when projection is unchanged
+4. **Single source of truth achieved** - Making yaml_body sensitive eliminates dual-diff confusion
+
+The implementation provides:
+- ✅ Single diff in plan output (managed_state_projection only)
+- ✅ Intelligent fallback (dry-run when possible, parsed yaml when not)
+- ✅ Readable hierarchical format (not flattened)
+- ✅ Clean separation of concerns (git for config, terraform for cluster state)
+
+### Rationale for Option B
 
 1. **Preserves all value propositions:**
    - Users see accurate dry-run predictions (managed_state_projection)
@@ -268,13 +868,32 @@ Implement `Map[String]String` for both `field_ownership` and `managed_state_proj
    - State migration can be handled with upgraders
    - Breaking changes acceptable before v1.0
 
+### Rationale for Option E (If Adopted)
+
+All benefits of Option B, plus:
+- **Solves bootstrap UX** - Shows parsed yaml content instead of "(known after apply)"
+- **Semantically correct** - yaml fields ARE the managed field projection during create
+- **Always informative** - Users see useful content in both bootstrap and update scenarios
+- **Minimal complexity** - Fallback to yaml parsing when dry-run unavailable
+
+### Rationale for Option F (If Adopted)
+
+All benefits of Option E, plus:
+- **Eliminates dual-diff confusion** - Only one thing to review (managed_state_projection)
+- **Cleanest separation of concerns** - Git tracks config, Terraform tracks cluster changes
+- **Maximum verbosity reduction** - 60-96% reduction from current (depends on change size)
+- **Aligns with user workflows** - Users already use git diff for config review
+- **Familiar pattern** - Similar to gavinbunney's yaml_body (sensitive) approach
+
 ### Real-World Scenarios
 
-| Scenario | Current | Option A | Option B | Option C |
-|----------|---------|----------|----------|----------|
-| Small (2-3 fields) | 136 lines | 73 lines | **53 lines** ✅ | 50 lines (no detail) |
-| Medium (10-15 fields) | ~200 lines | ~130 lines | **~70 lines** ✅ | 50 lines (no detail) |
-| Large (50+ fields) | ~400 lines | ~300 lines | **~150 lines** ✅ | 50 lines (no detail) |
+| Scenario | Current | Option A | Option B | Option C | Option E | Option F |
+|----------|---------|----------|----------|----------|----------|----------|
+| Small (2-3 fields) | 136 lines | 73 lines | 53 lines | 50 lines (no detail) | 53 lines | **~5 lines** ✅⭐ |
+| Medium (10-15 fields) | ~200 lines | ~130 lines | ~70 lines | 50 lines (no detail) | ~70 lines | **~12 lines** ✅⭐ |
+| Large (50+ fields) | ~400 lines | ~300 lines | ~150 lines | 50 lines (no detail) | ~150 lines | **~52 lines** ✅⭐ |
+| Bootstrap (CREATE) | "(known after apply)" | "(known after apply)" | "(known after apply)" | "(known after apply)" | ~15 lines | **~8 lines** ✅⭐ |
+| Dual-diff confusion | High | Medium | Medium | Low | Medium | **None** ✅⭐ |
 
 ## Implementation
 
