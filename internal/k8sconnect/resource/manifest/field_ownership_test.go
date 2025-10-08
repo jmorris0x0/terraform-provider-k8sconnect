@@ -381,6 +381,7 @@ YAML
 //     a) A warning is shown listing all conflicting fields
 //     b) Fields are taken over forcibly (may cause fights with other controllers)
 //     c) Users should use ignore_fields to release ownership if they don't want to manage a field
+//
 // TestAccManifestResource_FieldManagerConflict verifies that field ownership conflicts are detected and reported.
 func TestAccManifestResource_FieldManagerConflict(t *testing.T) {
 	t.Parallel()
@@ -602,6 +603,7 @@ YAML
 }
 `, namespace, deployName, namespace)
 }
+
 // TestAccManifestResource_DriftDetectionWithForceConflicts tests the scenario where:
 // 1. We create a resource
 // 2. External controller modifies it
