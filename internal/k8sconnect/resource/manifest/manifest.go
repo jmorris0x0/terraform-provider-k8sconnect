@@ -43,7 +43,6 @@ type manifestResourceModel struct {
 	DeleteTimeout          types.String  `tfsdk:"delete_timeout"`
 	FieldOwnership         types.Map     `tfsdk:"field_ownership"`
 	ForceDestroy           types.Bool    `tfsdk:"force_destroy"`
-	ForceConflicts         types.Bool    `tfsdk:"force_conflicts"`
 	IgnoreFields           types.List    `tfsdk:"ignore_fields"`
 	ManagedStateProjection types.String  `tfsdk:"managed_state_projection"`
 	WaitFor                types.Object  `tfsdk:"wait_for"`
@@ -140,13 +139,6 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 					"When this differs from current cluster state, it indicates drift - someone modified your managed fields outside Terraform. " +
 					"During plan, diffs in this attribute show exactly what Kubernetes will change when you apply, computed via dry-run for accuracy. " +
 					"This enables precise drift detection without false positives from fields managed by other controllers.",
-			},
-			"force_conflicts": schema.BoolAttribute{
-				Optional: true,
-				Description: "Force ownership of fields currently managed by other controllers during Server-Side Apply. " +
-					"When false (default), apply fails if another field manager owns a field, protecting against accidental takeovers. " +
-					"When true, forcibly claims ownership of conflicting fields. Useful when intentionally taking control from controllers " +
-					"like HPA or when migrating resources from other Terraform states.",
 			},
 			"ignore_fields": schema.ListAttribute{
 				Optional:    true,

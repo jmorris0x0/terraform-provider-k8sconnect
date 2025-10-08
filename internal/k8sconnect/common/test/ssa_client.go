@@ -81,6 +81,104 @@ func (c *SSATestClient) ApplyDeploymentReplicasSSA(ctx context.Context, namespac
 	return nil
 }
 
+// ApplyDeploymentCPULimitSSA uses Server-Side Apply to modify a deployment's CPU limit with a specific field manager.
+func (c *SSATestClient) ApplyDeploymentCPULimitSSA(ctx context.Context, namespace, name string, cpuLimit string, fieldManager string) error {
+	patch := map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]interface{}{
+			"name":      name,
+			"namespace": namespace,
+		},
+		"spec": map[string]interface{}{
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"containers": []map[string]interface{}{
+						{
+							"name": "nginx",
+							"resources": map[string]interface{}{
+								"limits": map[string]interface{}{
+									"cpu": cpuLimit,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	patchData, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("failed to marshal patch: %w", err)
+	}
+
+	result := c.clientset.AppsV1().RESTClient().
+		Patch(types.ApplyPatchType).
+		Namespace(namespace).
+		Resource("deployments").
+		Name(name).
+		Param("fieldManager", fieldManager).
+		Param("force", "true").
+		Body(patchData).
+		Do(ctx)
+
+	if err := result.Error(); err != nil {
+		return fmt.Errorf("SSA patch failed: %w", err)
+	}
+
+	return nil
+}
+
+// ApplyDeploymentMemoryLimitSSA uses Server-Side Apply to modify a deployment's memory limit with a specific field manager.
+func (c *SSATestClient) ApplyDeploymentMemoryLimitSSA(ctx context.Context, namespace, name string, memoryLimit string, fieldManager string) error {
+	patch := map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]interface{}{
+			"name":      name,
+			"namespace": namespace,
+		},
+		"spec": map[string]interface{}{
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"containers": []map[string]interface{}{
+						{
+							"name": "nginx",
+							"resources": map[string]interface{}{
+								"limits": map[string]interface{}{
+									"memory": memoryLimit,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	patchData, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("failed to marshal patch: %w", err)
+	}
+
+	result := c.clientset.AppsV1().RESTClient().
+		Patch(types.ApplyPatchType).
+		Namespace(namespace).
+		Resource("deployments").
+		Name(name).
+		Param("fieldManager", fieldManager).
+		Param("force", "true").
+		Body(patchData).
+		Do(ctx)
+
+	if err := result.Error(); err != nil {
+		return fmt.Errorf("SSA patch failed: %w", err)
+	}
+
+	return nil
+}
+
 // ApplyServicePortSSA uses Server-Side Apply to modify a service port with a specific field manager.
 // This can be used to test field ownership conflicts on Service resources.
 func (c *SSATestClient) ApplyServicePortSSA(ctx context.Context, namespace, name string, port int32, fieldManager string) error {

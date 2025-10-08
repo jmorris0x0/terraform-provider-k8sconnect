@@ -190,7 +190,7 @@ func (r *manifestResource) checkDriftAndPreserveState(ctx context.Context, req r
 
 				// Note: ImportedWithoutAnnotations is now in private state, not model
 				// But still allow terraform-specific settings to update
-				// (delete_protection, force_conflicts, etc. are not preserved)
+				// (delete_protection, ignore_fields, etc. are not preserved during import)
 			}
 		}
 	}
@@ -256,18 +256,38 @@ func (r *manifestResource) calculateProjection(ctx context.Context, req resource
 	// Extract ownership from dry-run result (what ownership WILL BE after apply)
 	paths := extractOwnedPaths(ctx, dryRunResult.GetManagedFields(), desiredObj.Object)
 
-	// Preserve field_ownership from state for UPDATE operations
-	// Only mark as unknown if ignore_fields changed or force_conflicts is set (both could affect ownership)
-	var stateData manifestResourceModel
-	if diags := req.State.Get(ctx, &stateData); !diags.HasError() {
-		ignoreFieldsChanged := !stateData.IgnoreFields.Equal(plannedData.IgnoreFields)
-		forceConflicts := !plannedData.ForceConflicts.IsNull() && plannedData.ForceConflicts.ValueBool()
+	// Extract predicted field ownership from dry-run for plan
+	predictedOwnership := parseFieldsV1ToPathMap(dryRunResult.GetManagedFields(), desiredObj.Object)
 
-		if !ignoreFieldsChanged && !forceConflicts && !stateData.FieldOwnership.IsNull() {
-			plannedData.FieldOwnership = stateData.FieldOwnership
-			tflog.Debug(ctx, "Preserved field_ownership from state for UPDATE")
+	// Convert to types.Map for Terraform
+	ownershipMap := make(map[string]string)
+	for path, ownership := range predictedOwnership {
+		ownershipMap[path] = ownership.Manager
+	}
+
+	// Add annotations that we will set during apply (not in dry-run yet)
+	// These are always owned by k8sconnect since we set them
+	ownershipMap["metadata.annotations.k8sconnect.terraform.io/created-at"] = "k8sconnect"
+	ownershipMap["metadata.annotations.k8sconnect.terraform.io/terraform-id"] = "k8sconnect"
+
+	// Filter out status fields - they are not preserved during Apply operations
+	// Status is managed by controllers after apply, not during apply
+	for path := range ownershipMap {
+		if strings.HasPrefix(path, "status.") || path == "status" {
+			delete(ownershipMap, path)
 		}
-		// else: leave field_ownership as Unknown, Apply will compute it
+	}
+
+	// Note: We do NOT filter out ignored fields from field_ownership
+	// Users need to see who owns ignored fields for visibility
+
+	// Set field_ownership to predicted value from dry-run
+	predictedFieldOwnership, diags := types.MapValueFrom(ctx, types.StringType, ownershipMap)
+	if !diags.HasError() {
+		plannedData.FieldOwnership = predictedFieldOwnership
+		tflog.Debug(ctx, "Set field_ownership from dry-run prediction", map[string]interface{}{
+			"field_count": len(ownershipMap),
+		})
 	}
 
 	// Apply projection
@@ -332,33 +352,10 @@ func (r *manifestResource) performDryRun(ctx context.Context, client k8sclient.K
 	return dryRunResult, nil
 }
 
-// getFieldOwnershipPaths gets paths based on field ownership
+// getFieldOwnershipPaths gets paths to use for projection
 func (r *manifestResource) getFieldOwnershipPaths(ctx context.Context, plannedData *manifestResourceModel, desiredObj *unstructured.Unstructured, client k8sclient.K8sClient) []string {
-	// Check force_conflicts setting FIRST
-	forceConflicts := !plannedData.ForceConflicts.IsNull() && plannedData.ForceConflicts.ValueBool()
-
-	if forceConflicts {
-		// When force_conflicts is true, use ALL fields from YAML
-		paths := extractFieldPaths(desiredObj.Object, "")
-		return paths
-	}
-
-	// Try to get current object for ownership info
-	gvr, err := client.GetGVR(ctx, desiredObj)
-	if err != nil {
-		paths := extractFieldPaths(desiredObj.Object, "")
-		return paths
-	}
-
-	currentObj, err := client.Get(ctx, gvr, desiredObj.GetNamespace(), desiredObj.GetName())
-	if err != nil {
-		tflog.Debug(ctx, "Could not get current object, falling back to YAML paths")
-		paths := extractFieldPaths(desiredObj.Object, "")
-		return paths
-	}
-
-	tflog.Debug(ctx, "Using field ownership for projection")
-	paths := extractOwnedPaths(ctx, currentObj.GetManagedFields(), desiredObj.Object)
+	// Always use ALL fields from YAML (we force ownership of all user-specified fields)
+	paths := extractFieldPaths(desiredObj.Object, "")
 	return paths
 }
 
@@ -561,22 +558,29 @@ func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req
 		userWantsPaths = filterIgnoredPaths(userWantsPaths, ignoreFields)
 	}
 
+	// Normalize user paths to match ownership map format (merge keys -> array indexes)
+	normalizedUserPaths := make(map[string]string) // normalized -> original
+	for _, userPath := range userWantsPaths {
+		normalized := normalizePathForComparison(userPath, desiredObj.Object)
+		normalizedUserPaths[normalized] = userPath
+	}
+
 	// Check each path the user wants against ownership
 	var conflicts []FieldConflict
-	for _, path := range userWantsPaths {
+	for normalizedPath, originalPath := range normalizedUserPaths {
 		// Skip metadata fields that are always owned by us
-		if strings.HasPrefix(path, "metadata.annotations.k8sconnect.terraform.io/") {
+		if strings.HasPrefix(normalizedPath, "metadata.annotations.k8sconnect.terraform.io/") {
 			continue
 		}
 		// Skip core fields that don't have ownership
-		if path == "apiVersion" || path == "kind" || path == "metadata.name" || path == "metadata.namespace" {
+		if normalizedPath == "apiVersion" || normalizedPath == "kind" || normalizedPath == "metadata.name" || normalizedPath == "metadata.namespace" {
 			continue
 		}
 
-		if owner, exists := ownership[path]; exists {
+		if owner, exists := ownership[normalizedPath]; exists {
 			if owner.Manager != "k8sconnect" {
 				conflicts = append(conflicts, FieldConflict{
-					Path:  path,
+					Path:  originalPath,
 					Owner: owner.Manager,
 				})
 			}
@@ -584,7 +588,9 @@ func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req
 	}
 
 	if len(conflicts) > 0 {
-		addConflictWarning(resp, conflicts, planData.ForceConflicts)
+		// field_ownership is already set from dry-run prediction in calculateProjection
+		// Just add the warning about conflicts
+		addConflictWarning(resp, conflicts)
 	}
 }
 
@@ -709,31 +715,103 @@ func findChangedFields(current, desired map[string]interface{}, prefix string) [
 	return changes
 }
 
-func addConflictWarning(resp *resource.ModifyPlanResponse, conflicts []FieldConflict, forceConflicts types.Bool) {
-	if forceConflicts.ValueBool() {
-		// Just warn when forcing
-		var conflictDetails []string
-		for _, c := range conflicts {
-			conflictDetails = append(conflictDetails, fmt.Sprintf("  - %s (owned by %s)", c.Path, c.Owner))
+// normalizePathForComparison converts paths with merge keys like "containers[name=nginx]"
+// to array index format like "containers[0]" by resolving the merge key in the actual object.
+// This allows comparing paths from extractFieldPaths (which uses merge keys) with paths
+// from field ownership (which uses array indexes).
+func normalizePathForComparison(path string, obj map[string]interface{}) string {
+	// Split path into segments
+	segments := strings.Split(path, ".")
+	var normalizedSegments []string
+	currentObj := interface{}(obj)
+
+	for _, segment := range segments {
+		// Check if this segment contains a merge key pattern like "containers[name=nginx]"
+		if strings.Contains(segment, "[") && strings.Contains(segment, "=") {
+			// Extract field name and merge key
+			parts := strings.SplitN(segment, "[", 2)
+			fieldName := parts[0]
+			mergeKeyPart := strings.TrimSuffix(parts[1], "]")
+
+			// Parse merge key (e.g., "name=nginx" -> key="name", value="nginx")
+			mergeKeyParts := strings.SplitN(mergeKeyPart, "=", 2)
+			if len(mergeKeyParts) != 2 {
+				// Malformed merge key, use as-is
+				normalizedSegments = append(normalizedSegments, segment)
+				continue
+			}
+			mergeKey := mergeKeyParts[0]
+			mergeValue := mergeKeyParts[1]
+
+			// Navigate to the array field in the current object
+			if objMap, ok := currentObj.(map[string]interface{}); ok {
+				if arrayVal, ok := objMap[fieldName]; ok {
+					if array, ok := arrayVal.([]interface{}); ok {
+						// Find the index of the array element with matching merge key
+						foundIndex := -1
+						for i, item := range array {
+							if itemMap, ok := item.(map[string]interface{}); ok {
+								if val, ok := itemMap[mergeKey]; ok {
+									if fmt.Sprintf("%v", val) == mergeValue {
+										foundIndex = i
+										currentObj = item
+										break
+									}
+								}
+							}
+						}
+						if foundIndex >= 0 {
+							normalizedSegments = append(normalizedSegments, fmt.Sprintf("%s[%d]", fieldName, foundIndex))
+							continue
+						}
+					}
+				}
+			}
+
+			// Couldn't resolve, use as-is
+			normalizedSegments = append(normalizedSegments, segment)
+		} else if strings.Contains(segment, "[") {
+			// Already has array index like "containers[0]", use as-is
+			normalizedSegments = append(normalizedSegments, segment)
+			// Navigate to that array element
+			parts := strings.SplitN(segment, "[", 2)
+			fieldName := parts[0]
+			indexStr := strings.TrimSuffix(parts[1], "]")
+			var idx int
+			if _, err := fmt.Sscanf(indexStr, "%d", &idx); err == nil && idx >= 0 {
+				if objMap, ok := currentObj.(map[string]interface{}); ok {
+					if arrayVal, ok := objMap[fieldName]; ok {
+						if array, ok := arrayVal.([]interface{}); ok {
+							if idx < len(array) {
+								currentObj = array[idx]
+							}
+						}
+					}
+				}
+			}
+		} else {
+			// Regular field, navigate deeper
+			normalizedSegments = append(normalizedSegments, segment)
+			if objMap, ok := currentObj.(map[string]interface{}); ok {
+				currentObj = objMap[segment]
+			}
 		}
-		resp.Diagnostics.AddWarning(
-			"Field Ownership Override",
-			fmt.Sprintf("Forcing ownership of fields managed by other controllers:\n%s\n\n"+
-				"These fields will be forcibly taken over. The other controllers may fight back.\n"+
-				"Consider adding these paths to ignore_fields to release ownership instead.",
-				strings.Join(conflictDetails, "\n")),
-		)
-	} else {
-		// Error when not forcing
-		var conflictDetails []string
-		for _, c := range conflicts {
-			conflictDetails = append(conflictDetails, fmt.Sprintf("  - %s (owned by %s)", c.Path, c.Owner))
-		}
-		resp.Diagnostics.AddError(
-			"Field Ownership Conflict",
-			fmt.Sprintf("Cannot modify fields owned by other controllers:\n%s\n\n"+
-				"To resolve: add conflicting paths to ignore_fields to release ownership, or set force_conflicts = true to override.",
-				strings.Join(conflictDetails, "\n")),
-		)
 	}
+
+	return strings.Join(normalizedSegments, ".")
+}
+
+func addConflictWarning(resp *resource.ModifyPlanResponse, conflicts []FieldConflict) {
+	// Always warn about conflicts - we will force ownership during apply
+	var conflictDetails []string
+	for _, c := range conflicts {
+		conflictDetails = append(conflictDetails, fmt.Sprintf("  - %s (owned by %s)", c.Path, c.Owner))
+	}
+	resp.Diagnostics.AddWarning(
+		"Field Ownership Override",
+		fmt.Sprintf("Forcing ownership of fields managed by other controllers:\n%s\n\n"+
+			"These fields will be forcibly taken over. The other controllers may fight back.\n"+
+			"Consider adding these paths to ignore_fields to release ownership instead.",
+			strings.Join(conflictDetails, "\n")),
+	)
 }

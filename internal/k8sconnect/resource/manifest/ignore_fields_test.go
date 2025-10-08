@@ -22,6 +22,11 @@ import (
 	testhelpers "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/test"
 )
 
+// Helper function to create a boolean pointer
+func boolPtr(b bool) *bool {
+	return &b
+}
+
 func TestAccManifestResource_IgnoreFields(t *testing.T) {
 	t.Parallel()
 
@@ -77,8 +82,9 @@ func TestAccManifestResource_IgnoreFields(t *testing.T) {
 // TestAccManifestResource_IgnoreFieldsTransition tests the critical workflow:
 // 1. Create resource WITHOUT ignore_fields
 // 2. External controller takes field ownership (simulated with SSA)
-// 3. Add ignore_fields to config
-// 4. Verify conflict error goes away and no drift occurs
+// 3. Provider forces ownership back (with warning)
+// 4. Add ignore_fields to release ownership
+// 5. Verify no drift occurs when field is ignored
 func TestAccManifestResource_IgnoreFieldsTransition(t *testing.T) {
 	t.Parallel()
 
@@ -99,7 +105,7 @@ func TestAccManifestResource_IgnoreFieldsTransition(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create deployment WITHOUT ignore_fields
 			{
-				Config: testAccManifestConfigIgnoreFieldsTransition(ns, deployName, 3, false),
+				Config: testAccManifestConfigIgnoreFieldsTransition(ns, deployName, 3, false, nil),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
@@ -108,7 +114,7 @@ func TestAccManifestResource_IgnoreFieldsTransition(t *testing.T) {
 					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 				),
 			},
-			// Step 2: Use SSA to forcibly take ownership of spec.replicas (simulating HPA)
+			// Step 2: Simulate external controller taking ownership, then force it back
 			{
 				PreConfig: func() {
 					ctx := context.Background()
@@ -118,28 +124,30 @@ func TestAccManifestResource_IgnoreFieldsTransition(t *testing.T) {
 					}
 					t.Logf("✓ Simulated hpa-controller taking ownership of spec.replicas")
 				},
-				Config: testAccManifestConfigIgnoreFieldsTransition(ns, deployName, 3, false),
+				Config: testAccManifestConfigIgnoreFieldsTransition(ns, deployName, 3, false, nil),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
-				ExpectError: regexp.MustCompile("Field Ownership Conflict|Cannot modify fields owned by other controllers"),
+				Check: resource.ComposeTestCheckFunc(
+					// We should have forced ownership back and reset replicas to 3
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "field_ownership.spec.replicas", "k8sconnect"),
+					testhelpers.CheckDeploymentReplicaCount(k8sClient.(*kubernetes.Clientset), ns, deployName, 3),
+				),
 			},
-			// Step 3: Add ignore_fields - conflict should disappear
+			// Step 3: Add ignore_fields - releases ownership to hpa-controller
 			{
-				Config: testAccManifestConfigIgnoreFieldsTransition(ns, deployName, 3, true),
+				Config: testAccManifestConfigIgnoreFieldsTransition(ns, deployName, 3, true, nil),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "ignore_fields.#", "1"),
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "ignore_fields.0", "spec.replicas"),
-					// Verify field_ownership shows hpa-controller owns spec.replicas
-					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "field_ownership.spec.replicas", "hpa-controller"),
 				),
 			},
 			// Step 4: Verify no drift even though replicas differ
 			{
-				Config: testAccManifestConfigIgnoreFieldsTransition(ns, deployName, 3, true),
+				Config: testAccManifestConfigIgnoreFieldsTransition(ns, deployName, 3, true, nil),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
@@ -207,7 +215,7 @@ YAML
 }
 
 // TestAccManifestResource_IgnoreFieldsRemoveWhileOwned tests removing ignore_fields
-// when another controller still owns the field - should ERROR
+// when another controller owns the field - we force ownership back
 func TestAccManifestResource_IgnoreFieldsRemoveWhileOwned(t *testing.T) {
 	t.Parallel()
 
@@ -228,7 +236,7 @@ func TestAccManifestResource_IgnoreFieldsRemoveWhileOwned(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create with ignore_fields
 			{
-				Config: testAccManifestConfigIgnoreFieldsTransition(ns, deployName, 3, true),
+				Config: testAccManifestConfigIgnoreFieldsTransition(ns, deployName, 3, true, nil),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
@@ -247,7 +255,7 @@ func TestAccManifestResource_IgnoreFieldsRemoveWhileOwned(t *testing.T) {
 					}
 					t.Logf("✓ Simulated hpa-controller taking ownership of spec.replicas")
 				},
-				Config: testAccManifestConfigIgnoreFieldsTransition(ns, deployName, 3, true),
+				Config: testAccManifestConfigIgnoreFieldsTransition(ns, deployName, 3, true, nil),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
@@ -261,13 +269,17 @@ func TestAccManifestResource_IgnoreFieldsRemoveWhileOwned(t *testing.T) {
 					},
 				},
 			},
-			// Step 3: REMOVE ignore_fields while HPA still owns it - should ERROR
+			// Step 3: REMOVE ignore_fields - we force ownership back
 			{
-				Config: testAccManifestConfigIgnoreFieldsTransition(ns, deployName, 3, false),
+				Config: testAccManifestConfigIgnoreFieldsTransition(ns, deployName, 3, false, nil),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
-				ExpectError: regexp.MustCompile("Field Ownership Conflict|Cannot modify fields owned by other controllers"),
+				Check: resource.ComposeTestCheckFunc(
+					// We should have forced ownership back and reset replicas to 3
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "field_ownership.spec.replicas", "k8sconnect"),
+					testhelpers.CheckDeploymentReplicaCount(k8sClient.(*kubernetes.Clientset), ns, deployName, 3),
+				),
 			},
 		},
 	})
@@ -295,7 +307,7 @@ func TestAccManifestResource_IgnoreFieldsModifyList(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create with one ignored field
 			{
-				Config: testAccManifestConfigIgnoreFieldsConfigMap(ns, cmName, []string{"data.key1"}),
+				Config: testAccManifestConfigIgnoreFieldsConfigMap(ns, cmName, []string{"data.key1"}, nil),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
@@ -320,7 +332,7 @@ func TestAccManifestResource_IgnoreFieldsModifyList(t *testing.T) {
 					}
 					t.Logf("✓ external-controller took ownership of data.key2 via SSA")
 				},
-				Config: testAccManifestConfigIgnoreFieldsConfigMap(ns, cmName, []string{"data.key1", "data.key2"}),
+				Config: testAccManifestConfigIgnoreFieldsConfigMap(ns, cmName, []string{"data.key1", "data.key2"}, nil),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
@@ -332,7 +344,7 @@ func TestAccManifestResource_IgnoreFieldsModifyList(t *testing.T) {
 			},
 			// Step 3: REMOVE one field from ignore list - should reclaim it
 			{
-				Config: testAccManifestConfigIgnoreFieldsConfigMap(ns, cmName, []string{"data.key2"}),
+				Config: testAccManifestConfigIgnoreFieldsConfigMap(ns, cmName, []string{"data.key2"}, nil),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
@@ -353,7 +365,7 @@ func TestAccManifestResource_IgnoreFieldsModifyList(t *testing.T) {
 }
 
 // TestAccManifestResource_IgnoreFieldsModifyListError tests removing a field from ignore_fields
-// when an external controller owns it - should ERROR (Gap 1 from test coverage doc)
+// when an external controller owns it - we force ownership back (Gap 1 from test coverage doc)
 func TestAccManifestResource_IgnoreFieldsModifyListError(t *testing.T) {
 	t.Parallel()
 
@@ -374,7 +386,7 @@ func TestAccManifestResource_IgnoreFieldsModifyListError(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create with both fields ignored
 			{
-				Config: testAccManifestConfigIgnoreFieldsConfigMap(ns, cmName, []string{"data.key1", "data.key2"}),
+				Config: testAccManifestConfigIgnoreFieldsConfigMap(ns, cmName, []string{"data.key1", "data.key2"}, nil),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
@@ -397,7 +409,7 @@ func TestAccManifestResource_IgnoreFieldsModifyListError(t *testing.T) {
 					}
 					t.Logf("✓ external-controller took ownership of data.key2 via SSA")
 				},
-				Config: testAccManifestConfigIgnoreFieldsConfigMap(ns, cmName, []string{"data.key1", "data.key2"}),
+				Config: testAccManifestConfigIgnoreFieldsConfigMap(ns, cmName, []string{"data.key1", "data.key2"}, nil),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
@@ -411,13 +423,19 @@ func TestAccManifestResource_IgnoreFieldsModifyListError(t *testing.T) {
 					},
 				},
 			},
-			// Step 3: Try to REMOVE data.key2 from ignore list - should ERROR because external owns it
+			// Step 3: REMOVE data.key2 from ignore list - we force ownership back
 			{
-				Config: testAccManifestConfigIgnoreFieldsConfigMap(ns, cmName, []string{"data.key1"}),
+				Config: testAccManifestConfigIgnoreFieldsConfigMap(ns, cmName, []string{"data.key1"}, nil),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
-				ExpectError: regexp.MustCompile("Field Ownership Conflict|Cannot modify fields owned by other controllers"),
+				Check: resource.ComposeTestCheckFunc(
+					// We should have forced ownership back and set key2 to expected value
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "field_ownership.data.key2", "k8sconnect"),
+					testhelpers.CheckConfigMapData(k8sClient, ns, cmName, map[string]string{
+						"key2": "value2",
+					}),
+				),
 			},
 		},
 	})
@@ -444,7 +462,7 @@ func TestAccManifestResource_IgnoreFieldsRemoveWhenOwned(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create with ignore_fields
 			{
-				Config: testAccManifestConfigIgnoreFieldsTransition(ns, deployName, 3, true),
+				Config: testAccManifestConfigIgnoreFieldsTransition(ns, deployName, 3, true, nil),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
@@ -457,7 +475,7 @@ func TestAccManifestResource_IgnoreFieldsRemoveWhenOwned(t *testing.T) {
 			},
 			// Step 2: REMOVE ignore_fields immediately (no external controller took over) - should succeed
 			{
-				Config: testAccManifestConfigIgnoreFieldsTransition(ns, deployName, 3, false),
+				Config: testAccManifestConfigIgnoreFieldsTransition(ns, deployName, 3, false, nil),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
@@ -472,11 +490,13 @@ func TestAccManifestResource_IgnoreFieldsRemoveWhenOwned(t *testing.T) {
 	})
 }
 
-func testAccManifestConfigIgnoreFieldsTransition(namespace, name string, replicas int, withIgnoreFields bool) string {
+func testAccManifestConfigIgnoreFieldsTransition(namespace, name string, replicas int, withIgnoreFields bool, forceConflicts *bool) string {
 	ignoreFieldsLine := ""
 	if withIgnoreFields {
 		ignoreFieldsLine = `ignore_fields = ["spec.replicas"]`
 	}
+
+	// Note: forceConflicts parameter is kept for compatibility but ignored (force is always true now)
 
 	return fmt.Sprintf(`
 variable "raw" { type = string }
@@ -527,7 +547,7 @@ YAML
 `, namespace, name, namespace, replicas, ignoreFieldsLine)
 }
 
-func testAccManifestConfigIgnoreFieldsConfigMap(namespace, name string, ignoreFields []string) string {
+func testAccManifestConfigIgnoreFieldsConfigMap(namespace, name string, ignoreFields []string, forceConflicts *bool) string {
 	ignoreFieldsLine := ""
 	if len(ignoreFields) > 0 {
 		fields := make([]string, len(ignoreFields))
@@ -536,6 +556,8 @@ func testAccManifestConfigIgnoreFieldsConfigMap(namespace, name string, ignoreFi
 		}
 		ignoreFieldsLine = fmt.Sprintf("ignore_fields = [%s]", strings.Join(fields, ", "))
 	}
+
+	// Note: forceConflicts parameter is kept for compatibility but ignored (force is always true now)
 
 	return fmt.Sprintf(`
 variable "raw" { type = string }
@@ -598,7 +620,7 @@ func TestAccManifestResource_IgnoreFieldsValidation(t *testing.T) {
 			{
 				Config: testAccManifestConfigIgnoreFieldsConfigMap(ns, cmName, []string{
 					"metadata.annotations.k8sconnect.terraform.io/created-at",
-				}),
+				}, nil),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
@@ -608,7 +630,7 @@ func TestAccManifestResource_IgnoreFieldsValidation(t *testing.T) {
 			{
 				Config: testAccManifestConfigIgnoreFieldsConfigMap(ns, cmName, []string{
 					"metadata.annotations.k8sconnect.terraform.io/terraform-id",
-				}),
+				}, nil),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
@@ -618,7 +640,7 @@ func TestAccManifestResource_IgnoreFieldsValidation(t *testing.T) {
 			{
 				Config: testAccManifestConfigIgnoreFieldsConfigMap(ns, cmName, []string{
 					"metadata.annotations.k8sconnect.terraform.io/something-else",
-				}),
+				}, nil),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},

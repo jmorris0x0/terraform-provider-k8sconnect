@@ -39,9 +39,6 @@ type K8sClient interface {
 	// SetFieldManager sets the field manager name for server-side apply.
 	SetFieldManager(name string) K8sClient
 
-	// WithForceConflicts enables force conflicts resolution.
-	WithForceConflicts(force bool) K8sClient
-
 	// GetGVR determines the GroupVersionResource for an unstructured object.
 	GetGVR(ctx context.Context, obj *unstructured.Unstructured) (schema.GroupVersionResource, error)
 
@@ -87,10 +84,9 @@ type resilientWatcher struct {
 // ===================== DynamicK8sClient =====================
 // DynamicK8sClient uses client-go's Dynamic Client for operations.
 type DynamicK8sClient struct {
-	client         dynamic.Interface
-	discovery      discovery.DiscoveryInterface
-	fieldManager   string
-	forceConflicts bool
+	client       dynamic.Interface
+	discovery    discovery.DiscoveryInterface
+	fieldManager string
 }
 
 // NewDynamicK8sClient creates a new DynamicK8sClient from a REST config.
@@ -106,20 +102,14 @@ func NewDynamicK8sClient(config *rest.Config) (*DynamicK8sClient, error) {
 	}
 
 	return &DynamicK8sClient{
-		client:         dynamicClient,
-		discovery:      discoveryClient,
-		fieldManager:   "k8sconnect",
-		forceConflicts: false,
+		client:       dynamicClient,
+		discovery:    discoveryClient,
+		fieldManager: "k8sconnect",
 	}, nil
 }
 
 func (d *DynamicK8sClient) SetFieldManager(name string) K8sClient {
 	d.fieldManager = name
-	return d
-}
-
-func (d *DynamicK8sClient) WithForceConflicts(force bool) K8sClient {
-	d.forceConflicts = force
 	return d
 }
 
@@ -203,11 +193,9 @@ func (d *DynamicK8sClient) Apply(ctx context.Context, obj *unstructured.Unstruct
 			fieldManager = d.fieldManager
 		}
 
-		force := options.Force || d.forceConflicts
-
 		applyOpts := metav1.ApplyOptions{
 			FieldManager: fieldManager,
-			Force:        force,
+			Force:        options.Force,
 		}
 
 		if len(options.DryRun) > 0 {
@@ -239,11 +227,9 @@ func (d *DynamicK8sClient) DryRunApply(ctx context.Context, obj *unstructured.Un
 			fieldManager = d.fieldManager
 		}
 
-		force := options.Force || d.forceConflicts
-
 		applyOpts := metav1.ApplyOptions{
 			FieldManager: fieldManager,
-			Force:        force,
+			Force:        options.Force,
 			DryRun:       []string{metav1.DryRunAll},
 		}
 

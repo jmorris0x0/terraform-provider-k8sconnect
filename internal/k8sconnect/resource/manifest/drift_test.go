@@ -791,10 +791,7 @@ func TestAccManifestResource_CombinedDriftScenarios(t *testing.T) {
 }
 
 func testAccCombinedDriftConfig(namespace, deployName, cmName string, forceConflicts bool) string {
-	forceStr := "false"
-	if forceConflicts {
-		forceStr = "true"
-	}
+	// Note: forceConflicts parameter is kept for compatibility but ignored (force is always true now)
 
 	return fmt.Sprintf(`
 variable "raw" {
@@ -847,8 +844,6 @@ spec:
         image: public.ecr.aws/nginx/nginx:1.21
 YAML
 
-  force_conflicts = %s
-
   cluster_connection = {
     kubeconfig = var.raw
   }
@@ -868,13 +863,11 @@ data:
   key2: value2
 YAML
 
-  force_conflicts = %s
-
   cluster_connection = {
     kubeconfig = var.raw
   }
 
   depends_on = [k8sconnect_manifest.namespace]
 }
-`, namespace, deployName, namespace, forceStr, cmName, namespace, forceStr)
+`, namespace, deployName, namespace, cmName, namespace)
 }

@@ -25,7 +25,7 @@ Bootstrap Kubernetes clusters and workloads in a **single `terraform apply`**—
 | Module & multi-cluster limits         | ❌ Providers at root only, requires aliases for multiple clusters           | ✅ Self-contained resources work in any module, any cluster                 |
 | Static provider configuration         | ❌ Provider config must be hardcoded at plan time                           | ✅ Use outputs, computed values, and loops dynamically                      |
 | CRD + CR in single apply              | ❌ Manual workaround or requires config                                     | ✅ Auto-retry, zero configuration                                           |
-| Field management conflicts            | ❌ Replace entire objects, conflicts with controllers                       | ✅ Server-Side Apply manages only your fields                               |
+| Field management conflicts            | ❌ Fights with controllers (HPA, cert-manager, webhooks)                    | ✅ Coexists with controllers via field ownership tracking                   |
 | Unpredictable plan diffs              | ❌ Plan shows what you send, not what K8s will do                           | ✅ Dry-run projections show exact changes before apply                      |
 
 
@@ -191,7 +191,7 @@ k8sconnect uses **Server-Side Apply with Dry-Run** for every operation, giving y
    - `managed_state_projection` diffs = External changes that will be corrected
    - `field_ownership` diffs = Ownership changes between controllers
 
-This is the first Terraform provider to combine SSA field management with dry-run projections for plan-time accuracy.
+This is the first Terraform provider to combine dry-run projections with field ownership tracking for multi-controller orchestration.
 
 ---
 
