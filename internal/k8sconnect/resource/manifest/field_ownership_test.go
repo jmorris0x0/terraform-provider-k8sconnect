@@ -632,3 +632,254 @@ YAML
 }
 `, namespace, deployName, namespace, forceConflicts)
 }
+// TestAccManifestResource_DriftDetectionWithForceConflicts tests the scenario where:
+// 1. We create a resource (force_conflicts defaults to true)
+// 2. External controller modifies it
+// 3. We detect drift and correct it WITHOUT changing the config
+// This is the scenario reported by the user where "inconsistent plan" error occurs
+func TestAccManifestResource_DriftDetectionWithForceConflicts(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("drift-force-ns-%d", time.Now().UnixNano()%1000000)
+	deployName := fmt.Sprintf("drift-force-deploy-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+	k8sClientset := k8sClient.(*kubernetes.Clientset)
+	ssaClient := testhelpers.NewSSATestClient(t, raw)
+
+	deploymentConfig := fmt.Sprintf(`
+variable "raw" { type = string }
+
+resource "k8sconnect_manifest" "namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = { kubeconfig = var.raw }
+}
+
+resource "k8sconnect_manifest" "deployment" {
+  depends_on = [k8sconnect_manifest.namespace]
+
+  yaml_body = <<YAML
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: drift-test
+  template:
+    metadata:
+      labels:
+        app: drift-test
+    spec:
+      containers:
+      - name: nginx
+        image: public.ecr.aws/nginx/nginx:1.21
+        resources:
+          limits:
+            cpu: "100m"
+            memory: "128Mi"
+YAML
+  cluster_connection = { kubeconfig = var.raw }
+  # force_conflicts defaults to true, don't set it explicitly
+}
+`, ns, deployName, ns)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create deployment - force_conflicts defaults to true
+			{
+				Config: deploymentConfig,
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
+					testhelpers.CheckDeploymentReplicaCount(k8sClientset, ns, deployName, 2),
+					resource.TestCheckResourceAttr("k8sconnect_manifest.deployment", "field_ownership.spec.replicas", "k8sconnect"),
+				),
+			},
+			// Step 2: External controller modifies replicas (simulating kubectl edit or HPA)
+			{
+				PreConfig: func() {
+					ctx := context.Background()
+					err := ssaClient.ApplyDeploymentReplicasSSA(ctx, ns, deployName, 5, "kubectl-edit")
+					if err != nil {
+						t.Fatalf("Failed to apply with kubectl-edit: %v", err)
+					}
+					time.Sleep(1 * time.Second)
+
+					// Verify ownership changed
+					deploy, err := k8sClientset.AppsV1().Deployments(ns).Get(ctx, deployName, metav1.GetOptions{})
+					if err != nil {
+						t.Fatalf("Failed to get deployment: %v", err)
+					}
+
+					hasKubectlEdit := false
+					for _, mf := range deploy.ManagedFields {
+						if mf.Manager == "kubectl-edit" {
+							hasKubectlEdit = true
+							t.Logf("✓ kubectl-edit took ownership via SSA")
+						}
+					}
+					if !hasKubectlEdit {
+						t.Fatalf("kubectl-edit did not appear in managedFields")
+					}
+				},
+				// Apply SAME config - just correcting drift
+				Config: deploymentConfig,
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				// This should succeed and forcibly take ownership back
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckDeploymentReplicaCount(k8sClientset, ns, deployName, 2),
+					// Critical: field_ownership should update to show k8sconnect owns it again
+					resource.TestCheckResourceAttr("k8sconnect_manifest.deployment", "field_ownership.spec.replicas", "k8sconnect"),
+				),
+			},
+		},
+		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, ns, deployName),
+	})
+}
+
+// TestAccManifestResource_MultipleFieldConflicts tests that when multiple fields have ownership conflicts,
+// ALL conflicts are detected and shown in the warning (not just one).
+// This reproduces the bug where only spec.replicas was shown but not other conflicted fields.
+func TestAccManifestResource_MultipleFieldConflicts(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("multi-conflict-ns-%d", time.Now().UnixNano()%1000000)
+	deployName := fmt.Sprintf("multi-conflict-deploy-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+	k8sClientset := k8sClient.(*kubernetes.Clientset)
+	ssaClient := testhelpers.NewSSATestClient(t, raw)
+
+	deploymentConfig := fmt.Sprintf(`
+variable "raw" { type = string }
+
+resource "k8sconnect_manifest" "namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = { kubeconfig = var.raw }
+}
+
+resource "k8sconnect_manifest" "deployment" {
+  depends_on = [k8sconnect_manifest.namespace]
+
+  yaml_body = <<YAML
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: multi-test
+  template:
+    metadata:
+      labels:
+        app: multi-test
+    spec:
+      containers:
+      - name: nginx
+        image: public.ecr.aws/nginx/nginx:1.21
+        resources:
+          limits:
+            cpu: "100m"
+            memory: "128Mi"
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+YAML
+  cluster_connection = { kubeconfig = var.raw }
+  # force_conflicts defaults to true
+}
+`, ns, deployName, ns)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create deployment
+			{
+				Config: deploymentConfig,
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
+					testhelpers.CheckDeploymentReplicaCount(k8sClientset, ns, deployName, 2),
+				),
+			},
+			// Step 2: Multiple external controllers modify different fields
+			{
+				PreConfig: func() {
+					ctx := context.Background()
+
+					// HPA takes ownership of replicas
+					err := ssaClient.ApplyDeploymentReplicasSSA(ctx, ns, deployName, 5, "hpa-controller")
+					if err != nil {
+						t.Fatalf("Failed to apply replicas with hpa-controller: %v", err)
+					}
+
+					// Resource controller changes CPU
+					err = ssaClient.ApplyDeploymentCPULimitSSA(ctx, ns, deployName, "200m", "resource-controller")
+					if err != nil {
+						t.Fatalf("Failed to apply CPU with resource-controller: %v", err)
+					}
+
+					// Memory controller changes memory
+					err = ssaClient.ApplyDeploymentMemoryLimitSSA(ctx, ns, deployName, "256Mi", "memory-controller")
+					if err != nil {
+						t.Fatalf("Failed to apply memory with memory-controller: %v", err)
+					}
+
+					time.Sleep(1 * time.Second)
+					t.Logf("✓ Created 3 conflicts: replicas (hpa-controller), cpu (resource-controller), memory (memory-controller)")
+				},
+				// Apply SAME config - should detect and show ALL 3 conflicts in warning
+				Config: deploymentConfig,
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				// Should succeed and correct all drift
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckDeploymentReplicaCount(k8sClientset, ns, deployName, 2),
+					// All fields should be owned by k8sconnect again
+					resource.TestCheckResourceAttr("k8sconnect_manifest.deployment", "field_ownership.spec.replicas", "k8sconnect"),
+					resource.TestCheckResourceAttr("k8sconnect_manifest.deployment", "field_ownership.spec.template.spec.containers[0].resources.limits.cpu", "k8sconnect"),
+					resource.TestCheckResourceAttr("k8sconnect_manifest.deployment", "field_ownership.spec.template.spec.containers[0].resources.limits.memory", "k8sconnect"),
+				),
+				// All conflicts should be detected and corrected (force_conflicts=true handles them automatically)
+			},
+		},
+		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, ns, deployName),
+	})
+}

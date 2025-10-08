@@ -82,18 +82,21 @@ func extractPathsFromFieldsV1(fields map[string]interface{}, prefix string, user
 			}
 		} else if strings.HasPrefix(key, "k:") {
 			// Array key like k:{"name":"nginx"}
-			arrayPath, arrayIndex := resolveArrayKey(key, prefix, userJSON)
-			if arrayPath != "" && arrayIndex >= 0 {
-				// Process array element fields
-				if subFields, ok := value.(map[string]interface{}); ok {
-					var userElement interface{}
-					if userArray, ok := userJSON.([]interface{}); ok && arrayIndex < len(userArray) {
-						userElement = userArray[arrayIndex]
+			// When we encounter a k: key, userJSON should be the array itself (from parent recursion)
+			if userArray, ok := userJSON.([]interface{}); ok {
+				// Parse the merge key to find which array element it refers to
+				mergeKey, err := mergeKeyMatcher.ParseMergeKey(key)
+				if err == nil {
+					arrayIndex := mergeKeyMatcher.FindArrayIndex(userArray, mergeKey)
+					if arrayIndex >= 0 {
+						// Process array element fields
+						if subFields, ok := value.(map[string]interface{}); ok {
+							userElement := userArray[arrayIndex]
+							elementPath := fmt.Sprintf("%s[%d]", prefix, arrayIndex)
+							nestedPaths := extractPathsFromFieldsV1(subFields, elementPath, userElement)
+							paths = append(paths, nestedPaths...)
+						}
 					}
-
-					elementPath := fmt.Sprintf("%s[%d]", arrayPath, arrayIndex)
-					nestedPaths := extractPathsFromFieldsV1(subFields, elementPath, userElement)
-					paths = append(paths, nestedPaths...)
 				}
 			}
 		}

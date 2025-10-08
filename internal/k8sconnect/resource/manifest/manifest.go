@@ -6,6 +6,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/mapvalidator"
@@ -142,12 +143,14 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 					"This enables precise drift detection without false positives from fields managed by other controllers.",
 			},
 			"force_conflicts": schema.BoolAttribute{
-				Optional: true,
-				Description: "Force ownership of fields currently managed by other controllers during Server-Side Apply. " +
-					"When false (default), apply fails if another field manager owns a field, protecting against accidental takeovers. " +
-					"When true, forcibly claims ownership of conflicting fields. Useful when intentionally taking control from controllers " +
-					"like HPA or when migrating resources from other Terraform states.",
-			},
+			Optional:    true,
+			Computed:    true,
+			Default:     booldefault.StaticBool(true),
+			Description: "Force ownership of fields currently managed by other controllers during Server-Side Apply. " +
+				"When true (default), forcibly claims ownership of conflicting fields with a warning, allowing automated drift detection. " +
+				"When false, apply fails if another field manager owns a field, requiring explicit resolution. " +
+				"Set to false when you want to be notified of conflicts before proceeding.",
+		},
 			"ignore_fields": schema.ListAttribute{
 				Optional:    true,
 				ElementType: types.StringType,

@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -561,22 +562,29 @@ func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req
 		userWantsPaths = filterIgnoredPaths(userWantsPaths, ignoreFields)
 	}
 
+	// Normalize user paths to match ownership map format (merge keys -> array indexes)
+	normalizedUserPaths := make(map[string]string) // normalized -> original
+	for _, userPath := range userWantsPaths {
+		normalized := normalizePathForComparison(userPath, desiredObj.Object)
+		normalizedUserPaths[normalized] = userPath
+	}
+
 	// Check each path the user wants against ownership
 	var conflicts []FieldConflict
-	for _, path := range userWantsPaths {
+	for normalizedPath, originalPath := range normalizedUserPaths {
 		// Skip metadata fields that are always owned by us
-		if strings.HasPrefix(path, "metadata.annotations.k8sconnect.terraform.io/") {
+		if strings.HasPrefix(normalizedPath, "metadata.annotations.k8sconnect.terraform.io/") {
 			continue
 		}
 		// Skip core fields that don't have ownership
-		if path == "apiVersion" || path == "kind" || path == "metadata.name" || path == "metadata.namespace" {
+		if normalizedPath == "apiVersion" || normalizedPath == "kind" || normalizedPath == "metadata.name" || normalizedPath == "metadata.namespace" {
 			continue
 		}
 
-		if owner, exists := ownership[path]; exists {
+		if owner, exists := ownership[normalizedPath]; exists {
 			if owner.Manager != "k8sconnect" {
 				conflicts = append(conflicts, FieldConflict{
-					Path:  path,
+					Path:  originalPath,
 					Owner: owner.Manager,
 				})
 			}
@@ -585,6 +593,52 @@ func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req
 
 	if len(conflicts) > 0 {
 		addConflictWarning(resp, conflicts, planData.ForceConflicts)
+
+		// When force_conflicts=true, we will take ownership of conflicted fields during apply.
+		// Mark only the conflicted fields as Unknown to avoid inconsistent plan errors
+		// while preserving ownership info for non-conflicted fields.
+		if planData.ForceConflicts.ValueBool() {
+			if planData.FieldOwnership.IsNull() || planData.FieldOwnership.IsUnknown() {
+				// CREATE: field_ownership will be fully computed during apply
+				diags := resp.Plan.SetAttribute(ctx, path.Root("field_ownership"), types.MapUnknown(types.StringType))
+				if diags.HasError() {
+					resp.Diagnostics.Append(diags...)
+					return
+				}
+			} else {
+				// UPDATE: Extract current field_ownership and mark only conflicted fields as Unknown
+				var currentOwnership map[string]attr.Value
+				diags := planData.FieldOwnership.ElementsAs(ctx, &currentOwnership, false)
+				if diags.HasError() {
+					tflog.Warn(ctx, "Failed to extract field_ownership, setting entire map to Unknown", map[string]interface{}{
+						"diagnostics": diags,
+					})
+					diags2 := resp.Plan.SetAttribute(ctx, path.Root("field_ownership"), types.MapUnknown(types.StringType))
+					if diags2.HasError() {
+						resp.Diagnostics.Append(diags2...)
+					}
+					return
+				}
+
+				// Set only the conflicted field paths to Unknown
+				for _, conflict := range conflicts {
+					currentOwnership[conflict.Path] = types.StringUnknown()
+				}
+
+				// Rebuild the map with mixed known and unknown values
+				updatedOwnership, diags := types.MapValue(types.StringType, currentOwnership)
+				if diags.HasError() {
+					resp.Diagnostics.Append(diags...)
+					return
+				}
+
+				diags = resp.Plan.SetAttribute(ctx, path.Root("field_ownership"), updatedOwnership)
+				if diags.HasError() {
+					resp.Diagnostics.Append(diags...)
+					return
+				}
+			}
+		}
 	}
 }
 
@@ -707,6 +761,93 @@ func findChangedFields(current, desired map[string]interface{}, prefix string) [
 	}
 
 	return changes
+}
+
+// normalizePathForComparison converts paths with merge keys like "containers[name=nginx]"
+// to array index format like "containers[0]" by resolving the merge key in the actual object.
+// This allows comparing paths from extractFieldPaths (which uses merge keys) with paths
+// from field ownership (which uses array indexes).
+func normalizePathForComparison(path string, obj map[string]interface{}) string {
+	// Split path into segments
+	segments := strings.Split(path, ".")
+	var normalizedSegments []string
+	currentObj := interface{}(obj)
+
+	for _, segment := range segments {
+		// Check if this segment contains a merge key pattern like "containers[name=nginx]"
+		if strings.Contains(segment, "[") && strings.Contains(segment, "=") {
+			// Extract field name and merge key
+			parts := strings.SplitN(segment, "[", 2)
+			fieldName := parts[0]
+			mergeKeyPart := strings.TrimSuffix(parts[1], "]")
+
+			// Parse merge key (e.g., "name=nginx" -> key="name", value="nginx")
+			mergeKeyParts := strings.SplitN(mergeKeyPart, "=", 2)
+			if len(mergeKeyParts) != 2 {
+				// Malformed merge key, use as-is
+				normalizedSegments = append(normalizedSegments, segment)
+				continue
+			}
+			mergeKey := mergeKeyParts[0]
+			mergeValue := mergeKeyParts[1]
+
+			// Navigate to the array field in the current object
+			if objMap, ok := currentObj.(map[string]interface{}); ok {
+				if arrayVal, ok := objMap[fieldName]; ok {
+					if array, ok := arrayVal.([]interface{}); ok {
+						// Find the index of the array element with matching merge key
+						foundIndex := -1
+						for i, item := range array {
+							if itemMap, ok := item.(map[string]interface{}); ok {
+								if val, ok := itemMap[mergeKey]; ok {
+									if fmt.Sprintf("%v", val) == mergeValue {
+										foundIndex = i
+										currentObj = item
+										break
+									}
+								}
+							}
+						}
+						if foundIndex >= 0 {
+							normalizedSegments = append(normalizedSegments, fmt.Sprintf("%s[%d]", fieldName, foundIndex))
+							continue
+						}
+					}
+				}
+			}
+
+			// Couldn't resolve, use as-is
+			normalizedSegments = append(normalizedSegments, segment)
+		} else if strings.Contains(segment, "[") {
+			// Already has array index like "containers[0]", use as-is
+			normalizedSegments = append(normalizedSegments, segment)
+			// Navigate to that array element
+			parts := strings.SplitN(segment, "[", 2)
+			fieldName := parts[0]
+			indexStr := strings.TrimSuffix(parts[1], "]")
+			if index, err := fmt.Sscanf(indexStr, "%d"); err == nil && index >= 0 {
+				if objMap, ok := currentObj.(map[string]interface{}); ok {
+					if arrayVal, ok := objMap[fieldName]; ok {
+						if array, ok := arrayVal.([]interface{}); ok {
+							var idx int
+							fmt.Sscanf(indexStr, "%d", &idx)
+							if idx < len(array) {
+								currentObj = array[idx]
+							}
+						}
+					}
+				}
+			}
+		} else {
+			// Regular field, navigate deeper
+			normalizedSegments = append(normalizedSegments, segment)
+			if objMap, ok := currentObj.(map[string]interface{}); ok {
+				currentObj = objMap[segment]
+			}
+		}
+	}
+
+	return strings.Join(normalizedSegments, ".")
 }
 
 func addConflictWarning(resp *resource.ModifyPlanResponse, conflicts []FieldConflict, forceConflicts types.Bool) {
