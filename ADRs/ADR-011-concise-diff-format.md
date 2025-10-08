@@ -406,8 +406,8 @@ To minimize confusion, we must document:
 
 6. **When another controller takes a field**:
    - "If field ownership changes, you'll see it in plan (field_ownership attribute)"
-   - "You can take it back (force_conflicts) or release it (ignore_fields)"
-   - "Both choices are explicit and documented in your HCL"
+   - "Provider will automatically force ownership (with warning) when you specify the field, or you can release it (ignore_fields)"
+   - "Both approaches are explicit and documented in your HCL"
 
 ### Completed: field_ownership Map Format
 
@@ -415,7 +415,7 @@ Implemented Map format for `field_ownership` with additional UX enhancements bey
 
 1. **Map format (core ADR goal)** - Field ownership now shows as flat map instead of verbose JSON. Unchanged keys are automatically hidden by Terraform's Map diff behavior.
 
-2. **Preservation during UPDATEs** - When `ignore_fields` and `force_conflicts` haven't changed, we preserve `field_ownership` from state during plan to prevent showing all old values disappearing with `-> (known after apply)`. This eliminates 16+ lines of noise on every UPDATE.
+2. **Preservation during UPDATEs** - When `ignore_fields` hasn't changed, we preserve `field_ownership` from state during plan to prevent showing all old values disappearing with `-> (known after apply)`. This eliminates 16+ lines of noise on every UPDATE.
 
 3. **Status field filtering** - Automatically filter out `status.*` paths from field_ownership tracking. Status fields are always owned by Kubernetes controllers (never by k8sconnect), so tracking them provides no actionable information and adds clutter during destroy operations.
 

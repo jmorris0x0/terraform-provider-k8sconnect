@@ -189,9 +189,9 @@ resource "provider_thing" "example" {
   # Option A: Explicitly ignore (let other controller own it)
   ignore_fields = ["property_b"]
 
-  # Option B: Explicitly take ownership (force the value)
+  # Option B: Explicitly take ownership (ownership forced automatically)
   property_b = "my-value"
-  force_conflicts = true
+  # Note: Provider uses SSA force=true, shows warning about ownership override
 
   # Option C: Adopt current value (accept what's there)
   property_b = "controller-value"

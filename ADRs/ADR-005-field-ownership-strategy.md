@@ -256,12 +256,10 @@ During implementation of field ownership tracking, several non-obvious bugs emer
 **Solution**: Accept partial matches when user's fields are a subset of the merge key.
 **Lesson**: Kubernetes will always add defaults; our matching must be flexible.
 
-### 3. Force Conflicts During Planning
-**Issue**: When `force_conflicts=true`, the plan didn't anticipate taking ownership of conflicted fields, causing "inconsistent result after apply" errors.
-**Solution**: Modified `ModifyPlan` to use different projection strategies based on `force_conflicts`:
-- When true: Project ALL fields from YAML (we'll take ownership)
-- When false: Project only currently-owned fields
-**Lesson**: Plan-time projection must match apply-time behavior exactly.
+### 3. Always Force Conflicts - Projection Strategy
+**Issue**: Provider always uses SSA with `force=true` to take ownership of conflicted fields. Plan must anticipate this to avoid "inconsistent result after apply" errors.
+**Solution**: Modified `ModifyPlan` to project ALL fields from YAML since we always take ownership during apply.
+**Lesson**: Plan-time projection must match apply-time behavior exactly. Since we always force ownership via SSA, we must project all fields in the plan.
 
 ### 4. Import State Initialization
 **Issue**: Field ownership flag not set during import operations.
