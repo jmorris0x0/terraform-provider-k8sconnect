@@ -777,12 +777,11 @@ func normalizePathForComparison(path string, obj map[string]interface{}) string 
 			parts := strings.SplitN(segment, "[", 2)
 			fieldName := parts[0]
 			indexStr := strings.TrimSuffix(parts[1], "]")
-			if index, err := fmt.Sscanf(indexStr, "%d"); err == nil && index >= 0 {
+			var idx int
+			if _, err := fmt.Sscanf(indexStr, "%d", &idx); err == nil && idx >= 0 {
 				if objMap, ok := currentObj.(map[string]interface{}); ok {
 					if arrayVal, ok := objMap[fieldName]; ok {
 						if array, ok := arrayVal.([]interface{}); ok {
-							var idx int
-							fmt.Sscanf(indexStr, "%d", &idx)
 							if idx < len(array) {
 								currentObj = array[idx]
 							}
