@@ -6,7 +6,6 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/mapvalidator"
@@ -44,7 +43,6 @@ type manifestResourceModel struct {
 	DeleteTimeout          types.String  `tfsdk:"delete_timeout"`
 	FieldOwnership         types.Map     `tfsdk:"field_ownership"`
 	ForceDestroy           types.Bool    `tfsdk:"force_destroy"`
-	ForceConflicts         types.Bool    `tfsdk:"force_conflicts"`
 	IgnoreFields           types.List    `tfsdk:"ignore_fields"`
 	ManagedStateProjection types.String  `tfsdk:"managed_state_projection"`
 	WaitFor                types.Object  `tfsdk:"wait_for"`
@@ -142,15 +140,6 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 					"During plan, diffs in this attribute show exactly what Kubernetes will change when you apply, computed via dry-run for accuracy. " +
 					"This enables precise drift detection without false positives from fields managed by other controllers.",
 			},
-			"force_conflicts": schema.BoolAttribute{
-			Optional:    true,
-			Computed:    true,
-			Default:     booldefault.StaticBool(true),
-			Description: "Force ownership of fields currently managed by other controllers during Server-Side Apply. " +
-				"When true (default), forcibly claims ownership of conflicting fields with a warning, allowing automated drift detection. " +
-				"When false, apply fails if another field manager owns a field, requiring explicit resolution. " +
-				"Set to false when you want to be notified of conflicts before proceeding.",
-		},
 			"ignore_fields": schema.ListAttribute{
 				Optional:    true,
 				ElementType: types.StringType,

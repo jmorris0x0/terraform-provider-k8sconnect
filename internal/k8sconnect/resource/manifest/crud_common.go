@@ -116,12 +116,6 @@ func (r *manifestResource) applyWithCRDRetry(ctx context.Context, client k8sclie
 }
 
 func (r *manifestResource) applyResourceWithConflictHandling(ctx context.Context, rc *ResourceContext, data *manifestResourceModel, resp interface{}, operation string) error {
-	// Check force conflicts from the data parameter
-	forceConflicts := false
-	if !data.ForceConflicts.IsNull() {
-		forceConflicts = data.ForceConflicts.ValueBool()
-	}
-
 	// Prepare the object to apply
 	objToApply := rc.Object.DeepCopy()
 
@@ -136,21 +130,11 @@ func (r *manifestResource) applyResourceWithConflictHandling(ctx context.Context
 		}
 	}
 
-	// Apply the resource with CRD retry (with ignored fields filtered out on Update)
+	// Apply the resource with CRD retry (always force conflicts)
 	err := r.applyWithCRDRetry(ctx, rc.Client, objToApply, k8sclient.ApplyOptions{
 		FieldManager: "k8sconnect",
-		Force:        forceConflicts,
+		Force:        true, // Always force ownership of conflicted fields
 	})
-
-	if err != nil && isFieldConflictError(err) && !forceConflicts {
-		if conflictsOnlyWithSelf(err) {
-			tflog.Info(ctx, "Detected drift in fields we own, forcing update")
-			err = r.applyWithCRDRetry(ctx, rc.Client, rc.Object, k8sclient.ApplyOptions{
-				FieldManager: "k8sconnect",
-				Force:        true,
-			})
-		}
-	}
 
 	if err != nil {
 		if isFieldConflictError(err) {
@@ -320,11 +304,11 @@ func (r *manifestResource) addFieldConflictError(resp interface{}, operation str
 	if createResp, ok := resp.(*resource.CreateResponse); ok {
 		createResp.Diagnostics.AddError("Field Manager Conflict",
 			"Another controller owns fields you're trying to set. "+
-				"Add conflicting paths to ignore_fields to release ownership, or set force_conflicts = true to override.")
+				"Add conflicting paths to ignore_fields to release ownership.")
 	} else if updateResp, ok := resp.(*resource.UpdateResponse); ok {
 		updateResp.Diagnostics.AddError("Field Manager Conflict",
 			"Another controller owns fields you're trying to set. "+
-				"Add conflicting paths to ignore_fields to release ownership, or set force_conflicts = true to override.")
+				"Add conflicting paths to ignore_fields to release ownership.")
 	}
 }
 

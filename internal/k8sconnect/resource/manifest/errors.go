@@ -28,8 +28,7 @@ func (r *manifestResource) classifyK8sError(err error, operation, resourceDesc s
 				"To resolve this conflict do one of the following:\n"+
 				"1. Add conflicting field paths to 'ignore_fields' to release ownership to the other controller\n"+
 				"2. Remove the conflicting fields from your Terraform configuration\n"+
-				"3. Set 'force_conflicts = true' to override (may cause persistent conflicts)\n"+
-				"4. Ensure only one controller manages these fields\n\n"+
+				"3. Ensure only one controller manages these fields\n\n"+
 				"Details: %v",
 				resourceDesc, err)
 

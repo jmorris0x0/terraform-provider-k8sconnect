@@ -306,7 +306,6 @@ func TestAccManifestResource_OwnershipImport(t *testing.T) {
 					"yaml_body",
 					"managed_state_projection",
 					"delete_protection",
-					"force_conflicts",
 				},
 			},
 			// Step 3: Verify ownership annotations still exist after import
@@ -378,25 +377,10 @@ YAML
 //  1. When another field manager (e.g., kubectl) takes ownership of a field that's defined in our YAML
 //  2. The provider should detect this conflict during planning
 //  3. An error should be raised indicating which fields are conflicted and who owns them
-//  4. The error should provide clear resolution options:
-//     a) Remove the conflicting field from your Terraform YAML
-//     b) Set force_conflicts=true to forcibly take ownership (may cause fights with other controllers)
-//     c) Future: Use ignore_field_changes to explicitly ignore the field
-//
-// Eventually make sure there is an error something like this:
-// resp.Diagnostics.AddError(
-//
-//	"Field Ownership Conflict",
-//	fmt.Sprintf("Cannot modify fields owned by other controllers:\n"+
-//	    "  - %s (owned by %s)\n\n"+
-//	    "Resolution options:\n"+
-//	    "1. Remove the conflicting field from your Terraform configuration\n"+
-//	    "2. Set force_conflicts = true to forcibly take ownership\n"+
-//	    "   WARNING: The other controller may fight back, causing perpetual drift\n"+
-//	    "3. (Future) Add field to ignore_field_changes when implemented",
-//	    conflictDetails),
-//
-// )
+//  4. The provider should warn about conflicts and force ownership (since we always use force=true)
+//     a) A warning is shown listing all conflicting fields
+//     b) Fields are taken over forcibly (may cause fights with other controllers)
+//     c) Users should use ignore_fields to release ownership if they don't want to manage a field
 // TestAccManifestResource_FieldManagerConflict verifies that field ownership conflicts are detected and reported.
 func TestAccManifestResource_FieldManagerConflict(t *testing.T) {
 	t.Parallel()
@@ -421,7 +405,7 @@ func TestAccManifestResource_FieldManagerConflict(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create deployment with Terraform
 			{
-				Config: testAccManifestConfig_FieldConflict(ns, deployName, false),
+				Config: testAccManifestConfig_FieldConflict(ns, deployName),
 				ConfigVariables: config.Variables{
 					"raw":         config.StringVariable(raw),
 					"namespace":   config.StringVariable(ns),
@@ -472,18 +456,8 @@ func TestAccManifestResource_FieldManagerConflict(t *testing.T) {
 						t.Fatalf("Expected replicas to be 3, got %v", deploy.Spec.Replicas)
 					}
 				},
-				// Now try to change replicas with Terraform - should conflict
-				Config: testAccManifestConfig_FieldConflictUpdate(ns, deployName, false),
-				ConfigVariables: config.Variables{
-					"raw":         config.StringVariable(raw),
-					"namespace":   config.StringVariable(ns),
-					"deploy_name": config.StringVariable(deployName),
-				},
-				ExpectError: regexp.MustCompile(`Field Manager Conflict|Field Ownership Conflict`),
-			},
-			// Step 3: Force the change
-			{
-				Config: testAccManifestConfig_FieldConflictUpdate(ns, deployName, true),
+				// Now change replicas with Terraform - should take ownership and show warning
+				Config: testAccManifestConfig_FieldConflictUpdate(ns, deployName),
 				ConfigVariables: config.Variables{
 					"raw":         config.StringVariable(raw),
 					"namespace":   config.StringVariable(ns),
@@ -499,7 +473,7 @@ func TestAccManifestResource_FieldManagerConflict(t *testing.T) {
 	})
 }
 
-func testAccManifestConfig_FieldConflict(namespace, deployName string, forceConflicts bool) string {
+func testAccManifestConfig_FieldConflict(namespace, deployName string) string {
 	return fmt.Sprintf(`
 variable "raw" {
   type = string
@@ -559,14 +533,12 @@ YAML
     kubeconfig = var.raw
   }
 
-  force_conflicts = %t
-  
   depends_on = [k8sconnect_manifest.field_conflict_namespace]
 }
-`, namespace, deployName, namespace, forceConflicts)
+`, namespace, deployName, namespace)
 }
 
-func testAccManifestConfig_FieldConflictUpdate(namespace, deployName string, forceConflicts bool) string {
+func testAccManifestConfig_FieldConflictUpdate(namespace, deployName string) string {
 	return fmt.Sprintf(`
 variable "raw" {
   type = string
@@ -626,14 +598,12 @@ YAML
     kubeconfig = var.raw
   }
 
-  force_conflicts = %t
-  
   depends_on = [k8sconnect_manifest.field_conflict_namespace]
 }
-`, namespace, deployName, namespace, forceConflicts)
+`, namespace, deployName, namespace)
 }
 // TestAccManifestResource_DriftDetectionWithForceConflicts tests the scenario where:
-// 1. We create a resource (force_conflicts defaults to true)
+// 1. We create a resource
 // 2. External controller modifies it
 // 3. We detect drift and correct it WITHOUT changing the config
 // This is the scenario reported by the user where "inconsistent plan" error occurs
@@ -692,7 +662,6 @@ spec:
             memory: "128Mi"
 YAML
   cluster_connection = { kubeconfig = var.raw }
-  # force_conflicts defaults to true, don't set it explicitly
 }
 `, ns, deployName, ns)
 
@@ -818,7 +787,6 @@ spec:
             memory: "64Mi"
 YAML
   cluster_connection = { kubeconfig = var.raw }
-  # force_conflicts defaults to true
 }
 `, ns, deployName, ns)
 
@@ -877,7 +845,7 @@ YAML
 					resource.TestCheckResourceAttr("k8sconnect_manifest.deployment", "field_ownership.spec.template.spec.containers[0].resources.limits.cpu", "k8sconnect"),
 					resource.TestCheckResourceAttr("k8sconnect_manifest.deployment", "field_ownership.spec.template.spec.containers[0].resources.limits.memory", "k8sconnect"),
 				),
-				// All conflicts should be detected and corrected (force_conflicts=true handles them automatically)
+				// All conflicts should be detected and corrected (we always force ownership)
 			},
 		},
 		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, ns, deployName),
