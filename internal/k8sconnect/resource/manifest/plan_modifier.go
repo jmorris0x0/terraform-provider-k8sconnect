@@ -90,11 +90,12 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 		return
 	}
 
-	// Validate connection is ready for operations (after parsing so we have desiredObj for fallback)
+	// Validate connection is ready for operations
 	if !r.isConnectionReady(plannedData.ClusterConnection) {
-		// Connection has unknown values (bootstrap scenario) - use yaml fallback
-		r.setProjectionToYamlFallback(ctx, &plannedData, desiredObj, resp,
-			"Bootstrap scenario: connection unknown, using YAML fallback for projection")
+		// Connection has unknown values (bootstrap scenario) - set projection to unknown
+		// User can review yaml_body in plan output
+		r.setProjectionUnknown(ctx, &plannedData, resp,
+			"Bootstrap scenario: connection unknown, projection will be calculated during apply")
 		return
 	}
 
@@ -123,28 +124,6 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 func (r *manifestResource) setProjectionUnknown(ctx context.Context, plannedData *manifestResourceModel, resp *resource.ModifyPlanResponse, reason string) {
 	tflog.Debug(ctx, reason)
 	plannedData.ManagedStateProjection = types.StringUnknown()
-	diags := resp.Plan.Set(ctx, plannedData)
-	resp.Diagnostics.Append(diags...)
-}
-
-// setProjectionToYamlFallback uses the parsed YAML as the projection when dry-run is not possible.
-// This provides users with a preview of their configuration even when we can't get K8s defaults.
-// Used for both bootstrap (connection unknown) and CRD scenarios (API not discovered yet).
-func (r *manifestResource) setProjectionToYamlFallback(ctx context.Context, plannedData *manifestResourceModel, desiredObj *unstructured.Unstructured, resp *resource.ModifyPlanResponse, reason string) {
-	tflog.Debug(ctx, reason)
-
-	// Convert the parsed YAML to JSON for projection
-	projectionJSON, err := toJSON(desiredObj.Object)
-	if err != nil {
-		// Can't convert to JSON - fall back to unknown
-		tflog.Warn(ctx, "Failed to convert YAML to JSON for fallback projection", map[string]interface{}{
-			"error": err.Error(),
-		})
-		plannedData.ManagedStateProjection = types.StringUnknown()
-	} else {
-		plannedData.ManagedStateProjection = types.StringValue(projectionJSON)
-	}
-
 	diags := resp.Plan.Set(ctx, plannedData)
 	resp.Diagnostics.Append(diags...)
 }
@@ -215,9 +194,10 @@ func (r *manifestResource) executeDryRunAndProjection(ctx context.Context, req r
 	if err != nil {
 		// Check if this is a CRD-not-found error during plan phase
 		if r.isCRDNotFoundError(err) {
-			// CRD doesn't exist yet (will be created during apply) - use yaml fallback
-			r.setProjectionToYamlFallback(ctx, plannedData, desiredObj, resp,
-				"CRD not found during plan: using YAML fallback for projection")
+			// CRD doesn't exist yet (will be created during apply) - set projection to unknown
+			// User can review yaml_body in plan output
+			r.setProjectionUnknown(ctx, plannedData, resp,
+				"CRD not found during plan: projection will be calculated during apply")
 			return true
 		}
 		return false
@@ -228,9 +208,10 @@ func (r *manifestResource) executeDryRunAndProjection(ctx context.Context, req r
 	if err != nil {
 		// Check if this is a CRD-not-found error during plan phase
 		if r.isCRDNotFoundError(err) {
-			// CRD doesn't exist yet (will be created during apply) - use yaml fallback
-			r.setProjectionToYamlFallback(ctx, plannedData, desiredObj, resp,
-				"CRD not found during dry-run: using YAML fallback for projection")
+			// CRD doesn't exist yet (will be created during apply) - set projection to unknown
+			// User can review yaml_body in plan output
+			r.setProjectionUnknown(ctx, plannedData, resp,
+				"CRD not found during dry-run: projection will be calculated during apply")
 			return true
 		}
 		return false
