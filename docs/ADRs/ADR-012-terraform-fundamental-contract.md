@@ -3,6 +3,17 @@
 ## Status
 Accepted - Foundational Principle
 
+## Decision Made (2025-10-09)
+
+**k8sconnect adopts the Pragmatic Interpretation** of Terraform's contract:
+
+- **State shows managed fields only** (per SSA managedFields), not complete cluster object
+- **Drift detection applies to managed fields** - fields the provider is responsible for
+- **Framework limitations make strict interpretation technically infeasible** (see Framework Limitations section below)
+- **This aligns with Kubernetes SSA semantics** and industry practice
+
+See ADR-013 for details on why the yaml_body sensitivity approach (which would have required strict interpretation) was abandoned.
+
 ## Context
 
 Terraform providers face constant trade-offs between UX, performance, accuracy, and maintainability. When making these trade-offs, we need a clear, immutable principle that guides all decisions.

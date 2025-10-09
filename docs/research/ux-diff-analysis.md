@@ -166,6 +166,9 @@
 - **Defeats the entire purpose of the provider**
 
 ### Option D: Hide yaml_body on Updates
+
+**UPDATE (2025-10-09): This option was fully investigated and ABANDONED. See ADR-013 for complete details.**
+
 **Change:**
 - Hide `field_ownership`
 - Keep `managed_state_projection` as is

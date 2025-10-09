@@ -1,6 +1,6 @@
 # ADR Implementation Status
 
-Last updated: 2025-10-06
+Last updated: 2025-10-09
 
 ## Summary
 
@@ -16,6 +16,9 @@ Last updated: 2025-10-06
 | ADR-008 | Selective Status Population | Accepted | ✅ **ADOPTED** | "You get ONLY what you wait for" principle |
 | ADR-009 | User-Controlled Drift Exemption | Accepted | ✅ **ADOPTED** | `ignore_fields` attribute |
 | ADR-010 | Prevent Orphan Resources (Identity Changes) | Accepted | ✅ **ADOPTED** | Identity change detection + RequiresReplace |
+| ADR-011 | Concise Diff Format | Partially Implemented | ⚠️ **PARTIAL** | field_ownership Map format done; yaml_body sensitivity rejected |
+| ADR-012 | Terraform Fundamental Contract | Accepted | ✅ **ADOPTED** | Pragmatic interpretation - state shows managed fields |
+| ADR-013 | YAML Body Sensitivity Approach | Rejected | ❌ **REJECTED** | Abandoned due to inconsistent plan errors |
 
 ## Detailed Status
 
@@ -280,6 +283,122 @@ Last updated: 2025-10-06
 - ADR-010 addresses resource _identity_ (K8s creates new resource) - implemented
 - Both use RequiresReplace mechanism in ModifyPlan
 
+### ⚠️ ADR-011: Concise Diff Format - PARTIALLY IMPLEMENTED
+
+**Status:** Partially implemented (2025-10-09)
+
+**What's implemented:**
+- `field_ownership` converted to Map format ✅
+- Preservation logic during UPDATEs ✅
+- Status field filtering ✅
+- 63 lines of noise reduced to 0-5 lines ✅
+
+**What's rejected:**
+- yaml_body sensitivity (see ADR-013) ❌
+- YAML fallback for projection (see ADR-013) ❌
+- managed_state_projection Map format (deferred, not critical) ⏸️
+
+**Evidence:**
+- field_ownership is MapAttribute in schema (manifest.go)
+- Conversion logic in crud_common.go and crud_operations.go
+- Preservation logic in plan_modifier.go
+- Status filtering removes `status.*` paths automatically
+
+**Implementation completeness:** ~60%
+- field_ownership improvements fully implemented ✅
+- yaml_body approach investigated and rejected (see ADR-013) ✅
+- managed_state_projection Map format not implemented (deferred) ⏸️
+
+**Results:**
+- Field ownership diffs: 63 lines → 0-5 lines
+- Total verbosity reduction: 136 lines → ~75 lines (45% improvement)
+- Remaining verbosity acceptable for current use cases
+
+**What's not implemented:**
+- managed_state_projection Map format (deferred until user feedback)
+- yaml_body sensitivity (abandoned - see ADR-013)
+
+### ✅ ADR-012: Terraform Fundamental Contract - ADOPTED
+
+**Status:** Accepted - Foundational Principle (2025-10-09)
+
+**Decision made:**
+- Pragmatic interpretation adopted ✅
+- State shows managed fields only (per SSA managedFields) ✅
+- Strict interpretation proven technically infeasible by framework limitations ✅
+
+**Evidence:**
+- State filtered to managed fields (projection.go, crud_common.go)
+- Framework limitation research (docs/research/diff-suppression-investigation.md)
+- Industry validation (HashiCorp's TODO comment confirms this is correct approach)
+
+**Implementation completeness:** 100%
+- Pragmatic interpretation documented ✅
+- Framework limitations explained ✅
+- Decision rationale captured ✅
+- References to supporting research ✅
+
+**Key points:**
+- terraform-plugin-framework cannot support storing complete state while selectively suppressing diffs
+- Pragmatic interpretation: "State shows managed fields" (per SSA managedFields)
+- This aligns with Kubernetes SSA semantics
+- HashiCorp's own provider has TODO to implement this approach
+- No provider successfully implements strict interpretation with clean UX
+
+**See also:**
+- ADR-013 for why yaml_body sensitivity (which required strict interpretation) was rejected
+- diff-suppression-investigation.md for complete framework limitation analysis
+
+### ❌ ADR-013: YAML Body Sensitivity Approach - REJECTED
+
+**Status:** Rejected (2025-10-09)
+
+**What was proposed:**
+- Make yaml_body sensitive (hide from plan output)
+- Use YAML fallback to populate managed_state_projection when dry-run fails
+- Single source of truth in plan output
+
+**Why it failed:**
+- **Inconsistent plan errors** when CRD and Custom Resource created together
+- YAML fallback shows what you WROTE, not what Kubernetes will DO
+- CRD schemas strip fields, admission controllers mutate, defaulting adds fields
+- YAML fallback cannot predict any server-side transformations
+
+**The fatal flaw:**
+1. PLAN: CRD doesn't exist → YAML fallback sets projection to `{"spec":{"setting":"value"}}`
+2. APPLY: CRD created → K8s CRD schema strips `spec.setting` → Projection becomes `{}`
+3. Terraform error: "inconsistent plan" - projection changed from plan to apply
+
+**Evidence of abandonment:**
+- All YAML fallback logic removed from plan_modifier.go
+- setProjectionToYamlFallback() function deleted
+- Private state flags for fallback removed
+- ADR-013 created documenting rejection
+- ADR-011 updated to reflect rejection
+
+**Implementation history:**
+- Approach was fully implemented ✅
+- Tests proved it caused inconsistent plan errors ✅
+- Completely removed from codebase ✅
+- Lessons learned documented ✅
+
+**Current behavior:**
+- Both yaml_body and managed_state_projection visible in plan output ✅
+- Projection Unknown during CREATE (acceptable - users review yaml_body) ✅
+- Projection accurate during UPDATE (dry-run works) ✅
+- No inconsistent plan errors ✅
+
+**Key lessons:**
+- "Known after apply" is OK when users have yaml_body to review
+- Cannot predict Kubernetes behavior without dry-run
+- Dual visibility (yaml_body + projection) provides value
+- Simpler is better
+
+**See also:**
+- docs/bootstrap-yaml-fallback-abandonment.md (complete technical analysis)
+- ADR-011 (updated to reflect rejection)
+- ADR-012 (pragmatic interpretation adopted instead)
+
 ## Recommendations
 
 ### Recently Completed ✅
@@ -351,7 +470,10 @@ If implementing ADR-005 later:
 - **ADR-004** (cross-state conflicts) - Not critical for single-state usage
 
 ### Implementation Status
-- **9 out of 10 ADRs fully implemented** (90% complete)
+- **10 out of 13 ADRs fully implemented** (77% complete)
+- **1 ADR partially implemented** (ADR-011 - field_ownership done, managed_state_projection deferred)
+- **1 ADR rejected** (ADR-013 - YAML body sensitivity proven infeasible)
+- **1 ADR not adopted** (ADR-004 - cross-state conflicts, low priority)
 - All core provider functionality complete with robust safety mechanisms
-- Only ADR-004 (cross-state conflicts) remains optional
 - ADR-007 (CRD dependency resolution) completed 2025-10-06 - major competitive differentiator
+- ADR-013 (YAML body sensitivity) investigated and rejected 2025-10-09 - valuable lessons learned
