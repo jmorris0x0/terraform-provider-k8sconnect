@@ -41,12 +41,7 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 		}
 	}
 
-	// Validate connection is ready for operations
-	if !r.validateConnectionReady(ctx, &plannedData, resp) {
-		return
-	}
-
-	// Parse the desired YAML
+	// Parse the desired YAML first (we need desiredObj for yaml fallback)
 	yamlStr := plannedData.YAMLBody.ValueString()
 
 	// Check if YAML is empty (can happen with unresolved interpolations during planning)
@@ -95,6 +90,14 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 		return
 	}
 
+	// Validate connection is ready for operations (after parsing so we have desiredObj for fallback)
+	if !r.isConnectionReady(plannedData.ClusterConnection) {
+		// Connection has unknown values (bootstrap scenario) - use yaml fallback
+		r.setProjectionToYamlFallback(ctx, &plannedData, desiredObj, resp,
+			"Bootstrap scenario: connection unknown, using YAML fallback for projection")
+		return
+	}
+
 	// Execute dry-run and compute projection
 	if !r.executeDryRunAndProjection(ctx, req, &plannedData, desiredObj, resp) {
 		return
@@ -120,6 +123,28 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 func (r *manifestResource) setProjectionUnknown(ctx context.Context, plannedData *manifestResourceModel, resp *resource.ModifyPlanResponse, reason string) {
 	tflog.Debug(ctx, reason)
 	plannedData.ManagedStateProjection = types.StringUnknown()
+	diags := resp.Plan.Set(ctx, plannedData)
+	resp.Diagnostics.Append(diags...)
+}
+
+// setProjectionToYamlFallback uses the parsed YAML as the projection when dry-run is not possible.
+// This provides users with a preview of their configuration even when we can't get K8s defaults.
+// Used for both bootstrap (connection unknown) and CRD scenarios (API not discovered yet).
+func (r *manifestResource) setProjectionToYamlFallback(ctx context.Context, plannedData *manifestResourceModel, desiredObj *unstructured.Unstructured, resp *resource.ModifyPlanResponse, reason string) {
+	tflog.Debug(ctx, reason)
+
+	// Convert the parsed YAML to JSON for projection
+	projectionJSON, err := toJSON(desiredObj.Object)
+	if err != nil {
+		// Can't convert to JSON - fall back to unknown
+		tflog.Warn(ctx, "Failed to convert YAML to JSON for fallback projection", map[string]interface{}{
+			"error": err.Error(),
+		})
+		plannedData.ManagedStateProjection = types.StringUnknown()
+	} else {
+		plannedData.ManagedStateProjection = types.StringValue(projectionJSON)
+	}
+
 	diags := resp.Plan.Set(ctx, plannedData)
 	resp.Diagnostics.Append(diags...)
 }
@@ -150,19 +175,6 @@ func parseWaitConfig(ctx context.Context, waitFor types.Object) (waitForModel, b
 	}
 	diags := waitFor.As(ctx, &config, basetypes.ObjectAsOptions{})
 	return config, !diags.HasError()
-}
-
-// validateConnectionReady checks if connection values are ready for use
-func (r *manifestResource) validateConnectionReady(ctx context.Context, plannedData *manifestResourceModel, resp *resource.ModifyPlanResponse) bool {
-	// If connection is not ready (unknown values), skip dry-run
-	if !r.isConnectionReady(plannedData.ClusterConnection) {
-		tflog.Debug(ctx, "Skipping dry-run due to unknown connection values")
-		plannedData.ManagedStateProjection = types.StringUnknown()
-		diags := resp.Plan.Set(ctx, plannedData)
-		resp.Diagnostics.Append(diags...)
-		return false
-	}
-	return true
 }
 
 // checkDriftAndPreserveState compares projections and preserves state if no changes
@@ -201,12 +213,26 @@ func (r *manifestResource) executeDryRunAndProjection(ctx context.Context, req r
 	// Setup client
 	client, err := r.setupDryRunClient(ctx, plannedData, resp)
 	if err != nil {
+		// Check if this is a CRD-not-found error during plan phase
+		if r.isCRDNotFoundError(err) {
+			// CRD doesn't exist yet (will be created during apply) - use yaml fallback
+			r.setProjectionToYamlFallback(ctx, plannedData, desiredObj, resp,
+				"CRD not found during plan: using YAML fallback for projection")
+			return true
+		}
 		return false
 	}
 
 	// Perform dry-run
 	dryRunResult, err := r.performDryRun(ctx, client, desiredObj, plannedData, resp)
 	if err != nil {
+		// Check if this is a CRD-not-found error during plan phase
+		if r.isCRDNotFoundError(err) {
+			// CRD doesn't exist yet (will be created during apply) - use yaml fallback
+			r.setProjectionToYamlFallback(ctx, plannedData, desiredObj, resp,
+				"CRD not found during dry-run: using YAML fallback for projection")
+			return true
+		}
 		return false
 	}
 
@@ -245,11 +271,25 @@ func (r *manifestResource) setupDryRunClient(ctx context.Context, plannedData *m
 func (r *manifestResource) calculateProjection(ctx context.Context, req resource.ModifyPlanRequest, plannedData *manifestResourceModel, desiredObj, dryRunResult *unstructured.Unstructured, client k8sclient.K8sClient, resp *resource.ModifyPlanResponse) bool {
 	isCreate := isCreateOperation(req)
 
-	// CREATE operations: Set projection to Unknown (will be populated after create)
+	// CREATE operations: Use dry-run result to show accurate preview with K8s defaults
+	// This replaces the old behavior of setting projection to unknown
 	if isCreate {
-		tflog.Debug(ctx, "CREATE - setting projection to unknown")
-		plannedData.ManagedStateProjection = types.StringUnknown()
-		return true
+		tflog.Debug(ctx, "CREATE - using dry-run result for projection")
+
+		// For CREATE, project all fields from dry-run result (no existing ownership to filter by)
+		// The dry-run result contains all the fields we're setting plus K8s defaults
+		paths := extractOwnedPaths(ctx, dryRunResult.GetManagedFields(), desiredObj.Object)
+
+		// Apply ignore_fields filtering if specified
+		if ignoreFields := getIgnoreFields(ctx, plannedData); ignoreFields != nil {
+			paths = filterIgnoredPaths(paths, ignoreFields)
+		}
+
+		// Set field_ownership to unknown for CREATE (will be populated after apply)
+		plannedData.FieldOwnership = types.MapUnknown(types.StringType)
+
+		// Project the dry-run result to show what will be created
+		return r.applyProjection(ctx, dryRunResult, paths, plannedData, resp)
 	}
 
 	// UPDATE operations: Use field ownership from dry-run result
