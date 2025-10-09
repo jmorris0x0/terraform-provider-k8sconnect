@@ -222,6 +222,12 @@ func isRetryableError(err error) bool {
 		return true
 	}
 
+	// Discovery errors - CRD/CR timing issues (API server discovery cache not updated yet)
+	if strings.Contains(errMsg, "could not find the requested resource") ||
+		strings.Contains(errMsg, "no matches for kind") {
+		return true
+	}
+
 	// Default: don't retry unknown errors
 	return false
 }

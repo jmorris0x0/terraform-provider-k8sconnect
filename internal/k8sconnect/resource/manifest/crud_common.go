@@ -272,19 +272,26 @@ func (r *manifestResource) updateProjectionFromCurrent(ctx context.Context, data
 		return err
 	}
 
-	// Convert projection to JSON for storage
-	projectionJSON, err := toJSON(projection)
-	if err != nil {
-		return err
+	// Convert projection to flat map for clean diff display
+	projectionMap := flattenProjectionToMap(projection, paths)
+
+	// Convert to types.Map
+	mapValue, diags := types.MapValueFrom(ctx, types.StringType, projectionMap)
+	if diags.HasError() {
+		tflog.Warn(ctx, "Failed to convert projection to map", map[string]interface{}{
+			"diagnostics": diags,
+		})
+		// Set empty map on error
+		emptyMap, _ := types.MapValueFrom(ctx, types.StringType, map[string]string{})
+		data.ManagedStateProjection = emptyMap
+	} else {
+		data.ManagedStateProjection = mapValue
 	}
 
-	// Update the projection in state - this is what enables drift detection
-	data.ManagedStateProjection = types.StringValue(projectionJSON)
-
 	tflog.Debug(ctx, "Updated managed state projection", map[string]interface{}{
-		"id":              data.ID.ValueString(),
-		"path_count":      len(paths),
-		"projection_size": len(projectionJSON),
+		"id":         data.ID.ValueString(),
+		"path_count": len(paths),
+		"map_size":   len(projectionMap),
 	})
 
 	return nil

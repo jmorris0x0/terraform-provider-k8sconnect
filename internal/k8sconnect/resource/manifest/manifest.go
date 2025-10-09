@@ -44,7 +44,7 @@ type manifestResourceModel struct {
 	FieldOwnership         types.Map     `tfsdk:"field_ownership"`
 	ForceDestroy           types.Bool    `tfsdk:"force_destroy"`
 	IgnoreFields           types.List    `tfsdk:"ignore_fields"`
-	ManagedStateProjection types.String  `tfsdk:"managed_state_projection"`
+	ManagedStateProjection types.Map     `tfsdk:"managed_state_projection"`
 	WaitFor                types.Object  `tfsdk:"wait_for"`
 	Status                 types.Dynamic `tfsdk:"status"`
 }
@@ -133,12 +133,14 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 				Optional:            true,
 				MarkdownDescription: `Force deletion by removing finalizers. ⚠️ **WARNING**: Unlike other providers, this REMOVES finalizers after timeout. May cause data loss and orphaned cloud resources. See docs before using.`,
 			},
-			"managed_state_projection": schema.StringAttribute{
-				Computed: true,
-				Description: "Snapshot of resource state from the last Server-Side Apply dry-run, containing only fields managed by k8sconnect. " +
+			"managed_state_projection": schema.MapAttribute{
+				Computed:    true,
+				ElementType: types.StringType,
+				Description: "Field-by-field snapshot of managed state as flat key-value pairs with dotted paths. " +
+					"Shows exactly which fields k8sconnect manages and their current values. " +
+					"Terraform automatically displays only changed keys in diffs for clean, scannable output. " +
 					"When this differs from current cluster state, it indicates drift - someone modified your managed fields outside Terraform. " +
-					"During plan, diffs in this attribute show exactly what Kubernetes will change when you apply, computed via dry-run for accuracy. " +
-					"This enables precise drift detection without false positives from fields managed by other controllers.",
+					"Computed via Server-Side Apply dry-run for accuracy, enabling precise drift detection without false positives.",
 			},
 			"ignore_fields": schema.ListAttribute{
 				Optional:    true,

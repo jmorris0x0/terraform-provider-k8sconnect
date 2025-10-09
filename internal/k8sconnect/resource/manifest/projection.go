@@ -474,6 +474,44 @@ func toJSON(obj map[string]interface{}) (string, error) {
 	return string(bytes), nil
 }
 
+// flattenProjectionToMap converts nested projection to flat key-value map with dotted paths
+// This enables clean, concise diffs in Terraform plan output
+func flattenProjectionToMap(projection map[string]interface{}, paths []string) map[string]string {
+	result := make(map[string]string, len(paths))
+
+	for _, path := range paths {
+		value, exists := getFieldByPath(projection, path)
+		if exists {
+			result[path] = formatValueForDisplay(value)
+		}
+	}
+
+	return result
+}
+
+// formatValueForDisplay converts a value to string for display in flat map
+func formatValueForDisplay(v interface{}) string {
+	if v == nil {
+		return "<nil>"
+	}
+
+	switch val := v.(type) {
+	case string:
+		return val
+	case int, int32, int64, float32, float64, bool:
+		return fmt.Sprintf("%v", val)
+	case map[string]interface{}, []interface{}:
+		// Complex types - use compact JSON
+		bytes, err := json.Marshal(val)
+		if err != nil {
+			return fmt.Sprintf("<error: %v>", err)
+		}
+		return string(bytes)
+	default:
+		return fmt.Sprintf("%v", val)
+	}
+}
+
 // filterIgnoredPaths removes paths that match any ignore pattern
 func filterIgnoredPaths(allPaths []string, ignoreFields []string) []string {
 	if len(ignoreFields) == 0 {

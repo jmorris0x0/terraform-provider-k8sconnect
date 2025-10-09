@@ -534,7 +534,8 @@ func TestAccManifestResource_CreateShowsProjection(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
-					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_cm", "managed_state_projection"),
+					// Check that managed_state_projection map has elements (% gives count)
+					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_cm", "managed_state_projection.%"),
 				),
 			},
 		},

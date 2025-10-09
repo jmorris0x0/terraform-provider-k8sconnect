@@ -237,12 +237,17 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		return
 	}
 
-	// Convert projection to JSON
-	projectionJSON, err := toJSON(projection)
-	if err != nil {
-		resp.Diagnostics.AddError("JSON Conversion Failed",
-			fmt.Sprintf("Failed to convert projection to JSON during import: %s", err))
-		return
+	// Convert projection to flat map for clean diff display
+	projectionMap := flattenProjectionToMap(projection, paths)
+
+	// Convert projection to types.Map
+	projectionMapValue, projDiags := types.MapValueFrom(ctx, types.StringType, projectionMap)
+	if projDiags.HasError() {
+		tflog.Warn(ctx, "Failed to convert projection to map during import", map[string]interface{}{
+			"diagnostics": projDiags,
+		})
+		// Set empty map on error
+		projectionMapValue, _ = types.MapValueFrom(ctx, types.StringType, map[string]string{})
 	}
 
 	// Extract field ownership from the imported object
@@ -286,7 +291,7 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		ClusterConnection:      connectionObj,
 		DeleteProtection:       types.BoolValue(false),
 		IgnoreFields:           types.ListNull(types.StringType),
-		ManagedStateProjection: types.StringValue(projectionJSON),
+		ManagedStateProjection: projectionMapValue,
 		FieldOwnership:         fieldOwnershipMap,
 		WaitFor: types.ObjectNull(map[string]attr.Type{
 			"condition":   types.StringType,
@@ -310,14 +315,14 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 	}
 
 	tflog.Info(ctx, "import completed with managed fields tracking", map[string]interface{}{
-		"id":              resourceID,
-		"kind":            kind,
-		"name":            name,
-		"namespace":       namespace,
-		"kubeconfig":      kubeconfigPath,
-		"context":         kubeContext,
-		"managed_paths":   len(paths),
-		"projection_size": len(projectionJSON),
+		"id":            resourceID,
+		"kind":          kind,
+		"name":          name,
+		"namespace":     namespace,
+		"kubeconfig":    kubeconfigPath,
+		"context":       kubeContext,
+		"managed_paths": len(paths),
+		"map_size":      len(projectionMap),
 	})
 
 }

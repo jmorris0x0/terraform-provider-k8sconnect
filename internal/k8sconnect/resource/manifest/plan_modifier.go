@@ -47,7 +47,7 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 	// Check if YAML is empty (can happen with unresolved interpolations during planning)
 	if yamlStr == "" {
 		// Mark computed fields as unknown
-		plannedData.ManagedStateProjection = types.StringUnknown()
+		plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
 		plannedData.FieldOwnership = types.MapUnknown(types.StringType)
 
 		// Handle status based on wait_for
@@ -69,7 +69,7 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 		if strings.Contains(yamlStr, "${") {
 			// During plan with interpolations to computed values, we can't parse/validate
 			// Mark computed fields as unknown
-			plannedData.ManagedStateProjection = types.StringUnknown()
+			plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
 			plannedData.FieldOwnership = types.MapUnknown(types.StringType)
 
 			// Handle status based on wait_for
@@ -123,7 +123,7 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 // setProjectionUnknown sets projection to unknown and saves plan
 func (r *manifestResource) setProjectionUnknown(ctx context.Context, plannedData *manifestResourceModel, resp *resource.ModifyPlanResponse, reason string) {
 	tflog.Debug(ctx, reason)
-	plannedData.ManagedStateProjection = types.StringUnknown()
+	plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
 	diags := resp.Plan.Set(ctx, plannedData)
 	resp.Diagnostics.Append(diags...)
 }
@@ -358,7 +358,7 @@ func (r *manifestResource) performDryRun(ctx context.Context, client k8sclient.K
 					immutableFields, resourceDesc))
 
 			// Set projection to unknown (replacement doesn't need projection)
-			plannedData.ManagedStateProjection = types.StringUnknown()
+			plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
 
 			// Return success (nil error) to allow planning to continue
 			// The replacement will be shown in the plan output
@@ -398,18 +398,21 @@ func (r *manifestResource) applyProjection(ctx context.Context, dryRunResult *un
 		return false
 	}
 
-	// Convert to JSON
-	projectionJSON, err := toJSON(projection)
-	if err != nil {
-		resp.Diagnostics.AddError("JSON Conversion Failed", fmt.Sprintf("Failed to convert projection: %s", err))
+	// Convert projection to flat map for clean diff display
+	projectionMap := flattenProjectionToMap(projection, paths)
+
+	// Convert to types.Map
+	mapValue, diags := types.MapValueFrom(ctx, types.StringType, projectionMap)
+	if diags.HasError() {
+		resp.Diagnostics.AddError("Map Conversion Failed", fmt.Sprintf("Failed to convert projection to map: %s", diags.Errors()))
 		return false
 	}
 
 	// Update the plan with projection
-	plannedData.ManagedStateProjection = types.StringValue(projectionJSON)
+	plannedData.ManagedStateProjection = mapValue
 	tflog.Debug(ctx, "Dry-run projection complete", map[string]interface{}{
-		"path_count":      len(paths),
-		"projection_size": len(projectionJSON),
+		"path_count": len(paths),
+		"map_size":   len(projectionMap),
 	})
 
 	return true
