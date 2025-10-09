@@ -109,7 +109,10 @@ func (r *manifestResource) isCRDNotFoundError(err error) bool {
 		return strings.Contains(msg, "no matches for kind") ||
 			strings.Contains(msg, "could not find the requested resource")
 	}
-	return false
+	// Also check plain error messages (for wrapped errors)
+	errMsg := strings.ToLower(err.Error())
+	return strings.Contains(errMsg, "no matches for kind") ||
+		strings.Contains(errMsg, "could not find the requested resource")
 }
 
 // isNamespaceNotFoundError detects when a namespace doesn't exist yet
