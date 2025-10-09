@@ -80,9 +80,22 @@ func (r *manifestResource) prepareContext(
 		if rc.Object != nil {
 			gvr, err := client.GetGVR(ctx, rc.Object)
 			if err != nil {
-				return nil, fmt.Errorf("failed to determine resource type: %w", err)
+				// During apply phase, if this is a CRD-not-found error, we'll retry later
+				// So don't fail here - let the apply retry logic handle it
+				if r.isCRDNotFoundError(err) {
+					tflog.Debug(ctx, "CRD not found during prepareContext, will retry during apply", map[string]interface{}{
+						"kind": rc.Object.GetKind(),
+						"name": rc.Object.GetName(),
+					})
+					// Leave GVR empty - operations that need it will be skipped
+					rc.GVR = schema.GroupVersionResource{}
+				} else {
+					// Other errors should fail immediately
+					return nil, fmt.Errorf("failed to determine resource type: %w", err)
+				}
+			} else {
+				rc.GVR = gvr
 			}
-			rc.GVR = gvr
 		}
 	}
 

@@ -143,12 +143,12 @@ When removing a field from `ignore_fields`:
 
 | Scenario | External Owns? | Action | Expected Behavior |
 |----------|----------------|--------|-------------------|
-| Remove entire list | ✅ Yes | `ignore_fields = []` → apply | **ERROR** - field ownership conflict |
+| Remove entire list | ✅ Yes | `ignore_fields = []` → apply | **WARNING** - ownership forced automatically via SSA |
 | Remove entire list | ❌ No | `ignore_fields = []` → apply | **SUCCESS** - we still own it, reclaim cleanly |
-| Remove from list | ✅ Yes | Remove field from list → apply | **ERROR** - field ownership conflict |
+| Remove from list | ✅ Yes | Remove field from list → apply | **WARNING** - ownership forced automatically via SSA |
 | Remove from list | ❌ No | Remove field from list → apply | **SUCCESS** - we still own it, reclaim cleanly |
 
-This behavior is **intentional** - if an external controller owns a field, Terraform won't forcibly reclaim it without user intervention (via `force_conflicts = true`).
+This behavior is **intentional** - when an external controller owns a field and you remove it from `ignore_fields`, the provider will forcibly take ownership using Server-Side Apply with `force=true`. You'll see a warning about the ownership override, and the other controller may fight back for control of that field.
 
 ## Testing Requirements
 

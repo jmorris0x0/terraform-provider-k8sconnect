@@ -181,10 +181,16 @@ testacc: oidc-setup
 
 .PHONY: test-examples
 test-examples: oidc-setup install
-	@echo "📚 Testing examples directory..."
-	@cd test/examples && \
+	@echo "📚 Testing examples directory..."; \
+	TEST_FILTER="$${TEST:-}"; \
+	if [ -n "$$TEST_FILTER" ]; then \
+		echo "Running tests matching: $$TEST_FILTER"; \
+	else \
+		echo "Running all example tests"; \
+	fi; \
+	cd test/examples && \
 	TF_ACC_KUBECONFIG="$$(cat ../../.testbuild/kubeconfig.yaml)" \
-	go test -v -timeout 30m
+	go test -v -timeout 30m -run "$$TEST_FILTER"
 
 .PHONY: clean
 clean:
