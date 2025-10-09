@@ -15,19 +15,26 @@ PARTIALLY IMPLEMENTED - Option 4 Required (Contract Compliance)
 
 Partially implemented Option F concept (yaml_body sensitive + managed_state_projection as single source of truth) but **MISSING critical requirement**: State must show ALL fields from cluster, not filtered by managedFields.
 
-**Key Decision: Skip Dry-Run for CREATE Operations**
+**Key Decision: Smart Projection for CREATE Operations**
 
-After discovering that bootstrap scenarios cause inconsistent plan errors, we made the critical decision to **never use dry-run for CREATE operations**. This preserves the first-use experience while maintaining all core value propositions.
+After discovering that bootstrap scenarios cause inconsistent plan errors, we implemented **intelligent projection calculation for CREATE operations** that does dry-run when possible while gracefully handling bootstrap.
 
 **The Problem:**
-1. During `terraform plan`: Cluster doesn't exist → uses yaml fallback → projection without K8s defaults (e.g., no `protocol: TCP`)
-2. During `terraform apply`: Cluster now exists (created by dependency) → Terraform re-calls plan modifier → would use dry-run → projection WITH K8s defaults
-3. Result: Projection changed between plan and apply → "inconsistent plan" error → **fatal UX failure on first use**
+1. During `terraform plan`: Cluster doesn't exist → projection must handle unknown values
+2. During `terraform apply`: Cluster now exists → projection must be consistent with plan
+3. **Additional requirement**: When cluster EXISTS during plan (adding resources), show accurate projection!
 
-**The Solution:**
-- CREATE operations: Always use parsed yaml as projection (never dry-run)
+**The Solution - Smart CREATE projection:**
+- **When ALL values known** (yaml parseable, cluster accessible): Do dry-run → accurate projection with K8s defaults ✨
+- **When ANY values unknown** (bootstrap, interpolations): Use yaml fallback → graceful degradation
 - UPDATE operations: Always use server-side dry-run (accurate predictions - core value prop!)
-- This ensures consistent plan/apply behavior during bootstrap while preserving accuracy where it matters most
+
+**Criteria for dry-run during CREATE:**
+- ✅ yaml_body contains no `${...}` interpolations (parseable)
+- ✅ cluster_connection is ready (host + auth known, not "known after apply")
+- ✅ ignore_fields is known (null OK, unknown not OK)
+
+This gives us the best of both worlds: accurate diffs when possible, graceful bootstrap when needed.
 
 **Trade-offs Accepted:**
 
@@ -40,9 +47,9 @@ After discovering that bootstrap scenarios cause inconsistent plan errors, we ma
 - Maintenance-free: No hardcoded K8s defaults for CRDs
 
 ⚠️ **What we accept:**
-- CREATE projections don't show K8s defaults during plan
-- Admission controller mutations during CREATE discovered on first refresh (not in plan)
-- User sees what they wrote, not what K8s will add as defaults
+- CREATE projections during **bootstrap** (cluster being created) don't show K8s defaults - fallback to yaml
+- CREATE with interpolations (`${var.foo}`) show projection as unknown - can't parse incomplete YAML
+- **But**: CREATE to existing cluster with known values DOES show K8s defaults via dry-run! ✨
 
 **The ACTUAL Impossible Triangle: Bootstrap UX vs Complete State vs Clean UX**
 
@@ -201,14 +208,15 @@ Research proved (99%+ certainty) that storing complete state while suppressing d
 
 **Implementation files:**
 - `internal/k8sconnect/resource/manifest/manifest.go:110` - Added Sensitive: true to yaml_body
-- `internal/k8sconnect/resource/manifest/plan_modifier.go:51-53` - Force connectionReady=false for CREATE operations
-- `internal/k8sconnect/resource/manifest/plan_modifier.go:217-220` - Skip dry-run for CREATE in executeDryRunAndProjection
-- `internal/k8sconnect/resource/manifest/plan_modifier.go:270-294` - calculateProjection uses parsed yaml for CREATE
+- `internal/k8sconnect/resource/manifest/plan_modifier.go` - Smart projection logic: checks yaml parseability, connection readiness, ignore_fields status
+- `internal/k8sconnect/resource/manifest/plan_modifier.go` - CREATE operations do dry-run when all values known, yaml fallback when any unknown
+- `internal/k8sconnect/resource/manifest/plan_modifier.go` - calculateProjection handles both dry-run results and yaml fallback paths
 - `internal/k8sconnect/resource/manifest/crud.go:72` - Call updateFieldOwnershipData after CREATE
 
 **Results:**
 - **Bootstrap scenario**: Works perfectly, no inconsistent plan errors ✅
-- **CREATE projection**: Shows parsed yaml (cluster doesn't exist, best available) ✅
+- **CREATE projection (existing cluster)**: Shows dry-run results with K8s defaults (accurate!) ✨
+- **CREATE projection (bootstrap/interpolations)**: Shows yaml fallback or unknown (graceful degradation) ✅
 - **CREATE state**: Shows COMPLETE cluster reality after apply (contract compliance) ✅
 - **UPDATE**: Shows server-side dry-run projection (accurate, includes K8s mutations) ✅
 - **Single diff**: Only managed_state_projection shown, no dual-diff confusion ✅
