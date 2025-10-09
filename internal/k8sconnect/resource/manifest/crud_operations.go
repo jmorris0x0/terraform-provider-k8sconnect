@@ -265,16 +265,25 @@ func (r *manifestResource) updateProjection(rc *ResourceContext) error {
 		return fmt.Errorf("failed to project fields: %w", err)
 	}
 
-	// Convert to JSON
-	projectionJSON, err := toJSON(projection)
-	if err != nil {
-		return fmt.Errorf("failed to convert projection: %w", err)
+	// Convert projection to flat map for clean diff display
+	projectionMap := flattenProjectionToMap(projection, paths)
+
+	// Convert to types.Map
+	mapValue, diags := types.MapValueFrom(rc.Ctx, types.StringType, projectionMap)
+	if diags.HasError() {
+		tflog.Warn(rc.Ctx, "Failed to convert projection to map", map[string]interface{}{
+			"diagnostics": diags,
+		})
+		// Set empty map on error
+		emptyMap, _ := types.MapValueFrom(rc.Ctx, types.StringType, map[string]string{})
+		rc.Data.ManagedStateProjection = emptyMap
+	} else {
+		rc.Data.ManagedStateProjection = mapValue
 	}
 
-	rc.Data.ManagedStateProjection = types.StringValue(projectionJSON)
 	tflog.Debug(rc.Ctx, "Updated projection", map[string]interface{}{
 		"path_count": len(paths),
-		"size":       len(projectionJSON),
+		"map_size":   len(projectionMap),
 	})
 
 	// Update field ownership (existing code continues...)
@@ -293,7 +302,7 @@ func (r *manifestResource) updateProjection(rc *ResourceContext) error {
 	}
 
 	// Convert to types.Map
-	mapValue, diags := types.MapValueFrom(rc.Ctx, types.StringType, ownershipMap)
+	mapValue, diags = types.MapValueFrom(rc.Ctx, types.StringType, ownershipMap)
 	if diags.HasError() {
 		tflog.Warn(rc.Ctx, "Failed to convert field ownership to map", map[string]interface{}{
 			"diagnostics": diags,

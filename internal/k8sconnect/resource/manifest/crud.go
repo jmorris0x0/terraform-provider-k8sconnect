@@ -122,7 +122,8 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 			tflog.Warn(ctx, "Projection still failing during refresh, keeping pending flag", map[string]interface{}{
 				"error": err.Error(),
 			})
-			data.ManagedStateProjection = types.StringValue("{}")
+			emptyMap, _ := types.MapValueFrom(ctx, types.StringType, map[string]string{})
+			data.ManagedStateProjection = emptyMap
 			setPendingProjectionFlag(ctx, resp.Private)
 		} else {
 			resp.Diagnostics.AddError("Projection Failed",
@@ -357,8 +358,10 @@ func handleProjectionFailure(
 		"error": err.Error(),
 	})
 
-	// Set empty projection
-	rc.Data.ManagedStateProjection = types.StringValue("{}")
+	// Set empty projection and field ownership - both must be known for Terraform to save state
+	emptyMap, _ := types.MapValueFrom(ctx, types.StringType, map[string]string{})
+	rc.Data.ManagedStateProjection = emptyMap
+	rc.Data.FieldOwnership = emptyMap
 
 	// Save state with pending projection flag in Private state
 	setPendingProjectionFlag(ctx, privateSetter)

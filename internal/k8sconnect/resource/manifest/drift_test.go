@@ -48,7 +48,7 @@ func TestAccManifestResource_DriftDetection(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.drift_test", "id"),
-					resource.TestCheckResourceAttrSet("k8sconnect_manifest.drift_test", "managed_state_projection"),
+					resource.TestCheckResourceAttrSet("k8sconnect_manifest.drift_test", "managed_state_projection.%"),
 					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
 				),
 			},

@@ -43,7 +43,7 @@ func TestAccManifestResource_QuantityNormalization(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					// Initial apply should succeed
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_quota", "id"),
-					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_quota", "managed_state_projection"),
+					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_quota", "managed_state_projection.%"),
 				),
 			},
 			{

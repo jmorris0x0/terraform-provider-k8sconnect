@@ -128,7 +128,7 @@ func TestAccManifestResource_ImportWithManagedFields(t *testing.T) {
 					testhelpers.CheckConfigMapExists(k8sClient, ns, configMapName),
 					resource.TestCheckResourceAttrSet(resourceName, "id"),
 					resource.TestCheckResourceAttrSet(resourceName, "yaml_body"),
-					resource.TestCheckResourceAttrSet(resourceName, "managed_state_projection"),
+					resource.TestCheckResourceAttrSet(resourceName, "managed_state_projection.%"),
 				),
 			},
 			// Step 2: Import the same resource
