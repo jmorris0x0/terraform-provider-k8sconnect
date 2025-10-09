@@ -28,8 +28,7 @@ func (r *manifestResource) classifyK8sError(err error, operation, resourceDesc s
 				"To resolve this conflict do one of the following:\n"+
 				"1. Add conflicting field paths to 'ignore_fields' to release ownership to the other controller\n"+
 				"2. Remove the conflicting fields from your Terraform configuration\n"+
-				"3. Set 'force_conflicts = true' to override (may cause persistent conflicts)\n"+
-				"4. Ensure only one controller manages these fields\n\n"+
+				"3. Ensure only one controller manages these fields\n\n"+
 				"Details: %v",
 				resourceDesc, err)
 
@@ -111,6 +110,26 @@ func (r *manifestResource) isCRDNotFoundError(err error) bool {
 			strings.Contains(msg, "could not find the requested resource")
 	}
 	return false
+}
+
+// isNamespaceNotFoundError detects when a namespace doesn't exist yet
+// This can happen when namespace and namespaced resources are created in parallel
+func (r *manifestResource) isNamespaceNotFoundError(err error) bool {
+	if statusErr, ok := err.(*errors.StatusError); ok {
+		msg := strings.ToLower(statusErr.ErrStatus.Message)
+		// Kubernetes returns "namespaces 'xyz' not found" when namespace doesn't exist
+		// Use "namespaces" (plural, the K8s resource type) to be specific
+		return strings.Contains(msg, "namespaces") && strings.Contains(msg, "not found")
+	}
+	// Also check plain error messages
+	errMsg := strings.ToLower(err.Error())
+	return strings.Contains(errMsg, "namespaces") && strings.Contains(errMsg, "not found")
+}
+
+// isDependencyNotReadyError detects temporary errors due to dependencies not being ready yet
+// This includes both CRD not found and namespace not found errors
+func (r *manifestResource) isDependencyNotReadyError(err error) bool {
+	return r.isCRDNotFoundError(err) || r.isNamespaceNotFoundError(err)
 }
 
 func (r *manifestResource) extractImmutableFields(err error) []string {

@@ -244,7 +244,7 @@ metadata:
 **Secondary Ownership (Field Managers):**
 ```go
 fieldManager := "k8sconnect" // Consistent across all instances
-// Use force_conflicts judiciously based on annotation analysis
+// Always use SSA with force=true to automatically take ownership of conflicted fields
 ```
 
 **Pros:**

@@ -20,6 +20,13 @@ import (
 
 // checkResourceExistenceAndOwnership checks if resource exists and verifies ownership
 func (r *manifestResource) checkResourceExistenceAndOwnership(ctx context.Context, rc *ResourceContext, data *manifestResourceModel, resp *resource.CreateResponse) error {
+	// Skip check if GVR is empty (CRD not found during prepareContext)
+	// The apply retry logic will handle this case
+	if rc.GVR.Empty() {
+		tflog.Debug(ctx, "Skipping existence check - GVR not available (likely CRD not found yet)")
+		return nil
+	}
+
 	existingObj, err := rc.Client.Get(ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName())
 	if err == nil {
 		// Resource exists - check ownership
@@ -33,7 +40,17 @@ func (r *manifestResource) checkResourceExistenceAndOwnership(ctx context.Contex
 			return fmt.Errorf("resource already managed")
 		}
 		// If existingID is empty (unowned) or matches our ID, we can proceed
-	} else if !errors.IsNotFound(err) {
+	} else if !errors.IsNotFound(err) && !r.isNamespaceNotFoundError(err) {
+		// If namespace doesn't exist, resource can't exist either - skip check
+		// The apply retry logic will handle this case
+		if r.isNamespaceNotFoundError(err) {
+			tflog.Debug(ctx, "Namespace doesn't exist yet - skipping existence check", map[string]interface{}{
+				"namespace": rc.Object.GetNamespace(),
+				"resource":  rc.Object.GetName(),
+			})
+			return nil
+		}
+
 		// Real error checking if resource exists
 		resp.Diagnostics.AddError("Existence Check Failed",
 			fmt.Sprintf("Failed to check if resource exists: %s", err))
@@ -44,10 +61,10 @@ func (r *manifestResource) checkResourceExistenceAndOwnership(ctx context.Contex
 
 // applyResourceWithConflictHandling applies resource and handles field conflicts.
 // Omits ignore_fields from the Apply patch to avoid taking ownership of those fields.
-// applyWithCRDRetry applies a resource with automatic retry for missing CRD errors
-// This enables CRD and CR to be applied together in a single terraform apply
+// applyWithCRDRetry applies a resource with automatic retry for missing dependencies
+// This enables CRD/CR and namespace/resource to be applied together in a single terraform apply
 func (r *manifestResource) applyWithCRDRetry(ctx context.Context, client k8sclient.K8sClient, obj *unstructured.Unstructured, opts k8sclient.ApplyOptions) error {
-	// CRD retry backoff schedule: fast initial retries, ~30s total
+	// Dependency retry backoff schedule: fast initial retries, ~30s total
 	backoff := []time.Duration{
 		100 * time.Millisecond,
 		500 * time.Millisecond,
@@ -65,7 +82,7 @@ func (r *manifestResource) applyWithCRDRetry(ctx context.Context, client k8sclie
 		if err == nil {
 			// Success!
 			if attempt > 0 {
-				tflog.Info(ctx, "Resource applied successfully after CRD retry", map[string]interface{}{
+				tflog.Info(ctx, "Resource applied successfully after dependency retry", map[string]interface{}{
 					"attempts": attempt + 1,
 					"kind":     obj.GetKind(),
 					"name":     obj.GetName(),
@@ -74,16 +91,20 @@ func (r *manifestResource) applyWithCRDRetry(ctx context.Context, client k8sclie
 			return nil
 		}
 
-		// Check if this is a CRD not found error
-		if !r.isCRDNotFoundError(err) {
+		// Check if this is a dependency not ready error (CRD or namespace)
+		if !r.isDependencyNotReadyError(err) {
 			// Different error type - return immediately
 			return err
 		}
 
 		lastErr = err
 
-		// Log retry attempt
-		tflog.Debug(ctx, "CRD not ready, retrying", map[string]interface{}{
+		// Log retry attempt with appropriate message
+		reason := "CRD"
+		if r.isNamespaceNotFoundError(err) {
+			reason = "Namespace"
+		}
+		tflog.Debug(ctx, fmt.Sprintf("%s not ready, retrying", reason), map[string]interface{}{
 			"attempt": attempt + 1,
 			"delay":   delay,
 			"kind":    obj.GetKind(),
@@ -116,12 +137,6 @@ func (r *manifestResource) applyWithCRDRetry(ctx context.Context, client k8sclie
 }
 
 func (r *manifestResource) applyResourceWithConflictHandling(ctx context.Context, rc *ResourceContext, data *manifestResourceModel, resp interface{}, operation string) error {
-	// Check force conflicts from the data parameter
-	forceConflicts := false
-	if !data.ForceConflicts.IsNull() {
-		forceConflicts = data.ForceConflicts.ValueBool()
-	}
-
 	// Prepare the object to apply
 	objToApply := rc.Object.DeepCopy()
 
@@ -136,21 +151,11 @@ func (r *manifestResource) applyResourceWithConflictHandling(ctx context.Context
 		}
 	}
 
-	// Apply the resource with CRD retry (with ignored fields filtered out on Update)
+	// Apply the resource with CRD retry (always force conflicts)
 	err := r.applyWithCRDRetry(ctx, rc.Client, objToApply, k8sclient.ApplyOptions{
 		FieldManager: "k8sconnect",
-		Force:        forceConflicts,
+		Force:        true, // Always force ownership of conflicted fields
 	})
-
-	if err != nil && isFieldConflictError(err) && !forceConflicts {
-		if conflictsOnlyWithSelf(err) {
-			tflog.Info(ctx, "Detected drift in fields we own, forcing update")
-			err = r.applyWithCRDRetry(ctx, rc.Client, rc.Object, k8sclient.ApplyOptions{
-				FieldManager: "k8sconnect",
-				Force:        true,
-			})
-		}
-	}
 
 	if err != nil {
 		if isFieldConflictError(err) {
@@ -320,11 +325,11 @@ func (r *manifestResource) addFieldConflictError(resp interface{}, operation str
 	if createResp, ok := resp.(*resource.CreateResponse); ok {
 		createResp.Diagnostics.AddError("Field Manager Conflict",
 			"Another controller owns fields you're trying to set. "+
-				"Add conflicting paths to ignore_fields to release ownership, or set force_conflicts = true to override.")
+				"Add conflicting paths to ignore_fields to release ownership.")
 	} else if updateResp, ok := resp.(*resource.UpdateResponse); ok {
 		updateResp.Diagnostics.AddError("Field Manager Conflict",
 			"Another controller owns fields you're trying to set. "+
-				"Add conflicting paths to ignore_fields to release ownership, or set force_conflicts = true to override.")
+				"Add conflicting paths to ignore_fields to release ownership.")
 	}
 }
 

@@ -15,8 +15,7 @@ import (
 
 // stubK8sClient is a test implementation of K8sClient that records method calls
 type stubK8sClient struct {
-	fieldManager   string
-	forceConflicts bool
+	fieldManager string
 
 	// Call recording
 	ApplyCalls  []ApplyCall
@@ -59,12 +58,11 @@ type DryRunCall struct {
 // NewStubK8sClient creates a new stub client for testing
 func NewStubK8sClient() *stubK8sClient {
 	return &stubK8sClient{
-		fieldManager:   "k8sconnect",
-		forceConflicts: false,
-		ApplyCalls:     []ApplyCall{},
-		GetCalls:       []GetCall{},
-		DeleteCalls:    []DeleteCall{},
-		DryRunCalls:    []DryRunCall{},
+		fieldManager: "k8sconnect",
+		ApplyCalls:   []ApplyCall{},
+		GetCalls:     []GetCall{},
+		DeleteCalls:  []DeleteCall{},
+		DryRunCalls:  []DryRunCall{},
 	}
 }
 
@@ -111,11 +109,6 @@ func (s *stubK8sClient) DryRunApply(ctx context.Context, obj *unstructured.Unstr
 
 func (s *stubK8sClient) SetFieldManager(name string) K8sClient {
 	s.fieldManager = name
-	return s
-}
-
-func (s *stubK8sClient) WithForceConflicts(force bool) K8sClient {
-	s.forceConflicts = force
 	return s
 }
 
