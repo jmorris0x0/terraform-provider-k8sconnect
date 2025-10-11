@@ -1,0 +1,158 @@
+// internal/k8sconnect/datasource/yaml_common/parsing.go
+package yaml_common
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"os"
+	"regexp"
+	"sort"
+	"strings"
+
+	"github.com/bmatcuk/doublestar/v4"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/yaml"
+)
+
+// DocumentInfo holds metadata about a parsed document
+type DocumentInfo struct {
+	Content       string
+	SourceFile    string
+	DocumentIndex int
+	LineNumber    int
+	Object        *unstructured.Unstructured
+	ParseError    error
+}
+
+// ParseDocuments splits and parses YAML documents from content
+func ParseDocuments(content, sourceFile string) ([]DocumentInfo, error) {
+	// Split documents using smart separator detection
+	rawDocs := SplitYAMLDocuments(content)
+
+	var documents []DocumentInfo
+	var errors []string
+
+	for i, rawDoc := range rawDocs {
+		doc := DocumentInfo{
+			Content:       rawDoc,
+			SourceFile:    sourceFile,
+			DocumentIndex: i,
+			LineNumber:    EstimateLineNumber(content, rawDoc),
+		}
+
+		// Try to parse as Kubernetes resource
+		var obj unstructured.Unstructured
+		if err := yaml.Unmarshal([]byte(rawDoc), &obj); err != nil {
+			// Document failed to parse - record error but continue
+			doc.ParseError = fmt.Errorf("invalid YAML at document %d: %w", i+1, err)
+			errors = append(errors, fmt.Sprintf("%s (document %d): %s", sourceFile, i+1, err.Error()))
+		} else {
+			doc.Object = &obj
+		}
+
+		documents = append(documents, doc)
+	}
+
+	var err error
+	if len(errors) > 0 {
+		err = fmt.Errorf("parsing errors: %s", strings.Join(errors, "; "))
+	}
+
+	return documents, err
+}
+
+// SplitYAMLDocuments splits YAML content on document separators
+func SplitYAMLDocuments(content string) []string {
+	separatorRegex := regexp.MustCompile(`(?m)^---\s*(?:#.*)?(?:\r?\n|$)`)
+
+	parts := separatorRegex.Split(content, -1)
+	var documents []string
+
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		// Skip empty documents and comment-only documents
+		if trimmed != "" && !isCommentOnly(trimmed) {
+			documents = append(documents, trimmed)
+		}
+	}
+
+	return documents
+}
+
+// isCommentOnly checks if a document contains only comments and whitespace
+func isCommentOnly(content string) bool {
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+			return false
+		}
+	}
+	return true
+}
+
+// EstimateLineNumber provides approximate line number for error reporting
+func EstimateLineNumber(fullContent, docContent string) int {
+	beforeDoc := strings.Split(fullContent, docContent)[0]
+	return strings.Count(beforeDoc, "\n") + 1
+}
+
+// GenerateResourceID creates a human-readable, stable ID for a Kubernetes resource
+// Format: kind.name (cluster-scoped) or kind.namespace.name (namespaced)
+func GenerateResourceID(obj *unstructured.Unstructured) string {
+	kind := strings.ToLower(obj.GetKind())
+	name := obj.GetName()
+	namespace := obj.GetNamespace()
+
+	// Handle edge cases
+	if kind == "" {
+		kind = "unknown"
+	}
+	if name == "" {
+		name = "unnamed"
+	}
+
+	// Create stable ID: kind.name or kind.namespace.name
+	if namespace == "" {
+		return fmt.Sprintf("%s.%s", kind, name)
+	}
+	return fmt.Sprintf("%s.%s.%s", kind, namespace, name)
+}
+
+// ExpandPattern resolves glob patterns using doublestar for full glob support
+func ExpandPattern(pattern string) ([]string, error) {
+	// Use doublestar for robust glob matching (handles **, *, ?, etc.)
+	// FilepathGlob works with real filesystem and handles both relative and absolute paths
+	matches, err := doublestar.FilepathGlob(pattern)
+	if err != nil {
+		return nil, err
+	}
+
+	// Filter to only include files (not directories)
+	var files []string
+	for _, match := range matches {
+		if info, err := os.Stat(match); err == nil && !info.IsDir() {
+			files = append(files, match)
+		}
+	}
+
+	// Sort for consistent ordering
+	sort.Strings(files)
+	return files, nil
+}
+
+// ReadFile reads a file and returns its content as string
+func ReadFile(path string) (string, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file %q: %w", path, err)
+	}
+	return string(content), nil
+}
+
+// HashString creates a SHA256 hash of the input string
+func HashString(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])
+}
