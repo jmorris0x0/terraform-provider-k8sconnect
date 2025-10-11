@@ -1,0 +1,90 @@
+# CRD that needs to be created first
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: databases.storage.example.com
+spec:
+  group: storage.example.com
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              size:
+                type: string
+              replicas:
+                type: integer
+  scope: Namespaced
+  names:
+    plural: databases
+    singular: database
+    kind: Database
+---
+# Namespace for the application
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: app-system
+---
+# ClusterRole for RBAC
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: database-operator
+rules:
+- apiGroups: ["storage.example.com"]
+  resources: ["databases"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+# Deployment for the database operator
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: db-operator
+  namespace: app-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: db-operator
+  template:
+    metadata:
+      labels:
+        app: db-operator
+    spec:
+      containers:
+      - name: operator
+        image: nginx:latest  # Placeholder image
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+---
+# ConfigMap for the operator
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: operator-config
+  namespace: app-system
+data:
+  log_level: info
+  reconcile_interval: "30s"
+---
+# Custom resource that depends on CRD existing
+apiVersion: storage.example.com/v1
+kind: Database
+metadata:
+  name: production-db
+  namespace: app-system
+spec:
+  size: large
+  replicas: 3

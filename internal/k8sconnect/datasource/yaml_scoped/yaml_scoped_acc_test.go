@@ -164,12 +164,12 @@ rules:
   verbs: ["*"]`
 
 const testConfigMapManifest = `apiVersion: v1
-data:
-  key: value
 kind: ConfigMap
 metadata:
   name: app-config
-  namespace: app-system`
+  namespace: app-system
+data:
+  key: value`
 
 const testDeploymentManifest = `apiVersion: apps/v1
 kind: Deployment
