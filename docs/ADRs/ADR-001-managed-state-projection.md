@@ -29,7 +29,7 @@ This creates a situation where the diff shown during `terraform plan` does not m
 - **Failed because**: Field ownership conflicts, no meaningful diffs during plan phase
 - **Result**: Deprecated
 
-#### Schema Translation (Official Provider)  
+#### Schema Translation (Official Provider)
 - **Approach**: Translate every Kubernetes resource type into Terraform schema
 - **Failed because**: Massive maintenance burden, can't support CRDs automatically, still shows incorrect diffs
 - **Result**: Incomplete resource coverage
@@ -85,9 +85,6 @@ Implement a provider that uses **Managed Fields Projection** to achieve accurate
    "managed_fields_projection": schema.StringAttribute{
        Computed: true,
        Description: "JSON projection of fields managed by this resource",
-       PlanModifiers: []planmodifier.String{
-           &managedFieldsProjectionModifier{},
-       },
    }
    ```
 
@@ -101,67 +98,13 @@ Implement a provider that uses **Managed Fields Projection** to achieve accurate
    - Update planned values to match reality
    - Show accurate diffs for managed fields
 
-### Implementation Strategy
+### How It Works
 
-Two key operations handle the projection:
+**Read Phase**: Get current resource from Kubernetes, parse user's YAML to determine which field paths to track, extract only those fields from the live state, store as JSON projection.
 
-#### Read Phase
-```go
-func (r *Resource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-    // Get current resource from Kubernetes
-    current, err := k8sClient.Get(ctx, resourceID)
-    
-    // Get yaml_body from state to determine managed field paths
-    var data manifestResourceModel
-    req.State.Get(ctx, &data)
-    
-    desiredObj := parseYAML(data.YAMLBody.ValueString())
-    managedPaths := extractFieldPaths(desiredObj)
-    
-    // Extract only managed fields from current state
-    projection := make(map[string]interface{})
-    for _, path := range managedPaths {
-        if value, exists := getFieldByPath(current, path); exists {
-            setFieldByPath(projection, path, value)
-        }
-    }
-    
-    // Store the projection
-    data.ManagedFieldsProjection = types.StringValue(toJSON(projection))
-    resp.State.Set(ctx, &data)
-}
-```
+**Plan Phase**: Parse desired YAML, perform dry-run apply with field manager, extract managed fields from dry-run result, update plan with accurate projection.
 
-#### Plan Modification Phase (Using Plugin Framework)
-```go
-func (r *Resource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-    // Skip during destroy
-    if req.Plan.Raw.IsNull() {
-        return
-    }
-    
-    // Get desired state from plan
-    var plannedData manifestResourceModel
-    req.Plan.Get(ctx, &plannedData)
-    
-    // Parse desired state
-    desiredObj := parseYAML(plannedData.YAMLBody.ValueString())
-    
-    // Perform dry-run with field manager
-    dryRunResult, err := k8sClient.DryRunApply(ctx, desiredObj, 
-        FieldManager: "terraform-provider",
-        Force: true,
-    )
-    
-    // Extract managed fields from dry-run result
-    managedPaths := extractFieldPaths(desiredObj)
-    projectedState := extractFieldsAtPaths(dryRunResult, managedPaths)
-    
-    // Update the plan with accurate projection
-    plannedData.ManagedFieldsProjection = types.StringValue(toJSON(projectedState))
-    resp.Plan.Set(ctx, &plannedData)
-}
-```
+This ensures the diff compares the same fields that will actually be managed.
 
 ## Consequences
 
@@ -172,8 +115,6 @@ func (r *Resource) ModifyPlan(ctx context.Context, req resource.ModifyPlanReques
 - **Respects Field Ownership**: Other controllers can modify other fields freely
 - **Predictable Behavior**: Diff matches apply because both use SSA
 - **Kubernetes-Native**: Embraces rather than fights Kubernetes patterns
-- **Simple Import**: Multiple import strategies (all fields, unowned only, or from specific manager)
-- **Minimal Performance Impact**: One additional API call is negligible compared to existing operations
 
 ### Negative
 - **Implementation Complexity**: Requires handling multiple Kubernetes-specific edge cases
@@ -181,7 +122,6 @@ func (r *Resource) ModifyPlan(ctx context.Context, req resource.ModifyPlanReques
 ### Neutral
 - **Field Conflicts**: Must handle when taking ownership from other controllers
 - **Limited Computed Field Visibility**: This is the reality of field management - Terraform only owns what it manages
-- **Debugging Complexity**: More complex internals than simple providers, but well worth the accuracy
 
 ## Implementation Notes
 
@@ -195,63 +135,42 @@ Handling Kubernetes correctly requires addressing multiple edge cases. This is n
 
 The alternative is to continue showing incorrect diffs, which makes Terraform unreliable for Kubernetes.
 
-### Critical Components
-1. **Field Path Extraction**: Tree traversal to identify all field paths
-2. **Projection Logic**: Get/set operations on paths
-3. **Type Preservation**: Handle lists, maps, primitives correctly
-4. **Dry-Run Integration**: API call with proper error handling
-5. **Field Manager Configuration**: Consistent naming and force behavior
-
 ### Critical Edge Cases That Must Be Handled
 
 #### Kubernetes Quantity Normalization
-Kubernetes normalizes resource quantities into canonical forms that differ from user input:
+Kubernetes normalizes resource quantities into canonical forms:
 ```yaml
-# User writes:
-resources:
-  limits:
-    memory: "1Gi"      # → Server stores as: "1073741824"
-    cpu: "100m"        # → Server stores as: "0.1"
-    storage: "5000Mi"  # → Server might store as: "5Gi"
+# User writes:        # Server stores as:
+memory: "1Gi"         # "1073741824"
+cpu: "100m"           # "0.1"
+storage: "5000Mi"     # "5Gi"
 ```
 
-**Impact**: Without handling this, every plan will show false changes.
+**Impact**: Without handling this, every plan shows false changes.
 
-**Solution**: The dry-run response contains the server's normalized values. We must store these normalized forms in our projection, not the user's original input. This ensures the diff compares like-for-like.
+**Solution**: Store the dry-run's normalized values in projection, not user's input. This ensures like-for-like comparison.
 
 #### Unknown Values During Planning
-When connection details depend on other resources, they may be unknown during planning:
+When connection details depend on other resources:
 ```hcl
 cluster_connection = {
   host = aws_eks_cluster.main.endpoint  # Unknown during plan
 }
 ```
 
-**Solution**: 
-- Detect unknown values in ModifyPlan
-- Skip dry-run when connection is unknown
-- Set managed_fields_projection to unknown
-- Let Terraform show generic "will be modified" 
-- Perform actual projection during apply when values are known
+**Solution**: Detect unknown values, skip dry-run, set projection to unknown. Perform actual projection during apply when values are known.
 
 #### Strategic Merge Patch Semantics
 Kubernetes uses different merge strategies for different list types:
 ```yaml
-# Replace entire list (default)
-args: ["--flag1", "--flag2"]
-
-# Strategic merge by name
+args: ["--flag1"]          # Replace entire list
 containers:
-- name: app    # Merged by 'name' field
-  image: v2
-
-# Strategic merge with patch strategy
-tolerations:   # Uses deletionStrategy
-- key: "key1"
-  operator: "Equal"
+- name: app                # Merge by 'name' field
+tolerations:
+- key: "key1"              # Uses deletionStrategy
 ```
 
-**Solution**: Use `k8s.io/apimachinery/pkg/util/strategicpatch` to handle merging correctly. Without this, list updates will show incorrect diffs.
+**Solution**: Parse merge keys from `managedFields.fieldsV1` to understand which array items we own. The actual strategic merge is performed server-side by Kubernetes during SSA - we just need to correctly extract our owned fields from the result.
 
 ### Import Strategies
 Import supports multiple strategies via import ID format:
@@ -259,53 +178,10 @@ Import supports multiple strategies via import ID format:
 - `namespace/kind/name?unowned` - Import only unowned fields
 - `namespace/kind/name?manager=kubectl` - Import fields owned by specific manager
 
-Example implementation:
-```go
-func extractFieldsBasedOnStrategy(liveObj *unstructured.Unstructured, strategy string) []string {
-    switch strategy {
-    case "unowned":
-        return extractUnownedFields(liveObj.GetManagedFields())
-    case "manager=kubectl":
-        return extractFieldsOwnedBy(liveObj.GetManagedFields(), "kubectl")
-    default:
-        return extractAllFields(liveObj)
-    }
-}
-```
-
-### Core Operations
-```go
-// Extract paths using recursion
-func extractFieldPaths(obj map[string]interface{}, prefix string) []string {
-    var paths []string
-    for key, value := range obj {
-        path := prefix + "." + key
-        paths = append(paths, path)
-        if nested, ok := value.(map[string]interface{}); ok {
-            paths = append(paths, extractFieldPaths(nested, path)...)
-        }
-    }
-    return paths
-}
-```
-
 ### Edge Cases
 1. **Field Conflicts**: Default to force=true with clear documentation
 2. **List Handling**: Strategic merge patch semantics (use Kubernetes libraries)
 3. **Migration**: Not needed - pre-alpha release
-
-## Plugin Framework Specifics
-
-The Terraform Plugin Framework provides the necessary capabilities through:
-
-1. **ResourceWithModifyPlan Interface**: Allows modification of the entire resource plan
-2. **Attribute Plan Modifiers**: Can modify individual attribute values
-3. **Computed Attributes**: Can be updated during planning based on dry-run results
-
-This is superior to SDK v2's CustomizeDiff because:
-- More explicit API with clear request/response types
-- Better separation of concerns (plan vs state vs config)
-- Native support for complex types without string manipulation
 
 ## Alternatives Considered
 
