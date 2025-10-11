@@ -143,4 +143,6 @@ Rollbacks in Terraform often mean disruptive destroy-and-recreate cycles, while 
 
 Terraform wants to be declarative and stateful, Kubernetes wants to be self-healing and continuously reconciling, and developers just want to ship code without becoming infrastructure experts.
 
+Add a file with the terraform block for the examples? It would be nice to be fully copy pastable.
 
+Add a deep compare yaml helper function for the tests. string comparisons are brittle and have wasted a lot of time for me.
