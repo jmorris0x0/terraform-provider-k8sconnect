@@ -3,6 +3,7 @@ module github.com/jmorris0x0/terraform-provider-k8sconnect
 go 1.24.6
 
 require (
+	github.com/bmatcuk/doublestar/v4 v4.9.1
 	github.com/hashicorp/terraform-plugin-framework v1.16.1
 	github.com/hashicorp/terraform-plugin-framework-validators v0.18.0
 	github.com/hashicorp/terraform-plugin-go v0.29.0

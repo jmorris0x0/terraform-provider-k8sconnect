@@ -127,3 +127,20 @@ Could probably knock out an MVP using the Terraform provider schema definitions 
     - kubectl has this
     - Useful for multi-tenancy patterns
     - Could be nice. Not sure how hard.
+
+
+Under the readme main table I say "Conventional providers" I need to make sure that all these things apply to both hashi and gavin. Otherwise i'm not being fair. Gotta be nice.
+
+Update git repo tag line for new focus on single stage apply.
+
+Add override_namespace to manifest resource for multi-tenancy patterns
+
+Unmet needs and pain points:
+
+Unified State Management: A tool that bridges Terraform's state with Kubernetes' native reconciliation without drift wars. [I address this already]
+
+Rollbacks in Terraform often mean disruptive destroy-and-recreate cycles, while Kubernetes can do rapid, surgical rollbacks in seconds. [I could address this?]
+
+Terraform wants to be declarative and stateful, Kubernetes wants to be self-healing and continuously reconciling, and developers just want to ship code without becoming infrastructure experts.
+
+

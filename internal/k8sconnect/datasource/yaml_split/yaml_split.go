@@ -7,11 +7,11 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -67,7 +67,7 @@ func (d *yamlSplitDataSource) Schema(ctx context.Context, req datasource.SchemaR
 			"manifests": schema.MapAttribute{
 				ElementType: types.StringType,
 				Computed:    true,
-				Description: "Map of stable manifest IDs to YAML content. IDs follow the format 'kind.name' (cluster-scoped) or 'kind.namespace.name' (namespaced). Duplicates get numeric suffixes.",
+				Description: "Map of stable manifest IDs to YAML content. IDs follow the format 'kind.name' (cluster-scoped) or 'kind.namespace.name' (namespaced). Duplicate IDs will cause an error.",
 			},
 		},
 	}
@@ -304,15 +304,11 @@ func (d *yamlSplitDataSource) generateBaseID(obj *unstructured.Unstructured) str
 	return fmt.Sprintf("%s.%s.%s", kind, namespace, name)
 }
 
-// expandPattern resolves glob patterns, including recursive patterns
+// expandPattern resolves glob patterns using doublestar for full glob support
 func (d *yamlSplitDataSource) expandPattern(pattern string) ([]string, error) {
-	// Handle recursive patterns with **
-	if strings.Contains(pattern, "**") {
-		return d.walkPattern(pattern)
-	}
-
-	// Standard glob
-	matches, err := filepath.Glob(pattern)
+	// Use doublestar for robust glob matching (handles **, *, ?, etc.)
+	// FilepathGlob works with real filesystem and handles both relative and absolute paths
+	matches, err := doublestar.FilepathGlob(pattern)
 	if err != nil {
 		return nil, err
 	}
@@ -328,68 +324,6 @@ func (d *yamlSplitDataSource) expandPattern(pattern string) ([]string, error) {
 	// Sort for consistent ordering
 	sort.Strings(files)
 	return files, nil
-}
-
-// walkPattern handles recursive directory patterns with **
-func (d *yamlSplitDataSource) walkPattern(pattern string) ([]string, error) {
-	var files []string
-
-	// Convert ** glob pattern to a more usable form
-	err := filepath.WalkDir(".", func(path string, dirEntry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if dirEntry.IsDir() {
-			return nil
-		}
-
-		// Use custom pattern matching for ** patterns
-		if d.matchesPattern(pattern, path) {
-			files = append(files, path)
-		}
-
-		return nil
-	})
-
-	sort.Strings(files)
-	return files, err
-}
-
-// matchesPattern checks if a file path matches a pattern with ** support
-func (d *yamlSplitDataSource) matchesPattern(pattern, path string) bool {
-	// Handle ** patterns
-	if strings.Contains(pattern, "**") {
-		// For now, handle the common case: **/*.ext
-		if strings.HasPrefix(pattern, "**/") {
-			suffix := pattern[3:] // Remove "**/"
-			matched, err := filepath.Match(suffix, filepath.Base(path))
-			return err == nil && matched
-		}
-		// For other ** patterns, try a different approach
-		// Convert ** to match any number of path segments
-		parts := strings.Split(pattern, "**")
-		if len(parts) == 2 {
-			prefix := strings.TrimSuffix(parts[0], "/")
-			suffix := strings.TrimPrefix(parts[1], "/")
-
-			// Check prefix
-			if prefix != "" && !strings.HasPrefix(path, prefix) {
-				return false
-			}
-
-			// Check suffix using glob on filename
-			if suffix != "" {
-				matched, err := filepath.Match(suffix, filepath.Base(path))
-				return err == nil && matched
-			}
-			return true
-		}
-	}
-
-	// Fallback to standard filepath.Match for non-recursive patterns
-	matched, err := filepath.Match(pattern, path)
-	return err == nil && matched
 }
 
 // readFile reads a file and returns its content as string
