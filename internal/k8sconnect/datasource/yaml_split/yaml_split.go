@@ -3,20 +3,13 @@ package yaml_split
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"os"
-	"regexp"
-	"sort"
-	"strings"
 
-	"github.com/bmatcuk/doublestar/v4"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"sigs.k8s.io/yaml"
+
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/datasource/yaml_common"
 )
 
 var _ datasource.DataSource = (*yamlSplitDataSource)(nil)
@@ -28,16 +21,6 @@ type yamlSplitDataSourceModel struct {
 	Content   types.String            `tfsdk:"content"`
 	Pattern   types.String            `tfsdk:"pattern"`
 	Manifests map[string]types.String `tfsdk:"manifests"`
-}
-
-// DocumentInfo holds metadata about a parsed document
-type DocumentInfo struct {
-	Content       string
-	SourceFile    string
-	DocumentIndex int
-	LineNumber    int
-	Object        *unstructured.Unstructured
-	ParseError    error
 }
 
 func NewYamlSplitDataSource() datasource.DataSource {
@@ -62,7 +45,7 @@ func (d *yamlSplitDataSource) Schema(ctx context.Context, req datasource.SchemaR
 			},
 			"pattern": schema.StringAttribute{
 				Optional:    true,
-				Description: "Glob pattern to match YAML files (e.g., './manifests/*.yaml', './configs/**/*.yml'). Supports recursive patterns. Mutually exclusive with 'content'.",
+				Description: "Glob pattern to match YAML files (e.g., './manifests/*.yaml', './configs/**/*.yml'). Supports recursive patterns. Mutually exclusive with 'pattern'.",
 			},
 			"manifests": schema.MapAttribute{
 				ElementType: types.StringType,
@@ -102,13 +85,13 @@ func (d *yamlSplitDataSource) Read(ctx context.Context, req datasource.ReadReque
 		return
 	}
 
-	var documents []DocumentInfo
+	var documents []yaml_common.DocumentInfo
 	var sourceID string
 
 	if hasContent {
 		// Parse inline content
 		content := data.Content.ValueString()
-		docs, err := d.parseDocuments(content, "<inline>")
+		docs, err := yaml_common.ParseDocuments(content, "<inline>")
 		if err != nil {
 			resp.Diagnostics.AddError(
 				"Content Parsing Error",
@@ -117,11 +100,11 @@ func (d *yamlSplitDataSource) Read(ctx context.Context, req datasource.ReadReque
 			return
 		}
 		documents = docs
-		sourceID = fmt.Sprintf("content-%s", hashString(content)[:8])
+		sourceID = fmt.Sprintf("content-%s", yaml_common.HashString(content)[:8])
 	} else {
 		// Handle pattern-based loading
 		pattern := data.Pattern.ValueString()
-		files, err := d.expandPattern(pattern)
+		files, err := yaml_common.ExpandPattern(pattern)
 		if err != nil {
 			resp.Diagnostics.AddError(
 				"Pattern Error",
@@ -140,7 +123,7 @@ func (d *yamlSplitDataSource) Read(ctx context.Context, req datasource.ReadReque
 
 		// Process all matching files
 		for _, file := range files {
-			content, err := d.readFile(file)
+			content, err := yaml_common.ReadFile(file)
 			if err != nil {
 				resp.Diagnostics.AddError(
 					"File Read Error",
@@ -149,7 +132,7 @@ func (d *yamlSplitDataSource) Read(ctx context.Context, req datasource.ReadReque
 				return
 			}
 
-			docs, err := d.parseDocuments(content, file)
+			docs, err := yaml_common.ParseDocuments(content, file)
 			if err != nil {
 				resp.Diagnostics.AddError(
 					"File Parsing Error",
@@ -159,7 +142,7 @@ func (d *yamlSplitDataSource) Read(ctx context.Context, req datasource.ReadReque
 			}
 			documents = append(documents, docs...)
 		}
-		sourceID = fmt.Sprintf("pattern-%s", hashString(pattern)[:8])
+		sourceID = fmt.Sprintf("pattern-%s", yaml_common.HashString(pattern)[:8])
 	}
 
 	// Generate manifests - this will fail on duplicates
@@ -180,83 +163,10 @@ func (d *yamlSplitDataSource) Read(ctx context.Context, req datasource.ReadReque
 	resp.Diagnostics.Append(diags...)
 }
 
-// Splits and parses YAML documents from content
-func (d *yamlSplitDataSource) parseDocuments(content, sourceFile string) ([]DocumentInfo, error) {
-	// Split documents using smart separator detection
-	rawDocs := d.splitYAMLDocuments(content)
-
-	var documents []DocumentInfo
-	var errors []string
-
-	for i, rawDoc := range rawDocs {
-		doc := DocumentInfo{
-			Content:       rawDoc,
-			SourceFile:    sourceFile,
-			DocumentIndex: i,
-			LineNumber:    d.estimateLineNumber(content, rawDoc),
-		}
-
-		// Try to parse as Kubernetes resource
-		var obj unstructured.Unstructured
-		if err := yaml.Unmarshal([]byte(rawDoc), &obj); err != nil {
-			// Document failed to parse - record error but continue
-			doc.ParseError = fmt.Errorf("invalid YAML at document %d: %w", i+1, err)
-			errors = append(errors, fmt.Sprintf("%s (document %d): %s", sourceFile, i+1, err.Error()))
-		} else {
-			doc.Object = &obj
-		}
-
-		documents = append(documents, doc)
-	}
-
-	var err error
-	if len(errors) > 0 {
-		err = fmt.Errorf("parsing errors: %s", strings.Join(errors, "; "))
-	}
-
-	return documents, err
-}
-
-// Splits YAML content on document separators
-func (d *yamlSplitDataSource) splitYAMLDocuments(content string) []string {
-	separatorRegex := regexp.MustCompile(`(?m)^---\s*(?:#.*)?(?:\r?\n|$)`)
-
-	parts := separatorRegex.Split(content, -1)
-	var documents []string
-
-	for _, part := range parts {
-		trimmed := strings.TrimSpace(part)
-		// Skip empty documents and comment-only documents
-		if trimmed != "" && !d.isCommentOnly(trimmed) {
-			documents = append(documents, trimmed)
-		}
-	}
-
-	return documents
-}
-
-// isCommentOnly checks if a document contains only comments and whitespace
-func (d *yamlSplitDataSource) isCommentOnly(content string) bool {
-	lines := strings.Split(content, "\n")
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
-			return false
-		}
-	}
-	return true
-}
-
-// estimateLineNumber provides approximate line number for error reporting
-func (d *yamlSplitDataSource) estimateLineNumber(fullContent, docContent string) int {
-	beforeDoc := strings.Split(fullContent, docContent)[0]
-	return strings.Count(beforeDoc, "\n") + 1
-}
-
 // generateManifests creates the final manifest map with stable IDs
-func (d *yamlSplitDataSource) generateManifests(documents []DocumentInfo) (map[string]types.String, error) {
+func (d *yamlSplitDataSource) generateManifests(documents []yaml_common.DocumentInfo) (map[string]types.String, error) {
 	manifests := make(map[string]types.String)
-	seenIDs := make(map[string]DocumentInfo) // Track which IDs we've seen and where
+	seenIDs := make(map[string]yaml_common.DocumentInfo) // Track which IDs we've seen and where
 
 	for _, doc := range documents {
 		if doc.ParseError != nil {
@@ -265,7 +175,7 @@ func (d *yamlSplitDataSource) generateManifests(documents []DocumentInfo) (map[s
 				doc.SourceFile, doc.DocumentIndex+1, doc.LineNumber, doc.ParseError)
 		}
 
-		id := d.generateBaseID(doc.Object)
+		id := yaml_common.GenerateResourceID(doc.Object)
 
 		// Check for duplicates - this is always an error
 		if existingDoc, exists := seenIDs[id]; exists {
@@ -281,62 +191,4 @@ func (d *yamlSplitDataSource) generateManifests(documents []DocumentInfo) (map[s
 	}
 
 	return manifests, nil
-}
-
-// generateBaseID creates a human-readable, stable ID for a Kubernetes resource
-func (d *yamlSplitDataSource) generateBaseID(obj *unstructured.Unstructured) string {
-	kind := strings.ToLower(obj.GetKind())
-	name := obj.GetName()
-	namespace := obj.GetNamespace()
-
-	// Handle edge cases
-	if kind == "" {
-		kind = "unknown"
-	}
-	if name == "" {
-		name = "unnamed"
-	}
-
-	// Create stable ID: kind.name or kind.namespace.name
-	if namespace == "" {
-		return fmt.Sprintf("%s.%s", kind, name)
-	}
-	return fmt.Sprintf("%s.%s.%s", kind, namespace, name)
-}
-
-// expandPattern resolves glob patterns using doublestar for full glob support
-func (d *yamlSplitDataSource) expandPattern(pattern string) ([]string, error) {
-	// Use doublestar for robust glob matching (handles **, *, ?, etc.)
-	// FilepathGlob works with real filesystem and handles both relative and absolute paths
-	matches, err := doublestar.FilepathGlob(pattern)
-	if err != nil {
-		return nil, err
-	}
-
-	// Filter to only include files (not directories)
-	var files []string
-	for _, match := range matches {
-		if info, err := os.Stat(match); err == nil && !info.IsDir() {
-			files = append(files, match)
-		}
-	}
-
-	// Sort for consistent ordering
-	sort.Strings(files)
-	return files, nil
-}
-
-// readFile reads a file and returns its content as string
-func (d *yamlSplitDataSource) readFile(path string) (string, error) {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("failed to read file %q: %w", path, err)
-	}
-	return string(content), nil
-}
-
-// hashString creates a SHA256 hash of the input string
-func hashString(s string) string {
-	h := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(h[:])
 }

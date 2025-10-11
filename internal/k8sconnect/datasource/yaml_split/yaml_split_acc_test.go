@@ -131,7 +131,7 @@ YAML
 
 const testAccYamlSplitConfigPattern = `
 data "k8sconnect_yaml_split" "test" {
-  pattern = "../../../examples/yaml-split-files/manifests/*.yaml"
+  pattern = "../../../../examples/yaml-split-files/manifests/*.yaml"
 }
 `
 
