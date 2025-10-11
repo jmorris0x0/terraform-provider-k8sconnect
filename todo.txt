@@ -5,8 +5,6 @@ Easy:
 
 * error if more than one context in kubeconfig and context is not given. Plus test. Using current context or first context is dangerous.
 
-* The readme example: "The yaml_split data source creates stable IDs like deployment.my-app.nginx and service.my-app.nginx, preventing unnecessary resource recreation when manifests are reordered." Can these collide? Do we need more entroy? Should it really be deployment.app.nginx based on the example? Make a runnable example maybe? what if two yaml_split resources put their output into one map? Would there be dupes?
-
 Hard:
 * Finish MVP of existing resource datasource and add wait_for. Actually, this might not be a good idea. 
 Datasources run during plan phase even with depends_on, so they can't wait for resources that don't exist yet. The only exception is when datasource inputs are unknown (forcing deferral to apply), but "resource might not exist" isn't the same as "input value unknown". For waiting on resources created by other systems, you'd need a separate wait resource, not a waiting datasource.
@@ -22,9 +20,6 @@ GB does this:
 
    # Import the certmanager Issuer CRD named cluster-selfsigned-issuer-root-ca from the my-namespace namespace
    $ terraform import -provider kubectl module.kubernetes.kubectl_manifest.crd-example certmanager.k8s.io/v1alpha1//Issuer//cluster-selfsigned-issuer-root-ca//my-namespace
-
-* UX of yaml split needs a lot of work. It works as an MVP but the existing filtering by regex is quite awkward. API needs redesign before alpha. Don't even start with the patch resource until this one is totally polished. At minimum, expose yaml fields as attributes so people can filter. That's easy. Consider adding a filter field of some kind.
-67b38a3f-368f-461d-ad12-ffc7b541cac3
 
 
 DOCUMENTATION & RELEASE
