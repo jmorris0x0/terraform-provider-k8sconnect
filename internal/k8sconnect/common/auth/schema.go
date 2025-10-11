@@ -34,7 +34,7 @@ func GetConnectionSchemaForResource() map[string]resourceschema.Attribute {
 		},
 		"context": resourceschema.StringAttribute{
 			Optional:    true,
-			Description: "Context to use from the kubeconfig.",
+			Description: "Context to use from the kubeconfig. Optional when kubeconfig contains exactly one context (that context will be used automatically). Required when kubeconfig contains multiple contexts to prevent accidental connection to the wrong cluster. Error will list available contexts if not specified when required.",
 		},
 		"token": resourceschema.StringAttribute{
 			Optional:    true,

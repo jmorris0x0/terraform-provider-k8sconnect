@@ -463,3 +463,140 @@ func TestCreateRESTConfig_InvalidPEM(t *testing.T) {
 		})
 	}
 }
+
+// Context validation tests
+func TestCreateRESTConfig_KubeconfigNoContexts(t *testing.T) {
+	kubeconfig := `apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: https://test.example.com
+    insecure-skip-tls-verify: true
+  name: test-cluster
+contexts: []
+users:
+- name: test-user
+  user:
+    token: test-token`
+
+	conn := ClusterConnectionModel{
+		Kubeconfig: types.StringValue(kubeconfig),
+	}
+
+	_, err := CreateRESTConfig(context.Background(), conn)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "kubeconfig contains no contexts")
+}
+
+func TestCreateRESTConfig_KubeconfigMultipleContextsWithoutExplicit(t *testing.T) {
+	kubeconfig := `apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: https://prod.example.com
+    insecure-skip-tls-verify: true
+  name: prod-cluster
+- cluster:
+    server: https://dev.example.com
+    insecure-skip-tls-verify: true
+  name: dev-cluster
+contexts:
+- context:
+    cluster: prod-cluster
+    user: prod-user
+  name: prod-context
+- context:
+    cluster: dev-cluster
+    user: dev-user
+  name: dev-context
+users:
+- name: prod-user
+  user:
+    token: prod-token
+- name: dev-user
+  user:
+    token: dev-token`
+
+	conn := ClusterConnectionModel{
+		Kubeconfig: types.StringValue(kubeconfig),
+		// Context not specified - should error
+	}
+
+	_, err := CreateRESTConfig(context.Background(), conn)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "kubeconfig contains 2 contexts")
+	assert.Contains(t, err.Error(), "must explicitly specify which one to use")
+	assert.Contains(t, err.Error(), "prod-context")
+	assert.Contains(t, err.Error(), "dev-context")
+}
+
+func TestCreateRESTConfig_KubeconfigMultipleContextsWithExplicit(t *testing.T) {
+	kubeconfig := `apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: https://prod.example.com
+    insecure-skip-tls-verify: true
+  name: prod-cluster
+- cluster:
+    server: https://dev.example.com
+    insecure-skip-tls-verify: true
+  name: dev-cluster
+contexts:
+- context:
+    cluster: prod-cluster
+    user: prod-user
+  name: prod-context
+- context:
+    cluster: dev-cluster
+    user: dev-user
+  name: dev-context
+users:
+- name: prod-user
+  user:
+    token: prod-token
+- name: dev-user
+  user:
+    token: dev-token`
+
+	conn := ClusterConnectionModel{
+		Kubeconfig: types.StringValue(kubeconfig),
+		Context:    types.StringValue("dev-context"),
+	}
+
+	config, err := CreateRESTConfig(context.Background(), conn)
+
+	require.NoError(t, err)
+	assert.NotNil(t, config)
+}
+
+func TestCreateRESTConfig_KubeconfigInvalidContext(t *testing.T) {
+	kubeconfig := `apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: https://test.example.com
+    insecure-skip-tls-verify: true
+  name: test-cluster
+contexts:
+- context:
+    cluster: test-cluster
+    user: test-user
+  name: test-context
+users:
+- name: test-user
+  user:
+    token: test-token`
+
+	conn := ClusterConnectionModel{
+		Kubeconfig: types.StringValue(kubeconfig),
+		Context:    types.StringValue("nonexistent-context"),
+	}
+
+	_, err := CreateRESTConfig(context.Background(), conn)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "context \"nonexistent-context\" not found in kubeconfig")
+}

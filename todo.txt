@@ -3,8 +3,6 @@ CRITICAL BUGS & FIXES
 Easy:
 * Add url attribute to yaml_split to load from the web url, OCI, and git repo/path/branch. Won't do. There is already an http datasource. Just make an example that uses it.
 
-* error if more than one context in kubeconfig and context is not given. Plus test. Using current context or first context is dangerous.
-
 Hard:
 * Finish MVP of existing resource datasource and add wait_for. Actually, this might not be a good idea. 
 Datasources run during plan phase even with depends_on, so they can't wait for resources that don't exist yet. The only exception is when datasource inputs are unknown (forcing deferral to apply), but "resource might not exist" isn't the same as "input value unknown". For waiting on resources created by other systems, you'd need a separate wait resource, not a waiting datasource.
