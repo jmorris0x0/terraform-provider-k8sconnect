@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"k8s.io/client-go/rest"
@@ -212,19 +213,15 @@ func configureProxy(config *rest.Config, conn ClusterConnectionModel) error {
 func createKubeconfigConfig(conn ClusterConnectionModel) (*rest.Config, error) {
 	kubeconfigData := []byte(conn.Kubeconfig.ValueString())
 
-	config, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigData)
+	// Load kubeconfig to inspect contexts
+	clientConfig, err := clientcmd.Load(kubeconfigData)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse kubeconfig: %w", err)
+		return nil, fmt.Errorf("failed to load kubeconfig: %w", err)
 	}
 
 	if !conn.Context.IsNull() {
+		// Context explicitly provided - use it
 		context := conn.Context.ValueString()
-		// Load kubeconfig and set context
-		clientConfig, err := clientcmd.Load(kubeconfigData)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load kubeconfig: %w", err)
-		}
-
 		if _, exists := clientConfig.Contexts[context]; !exists {
 			return nil, fmt.Errorf("context %q not found in kubeconfig", context)
 		}
@@ -233,5 +230,27 @@ func createKubeconfigConfig(conn ClusterConnectionModel) (*rest.Config, error) {
 		return clientcmd.NewDefaultClientConfig(*clientConfig, &clientcmd.ConfigOverrides{}).ClientConfig()
 	}
 
-	return config, nil
+	// No context provided - validate kubeconfig has safe defaults
+	contextCount := len(clientConfig.Contexts)
+
+	if contextCount == 0 {
+		return nil, fmt.Errorf("kubeconfig contains no contexts")
+	}
+
+	if contextCount == 1 {
+		// Only one context - safe to use it automatically
+		for contextName := range clientConfig.Contexts {
+			clientConfig.CurrentContext = contextName
+			return clientcmd.NewDefaultClientConfig(*clientConfig, &clientcmd.ConfigOverrides{}).ClientConfig()
+		}
+	}
+
+	// Multiple contexts - require explicit selection for safety
+	contextNames := make([]string, 0, len(clientConfig.Contexts))
+	for name := range clientConfig.Contexts {
+		contextNames = append(contextNames, name)
+	}
+
+	return nil, fmt.Errorf("kubeconfig contains %d contexts - you must explicitly specify which one to use via 'context' attribute.\n\nAvailable contexts:\n  - %s",
+		contextCount, strings.Join(contextNames, "\n  - "))
 }

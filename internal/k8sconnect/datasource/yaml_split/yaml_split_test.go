@@ -152,7 +152,7 @@ kind: MyResource
 metadata:
   name: my-custom
   namespace: test`,
-			expectedID: "myresource.test.my-custom",
+			expectedID: "custom.io.myresource.test.my-custom",
 		},
 		{
 			name: "missing name",

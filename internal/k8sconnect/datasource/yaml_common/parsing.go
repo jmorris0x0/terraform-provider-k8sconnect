@@ -99,11 +99,27 @@ func EstimateLineNumber(fullContent, docContent string) int {
 }
 
 // GenerateResourceID creates a human-readable, stable ID for a Kubernetes resource
-// Format: kind.name (cluster-scoped) or kind.namespace.name (namespaced)
+// Format: [group.]kind[.namespace].name
+// - Core resources (apiVersion: v1): kind.name or kind.namespace.name
+// - Grouped resources (apiVersion: apps/v1): group.kind.name or group.kind.namespace.name
+// - Custom resources (apiVersion: custom.example.com/v1): group.kind.name or group.kind.namespace.name
 func GenerateResourceID(obj *unstructured.Unstructured) string {
+	apiVersion := obj.GetAPIVersion()
 	kind := strings.ToLower(obj.GetKind())
 	name := obj.GetName()
 	namespace := obj.GetNamespace()
+
+	// Extract group from apiVersion
+	// apiVersion formats:
+	// - "v1" -> no group (core)
+	// - "apps/v1" -> group is "apps"
+	// - "custom.example.com/v1" -> group is "custom.example.com"
+	var group string
+	if strings.Contains(apiVersion, "/") {
+		parts := strings.Split(apiVersion, "/")
+		group = strings.ToLower(parts[0])
+	}
+	// If no "/" then it's core group (v1, v1beta1, etc.) - no group prefix
 
 	// Handle edge cases
 	if kind == "" {
@@ -113,11 +129,19 @@ func GenerateResourceID(obj *unstructured.Unstructured) string {
 		name = "unnamed"
 	}
 
-	// Create stable ID: kind.name or kind.namespace.name
-	if namespace == "" {
-		return fmt.Sprintf("%s.%s", kind, name)
+	// Create stable ID with group (if present)
+	// Format: [group.]kind[.namespace].name
+	var idParts []string
+	if group != "" {
+		idParts = append(idParts, group)
 	}
-	return fmt.Sprintf("%s.%s.%s", kind, namespace, name)
+	idParts = append(idParts, kind)
+	if namespace != "" {
+		idParts = append(idParts, namespace)
+	}
+	idParts = append(idParts, name)
+
+	return strings.Join(idParts, ".")
 }
 
 // ExpandPattern resolves glob patterns using doublestar for full glob support
