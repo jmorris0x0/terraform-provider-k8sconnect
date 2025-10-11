@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/datasource/yaml_common"
 )
 
 func TestSplitYAMLDocuments(t *testing.T) {
-	d := &yamlSplitDataSource{}
-
 	tests := []struct {
 		name     string
 		content  string
@@ -102,7 +102,7 @@ metadata:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := d.splitYAMLDocuments(tt.content)
+			result := yaml_common.SplitYAMLDocuments(tt.content)
 
 			if len(result) != len(tt.expected) {
 				t.Errorf("expected %d documents, got %d", len(tt.expected), len(result))
@@ -123,8 +123,6 @@ metadata:
 }
 
 func TestGenerateBaseID(t *testing.T) {
-	d := &yamlSplitDataSource{}
-
 	tests := []struct {
 		name       string
 		yaml       string
@@ -175,7 +173,7 @@ metadata:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			docs, err := d.parseDocuments(tt.yaml, "test")
+			docs, err := yaml_common.ParseDocuments(tt.yaml, "test")
 			if err != nil && !strings.Contains(tt.name, "missing kind") {
 				t.Fatalf("failed to parse document: %v", err)
 			}
@@ -197,7 +195,7 @@ metadata:
 				t.Fatal("expected parsed object")
 			}
 
-			id := d.generateBaseID(docs[0].Object)
+			id := yaml_common.GenerateResourceID(docs[0].Object)
 			if id != tt.expectedID {
 				t.Errorf("expected ID %q, got %q", tt.expectedID, id)
 			}
@@ -228,7 +226,7 @@ spec:
   - name: nginx
     image: public.ecr.aws/nginx/nginx:1.21`
 
-	docs, err := d.parseDocuments(content, "test")
+	docs, err := yaml_common.ParseDocuments(content, "test")
 	if err != nil {
 		t.Fatalf("failed to parse documents: %v", err)
 	}
@@ -265,7 +263,7 @@ metadata:
   name: another-valid
   namespace: default`
 
-	docs, err := d.parseDocuments(content, "test")
+	docs, err := yaml_common.ParseDocuments(content, "test")
 
 	// Should have parsing errors but still return documents
 	if err == nil {
@@ -301,8 +299,6 @@ metadata:
 }
 
 func TestFilePatternExpansion(t *testing.T) {
-	d := &yamlSplitDataSource{}
-
 	// Create temporary directory structure
 	tmpDir, err := os.MkdirTemp("", "yaml_split_test")
 	if err != nil {
@@ -371,7 +367,7 @@ metadata:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			files, err := d.expandPattern(tt.pattern)
+			files, err := yaml_common.ExpandPattern(tt.pattern)
 			if err != nil {
 				t.Fatalf("failed to expand pattern: %v", err)
 			}
@@ -390,50 +386,7 @@ metadata:
 	}
 }
 
-func TestCommentOnlyDetection(t *testing.T) {
-	d := &yamlSplitDataSource{}
-
-	tests := []struct {
-		name     string
-		content  string
-		expected bool
-	}{
-		{
-			name:     "only comments",
-			content:  "# This is a comment\n# Another comment",
-			expected: true,
-		},
-		{
-			name:     "comments and whitespace",
-			content:  "\n  # Comment\n\n  # Another\n  ",
-			expected: true,
-		},
-		{
-			name:     "has yaml content",
-			content:  "# Comment\napiVersion: v1",
-			expected: false,
-		},
-		{
-			name:     "empty content",
-			content:  "",
-			expected: true,
-		},
-		{
-			name:     "only whitespace",
-			content:  "\n  \n\t\n",
-			expected: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := d.isCommentOnly(tt.content)
-			if result != tt.expected {
-				t.Errorf("expected %v, got %v for content: %q", tt.expected, result, tt.content)
-			}
-		})
-	}
-}
+// TestCommentOnlyDetection removed - isCommentOnly is now an internal function in yaml_common
 
 // Integration test that exercises the full Read flow
 func TestDataSourceRead(t *testing.T) {
@@ -455,7 +408,7 @@ spec:
 
 	d := &yamlSplitDataSource{}
 
-	docs, err := d.parseDocuments(content, "<test>")
+	docs, err := yaml_common.ParseDocuments(content, "<test>")
 	if err != nil {
 		t.Fatalf("failed to parse documents: %v", err)
 	}
@@ -482,15 +435,13 @@ spec:
 }
 
 func TestEdgeCases(t *testing.T) {
-	d := &yamlSplitDataSource{}
-
 	t.Run("document with only metadata", func(t *testing.T) {
 		content := `apiVersion: v1
 kind: ConfigMap
 metadata:
   name: empty-config`
 
-		docs, err := d.parseDocuments(content, "test")
+		docs, err := yaml_common.ParseDocuments(content, "test")
 		if err != nil {
 			t.Fatalf("failed to parse: %v", err)
 		}
@@ -499,7 +450,7 @@ metadata:
 			t.Errorf("expected 1 document, got %d", len(docs))
 		}
 
-		id := d.generateBaseID(docs[0].Object)
+		id := yaml_common.GenerateResourceID(docs[0].Object)
 		expected := "configmap.empty-config"
 		if id != expected {
 			t.Errorf("expected ID %q, got %q", expected, id)
@@ -513,12 +464,12 @@ metadata:
   name: my-service-123
   namespace: kube-system`
 
-		docs, err := d.parseDocuments(content, "test")
+		docs, err := yaml_common.ParseDocuments(content, "test")
 		if err != nil {
 			t.Fatalf("failed to parse: %v", err)
 		}
 
-		id := d.generateBaseID(docs[0].Object)
+		id := yaml_common.GenerateResourceID(docs[0].Object)
 		expected := "service.kube-system.my-service-123"
 		if id != expected {
 			t.Errorf("expected ID %q, got %q", expected, id)
@@ -533,12 +484,12 @@ metadata:
   name: %s
   namespace: default`, longName)
 
-		docs, err := d.parseDocuments(content, "test")
+		docs, err := yaml_common.ParseDocuments(content, "test")
 		if err != nil {
 			t.Fatalf("failed to parse: %v", err)
 		}
 
-		id := d.generateBaseID(docs[0].Object)
+		id := yaml_common.GenerateResourceID(docs[0].Object)
 		expected := fmt.Sprintf("secret.default.%s", longName)
 		if id != expected {
 			t.Errorf("expected ID %q, got %q", expected, id)
@@ -547,8 +498,6 @@ metadata:
 }
 
 func TestLineNumberEstimation(t *testing.T) {
-	d := &yamlSplitDataSource{}
-
 	content := `# Header comment
 apiVersion: v1
 kind: Namespace
@@ -561,7 +510,7 @@ kind: Pod
 metadata:
   name: second`
 
-	docs, err := d.parseDocuments(content, "test")
+	docs, err := yaml_common.ParseDocuments(content, "test")
 	if err != nil {
 		t.Fatalf("failed to parse: %v", err)
 	}
