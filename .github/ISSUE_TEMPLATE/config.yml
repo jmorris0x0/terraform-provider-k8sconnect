@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions & Discussions
+    url: https://github.com/jmorris0x0/terraform-provider-k8sconnect/issues
+    about: For questions, open a regular issue and we'll help you out
