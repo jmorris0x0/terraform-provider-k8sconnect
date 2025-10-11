@@ -187,8 +187,8 @@ spec:
         app: server
     spec:
       containers:
-      - image: nginx:latest
-        name: server`
+      - name: server
+        image: nginx:latest`
 
 const testDatabaseCRManifest = `apiVersion: example.com/v1
 kind: Database
