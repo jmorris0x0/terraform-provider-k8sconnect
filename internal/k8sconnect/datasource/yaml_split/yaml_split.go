@@ -45,7 +45,7 @@ func (d *yamlSplitDataSource) Schema(ctx context.Context, req datasource.SchemaR
 			},
 			"pattern": schema.StringAttribute{
 				Optional:    true,
-				Description: "Glob pattern to match YAML files (e.g., './manifests/*.yaml', './configs/**/*.yml'). Supports recursive patterns. Mutually exclusive with 'pattern'.",
+				Description: "Glob pattern to match YAML files (e.g., './manifests/*.yaml', './configs/**/*.yml'). Supports recursive patterns. Mutually exclusive with 'content'.",
 			},
 			"manifests": schema.MapAttribute{
 				ElementType: types.StringType,

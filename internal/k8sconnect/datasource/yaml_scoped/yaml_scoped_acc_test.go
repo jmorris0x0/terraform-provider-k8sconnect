@@ -30,7 +30,7 @@ func TestAccYamlScopedDataSource_Basic(t *testing.T) {
 					resource.TestCheckResourceAttr("data.k8sconnect_yaml_scoped.test", "crds.%", "1"),
 					resource.TestCheckResourceAttr(
 						"data.k8sconnect_yaml_scoped.test",
-						"crds.customresourcedefinition.databases.example.com",
+						"crds.apiextensions.k8s.io.customresourcedefinition.databases.example.com",
 						testCRDManifest,
 					),
 
@@ -43,7 +43,7 @@ func TestAccYamlScopedDataSource_Basic(t *testing.T) {
 					),
 					resource.TestCheckResourceAttr(
 						"data.k8sconnect_yaml_scoped.test",
-						"cluster_scoped.clusterrole.app-admin",
+						"cluster_scoped.rbac.authorization.k8s.io.clusterrole.app-admin",
 						testClusterRoleManifest,
 					),
 
@@ -56,7 +56,7 @@ func TestAccYamlScopedDataSource_Basic(t *testing.T) {
 					),
 					resource.TestCheckResourceAttr(
 						"data.k8sconnect_yaml_scoped.test",
-						"namespaced.deployment.app-system.app-server",
+						"namespaced.apps.deployment.app-system.app-server",
 						testDeploymentManifest,
 					),
 				),
@@ -83,7 +83,7 @@ func TestAccYamlScopedDataSource_CustomResources(t *testing.T) {
 					resource.TestCheckResourceAttr("data.k8sconnect_yaml_scoped.test", "namespaced.%", "1"),
 					resource.TestCheckResourceAttr(
 						"data.k8sconnect_yaml_scoped.test",
-						"namespaced.database.default.my-db",
+						"namespaced.example.com.database.default.my-db",
 						testDatabaseCRManifest,
 					),
 				),

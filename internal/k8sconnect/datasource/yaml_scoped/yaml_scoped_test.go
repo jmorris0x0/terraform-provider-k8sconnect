@@ -47,7 +47,7 @@ metadata:
 	if len(crds) != 1 {
 		t.Errorf("expected 1 CRD, got %d", len(crds))
 	}
-	if _, exists := crds["customresourcedefinition.myresources.example.com"]; !exists {
+	if _, exists := crds["apiextensions.k8s.io.customresourcedefinition.myresources.example.com"]; !exists {
 		t.Error("CRD not found in crds map")
 	}
 
@@ -63,7 +63,7 @@ metadata:
 	if len(namespaced) != 1 {
 		t.Errorf("expected 1 namespaced resource, got %d", len(namespaced))
 	}
-	if _, exists := namespaced["deployment.test-ns.test-deploy"]; !exists {
+	if _, exists := namespaced["apps.deployment.test-ns.test-deploy"]; !exists {
 		t.Error("Deployment not found in namespaced map")
 	}
 }
@@ -71,30 +71,34 @@ metadata:
 func TestClusterScopedKinds(t *testing.T) {
 	tests := []struct {
 		name               string
+		apiVersion         string
 		kind               string
 		expectClusterScope bool
 	}{
-		{"Namespace", "Namespace", true},
-		{"namespace lowercase", "namespace", true},
-		{"ClusterRole", "ClusterRole", true},
-		{"ClusterRoleBinding", "ClusterRoleBinding", true},
-		{"PersistentVolume", "PersistentVolume", true},
-		{"StorageClass", "StorageClass", true},
-		{"Node", "Node", true},
-		{"IngressClass", "IngressClass", true},
-		{"Deployment", "Deployment", false},
-		{"Service", "Service", false},
-		{"ConfigMap", "ConfigMap", false},
-		{"Pod", "Pod", false},
-		{"Secret", "Secret", false},
-		{"unknown kind", "UnknownKind", false},
+		{"Namespace", "v1", "Namespace", true},
+		{"namespace lowercase", "v1", "namespace", true},
+		{"ClusterRole", "rbac.authorization.k8s.io/v1", "ClusterRole", true},
+		{"ClusterRoleBinding", "rbac.authorization.k8s.io/v1", "ClusterRoleBinding", true},
+		{"PersistentVolume", "v1", "PersistentVolume", true},
+		{"StorageClass", "storage.k8s.io/v1", "StorageClass", true},
+		{"Node", "v1", "Node", true},
+		{"IngressClass", "networking.k8s.io/v1", "IngressClass", true},
+		{"Deployment", "apps/v1", "Deployment", false},
+		{"Service", "v1", "Service", false},
+		{"ConfigMap", "v1", "ConfigMap", false},
+		{"Pod", "v1", "Pod", false},
+		{"Secret", "v1", "Secret", false},
+		{"unknown kind", "example.com/v1", "UnknownKind", false},
+		{"ValidatingAdmissionPolicy", "admissionregistration.k8s.io/v1", "ValidatingAdmissionPolicy", true},
+		{"ValidatingAdmissionPolicyBinding", "admissionregistration.k8s.io/v1", "ValidatingAdmissionPolicyBinding", true},
+		{"SelfSubjectReview", "authentication.k8s.io/v1", "SelfSubjectReview", true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := isClusterScopedKind(tt.kind)
+			result := isClusterScopedKind(tt.apiVersion, tt.kind)
 			if result != tt.expectClusterScope {
-				t.Errorf("isClusterScopedKind(%q) = %v, want %v", tt.kind, result, tt.expectClusterScope)
+				t.Errorf("isClusterScopedKind(%q, %q) = %v, want %v", tt.apiVersion, tt.kind, result, tt.expectClusterScope)
 			}
 		})
 	}
@@ -190,7 +194,7 @@ spec:
 	}
 
 	// Verify specific resources
-	expectedCRDs := []string{"customresourcedefinition.applications.example.com"}
+	expectedCRDs := []string{"apiextensions.k8s.io.customresourcedefinition.applications.example.com"}
 	for _, id := range expectedCRDs {
 		if _, exists := crds[id]; !exists {
 			t.Errorf("CRD %q not found", id)
@@ -199,7 +203,7 @@ spec:
 
 	expectedClusterScoped := []string{
 		"namespace.app-system",
-		"clusterrole.app-reader",
+		"rbac.authorization.k8s.io.clusterrole.app-reader",
 	}
 	for _, id := range expectedClusterScoped {
 		if _, exists := clusterScoped[id]; !exists {
@@ -209,8 +213,8 @@ spec:
 
 	expectedNamespaced := []string{
 		"configmap.app-system.app-config",
-		"deployment.app-system.app-server",
-		"application.app-system.my-app",
+		"apps.deployment.app-system.app-server",
+		"example.com.application.app-system.my-app",
 	}
 	for _, id := range expectedNamespaced {
 		if _, exists := namespaced[id]; !exists {
@@ -383,7 +387,7 @@ spec:
 		t.Errorf("expected 1 namespaced custom resource, got %d", len(namespaced))
 	}
 
-	if _, exists := namespaced["mycustomresource.default.my-instance"]; !exists {
+	if _, exists := namespaced["example.com.mycustomresource.default.my-instance"]; !exists {
 		t.Error("custom resource not found in namespaced map")
 	}
 }
@@ -562,12 +566,12 @@ spec:
 	}
 
 	// Verify the custom resource instance is NOT in CRDs
-	if _, exists := crds["database.production.main-db"]; exists {
+	if _, exists := crds["storage.example.com.database.production.main-db"]; exists {
 		t.Error("Database CR instance should not be in CRDs category")
 	}
 
 	// Verify it's in namespaced
-	if _, exists := namespaced["database.production.main-db"]; !exists {
+	if _, exists := namespaced["storage.example.com.database.production.main-db"]; !exists {
 		t.Error("Database CR instance should be in namespaced category")
 	}
 }

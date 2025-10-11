@@ -18,7 +18,7 @@ Splits multi-document YAML content into individual manifests with stable, human-
 ### Optional
 
 - `content` (String) Raw YAML content containing one or more Kubernetes manifests separated by '---'. Mutually exclusive with 'pattern'.
-- `pattern` (String) Glob pattern to match YAML files (e.g., './manifests/*.yaml', './configs/**/*.yml'). Supports recursive patterns. Mutually exclusive with 'pattern'.
+- `pattern` (String) Glob pattern to match YAML files (e.g., './manifests/*.yaml', './configs/**/*.yml'). Supports recursive patterns. Mutually exclusive with 'content'.
 
 ### Read-Only
 
