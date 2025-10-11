@@ -257,8 +257,8 @@ func isClusterScopedKind(apiVersion, kind string) bool {
 	// Excludes deprecated ComponentStatus and removed PodSecurityPolicy
 	clusterScopedResources := map[string]bool{
 		// Core (apiVersion: v1)
-		"namespace":       true,
-		"node":            true,
+		"namespace":        true,
+		"node":             true,
 		"persistentvolume": true,
 
 		// admissionregistration.k8s.io/v1
