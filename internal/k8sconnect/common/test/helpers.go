@@ -424,3 +424,67 @@ func CheckConfigMapFieldSet(client kubernetes.Interface, namespace, name, fieldP
 		return nil
 	}
 }
+
+// CheckServiceAccountExists verifies a ServiceAccount exists in the cluster
+func CheckServiceAccountExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		_, err := client.CoreV1().ServiceAccounts(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("serviceaccount %s/%s does not exist: %v", namespace, name, err)
+		}
+		fmt.Printf("✅ Verified serviceaccount %s/%s exists in Kubernetes\n", namespace, name)
+		return nil
+	}
+}
+
+// CheckServiceAccountDestroy verifies a ServiceAccount has been deleted
+func CheckServiceAccountDestroy(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		for i := 0; i < 10; i++ {
+			_, err := client.CoreV1().ServiceAccounts(namespace).Get(ctx, name, metav1.GetOptions{})
+			if err != nil {
+				if strings.Contains(err.Error(), "not found") {
+					fmt.Printf("✅ Verified serviceaccount %s/%s was deleted\n", namespace, name)
+					return nil
+				}
+				return fmt.Errorf("unexpected error checking serviceaccount: %v", err)
+			}
+			time.Sleep(1 * time.Second)
+		}
+		return fmt.Errorf("serviceaccount %s/%s still exists after deletion", namespace, name)
+	}
+}
+
+// CheckClusterRoleBindingExists verifies a ClusterRoleBinding exists in the cluster
+func CheckClusterRoleBindingExists(client kubernetes.Interface, name string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		_, err := client.RbacV1().ClusterRoleBindings().Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("clusterrolebinding %s does not exist: %v", name, err)
+		}
+		fmt.Printf("✅ Verified clusterrolebinding %s exists in Kubernetes\n", name)
+		return nil
+	}
+}
+
+// CheckClusterRoleBindingDestroy verifies a ClusterRoleBinding has been deleted
+func CheckClusterRoleBindingDestroy(client kubernetes.Interface, name string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		for i := 0; i < 10; i++ {
+			_, err := client.RbacV1().ClusterRoleBindings().Get(ctx, name, metav1.GetOptions{})
+			if err != nil {
+				if strings.Contains(err.Error(), "not found") {
+					fmt.Printf("✅ Verified clusterrolebinding %s was deleted\n", name)
+					return nil
+				}
+				return fmt.Errorf("unexpected error checking clusterrolebinding: %v", err)
+			}
+			time.Sleep(1 * time.Second)
+		}
+		return fmt.Errorf("clusterrolebinding %s still exists after deletion", name)
+	}
+}
