@@ -4,7 +4,6 @@ Working examples showing k8sconnect provider usage patterns.
 
 ## Basic Resources
 - `basic-deployment/` - Simple namespace and deployment
-- `loadbalancer-service/` - Service with LoadBalancer type
 
 ## Wait For Feature
 - `wait-for-loadbalancer/` - Wait for LoadBalancer to get IP/hostname (`wait_for.field`)

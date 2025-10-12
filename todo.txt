@@ -14,7 +14,6 @@ DOCUMENTATION & RELEASE
 Registry landing page: Write main docs
 Verify attribute docs: Status changes need documentation updates
 Example improvements: Show both inline and template file patterns
-Don't need the first load balancer example. Find a different one or delete.
 Nested Schema for wait_for: Needs love
 
 
@@ -28,7 +27,6 @@ HPA simulation: Test multiple simultaneous ownership changes
 Find a way to test multicluster
 Delayed plan application: Handle out of date plans
 Add examples tests for resource datasource
-Use latest for all example images. Otherwise just making toil for later.
 Autodetect the most recent terraform version for testing locally and in CI. Otherwise this is monthly toil.
 
 FEATURE ADDITIONS
@@ -56,7 +54,6 @@ Security scanning alerts: Address current GitHub code scanning issues
 
 MARKETING & GROWTH
 
-SEO optimization: Is "k8sconnect" optimal for discovery?
 Launch content: Medium article, r/kubernetes, r/terraform, HackerNews posts, SweetOps Slack, Kubernetes Slack
 
 
