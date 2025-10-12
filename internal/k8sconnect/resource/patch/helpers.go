@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/fieldmanagement"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 )
 
@@ -155,85 +156,12 @@ func extractFieldPathsFromMap(data map[string]interface{}, prefix string) []stri
 
 // extractFieldOwnershipForPaths extracts ownership info for specific field paths
 func extractFieldOwnershipForPaths(obj *unstructured.Unstructured, paths []string) map[string]string {
-	result := make(map[string]string)
-
-	// Get all ownership info
-	allOwnership := extractFieldOwnershipMap(obj)
-
-	// Filter to only the paths we care about
-	for _, path := range paths {
-		if owner, exists := allOwnership[path]; exists {
-			result[path] = owner
-		}
-	}
-
-	return result
+	return fieldmanagement.ExtractFieldOwnershipForPaths(obj, paths)
 }
 
 // extractFieldOwnershipMap extracts field ownership as a simple map[path]manager
 func extractFieldOwnershipMap(obj *unstructured.Unstructured) map[string]string {
-	result := make(map[string]string)
-
-	for _, mf := range obj.GetManagedFields() {
-		if mf.FieldsV1 == nil {
-			continue
-		}
-
-		var fields map[string]interface{}
-		if err := json.Unmarshal(mf.FieldsV1.Raw, &fields); err != nil {
-			continue
-		}
-
-		// Extract paths owned by this manager
-		paths := extractPathsFromFieldsV1Simple(fields, "")
-		for _, path := range paths {
-			result[path] = mf.Manager
-		}
-	}
-
-	return result
-}
-
-// extractPathsFromFieldsV1Simple is a simplified version that doesn't need user JSON
-func extractPathsFromFieldsV1Simple(fields map[string]interface{}, prefix string) []string {
-	var paths []string
-
-	for key, value := range fields {
-		if strings.HasPrefix(key, "f:") {
-			// Regular field
-			fieldName := strings.TrimPrefix(key, "f:")
-			currentPath := fieldName
-			if prefix != "" {
-				currentPath = prefix + "." + fieldName
-			}
-
-			if subFields, ok := value.(map[string]interface{}); ok && len(subFields) > 0 {
-				// Has sub-fields - recurse
-				if _, hasDot := subFields["."]; hasDot {
-					// This field itself is owned
-					paths = append(paths, currentPath)
-				}
-
-				// Recurse for nested fields
-				nestedPaths := extractPathsFromFieldsV1Simple(subFields, currentPath)
-				paths = append(paths, nestedPaths...)
-			} else {
-				// Leaf field
-				paths = append(paths, currentPath)
-			}
-		} else if strings.HasPrefix(key, "k:") {
-			// Array element - we'll use simplified handling
-			if subFields, ok := value.(map[string]interface{}); ok {
-				// Extract array key info for path
-				arrayKey := strings.TrimPrefix(key, "k:")
-				arrayPath := fmt.Sprintf("%s%s", prefix, arrayKey)
-				nestedPaths := extractPathsFromFieldsV1Simple(subFields, arrayPath)
-				paths = append(paths, nestedPaths...)
-			}
-		}
-	}
-
-	return paths
+	return fieldmanagement.ExtractFieldOwnershipMap(obj)
 }
 
 // applyPatch applies the patch to the target resource using the appropriate method based on patch type
@@ -336,26 +264,5 @@ func mergeMaps(dst, src map[string]interface{}) {
 
 // extractManagedFieldsForManager extracts the managed fields JSON for a specific field manager
 func extractManagedFieldsForManager(obj *unstructured.Unstructured, fieldManager string) (string, error) {
-	for _, mf := range obj.GetManagedFields() {
-		if mf.Manager == fieldManager {
-			if mf.FieldsV1 != nil {
-				// Convert to a more readable JSON format
-				var fields map[string]interface{}
-				if err := json.Unmarshal(mf.FieldsV1.Raw, &fields); err != nil {
-					return "", fmt.Errorf("failed to parse managed fields: %w", err)
-				}
-
-				// Convert back to JSON string
-				jsonBytes, err := json.Marshal(fields)
-				if err != nil {
-					return "", fmt.Errorf("failed to marshal managed fields: %w", err)
-				}
-
-				return string(jsonBytes), nil
-			}
-		}
-	}
-
-	// No fields managed by this manager
-	return "{}", nil
+	return fieldmanagement.ExtractManagedFieldsForManager(obj, fieldManager)
 }

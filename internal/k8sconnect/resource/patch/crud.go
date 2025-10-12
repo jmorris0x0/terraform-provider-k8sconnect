@@ -533,7 +533,11 @@ func getNestedValue(obj map[string]interface{}, parts []string) interface{} {
 		case []interface{}:
 			// Handle array index
 			idx := 0
-			fmt.Sscanf(part, "%d", &idx)
+			n, err := fmt.Sscanf(part, "%d", &idx)
+			if err != nil || n != 1 {
+				// Not a valid integer index
+				return nil
+			}
 			if idx >= 0 && idx < len(v) {
 				current = v[idx]
 			} else {

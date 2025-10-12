@@ -198,7 +198,9 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 	waited := r.handleWaitExecution(ctx, rc, resp, "updated")
 
 	// 6. Update status
-	r.updateStatus(rc, waited)
+	if err := r.updateStatus(rc, waited); err != nil {
+		tflog.Warn(ctx, "Failed to update status", map[string]interface{}{"error": err.Error()})
+	}
 
 	// 7. Update projection (with recovery logic - ADR-006)
 	if err := r.updateProjection(rc); err != nil {
