@@ -15,6 +15,7 @@ import (
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/factory"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8serrors"
 )
 
 type resourceDataSource struct {
@@ -128,7 +129,13 @@ func (d *resourceDataSource) Read(ctx context.Context, req datasource.ReadReques
 	// Get client
 	client, err := d.clientFactory.GetClient(conn)
 	if err != nil {
-		resp.Diagnostics.AddError("Failed to create client", err.Error())
+		// Client creation errors are connection-related, classify them
+		severity, title, detail := k8serrors.ClassifyError(err, "Connect to Cluster", "cluster")
+		if severity == "warning" {
+			resp.Diagnostics.AddWarning(title, detail)
+		} else {
+			resp.Diagnostics.AddError(title, detail)
+		}
 		return
 	}
 
@@ -152,13 +159,14 @@ func (d *resourceDataSource) Read(ctx context.Context, req datasource.ReadReques
 	// Use the client's proper discovery-based resolution
 	gvr, err := client.GetGVR(ctx, tempObj)
 	if err != nil {
-		resp.Diagnostics.AddError(
-			"Failed to resolve resource type",
-			fmt.Sprintf("Unable to determine resource type for %s/%s: %v. "+
-				"This may indicate the CRD is not installed or the API version is incorrect.",
-				data.APIVersion.ValueString(),
-				data.Kind.ValueString(),
-				err))
+		// GVR resolution errors
+		resourceDesc := fmt.Sprintf("%s/%s", data.APIVersion.ValueString(), data.Kind.ValueString())
+		severity, title, detail := k8serrors.ClassifyError(err, "Resolve Resource Type", resourceDesc)
+		if severity == "warning" {
+			resp.Diagnostics.AddWarning(title, detail)
+		} else {
+			resp.Diagnostics.AddError(title, detail)
+		}
 		return
 	}
 
@@ -168,14 +176,16 @@ func (d *resourceDataSource) Read(ctx context.Context, req datasource.ReadReques
 	// Get the resource
 	obj, err := client.Get(ctx, gvr, namespace, metadata.Name.ValueString())
 	if err != nil {
-		resp.Diagnostics.AddError(
-			"Resource not found",
-			fmt.Sprintf("Failed to get %s/%s in namespace %s: %v",
-				data.Kind.ValueString(),
-				metadata.Name.ValueString(),
-				namespace,
-				err),
-		)
+		resourceDesc := fmt.Sprintf("%s %s", data.Kind.ValueString(), metadata.Name.ValueString())
+		if namespace != "" {
+			resourceDesc = fmt.Sprintf("%s %s/%s", data.Kind.ValueString(), namespace, metadata.Name.ValueString())
+		}
+		severity, title, detail := k8serrors.ClassifyError(err, "Read Resource", resourceDesc)
+		if severity == "warning" {
+			resp.Diagnostics.AddWarning(title, detail)
+		} else {
+			resp.Diagnostics.AddError(title, detail)
+		}
 		return
 	}
 
