@@ -301,7 +301,7 @@ func (r *patchResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 	}
 
 	// 4. Check if target still exists
-	_, targetObj, err := r.getTargetResource(ctx, client, target)
+	_, _, err = r.getTargetResource(ctx, client, target)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			// Target already deleted - nothing to do
@@ -349,8 +349,29 @@ func (r *patchResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 				})
 
 			// Transfer each group back to its original owner
+			// IMPORTANT: Refetch resource before each transfer to ensure idempotency
 			for owner, fields := range fieldsByOwner {
-				err := r.transferOwnershipForFields(ctx, client, targetObj, gvr, fields, owner)
+				// Refetch current state to check ownership (idempotent retry)
+				_, currentObj, err := r.getTargetResource(ctx, client, target)
+				if err != nil {
+					tflog.Warn(ctx, "Failed to fetch resource for ownership transfer", map[string]interface{}{
+						"owner": owner,
+						"error": err.Error(),
+					})
+					continue
+				}
+
+				// Filter fields to only transfer those currently owned by our patch manager
+				fieldsToTransfer := r.filterFieldsOwnedByManager(currentObj, fields, fieldManager)
+				if len(fieldsToTransfer) == 0 {
+					tflog.Debug(ctx, "No fields currently owned by this patch, skipping", map[string]interface{}{
+						"owner":       owner,
+						"total_fields": len(fields),
+					})
+					continue
+				}
+
+				err = r.transferOwnershipForFields(ctx, client, currentObj, gvr, fieldsToTransfer, owner)
 				if err != nil {
 					tflog.Warn(ctx, "Failed to transfer ownership for some fields", map[string]interface{}{
 						"owner": owner,
@@ -360,7 +381,8 @@ func (r *patchResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 				} else {
 					tflog.Debug(ctx, "Successfully transferred ownership", map[string]interface{}{
 						"owner":       owner,
-						"field_count": len(fields),
+						"field_count": len(fieldsToTransfer),
+						"skipped":     len(fields) - len(fieldsToTransfer),
 					})
 				}
 			}
@@ -422,6 +444,21 @@ func groupFieldsByPreviousOwner(previousOwners map[string]string) map[string][]s
 	}
 
 	return result
+}
+
+// filterFieldsOwnedByManager filters a list of fields to only those currently owned by the specified field manager
+// This ensures idempotent destroy - if a field was already transferred, we skip it
+func (r *patchResource) filterFieldsOwnedByManager(obj *unstructured.Unstructured, fields []string, fieldManager string) []string {
+	currentOwnership := extractFieldOwnershipMap(obj)
+
+	var ownedFields []string
+	for _, field := range fields {
+		if owner, exists := currentOwnership[field]; exists && owner == fieldManager {
+			ownedFields = append(ownedFields, field)
+		}
+	}
+
+	return ownedFields
 }
 
 // transferOwnershipForFields transfers ownership of specific fields to a new owner

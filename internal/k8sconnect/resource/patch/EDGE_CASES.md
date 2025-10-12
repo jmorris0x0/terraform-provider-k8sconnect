@@ -1,6 +1,9 @@
 # Patch Resource Edge Cases Test Coverage
 
-## Phase 1 MVP - Critical Safety Tests
+**Note:** Many tests from Phase 2 sections (19-21, 23) are duplicates of manifest resource tests,
+since patch reuses the same connection/auth/client mechanisms. Focus on patch-specific behaviors.
+
+## Phase 1 MVP - Critical Safety Tests (Patch-Specific)
 
 ### 1. Self-Patching Prevention (CRITICAL!)
 - [ ] **1.1** Try to patch resource with `k8sconnect.terraform.io/terraform-id` annotation
@@ -130,25 +133,14 @@
 - [ ] **18.5** Copy operation
 - [ ] **18.6** Test operation
 
-### 19. Connection Types
-- [ ] **19.1** Kubeconfig from file
-- [ ] **19.2** Kubeconfig inline
-- [ ] **19.3** Token auth
-- [ ] **19.4** Exec auth (aws eks get-token)
-- [ ] **19.5** Client certificate auth
-- [ ] **19.6** Context switching
+### 19. Connection Types ⚠️ **DUPLICATE - Already tested in manifest resource**
+- [ ] ~~19.1-19.6~~ Connection mechanisms already tested in manifest_test.go
 
-### 20. Error Handling
-- [ ] **20.1** Network timeout during create
-- [ ] **20.2** Network timeout during delete
-- [ ] **20.3** Invalid credentials
-- [ ] **20.4** Cluster unreachable
-- [ ] **20.5** API server returns 5xx
+### 20. Error Handling ⚠️ **DUPLICATE - Already tested in manifest resource**
+- [ ] ~~20.1-20.5~~ Network/auth errors already tested in manifest_test.go
 
-### 21. State Management
-- [ ] **21.1** Import attempt (should fail with clear message)
-- [ ] **21.2** State file corruption recovery
-- [ ] **21.3** Upgrade from future version
+### 21. State Management ⚠️ **DUPLICATE - Already tested in manifest resource**
+- [ ] ~~21.1-21.3~~ State operations already tested in manifest_test.go
 
 ### 22. Real-World Scenarios
 - [ ] **22.1** Patch EKS aws-node DaemonSet
@@ -171,11 +163,28 @@
 
 ## Test Priority
 
-**P0 (Must have for MVP):**
-- All of section 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14
+**P0 (Must have for MVP - ~35 unique tests):**
+- Sections 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14
+- **Unit tests:** 1, 2 (helper functions)
+- **Acceptance tests:** 1-8, 10-14
 
-**P1 (Should have):**
-- 15, 16, 19, 22
+**P1 (Should have - ~15 unique tests):**
+- Sections 15, 16, 22
+- Section 19-21 are **DUPLICATES** - skip (already tested in manifest)
 
-**P2 (Nice to have):**
-- 17, 18, 20, 21, 23, 24
+**P2 (Nice to have - ~15 unique tests):**
+- Sections 17, 18, 24
+- Section 23 mostly **DUPLICATE** - only test patch-specific performance scenarios
+
+**Current Test Coverage:**
+- ✅ Unit tests: 21 tests (5 test functions covering helpers and safety)
+- ✅ Acceptance tests: 8 test functions covering critical P0 scenarios
+  - Self-patching prevention
+  - take_ownership validation
+  - Basic patch operations
+  - Non-existent target
+  - Single owner ownership transfer
+  - Multiple owner ownership transfer
+  - Patch type validation
+  - Update patch content
+  - Target change replacement
