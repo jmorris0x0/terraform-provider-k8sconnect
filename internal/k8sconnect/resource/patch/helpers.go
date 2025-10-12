@@ -8,8 +8,10 @@ import (
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/yaml"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
@@ -72,15 +74,51 @@ func (r *patchResource) getTargetResource(ctx context.Context, client k8sclient.
 
 // extractPatchFieldPaths extracts the field paths that will be modified by a patch
 func (r *patchResource) extractPatchFieldPaths(ctx context.Context, patchContent string, patchType string) ([]string, error) {
-	// Parse the patch content as unstructured
-	var patchData map[string]interface{}
+	switch patchType {
+	case "application/json-patch+json":
+		// JSON Patch is an array of operations
+		return extractFieldPathsFromJSONPatch(patchContent)
+	case "application/merge-patch+json", "application/strategic-merge-patch+json":
+		// Merge patches are maps
+		var patchData map[string]interface{}
+		if err := yaml.Unmarshal([]byte(patchContent), &patchData); err != nil {
+			return nil, fmt.Errorf("failed to parse patch: %w", err)
+		}
+		return extractFieldPathsFromMap(patchData, ""), nil
+	default:
+		return nil, fmt.Errorf("unsupported patch type: %s", patchType)
+	}
+}
 
-	if err := yaml.Unmarshal([]byte(patchContent), &patchData); err != nil {
-		return nil, fmt.Errorf("failed to parse patch: %w", err)
+// extractFieldPathsFromJSONPatch extracts field paths from JSON Patch operations
+func extractFieldPathsFromJSONPatch(patchContent string) ([]string, error) {
+	var operations []map[string]interface{}
+	if err := json.Unmarshal([]byte(patchContent), &operations); err != nil {
+		return nil, fmt.Errorf("failed to parse JSON patch: %w", err)
 	}
 
-	// Extract all field paths from the patch
-	return extractFieldPathsFromMap(patchData, ""), nil
+	paths := make([]string, 0)
+	for _, op := range operations {
+		// Each operation has a "path" field
+		if pathVal, ok := op["path"]; ok {
+			if pathStr, ok := pathVal.(string); ok {
+				// JSON Patch paths start with "/" - remove it and convert to dot notation
+				cleanPath := strings.TrimPrefix(pathStr, "/")
+				cleanPath = strings.ReplaceAll(cleanPath, "/", ".")
+				paths = append(paths, cleanPath)
+			}
+		}
+		// "move" and "copy" operations also have "from" field
+		if fromVal, ok := op["from"]; ok {
+			if fromStr, ok := fromVal.(string); ok {
+				cleanPath := strings.TrimPrefix(fromStr, "/")
+				cleanPath = strings.ReplaceAll(cleanPath, "/", ".")
+				paths = append(paths, cleanPath)
+			}
+		}
+	}
+
+	return paths, nil
 }
 
 // extractFieldPathsFromMap recursively extracts field paths from a map
@@ -198,14 +236,50 @@ func extractPathsFromFieldsV1Simple(fields map[string]interface{}, prefix string
 	return paths
 }
 
-// applyPatch applies the patch to the target resource using Server-Side Apply
+// applyPatch applies the patch to the target resource using the appropriate method based on patch type
 func (r *patchResource) applyPatch(ctx context.Context, client k8sclient.K8sClient, targetObj *unstructured.Unstructured, data patchResourceModel, fieldManager string, gvr schema.GroupVersionResource) (*unstructured.Unstructured, error) {
-	// Get patch content
+	// Get patch content and type
 	patchContent := r.getPatchContent(data)
 	if patchContent == "" {
 		return nil, fmt.Errorf("no patch content provided")
 	}
 
+	patchTypeStr := r.determinePatchType(data)
+
+	// Handle different patch types
+	switch patchTypeStr {
+	case "application/json-patch+json":
+		return r.applyJSONOrMergePatch(ctx, client, targetObj, patchContent, types.JSONPatchType, gvr, fieldManager)
+	case "application/merge-patch+json":
+		return r.applyJSONOrMergePatch(ctx, client, targetObj, patchContent, types.MergePatchType, gvr, fieldManager)
+	case "application/strategic-merge-patch+json":
+		return r.applyStrategicMergePatch(ctx, client, targetObj, patchContent, fieldManager, gvr)
+	default:
+		return nil, fmt.Errorf("unsupported patch type: %s", patchTypeStr)
+	}
+}
+
+// applyJSONOrMergePatch applies JSON Patch or Merge Patch using the k8s Patch API
+func (r *patchResource) applyJSONOrMergePatch(ctx context.Context, client k8sclient.K8sClient, targetObj *unstructured.Unstructured, patchContent string, patchType types.PatchType, gvr schema.GroupVersionResource, fieldManager string) (*unstructured.Unstructured, error) {
+	// Use Patch API with the raw patch content
+	patchBytes := []byte(patchContent)
+
+	// Create patch options with field manager
+	// Note: Force field is not allowed for JSON/Merge patches (only for SSA)
+	patchOptions := metav1.PatchOptions{
+		FieldManager: fieldManager,
+	}
+
+	result, err := client.Patch(ctx, gvr, targetObj.GetNamespace(), targetObj.GetName(), patchType, patchBytes, patchOptions)
+	if err != nil {
+		return nil, fmt.Errorf("failed to apply patch: %w", err)
+	}
+
+	return result, nil
+}
+
+// applyStrategicMergePatch applies a strategic merge patch using Server-Side Apply
+func (r *patchResource) applyStrategicMergePatch(ctx context.Context, client k8sclient.K8sClient, targetObj *unstructured.Unstructured, patchContent string, fieldManager string, gvr schema.GroupVersionResource) (*unstructured.Unstructured, error) {
 	// Parse patch content into unstructured format
 	var patchData map[string]interface{}
 	if err := yaml.Unmarshal([]byte(patchContent), &patchData); err != nil {
