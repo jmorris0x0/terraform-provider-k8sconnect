@@ -1,0 +1,142 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill out the information below to help us investigate.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear description of what the bug is.
+      placeholder: When I try to..., the provider...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Steps to reproduce the behavior
+      placeholder: |
+        1. Create a resource with...
+        2. Run terraform apply...
+        3. See error...
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Terraform Configuration
+      description: Relevant parts of your Terraform configuration
+      render: hcl
+      placeholder: |
+        resource "k8sconnect_manifest" "example" {
+          yaml_body = <<YAML
+        apiVersion: v1
+        kind: Pod
+        metadata:
+          name: nginx
+        YAML
+
+          cluster_connection = {
+            kubeconfig = file("~/.kube/config")
+          }
+        }
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen
+      placeholder: I expected...
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened
+      placeholder: Instead...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error Messages / Logs
+      description: Relevant error messages or log output (redact sensitive information)
+      render: shell
+      placeholder: |
+        Error: ...
+
+        Logs from TF_LOG=DEBUG terraform apply:
+        ...
+
+  - type: input
+    id: provider-version
+    attributes:
+      label: Provider Version
+      description: Version of terraform-provider-k8sconnect
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: terraform-version
+    attributes:
+      label: Terraform Version
+      description: Output of `terraform version`
+      placeholder: "1.9.0"
+    validations:
+      required: true
+
+  - type: input
+    id: kubernetes-version
+    attributes:
+      label: Kubernetes Version
+      description: Output of `kubectl version --short`
+      placeholder: "v1.31.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kubernetes-platform
+    attributes:
+      label: Kubernetes Platform
+      description: What Kubernetes distribution are you using?
+      options:
+        - EKS (AWS)
+        - GKE (Google Cloud)
+        - AKS (Azure)
+        - k3s/k3d
+        - kind
+        - minikube
+        - Self-managed
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any other information that might be relevant (OS, special cluster config, etc.)
+      placeholder: Running on macOS, using exec auth with AWS CLI...
+
+  - type: checkboxes
+    id: search
+    attributes:
+      label: Due Diligence
+      options:
+        - label: I searched existing issues and didn't find a duplicate
+          required: true
+        - label: I tried with the latest provider version
+          required: false

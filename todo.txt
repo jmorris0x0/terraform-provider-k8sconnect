@@ -35,6 +35,7 @@ Test very large CRDs. This was an issue in other providers. might need chunking.
 Delayed plan application: Handle out-of-date plans
 Add examples tests for datasource
 Use latest for all example images. Otherwise just making toil for later.
+Autodetect the most recent terraform version for testing locally and in CI. Otherwise this is monthly toil.
 
 FEATURE ADDITIONS
 
@@ -45,9 +46,6 @@ Adding a patch resource would be a big differentiator. Not sure if wise though.
 
 UX IMPROVEMENTS
 
-Remove field_ownership from diffs: Just noise in output. This is fixed by moving to map.
-Hide private attributes: Some should not be in UI
-YAML diff vs dry-run diff: Evaluate which is better UX
 Datasource args: Flatten nested structure unless adding more attributes
 Better datasource errors: Improve error messages
 Warnings for old versions: Terraform <1.6 or pre-SSA Kubernetes
@@ -60,9 +58,8 @@ GB has many yaml helper datasources. I just have one. Good design decsion? Or no
 CODE QUALITY
 
 Cyclomatic complexity: Reduce all functions to <15
-General refactoring: Simplification pass
+General refactoring: Spend three days on simplification pass
 Convert to issues: Move this list to GitHub issues
-Share same wait/watch/polling code between all actions. Move to common?
 Security scanning alerts: Address current GitHub code scanning issues
 
 MARKETING & GROWTH
@@ -101,10 +98,6 @@ Could probably knock out an MVP using the Terraform provider schema definitions 
     - Useful for debugging SSA conflicts
     - HashiCorp has this, I auto-generate
     - Could be quite complex?
-  5. sensitive_fields - mask arbitrary fields in state
-    - kubectl has this for custom masking
-    - You only mask connection credentials
-    - Meh. Easy to add later if people complain.
   6. override_namespace - apply to different namespace than YAML specifies
     - kubectl has this
     - Useful for multi-tenancy patterns
@@ -119,15 +112,9 @@ Add override_namespace to manifest resource for multi-tenancy patterns
 
 Unmet needs and pain points:
 
-Unified State Management: A tool that bridges Terraform's state with Kubernetes' native reconciliation without drift wars. [I address this already]
-
-Rollbacks in Terraform often mean disruptive destroy-and-recreate cycles, while Kubernetes can do rapid, surgical rollbacks in seconds. [I could address this?]
-
 Terraform wants to be declarative and stateful, Kubernetes wants to be self-healing and continuously reconciling, and developers just want to ship code without becoming infrastructure experts.
 
 Add a file with the terraform block for the examples? It would be nice to be fully copy pastable.
 
 Add a deep compare yaml helper function for the tests. string comparisons are brittle and have wasted a lot of time for me.
 
-
-New examples are using docker.com

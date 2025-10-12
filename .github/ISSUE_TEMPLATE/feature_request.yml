@@ -1,0 +1,99 @@
+name: Feature Request
+description: Suggest a new feature or enhancement
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a new feature! Please describe your use case and proposed solution below.
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use Case
+      description: What problem are you trying to solve? What's the motivation for this feature?
+      placeholder: |
+        I'm trying to...
+
+        Currently, I have to...
+
+        This is painful because...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed Solution
+      description: How do you envision this feature working?
+      placeholder: |
+        I'd like to be able to...
+
+        Example configuration:
+        ```hcl
+        resource "k8sconnect_manifest" "example" {
+          new_feature = "value"
+        }
+        ```
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Have you considered any alternative solutions or workarounds?
+      placeholder: |
+        I tried..., but it doesn't work because...
+
+        I could work around it by..., but that's not ideal because...
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Feature Scope
+      description: What area does this feature relate to?
+      options:
+        - Resource (k8sconnect_manifest)
+        - Data Source (yaml_split, yaml_scoped, etc.)
+        - Connection/Authentication
+        - Field Ownership/Drift Detection
+        - Wait Conditions
+        - Import
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: breaking
+    attributes:
+      label: Breaking Change
+      description: Would this require breaking changes to existing configurations?
+      options:
+        - "No - Backward compatible"
+        - "Yes - Breaking change required"
+        - "Unsure"
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: |
+        Any other context, screenshots, links to similar features in other providers, etc.
+      placeholder: |
+        Similar to how the kubectl provider does...
+
+        Related upstream Kubernetes issue: ...
+
+  - type: checkboxes
+    id: search
+    attributes:
+      label: Due Diligence
+      options:
+        - label: I searched existing issues and didn't find a duplicate
+          required: true
+        - label: I'm willing to contribute a PR for this feature
+          required: false

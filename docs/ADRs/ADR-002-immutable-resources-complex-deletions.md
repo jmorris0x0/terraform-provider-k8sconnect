@@ -24,72 +24,50 @@ Current k8sconnect behavior:
 
 When users change immutable fields in Terraform configuration:
 ```hcl
-# Initial configuration
 resource "k8sconnect_manifest" "pvc" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: PersistentVolumeClaim
-metadata:
-  name: data-volume
 spec:
   resources:
     requests:
-      storage: 10Gi  # User changes to 20Gi
+      storage: 10Gi  # User changes to 20Gi - immutable!
 YAML
 }
 ```
 
-**Current behavior**: 
+**Current behavior**:
 ```
 Error: Update: Invalid Resource
-
-The PersistentVolumeClaim data-volume contains invalid fields or values. 
-Review the YAML specification and ensure all required fields are present 
-and correctly formatted. Details: PersistentVolumeClaim "data-volume" is 
-invalid: spec: Forbidden: spec is immutable after creation
+Details: spec is immutable after creation
 ```
 
 **Problems**:
 - Generic error message doesn't explain immutability
 - No guidance on how to resolve
-- Users often don't understand they need to recreate
+- Users don't understand they need to recreate
 
 ### Complex Deletions
 
-When resources get stuck during deletion:
-```hcl
-# PVC with volume in use
-# Namespace with resources still inside
-# Custom resources with finalizers waiting for controller
-```
-
-**Current behavior**: We timeout and provide guidance, but could be more intelligent.
+Resources with finalizers, volumes in use, or namespaces with resources inside get stuck during deletion. Current behavior times out and provides guidance, but could be more intelligent.
 
 ## Research: How Other Providers Handle This
 
-### 1. HashiCorp Kubernetes Provider
+### HashiCorp Kubernetes Provider
 
 **Immutable Fields**:
 - Uses schema with `ForceNew: true` for known immutable fields
 - Terraform automatically plans resource recreation
 - Clear in plan output: `# must be replaced`
 
-**Example**:
-```go
-"storage_class_name": {
-    Type:     schema.TypeString,
-    Optional: true,
-    ForceNew: true,  // Forces recreation on change
-    Computed: true,
-}
-```
+**Limitation**: Requires maintaining per-resource schemas. Can't handle CRDs or unknown resources.
 
 **Complex Deletions**:
 - Basic timeout support
 - No built-in finalizer handling
 - Users often resort to local-exec provisioners
 
-### 2. Kubectl Provider (Gavin Bunney)
+### Kubectl Provider (Gavin Bunney)
 
 **Immutable Fields**:
 - No special handling - errors bubble up from Kubernetes
@@ -98,10 +76,9 @@ When resources get stuck during deletion:
 
 **Complex Deletions**:
 - Simple timeout mechanism
-- `force_delete` option that patches finalizers (Is this really true?)
 - Limited intelligence about deletion order
 
-### 3. ArgoCD
+### ArgoCD
 
 **Immutable Fields**:
 - Detects immutable field changes via dry-run
@@ -113,7 +90,7 @@ When resources get stuck during deletion:
 - Cascading deletion with proper ordering
 - Retry logic with exponential backoff
 
-### 4. Flux
+### Flux
 
 **Immutable Fields**:
 - Uses server-side dry-run to detect issues
@@ -127,241 +104,102 @@ When resources get stuck during deletion:
 
 ## Proposed Solutions
 
-### Option 1: Dry-Run Detection with Automatic Recreation
+### Option 1: Dry-Run Detection with Automatic Recreation (CHOSEN)
 
-**Approach**:
-1. Before Update, perform dry-run apply
-2. Detect immutable field errors (422 Invalid with specific patterns)
-3. Automatically plan recreation if immutable fields changed
-4. Show clear message in plan output
+**Approach**: Perform dry-run during plan phase, detect immutable field errors (422 Invalid), automatically plan recreation.
 
-**Implementation**:
-```go
-func (r *manifestResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-    // Perform dry-run first
-    dryRunResult, err := client.DryRunApply(ctx, obj, k8sclient.ApplyOptions{
-        FieldManager: DefaultFieldManager,
-        DryRun:       []string{metav1.DryRunAll},
-    })
-    
-    if err != nil && r.isImmutableFieldError(err) {
-        // Force recreation instead of update
-        resp.RequiresReplace = append(resp.RequiresReplace, path.Root("yaml_body"))
-        return
-    }
-    
-    // Proceed with normal update...
-}
-
-func (r *manifestResource) isImmutableFieldError(err error) bool {
-    if statusErr, ok := err.(*errors.StatusError); ok {
-        return statusErr.ErrStatus.Code == 422 && 
-               strings.Contains(statusErr.ErrStatus.Message, "immutable")
-    }
-    return false
-}
-```
+**How it works**: ModifyPlan performs dry-run apply. If error contains "immutable" pattern, mark resource for replacement. User sees clear plan output showing recreation before apply.
 
 **Pros**:
-- Automatic handling of immutable fields
+- Automatic handling - no user intervention
 - Clear plan output showing recreation
-- No user intervention required
+- Works with any resource type including CRDs
 
 **Cons**:
-- Extra API call for every update
-- May force unwanted recreations
-- Dry-run isn't perfect predictor
+- Extra API call for every update (already doing dry-run for projection)
+- Dry-run isn't perfect predictor (rare edge cases)
 
 ### Option 2: Enhanced Error Messages with Manual Recreation
 
-**Approach**:
-1. Detect immutable field errors during apply
-2. Provide detailed error message with resolution steps
-3. User must manually taint resource or add lifecycle rule
-
-**Implementation**:
-```go
-func (r *manifestResource) classifyK8sError(err error, operation, resourceDesc string) (severity, title, detail string) {
-    // ... existing cases ...
-    
-    case r.isImmutableFieldError(err):
-        immutableFields := r.extractImmutableFields(err)
-        return "error", fmt.Sprintf("%s: Immutable Field Changed", operation),
-            fmt.Sprintf("Cannot update immutable fields on %s: %v\n\n"+
-                "Immutable fields cannot be changed after resource creation.\n\n"+
-                "Resolution options:\n"+
-                "1. Revert the changes to immutable fields\n"+
-                "2. Delete and recreate the resource:\n"+
-                "   terraform destroy -target=%s\n"+
-                "   terraform apply\n"+
-                "3. Add lifecycle rule to force recreation:\n"+
-                "   lifecycle {\n"+
-                "     replace_triggered_by = [null_resource.trigger]\n"+
-                "   }",
-                resourceDesc, immutableFields, req.ID)
-}
-```
+**Approach**: Detect immutable errors at apply time, provide detailed resolution steps. User must manually taint or add lifecycle rule.
 
 **Pros**:
 - No performance overhead
 - User has full control
-- Works with any resource type
 
 **Cons**:
 - Manual intervention required
 - Poor user experience
-- Error occurs at apply time
+- Error occurs at apply time (too late)
 
 ### Option 3: Configurable Recreation Strategy
 
-**Approach**:
-1. Add `recreate_on_immutable_change` option to resource
-2. Maintain list of known immutable fields per resource type
-3. Detect changes to immutable fields during plan
-4. Force recreation based on configuration
-
-**Implementation**:
-```go
-type manifestResourceModel struct {
-    // ... existing fields ...
-    RecreateOnImmutableChange types.Bool `tfsdk:"recreate_on_immutable_change"`
-}
-
-var knownImmutableFields = map[string][]string{
-    "PersistentVolumeClaim": {"spec.storageClassName", "spec.accessModes", "spec.resources.requests.storage"},
-    "Service": {"spec.clusterIP", "spec.type", "spec.ports[*].protocol"},
-    "Pod": {"spec.containers[*].image", "spec.containers[*].command"},
-}
-```
+**Approach**: Add `recreate_on_immutable_change` option, maintain list of known immutable fields per resource type.
 
 **Pros**:
 - User control over behavior
 - Can be intelligent about known types
-- Good balance of automation and control
 
 **Cons**:
-- Maintaining immutable field list
+- Maintaining immutable field list is a maintenance nightmare
 - Complex implementation
-- May miss custom resources
+- Will miss CRDs and custom resources
 
-## Open Questions
+## Decision
 
-### 1. Immutable Field Detection Strategy
+Implement **Option 1: Dry-Run Detection with Automatic Recreation**.
 
-**Q1.1**: Should we use dry-run to detect immutability proactively or handle errors reactively?
-- **Consideration**: Dry-run adds latency but provides better UX
-- **Trade-off**: Performance vs user experience
+We already perform dry-run during plan phase for accurate diff projection (ADR-001), so the performance overhead is already paid. Detection via dry-run is universal - works with any Kubernetes resource including CRDs without maintaining field lists.
 
-**Q1.2**: How do we handle partial immutability (e.g., can grow PVC but not shrink)?
-- **Example**: PVC storage can increase but not decrease
-- **Challenge**: Simple immutable/mutable classification insufficient
+The automatic recreation provides the best UX - users see the replacement in the plan output before apply, just like HashiCorp's provider, but without requiring schema definitions.
 
-**Q1.3**: Should we maintain a registry of known immutable fields?
-- **Pros**: Faster detection, better error messages
-- **Cons**: Maintenance burden, doesn't handle CRDs
+## Implementation Notes
 
-### 2. Recreation Behavior
+### Detection Logic
+During ModifyPlan, after dry-run:
+1. Check if error is 422 Invalid
+2. Check if error message contains "immutable" or "Forbidden: spec is immutable"
+3. If both true, mark resource for replacement via RequiresReplace
 
-**Q2.1**: Should recreation be automatic or require user confirmation?
-- **Option A**: Automatic with clear plan output
-- **Option B**: Error with manual intervention required
-- **Option C**: Configurable behavior
-
-**Q2.2**: How do we handle resources with persistent data (PVCs, StatefulSets)?
-- **Risk**: Data loss on recreation
-- **Mitigation**: Special warnings? Block recreation?
-
-**Q2.3**: What about resources with external dependencies?
-- **Example**: Service with external DNS/load balancer
-- **Challenge**: Recreation might break external integrations
-
-### 3. Deletion Improvements
-
-**Q3.1**: Should we implement intelligent finalizer handling beyond force_destroy?
-- **Option A**: Remove specific finalizers after timeout
-- **Option B**: Cascading deletion strategies
-- **Option C**: Exponential backoff with health checks
-
-**Q3.2**: How do we handle deletion ordering for dependent resources?
-- **Example**: Namespace with resources inside
-- **Challenge**: Need dependency graph analysis
-
-**Q3.3**: Should we provide deletion progress feedback?
-- **Current**: Silent until timeout
-- **Proposed**: Periodic status checks with progress
-
-### 4. API and UX Design
-
-**Q4.1**: Where should recreation configuration live?
-```hcl
-# Option A: Resource-level attribute
-resource "k8sconnect_manifest" "example" {
-  recreate_on_immutable_change = true
-  # ...
-}
-
-# Option B: Lifecycle-style block
-resource "k8sconnect_manifest" "example" {
-  immutable_fields {
-    behavior = "recreate" # or "error"
-    known_fields = ["spec.storageClassName"]
-  }
-  # ...
-}
-
-# Option C: Provider-level default with overrides
-provider "k8sconnect" {
-  immutable_field_behavior = "recreate"
+### User Experience
+Plan output shows:
+```
+# k8sconnect_manifest.pvc must be replaced
+-/+ resource "k8sconnect_manifest" "pvc" {
+    ~ yaml_body = <<YAML
+        spec:
+          resources:
+            requests:
+-             storage: 10Gi
++             storage: 20Gi
+      YAML
 }
 ```
 
-**Q4.2**: How should we surface immutability information in plans?
-- Show which fields are immutable?
-- Warn about potential recreation before apply?
-- Custom diff formatting?
+## Key Considerations
 
-### 5. Performance Considerations
+### Data Loss Risk
+Recreating resources like PVCs can cause data loss. We rely on Terraform's standard plan review workflow - users see the replacement before apply and can cancel if unintended.
 
-**Q5.1**: Is the overhead of dry-run acceptable for all updates?
-- **Measurement needed**: Latency impact
-- **Alternative**: Only dry-run for known problematic types
+### Partial Immutability
+Some fields have directional constraints (e.g., PVC storage can grow but not shrink). Dry-run correctly detects these - the server returns the specific error.
 
-**Q5.2**: Should we cache immutability information?
-- **Example**: Remember that a field is immutable after first error
-- **Challenge**: Cache invalidation, schema changes
+### Server-Side Changes
+If admission webhooks modify immutable fields, we respect the server's values via projection (ADR-001). We never show drift on fields we don't manage.
 
-### 6. Edge Cases
+### Performance
+Dry-run latency is already part of the plan phase for projection. Immutability detection adds no additional API calls.
 
-**Q6.1**: How do we handle server-side changes to immutable fields?
-- **Scenario**: Admission webhook modifies immutable field
-- **Current**: Would cause perpetual diff
-- **Solution**: Ignore? Warn? Error?
+### CRD Support
+Works automatically with CRDs - we don't maintain field lists. The API server is the source of truth for what's immutable.
 
-**Q6.2**: What about resources that become immutable conditionally?
-- **Example**: Some fields immutable only after resource is "Ready"
-- **Challenge**: Need state awareness
+## Limitations
 
-**Q6.3**: How do we handle schema evolution?
-- **Scenario**: Field becomes immutable in new K8s version
-- **Challenge**: Behavior changes without Terraform changes
+1. **Dry-run accuracy**: Rare edge cases where dry-run succeeds but actual apply fails
+2. **Timing**: Detection happens at plan time, but some immutability might be conditional on resource state
+3. **Warnings**: No special warnings for high-risk resources (PVCs with data) - users must review plan output
 
-### 7. Compatibility and Migration
-
-**Q7.1**: How do we ensure backward compatibility?
-- Default behavior must not break existing configs
-- Migration path for new features
-
-**Q7.2**: Should this be opt-in or opt-out?
-- **Consideration**: Safety vs convenience
-- **Precedent**: What do other providers do?
-
-## Next Steps
-
-1. **Spike**: Implement dry-run detection prototype to measure performance impact
-2. **Survey**: Poll community on preferred behavior (automatic vs manual recreation)
-3. **Research**: Deep dive into specific resource types (PVC, StatefulSet, Service)
-4. **Design**: Create detailed proposal based on findings
-5. **POC**: Build proof-of-concept for most promising approach
+These limitations are acceptable because the alternative - cryptic errors at apply time - is worse.
 
 ## References
 
@@ -369,4 +207,3 @@ provider "k8sconnect" {
 2. [HashiCorp Kubernetes Provider Source](https://github.com/hashicorp/terraform-provider-kubernetes)
 3. [Server-Side Apply Field Management](https://kubernetes.io/docs/reference/using-api/server-side-apply/#field-management)
 4. [Finalizers Documentation](https://kubernetes.io/docs/concepts/overview/working-with-objects/finalizers/)
-5. [Crossplane Composition Functions](https://docs.crossplane.io/latest/concepts/composition-functions/)
