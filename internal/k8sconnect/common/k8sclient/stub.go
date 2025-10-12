@@ -225,5 +225,10 @@ func (s *stubK8sClient) PatchStatus(ctx context.Context, gvr schema.GroupVersion
 	return s.GetResponse, nil
 }
 
+func (s *stubK8sClient) GetWarnings() []string {
+	// Stub never has warnings
+	return nil
+}
+
 // Interface assertion to ensure stubK8sClient satisfies K8sClient
 var _ K8sClient = (*stubK8sClient)(nil)

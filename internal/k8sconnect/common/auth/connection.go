@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
@@ -58,6 +59,9 @@ func createInlineConfig(conn ClusterConnectionModel) (*rest.Config, error) {
 	config := &rest.Config{
 		Host: conn.Host.ValueString(),
 	}
+
+	// Set up warning handler to collect K8s API deprecation warnings
+	config.WarningHandler = k8sclient.NewWarningCollector()
 
 	// Configure TLS
 	if err := configureTLS(config, conn); err != nil {
@@ -227,7 +231,14 @@ func createKubeconfigConfig(conn ClusterConnectionModel) (*rest.Config, error) {
 		}
 
 		clientConfig.CurrentContext = context
-		return clientcmd.NewDefaultClientConfig(*clientConfig, &clientcmd.ConfigOverrides{}).ClientConfig()
+		config, err := clientcmd.NewDefaultClientConfig(*clientConfig, &clientcmd.ConfigOverrides{}).ClientConfig()
+		if err != nil {
+			return nil, err
+		}
+
+		// Set up warning handler to collect K8s API deprecation warnings
+		config.WarningHandler = k8sclient.NewWarningCollector()
+		return config, nil
 	}
 
 	// No context provided - validate kubeconfig has safe defaults
@@ -241,7 +252,14 @@ func createKubeconfigConfig(conn ClusterConnectionModel) (*rest.Config, error) {
 		// Only one context - safe to use it automatically
 		for contextName := range clientConfig.Contexts {
 			clientConfig.CurrentContext = contextName
-			return clientcmd.NewDefaultClientConfig(*clientConfig, &clientcmd.ConfigOverrides{}).ClientConfig()
+			config, err := clientcmd.NewDefaultClientConfig(*clientConfig, &clientcmd.ConfigOverrides{}).ClientConfig()
+			if err != nil {
+				return nil, err
+			}
+
+			// Set up warning handler to collect K8s API deprecation warnings
+			config.WarningHandler = k8sclient.NewWarningCollector()
+			return config, nil
 		}
 	}
 

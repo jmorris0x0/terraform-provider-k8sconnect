@@ -47,8 +47,14 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
+	// 6a. Surface any API warnings from apply operation
+	surfaceK8sWarnings(ctx, rc.Client, &resp.Diagnostics)
+
 	// 7. Phase 2 - Read back to get managedFields
 	r.readResourceAfterCreate(ctx, rc)
+
+	// 7a. Surface any API warnings from read operation
+	surfaceK8sWarnings(ctx, rc.Client, &resp.Diagnostics)
 
 	// 8. Update projection BEFORE state save
 	if err := r.updateProjection(rc); err != nil {
@@ -109,6 +115,9 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 			fmt.Sprintf("Failed to read %s: %s", rc.Object.GetKind(), err))
 		return
 	}
+
+	// 3a. Surface any API warnings from read operation
+	surfaceK8sWarnings(ctx, rc.Client, &resp.Diagnostics)
 
 	// 4. Check ownership
 	if err := r.verifyOwnership(currentObj, data.ID.ValueString(), rc.Object, resp); err != nil {
@@ -175,6 +184,9 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 	if err := r.applyResourceWithConflictHandling(ctx, rc, rc.Data, resp, "Update"); err != nil {
 		return
 	}
+
+	// 4a. Surface any API warnings from apply operation
+	surfaceK8sWarnings(ctx, rc.Client, &resp.Diagnostics)
 
 	tflog.Info(ctx, "Resource updated", map[string]interface{}{
 		"kind":      rc.Object.GetKind(),
@@ -256,12 +268,18 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 		return
 	}
 
+	// 5a. Surface any API warnings from get operation
+	surfaceK8sWarnings(ctx, rc.Client, &resp.Diagnostics)
+
 	// 6. Attempt normal deletion
 	err = rc.Client.Delete(ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName(), k8sclient.DeleteOptions{})
 	if err != nil && !errors.IsNotFound(err) {
 		resp.Diagnostics.AddError("Deletion Failed", err.Error())
 		return
 	}
+
+	// 6a. Surface any API warnings from delete operation
+	surfaceK8sWarnings(ctx, rc.Client, &resp.Diagnostics)
 
 	// 7. Wait for deletion with timeout
 	err = r.waitForDeletion(ctx, rc.Client, rc.GVR, rc.Object, timeout)
@@ -374,4 +392,18 @@ func handleProjectionFailure(
 		fmt.Sprintf("Resource was %s successfully but projection calculation failed: %s\n\n"+
 			"This is typically caused by network issues. Run 'terraform apply' again to complete the operation.", operation, err),
 	)
+}
+
+// surfaceK8sWarnings checks for Kubernetes API warnings and adds them as Terraform diagnostics
+func surfaceK8sWarnings(ctx context.Context, client k8sclient.K8sClient, diagnostics *diag.Diagnostics) {
+	warnings := client.GetWarnings()
+	for _, warning := range warnings {
+		diagnostics.AddWarning(
+			"Kubernetes API Warning",
+			fmt.Sprintf("The Kubernetes API server returned a warning:\n\n%s", warning),
+		)
+		tflog.Warn(ctx, "Kubernetes API warning", map[string]interface{}{
+			"warning": warning,
+		})
+	}
 }
