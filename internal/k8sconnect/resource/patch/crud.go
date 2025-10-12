@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8serrors"
 )
 
 func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -58,7 +59,13 @@ func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, 
 			)
 			return
 		}
-		resp.Diagnostics.AddError("Failed to Get Target Resource", err.Error())
+		// Use error classification for other K8s API errors
+		severity, title, detail := k8serrors.ClassifyError(err, "Get Target Resource", formatTarget(target))
+		if severity == "warning" {
+			resp.Diagnostics.AddWarning(title, detail)
+		} else {
+			resp.Diagnostics.AddError(title, detail)
+		}
 		return
 	}
 
@@ -90,7 +97,12 @@ func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, 
 	fieldManager := fmt.Sprintf("k8sconnect-patch-%s", data.ID.ValueString())
 	patchedObj, err := r.applyPatch(ctx, client, targetObj, data, fieldManager, gvr)
 	if err != nil {
-		resp.Diagnostics.AddError("Patch Failed", err.Error())
+		severity, title, detail := k8serrors.ClassifyError(err, "Apply Patch", formatTarget(target))
+		if severity == "warning" {
+			resp.Diagnostics.AddWarning(title, detail)
+		} else {
+			resp.Diagnostics.AddError(title, detail)
+		}
 		return
 	}
 
@@ -159,7 +171,12 @@ func (r *patchResource) Read(ctx context.Context, req resource.ReadRequest, resp
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		resp.Diagnostics.AddError("Failed to Read Target Resource", err.Error())
+		severity, title, detail := k8serrors.ClassifyError(err, "Read Target Resource", formatTarget(target))
+		if severity == "warning" {
+			resp.Diagnostics.AddWarning(title, detail)
+		} else {
+			resp.Diagnostics.AddError(title, detail)
+		}
 		return
 	}
 
@@ -234,7 +251,12 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	// 6. Get current resource
 	gvr, currentObj, err := r.getTargetResource(ctx, client, target)
 	if err != nil {
-		resp.Diagnostics.AddError("Failed to Get Target Resource", err.Error())
+		severity, title, detail := k8serrors.ClassifyError(err, "Get Target Resource", formatTarget(target))
+		if severity == "warning" {
+			resp.Diagnostics.AddWarning(title, detail)
+		} else {
+			resp.Diagnostics.AddError(title, detail)
+		}
 		return
 	}
 
@@ -242,7 +264,12 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	fieldManager := fmt.Sprintf("k8sconnect-patch-%s", plan.ID.ValueString())
 	patchedObj, err := r.applyPatch(ctx, client, currentObj, plan, fieldManager, gvr)
 	if err != nil {
-		resp.Diagnostics.AddError("Patch Update Failed", err.Error())
+		severity, title, detail := k8serrors.ClassifyError(err, "Update Patch", formatTarget(target))
+		if severity == "warning" {
+			resp.Diagnostics.AddWarning(title, detail)
+		} else {
+			resp.Diagnostics.AddError(title, detail)
+		}
 		return
 	}
 
