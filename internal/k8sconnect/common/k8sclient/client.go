@@ -54,6 +54,10 @@ type K8sClient interface {
 
 	// PatchStatus patches the status subresource of a Kubernetes object
 	PatchStatus(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string, patchType types.PatchType, data []byte, options metav1.PatchOptions) (*unstructured.Unstructured, error)
+
+	// GetWarnings retrieves any Kubernetes API warnings collected since the last call
+	// Returns a slice of warning messages (typically about deprecated APIs)
+	GetWarnings() []string
 }
 
 // ApplyOptions holds options for server-side apply operations.
@@ -84,12 +88,14 @@ type resilientWatcher struct {
 // ===================== DynamicK8sClient =====================
 // DynamicK8sClient uses client-go's Dynamic Client for operations.
 type DynamicK8sClient struct {
-	client       dynamic.Interface
-	discovery    discovery.DiscoveryInterface
-	fieldManager string
+	client           dynamic.Interface
+	discovery        discovery.DiscoveryInterface
+	fieldManager     string
+	warningCollector *WarningCollector
 }
 
 // NewDynamicK8sClient creates a new DynamicK8sClient from a REST config.
+// The config should have a WarningHandler set if you want to collect API warnings.
 func NewDynamicK8sClient(config *rest.Config) (*DynamicK8sClient, error) {
 	dynamicClient, err := dynamic.NewForConfig(config)
 	if err != nil {
@@ -101,10 +107,17 @@ func NewDynamicK8sClient(config *rest.Config) (*DynamicK8sClient, error) {
 		return nil, fmt.Errorf("failed to create discovery client: %w", err)
 	}
 
+	// Extract warning collector from config if present
+	var warningCollector *WarningCollector
+	if wc, ok := config.WarningHandler.(*WarningCollector); ok {
+		warningCollector = wc
+	}
+
 	return &DynamicK8sClient{
-		client:       dynamicClient,
-		discovery:    discoveryClient,
-		fieldManager: "k8sconnect",
+		client:           dynamicClient,
+		discovery:        discoveryClient,
+		fieldManager:     "k8sconnect",
+		warningCollector: warningCollector,
 	}, nil
 }
 
@@ -648,6 +661,14 @@ func (rw *resilientWatcher) Stop() {
 
 func (rw *resilientWatcher) ResultChan() <-chan watch.Event {
 	return rw.resultChan
+}
+
+// GetWarnings retrieves any Kubernetes API warnings collected since the last call
+func (d *DynamicK8sClient) GetWarnings() []string {
+	if d.warningCollector == nil {
+		return nil
+	}
+	return d.warningCollector.GetWarnings()
 }
 
 // Interface assertion to ensure DynamicK8sClient satisfies K8sClient

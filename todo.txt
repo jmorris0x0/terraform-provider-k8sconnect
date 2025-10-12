@@ -13,28 +13,20 @@ DOCUMENTATION & RELEASE
 
 Registry landing page: Write main docs
 Verify attribute docs: Status changes need documentation updates
-Fill community standards: Issue templates, contributing guide, etc.
 Example improvements: Show both inline and template file patterns
-Don't need the first load balancer example. Find a different one or delete.
-
 Nested Schema for wait_for: Needs love
 
 
 TESTING GAPS
 
 Ownership edge cases: Create transition matrix and acceptance tests for all ownership scenarios
-Ownership conflict test: Test without force_conflicts=true (item 27)
 Import blocks: Verify they work correctly
-Cluster connection validation: Complex attribute combinations need better testing
-Datasource testing: Dependency graph, unknowns handling, interpolation
-OpenTofu tests: Add compatibility testing
+Datasource testing: Dependency graph, unknowns handling, interpolation.
 Check for stubs/skips: Audit test suite for forgotten temporary code
 HPA simulation: Test multiple simultaneous ownership changes
 Find a way to test multicluster
-Test very large CRDs. This was an issue in other providers. might need chunking.
-Delayed plan application: Handle out-of-date plans
-Add examples tests for datasource
-Use latest for all example images. Otherwise just making toil for later.
+Delayed plan application: Handle out of date plans
+Add examples tests for resource datasource
 Autodetect the most recent terraform version for testing locally and in CI. Otherwise this is monthly toil.
 
 FEATURE ADDITIONS
@@ -52,21 +44,18 @@ Warnings for old versions: Terraform <1.6 or pre-SSA Kubernetes
 Lock down the interface before launch: The attributes and behavior I ship with will haunt me for years.
 https://registry.terraform.io/providers/gavinbunney/kubectl/latest/docs/resources/kubectl_manifest#attribute-reference
 https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/manifest
-GB has many yaml helper datasources. I just have one. Good design decsion? Or no?
 
 
 CODE QUALITY
 
 Cyclomatic complexity: Reduce all functions to <15
 General refactoring: Spend three days on simplification pass
-Convert to issues: Move this list to GitHub issues
 Security scanning alerts: Address current GitHub code scanning issues
 
 MARKETING & GROWTH
 
-SEO optimization: Is "k8sconnect" optimal for discovery?
 Launch content: Medium article, r/kubernetes, r/terraform, HackerNews posts, SweetOps Slack, Kubernetes Slack
-Release pipeline: Add Tofu release, verify Windows/Linux builds
+
 
 DEFERRED/COMPLEX
 
@@ -120,3 +109,5 @@ Add a deep compare yaml helper function for the tests. string comparisons are br
  
 
 Add CI job to check/update cluster scoped resources list?
+
+Maybe call them: yaml_split and yaml_sort?
