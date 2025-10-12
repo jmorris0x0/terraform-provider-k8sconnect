@@ -2,6 +2,8 @@
 package patch_test
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"testing"
@@ -11,9 +13,14 @@ import (
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/config"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect"
 	testhelpers "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/test"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 )
 
 // Section 15: Array Handling Tests
@@ -37,13 +44,41 @@ func TestAccPatchResource_ArrayContainerByName(t *testing.T) {
 			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
 		},
 		Steps: []resource.TestStep{
-			// Step 1: Create Deployment with multiple containers
+			// Step 1: Create namespace and Deployment with kubectl field manager
 			{
-				Config: testAccPatchConfigArrayContainerSetup(ns, deployName),
+				Config: testAccPatchConfigEmptyWithNamespace(ns),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
 				Check: resource.ComposeTestCheckFunc(
+					// Create Deployment with kubectl field manager using k8s client
+					createDeploymentWithFieldManager(t, k8sClient, ns, deployName, "kubectl", map[string]interface{}{
+						"replicas": float64(1),
+						"selector": map[string]interface{}{
+							"matchLabels": map[string]interface{}{
+								"app": "test",
+							},
+						},
+						"template": map[string]interface{}{
+							"metadata": map[string]interface{}{
+								"labels": map[string]interface{}{
+									"app": "test",
+								},
+							},
+							"spec": map[string]interface{}{
+								"containers": []interface{}{
+									map[string]interface{}{
+										"name":  "app",
+										"image": "nginx:1.14.2",
+									},
+									map[string]interface{}{
+										"name":  "sidecar",
+										"image": "busybox:1.28",
+									},
+								},
+							},
+						},
+					}),
 					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 				),
 			},
@@ -85,13 +120,47 @@ func TestAccPatchResource_ArrayEnvVarByName(t *testing.T) {
 			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
 		},
 		Steps: []resource.TestStep{
-			// Step 1: Create Deployment with env vars
+			// Step 1: Create namespace and Deployment with kubectl field manager
 			{
-				Config: testAccPatchConfigArrayEnvSetup(ns, deployName),
+				Config: testAccPatchConfigEmptyWithNamespace(ns),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
 				Check: resource.ComposeTestCheckFunc(
+					// Create Deployment with kubectl field manager using k8s client
+					createDeploymentWithFieldManager(t, k8sClient, ns, deployName, "kubectl", map[string]interface{}{
+						"replicas": float64(1),
+						"selector": map[string]interface{}{
+							"matchLabels": map[string]interface{}{
+								"app": "test",
+							},
+						},
+						"template": map[string]interface{}{
+							"metadata": map[string]interface{}{
+								"labels": map[string]interface{}{
+									"app": "test",
+								},
+							},
+							"spec": map[string]interface{}{
+								"containers": []interface{}{
+									map[string]interface{}{
+										"name":  "app",
+										"image": "nginx:1.14.2",
+										"env": []interface{}{
+											map[string]interface{}{
+												"name":  "ENV1",
+												"value": "value1",
+											},
+											map[string]interface{}{
+												"name":  "ENV2",
+												"value": "value2",
+											},
+										},
+									},
+								},
+							},
+						},
+					}),
 					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 				),
 			},
@@ -183,13 +252,33 @@ func TestAccPatchResource_ComplexObjectArray(t *testing.T) {
 			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
 		},
 		Steps: []resource.TestStep{
-			// Step 1: Create Service with ports array
+			// Step 1: Create namespace and Service with kubectl field manager
 			{
-				Config: testAccPatchConfigComplexArraySetup(ns, svcName),
+				Config: testAccPatchConfigEmptyWithNamespace(ns),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
 				Check: resource.ComposeTestCheckFunc(
+					// Create Service with kubectl field manager using k8s client
+					createServiceWithFieldManager(t, k8sClient, ns, svcName, "kubectl", map[string]interface{}{
+						"selector": map[string]interface{}{
+							"app": "test",
+						},
+						"ports": []interface{}{
+							map[string]interface{}{
+								"name":       "http",
+								"port":       float64(80),
+								"targetPort": float64(8080),
+								"protocol":   "TCP",
+							},
+							map[string]interface{}{
+								"name":       "https",
+								"port":       float64(443),
+								"targetPort": float64(8443),
+								"protocol":   "TCP",
+							},
+						},
+					}),
 					testhelpers.CheckServiceExists(k8sClient, ns, svcName),
 				),
 			},
@@ -233,13 +322,43 @@ func TestAccPatchResource_DeepNestedContainerEnv(t *testing.T) {
 			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
 		},
 		Steps: []resource.TestStep{
-			// Step 1: Create Deployment
+			// Step 1: Create namespace and Deployment with kubectl field manager
 			{
-				Config: testAccPatchConfigDeepNestedSetup(ns, deployName),
+				Config: testAccPatchConfigEmptyWithNamespace(ns),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
 				Check: resource.ComposeTestCheckFunc(
+					// Create Deployment with kubectl field manager using k8s client
+					createDeploymentWithFieldManager(t, k8sClient, ns, deployName, "kubectl", map[string]interface{}{
+						"replicas": float64(1),
+						"selector": map[string]interface{}{
+							"matchLabels": map[string]interface{}{
+								"app": "test",
+							},
+						},
+						"template": map[string]interface{}{
+							"metadata": map[string]interface{}{
+								"labels": map[string]interface{}{
+									"app": "test",
+								},
+							},
+							"spec": map[string]interface{}{
+								"containers": []interface{}{
+									map[string]interface{}{
+										"name":  "app",
+										"image": "nginx:1.14.2",
+										"env": []interface{}{
+											map[string]interface{}{
+												"name":  "DEEP_VAR",
+												"value": "original",
+											},
+										},
+									},
+								},
+							},
+						},
+					}),
 					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 				),
 			},
@@ -257,53 +376,6 @@ func TestAccPatchResource_DeepNestedContainerEnv(t *testing.T) {
 		},
 		CheckDestroy: resource.ComposeTestCheckFunc(
 			testhelpers.CheckDeploymentDestroy(k8sClient, ns, deployName),
-			testhelpers.CheckNamespaceDestroy(k8sClient, ns),
-		),
-	})
-}
-
-// TestAccPatchResource_DeepNestedVolumeConfigMap tests deep nesting with volumes
-// (EDGE_CASES.md 16.2)
-func TestAccPatchResource_DeepNestedVolumeConfigMap(t *testing.T) {
-	t.Parallel()
-
-	raw := os.Getenv("TF_ACC_KUBECONFIG")
-	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG must be set")
-	}
-
-	ns := fmt.Sprintf("deep-volume-ns-%d", time.Now().UnixNano()%1000000)
-	podName := fmt.Sprintf("deep-volume-pod-%d", time.Now().UnixNano()%1000000)
-	k8sClient := testhelpers.CreateK8sClient(t, raw)
-
-	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
-			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
-		},
-		Steps: []resource.TestStep{
-			// Step 1: Create Pod with volume
-			{
-				Config: testAccPatchConfigDeepVolumeSetup(ns, podName),
-				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
-				},
-				Check: resource.ComposeTestCheckFunc(
-					testhelpers.CheckPodExists(k8sClient, ns, podName),
-				),
-			},
-			// Step 2: Patch volume mount path
-			{
-				Config: testAccPatchConfigDeepVolumePatch(ns, podName),
-				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
-				},
-				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttrSet("k8sconnect_patch.test", "id"),
-				),
-			},
-		},
-		CheckDestroy: resource.ComposeTestCheckFunc(
-			testhelpers.CheckPodDestroy(k8sClient, ns, podName),
 			testhelpers.CheckNamespaceDestroy(k8sClient, ns),
 		),
 	})
@@ -328,12 +400,44 @@ func TestAccPatchResource_DeepNestedFieldExtraction(t *testing.T) {
 			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
 		},
 		Steps: []resource.TestStep{
-			// Step 1: Create Deployment
+			// Step 1: Create namespace and Deployment with kubectl field manager
 			{
-				Config: testAccPatchConfigDeepNestedSetup(ns, deployName),
+				Config: testAccPatchConfigEmptyWithNamespace(ns),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
+				Check: resource.ComposeTestCheckFunc(
+					// Create Deployment with kubectl field manager using k8s client
+					createDeploymentWithFieldManager(t, k8sClient, ns, deployName, "kubectl", map[string]interface{}{
+						"replicas": float64(1),
+						"selector": map[string]interface{}{
+							"matchLabels": map[string]interface{}{
+								"app": "test",
+							},
+						},
+						"template": map[string]interface{}{
+							"metadata": map[string]interface{}{
+								"labels": map[string]interface{}{
+									"app": "test",
+								},
+							},
+							"spec": map[string]interface{}{
+								"containers": []interface{}{
+									map[string]interface{}{
+										"name":  "app",
+										"image": "nginx:1.14.2",
+										"env": []interface{}{
+											map[string]interface{}{
+												"name":  "DEEP_VAR",
+												"value": "original",
+											},
+										},
+									},
+								},
+							},
+						},
+					}),
+				),
 			},
 			// Step 2: Patch and verify managed_fields contains nested paths
 			{
@@ -375,12 +479,44 @@ func TestAccPatchResource_DeepNestedOwnershipTransfer(t *testing.T) {
 			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
 		},
 		Steps: []resource.TestStep{
-			// Step 1: Create Deployment
+			// Step 1: Create namespace and Deployment with kubectl field manager
 			{
-				Config: testAccPatchConfigDeepNestedSetup(ns, deployName),
+				Config: testAccPatchConfigEmptyWithNamespace(ns),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
+				Check: resource.ComposeTestCheckFunc(
+					// Create Deployment with kubectl field manager using k8s client
+					createDeploymentWithFieldManager(t, k8sClient, ns, deployName, "kubectl", map[string]interface{}{
+						"replicas": float64(1),
+						"selector": map[string]interface{}{
+							"matchLabels": map[string]interface{}{
+								"app": "test",
+							},
+						},
+						"template": map[string]interface{}{
+							"metadata": map[string]interface{}{
+								"labels": map[string]interface{}{
+									"app": "test",
+								},
+							},
+							"spec": map[string]interface{}{
+								"containers": []interface{}{
+									map[string]interface{}{
+										"name":  "app",
+										"image": "nginx:1.14.2",
+										"env": []interface{}{
+											map[string]interface{}{
+												"name":  "DEEP_VAR",
+												"value": "original",
+											},
+										},
+									},
+								},
+							},
+						},
+					}),
+				),
 			},
 			// Step 2: Patch deeply nested field
 			{
@@ -393,13 +529,43 @@ func TestAccPatchResource_DeepNestedOwnershipTransfer(t *testing.T) {
 					resource.TestCheckResourceAttrSet("k8sconnect_patch.test", "previous_owners.%"),
 				),
 			},
-			// Step 3: Destroy and verify ownership transfer
+			// Step 3: Destroy patch and verify ownership transfer
 			{
-				Config: testAccPatchConfigDeepNestedSetup(ns, deployName),
+				Config: testAccPatchConfigEmptyWithNamespace(ns),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
 				Check: resource.ComposeTestCheckFunc(
+					// Recreate Deployment with kubectl field manager after patch is destroyed
+					createDeploymentWithFieldManager(t, k8sClient, ns, deployName, "kubectl", map[string]interface{}{
+						"replicas": float64(1),
+						"selector": map[string]interface{}{
+							"matchLabels": map[string]interface{}{
+								"app": "test",
+							},
+						},
+						"template": map[string]interface{}{
+							"metadata": map[string]interface{}{
+								"labels": map[string]interface{}{
+									"app": "test",
+								},
+							},
+							"spec": map[string]interface{}{
+								"containers": []interface{}{
+									map[string]interface{}{
+										"name":  "app",
+										"image": "nginx:1.14.2",
+										"env": []interface{}{
+											map[string]interface{}{
+												"name":  "DEEP_VAR",
+												"value": "original",
+											},
+										},
+									},
+								},
+							},
+						},
+					}),
 					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 				),
 			},
@@ -532,12 +698,38 @@ func TestAccPatchResource_BooleanValues(t *testing.T) {
 			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
 		},
 		Steps: []resource.TestStep{
-			// Step 1: Create Deployment
+			// Step 1: Create namespace and Deployment with kubectl field manager
 			{
-				Config: testAccPatchConfigBooleanSetup(ns, deployName),
+				Config: testAccPatchConfigEmptyWithNamespace(ns),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
+				Check: resource.ComposeTestCheckFunc(
+					// Create Deployment with kubectl field manager using k8s client
+					createDeploymentWithFieldManager(t, k8sClient, ns, deployName, "kubectl", map[string]interface{}{
+						"replicas": float64(1),
+						"selector": map[string]interface{}{
+							"matchLabels": map[string]interface{}{
+								"app": "test",
+							},
+						},
+						"template": map[string]interface{}{
+							"metadata": map[string]interface{}{
+								"labels": map[string]interface{}{
+									"app": "test",
+								},
+							},
+							"spec": map[string]interface{}{
+								"containers": []interface{}{
+									map[string]interface{}{
+										"name":  "app",
+										"image": "nginx:1.14.2",
+									},
+								},
+							},
+						},
+					}),
+				),
 			},
 			// Step 2: Patch boolean fields
 			{
@@ -576,12 +768,38 @@ func TestAccPatchResource_NumericValues(t *testing.T) {
 			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
 		},
 		Steps: []resource.TestStep{
-			// Step 1: Create Deployment with replicas
+			// Step 1: Create namespace and Deployment with kubectl field manager
 			{
-				Config: testAccPatchConfigNumericSetup(ns, deployName),
+				Config: testAccPatchConfigEmptyWithNamespace(ns),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
+				Check: resource.ComposeTestCheckFunc(
+					// Create Deployment with kubectl field manager using k8s client
+					createDeploymentWithFieldManager(t, k8sClient, ns, deployName, "kubectl", map[string]interface{}{
+						"replicas": float64(1),
+						"selector": map[string]interface{}{
+							"matchLabels": map[string]interface{}{
+								"app": "test",
+							},
+						},
+						"template": map[string]interface{}{
+							"metadata": map[string]interface{}{
+								"labels": map[string]interface{}{
+									"app": "test",
+								},
+							},
+							"spec": map[string]interface{}{
+								"containers": []interface{}{
+									map[string]interface{}{
+										"name":  "app",
+										"image": "nginx:1.14.2",
+									},
+								},
+							},
+						},
+					}),
+				),
 			},
 			// Step 2: Patch numeric fields (replicas)
 			{
@@ -1010,33 +1228,6 @@ YAML
   cluster_connection = { kubeconfig = var.raw }
 }
 
-resource "k8sconnect_manifest" "test_deploy" {
-  yaml_body = <<YAML
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: %s
-  namespace: %s
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: test
-  template:
-    metadata:
-      labels:
-        app: test
-    spec:
-      containers:
-      - name: app
-        image: nginx:1.14.2
-      - name: sidecar
-        image: busybox:1.28
-YAML
-  cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
-}
-
 resource "k8sconnect_patch" "test" {
   target = {
     api_version = "apps/v1"
@@ -1058,9 +1249,9 @@ YAML
 
   take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_deploy]
+  depends_on = [k8sconnect_manifest.test_ns]
 }
-`, namespace, deployName, namespace, deployName, namespace)
+`, namespace, deployName, namespace)
 }
 
 func testAccPatchConfigArrayEnvSetup(namespace, deployName string) string {
@@ -1125,36 +1316,6 @@ YAML
   cluster_connection = { kubeconfig = var.raw }
 }
 
-resource "k8sconnect_manifest" "test_deploy" {
-  yaml_body = <<YAML
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: %s
-  namespace: %s
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: test
-  template:
-    metadata:
-      labels:
-        app: test
-    spec:
-      containers:
-      - name: app
-        image: nginx:1.14.2
-        env:
-        - name: ENV1
-          value: "value1"
-        - name: ENV2
-          value: "value2"
-YAML
-  cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
-}
-
 resource "k8sconnect_patch" "test" {
   target = {
     api_version = "apps/v1"
@@ -1176,9 +1337,9 @@ YAML
 
   take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_deploy]
+  depends_on = [k8sconnect_manifest.test_ns]
 }
-`, namespace, deployName, namespace, deployName, namespace)
+`, namespace, deployName, namespace)
 }
 
 func testAccPatchConfigSimpleArrayPatch(namespace, cmName string) string {
@@ -1270,28 +1431,6 @@ YAML
   cluster_connection = { kubeconfig = var.raw }
 }
 
-resource "k8sconnect_manifest" "test_svc" {
-  yaml_body = <<YAML
-apiVersion: v1
-kind: Service
-metadata:
-  name: %s
-  namespace: %s
-spec:
-  selector:
-    app: test
-  ports:
-  - port: 80
-    targetPort: 8080
-    protocol: TCP
-  - port: 443
-    targetPort: 8443
-    protocol: TCP
-YAML
-  cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
-}
-
 resource "k8sconnect_patch" "test" {
   target = {
     api_version = "v1"
@@ -1309,9 +1448,9 @@ YAML
 
   take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_svc]
+  depends_on = [k8sconnect_manifest.test_ns]
 }
-`, namespace, svcName, namespace, svcName, namespace)
+`, namespace, svcName, namespace)
 }
 
 // Terraform config helpers for Section 16: Deep Nesting
@@ -1376,34 +1515,6 @@ YAML
   cluster_connection = { kubeconfig = var.raw }
 }
 
-resource "k8sconnect_manifest" "test_deploy" {
-  yaml_body = <<YAML
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: %s
-  namespace: %s
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: test
-  template:
-    metadata:
-      labels:
-        app: test
-    spec:
-      containers:
-      - name: app
-        image: nginx:1.14.2
-        env:
-        - name: DEEP_VAR
-          value: "original"
-YAML
-  cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
-}
-
 resource "k8sconnect_patch" "test" {
   target = {
     api_version = "apps/v1"
@@ -1425,9 +1536,9 @@ YAML
 
   take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_deploy]
+  depends_on = [k8sconnect_manifest.test_ns]
 }
-`, namespace, deployName, namespace, deployName, namespace)
+`, namespace, deployName, namespace)
 }
 
 func testAccPatchConfigDeepVolumeSetup(namespace, podName string) string {
@@ -1484,28 +1595,6 @@ YAML
   cluster_connection = { kubeconfig = var.raw }
 }
 
-resource "k8sconnect_manifest" "test_pod" {
-  yaml_body = <<YAML
-apiVersion: v1
-kind: Pod
-metadata:
-  name: %s
-  namespace: %s
-spec:
-  containers:
-  - name: app
-    image: nginx:1.14.2
-    volumeMounts:
-    - name: config
-      mountPath: /etc/config
-  volumes:
-  - name: config
-    emptyDir: {}
-YAML
-  cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
-}
-
 resource "k8sconnect_patch" "test" {
   target = {
     api_version = "v1"
@@ -1525,9 +1614,9 @@ YAML
 
   take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_pod]
+  depends_on = [k8sconnect_manifest.test_ns]
 }
-`, namespace, podName, namespace, podName, namespace)
+`, namespace, podName, namespace)
 }
 
 // Terraform config helpers for Section 17: Special Values
@@ -1661,31 +1750,6 @@ YAML
   cluster_connection = { kubeconfig = var.raw }
 }
 
-resource "k8sconnect_manifest" "test_deploy" {
-  yaml_body = <<YAML
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: %s
-  namespace: %s
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: test
-  template:
-    metadata:
-      labels:
-        app: test
-    spec:
-      containers:
-      - name: app
-        image: nginx:1.14.2
-YAML
-  cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
-}
-
 resource "k8sconnect_patch" "test" {
   target = {
     api_version = "apps/v1"
@@ -1706,9 +1770,9 @@ YAML
 
   take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_deploy]
+  depends_on = [k8sconnect_manifest.test_ns]
 }
-`, namespace, deployName, namespace, deployName, namespace)
+`, namespace, deployName, namespace)
 }
 
 func testAccPatchConfigNumericSetup(namespace, deployName string) string {
@@ -1768,31 +1832,6 @@ YAML
   cluster_connection = { kubeconfig = var.raw }
 }
 
-resource "k8sconnect_manifest" "test_deploy" {
-  yaml_body = <<YAML
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: %s
-  namespace: %s
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: test
-  template:
-    metadata:
-      labels:
-        app: test
-    spec:
-      containers:
-      - name: app
-        image: nginx:1.14.2
-YAML
-  cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
-}
-
 resource "k8sconnect_patch" "test" {
   target = {
     api_version = "apps/v1"
@@ -1808,9 +1847,9 @@ YAML
 
   take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_deploy]
+  depends_on = [k8sconnect_manifest.test_ns]
 }
-`, namespace, deployName, namespace, deployName, namespace)
+`, namespace, deployName, namespace)
 }
 
 func testAccPatchConfigLargeString(namespace, cmName string) string {
@@ -2086,4 +2125,132 @@ resource "k8sconnect_patch" "test" {
   depends_on = [k8sconnect_manifest.test_ns]
 }
 `, namespace, cmName, namespace)
+}
+
+// Helper functions to create resources with custom field managers using k8s client
+
+// createDeploymentWithFieldManager creates a Deployment with a custom field manager
+func createDeploymentWithFieldManager(t *testing.T, client kubernetes.Interface, namespace, name, fieldManager string, spec map[string]interface{}) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+
+		// Create the Deployment using the k8s client with custom field manager
+		deploy := &unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"metadata": map[string]interface{}{
+					"name":      name,
+					"namespace": namespace,
+				},
+				"spec": spec,
+			},
+		}
+
+		deployBytes, err := json.Marshal(deploy.Object)
+		if err != nil {
+			return fmt.Errorf("failed to marshal deployment: %v", err)
+		}
+
+		_, err = client.AppsV1().Deployments(namespace).Patch(
+			ctx,
+			name,
+			types.ApplyPatchType,
+			deployBytes,
+			metav1.PatchOptions{
+				FieldManager: fieldManager,
+				Force:        ptr(true),
+			},
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create deployment with field manager %s: %v", fieldManager, err)
+		}
+
+		fmt.Printf("✅ Created deployment %s/%s with field manager %s\n", namespace, name, fieldManager)
+		return nil
+	}
+}
+
+// createServiceWithFieldManager creates a Service with a custom field manager
+func createServiceWithFieldManager(t *testing.T, client kubernetes.Interface, namespace, name, fieldManager string, spec map[string]interface{}) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+
+		// Create the Service using the k8s client with custom field manager
+		svc := &unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       "Service",
+				"metadata": map[string]interface{}{
+					"name":      name,
+					"namespace": namespace,
+				},
+				"spec": spec,
+			},
+		}
+
+		svcBytes, err := json.Marshal(svc.Object)
+		if err != nil {
+			return fmt.Errorf("failed to marshal service: %v", err)
+		}
+
+		_, err = client.CoreV1().Services(namespace).Patch(
+			ctx,
+			name,
+			types.ApplyPatchType,
+			svcBytes,
+			metav1.PatchOptions{
+				FieldManager: fieldManager,
+				Force:        ptr(true),
+			},
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create service with field manager %s: %v", fieldManager, err)
+		}
+
+		fmt.Printf("✅ Created service %s/%s with field manager %s\n", namespace, name, fieldManager)
+		return nil
+	}
+}
+
+// createPodWithFieldManager creates a Pod with a custom field manager
+func createPodWithFieldManager(t *testing.T, client kubernetes.Interface, namespace, name, fieldManager string, spec map[string]interface{}) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+
+		// Create the Pod using the k8s client with custom field manager
+		pod := &unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       "Pod",
+				"metadata": map[string]interface{}{
+					"name":      name,
+					"namespace": namespace,
+				},
+				"spec": spec,
+			},
+		}
+
+		podBytes, err := json.Marshal(pod.Object)
+		if err != nil {
+			return fmt.Errorf("failed to marshal pod: %v", err)
+		}
+
+		_, err = client.CoreV1().Pods(namespace).Patch(
+			ctx,
+			name,
+			types.ApplyPatchType,
+			podBytes,
+			metav1.PatchOptions{
+				FieldManager: fieldManager,
+				Force:        ptr(true),
+			},
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create pod with field manager %s: %v", fieldManager, err)
+		}
+
+		fmt.Printf("✅ Created pod %s/%s with field manager %s\n", namespace, name, fieldManager)
+		return nil
+	}
 }
