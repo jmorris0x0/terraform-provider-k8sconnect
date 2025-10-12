@@ -111,8 +111,13 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		resp.Diagnostics.AddError("Read Failed",
-			fmt.Sprintf("Failed to read %s: %s", rc.Object.GetKind(), err))
+		resourceDesc := fmt.Sprintf("%s %s", rc.Object.GetKind(), rc.Object.GetName())
+		severity, title, detail := r.classifyK8sError(err, "Read", resourceDesc)
+		if severity == "warning" {
+			resp.Diagnostics.AddWarning(title, detail)
+		} else {
+			resp.Diagnostics.AddError(title, detail)
+		}
 		return
 	}
 
@@ -266,14 +271,26 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 			tflog.Info(ctx, "Resource already deleted")
 			return
 		}
-		resp.Diagnostics.AddError("Failed to check resource", err.Error())
+		resourceDesc := fmt.Sprintf("%s %s", rc.Object.GetKind(), rc.Object.GetName())
+		severity, title, detail := r.classifyK8sError(err, "Delete", resourceDesc)
+		if severity == "warning" {
+			resp.Diagnostics.AddWarning(title, detail)
+		} else {
+			resp.Diagnostics.AddError(title, detail)
+		}
 		return
 	}
 
 	// 6. Attempt normal deletion
 	err = rc.Client.Delete(ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName(), k8sclient.DeleteOptions{})
 	if err != nil && !errors.IsNotFound(err) {
-		resp.Diagnostics.AddError("Deletion Failed", err.Error())
+		resourceDesc := fmt.Sprintf("%s %s", rc.Object.GetKind(), rc.Object.GetName())
+		severity, title, detail := r.classifyK8sError(err, "Delete", resourceDesc)
+		if severity == "warning" {
+			resp.Diagnostics.AddWarning(title, detail)
+		} else {
+			resp.Diagnostics.AddError(title, detail)
+		}
 		return
 	}
 

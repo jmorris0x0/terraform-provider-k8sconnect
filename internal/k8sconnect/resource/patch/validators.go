@@ -6,21 +6,132 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 )
 
 // ConfigValidators implements resource.ResourceWithConfigValidators
 func (r *patchResource) ConfigValidators(ctx context.Context) []resource.ConfigValidator {
 	return []resource.ConfigValidator{
+		&patchClusterConnectionValidator{},
+		&patchExecAuthValidator{},
 		&takeOwnershipValidator{},
 	}
 }
 
+// =============================================================================
+// patchClusterConnectionValidator ensures exactly one connection mode is specified
+// =============================================================================
+
+type patchClusterConnectionValidator struct{}
+
+func (v *patchClusterConnectionValidator) Description(ctx context.Context) string {
+	return "Ensures exactly one cluster connection mode is specified: inline (host + cluster_ca_certificate or insecure) or kubeconfig"
+}
+
+func (v *patchClusterConnectionValidator) MarkdownDescription(ctx context.Context) string {
+	return "Ensures exactly one cluster connection mode is specified: inline (`host` + `cluster_ca_certificate` or `insecure`), `kubeconfig`"
+}
+
+func (v *patchClusterConnectionValidator) ValidateResource(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var data patchResourceModel
+	diags := req.Config.Get(ctx, &data)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Skip validation for unknown connections (during planning)
+	if data.ClusterConnection.IsUnknown() {
+		return
+	}
+
+	// Check connection exists
+	if data.ClusterConnection.IsNull() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("cluster_connection"),
+			"Missing Cluster Connection Configuration",
+			"cluster_connection block is required.",
+		)
+		return
+	}
+
+	// Convert to connection model
+	connModel, err := auth.ObjectToConnectionModel(ctx, data.ClusterConnection)
+	if err != nil {
+		// Unknown values during planning - skip validation
+		return
+	}
+
+	// Use common validation logic
+	err = auth.ValidateConnectionWithUnknowns(ctx, connModel)
+	if err != nil {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("cluster_connection"),
+			"Invalid Cluster Connection Configuration",
+			err.Error(),
+		)
+	}
+}
+
+// =============================================================================
+// patchExecAuthValidator ensures complete exec configuration when present
+// =============================================================================
+
+type patchExecAuthValidator struct{}
+
+func (v *patchExecAuthValidator) Description(ctx context.Context) string {
+	return "Ensures that if exec auth is specified, all required fields (api_version, command) are provided"
+}
+
+func (v *patchExecAuthValidator) MarkdownDescription(ctx context.Context) string {
+	return "Ensures that if exec auth is specified, all required fields (`api_version`, `command`) are provided"
+}
+
+func (v *patchExecAuthValidator) ValidateResource(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var data patchResourceModel
+	diags := req.Config.Get(ctx, &data)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// If connection is unknown or null, skip validation
+	if data.ClusterConnection.IsUnknown() || data.ClusterConnection.IsNull() {
+		return
+	}
+
+	// Convert to connection model
+	connModel, err := auth.ObjectToConnectionModel(ctx, data.ClusterConnection)
+	if err != nil {
+		// Unknown values during planning
+		return
+	}
+
+	// Use common validation logic (which includes exec validation)
+	err = auth.ValidateConnectionWithUnknowns(ctx, connModel)
+	if err != nil {
+		// Only report if it's an exec-related error
+		if strings.Contains(err.Error(), "exec authentication") {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("cluster_connection").AtName("exec"),
+				"Invalid Exec Authentication Configuration",
+				err.Error(),
+			)
+		}
+	}
+}
+
+// =============================================================================
 // takeOwnershipValidator ensures take_ownership is set to true
+// =============================================================================
+
 type takeOwnershipValidator struct{}
 
 func (v *takeOwnershipValidator) Description(ctx context.Context) string {

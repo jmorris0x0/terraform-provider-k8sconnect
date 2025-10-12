@@ -6,33 +6,11 @@ import (
 	"fmt"
 )
 
-// Ensures exactly one connection mode is specified and all required fields are present.
+// ValidateConnection ensures exactly one connection mode is specified and all required fields are present.
 func ValidateConnection(ctx context.Context, conn ClusterConnectionModel) error {
-	// Check for inline mode (host-based)
-	hasInline := !conn.Host.IsNull()
-
-	// Check for kubeconfig mode
-	hasKubeconfig := !conn.Kubeconfig.IsNull()
-
-	// Count active modes
-	modeCount := 0
-	activeModes := []string{}
-
-	if hasInline {
-		modeCount++
-		activeModes = append(activeModes, "inline")
-	}
-
-	if hasKubeconfig {
-		modeCount++
-		activeModes = append(activeModes, "kubeconfig")
-	}
-
-	// Validate exactly one mode is specified
-	if modeCount == 0 {
-		return fmt.Errorf("no cluster connection mode specified: provide host (inline) or kubeconfig")
-	} else if modeCount > 1 {
-		return fmt.Errorf("multiple cluster connection modes specified (%v): use only one", activeModes)
+	// Validate connection modes
+	if err := validateConnectionModes(conn); err != nil {
+		return err
 	}
 
 	// Validate client certificate configuration BEFORE checking inline auth
@@ -42,7 +20,7 @@ func ValidateConnection(ctx context.Context, conn ClusterConnectionModel) error 
 	}
 
 	// Additional validation for inline mode
-	if hasInline {
+	if hasInlineMode(conn) {
 		if err := validateInlineConnection(conn); err != nil {
 			return err
 		}
@@ -58,23 +36,112 @@ func ValidateConnection(ctx context.Context, conn ClusterConnectionModel) error 
 	return nil
 }
 
-// validateInlineConnection validates inline connection requirements
-func validateInlineConnection(conn ClusterConnectionModel) error {
-	// Validate CA cert or insecure for inline mode
-	if conn.ClusterCACertificate.IsNull() && (conn.Insecure.IsNull() || !conn.Insecure.ValueBool()) {
-		return fmt.Errorf("inline connections require either 'cluster_ca_certificate' or 'insecure = true'")
+// validateConnectionModes ensures exactly one connection mode is specified
+func validateConnectionModes(conn ClusterConnectionModel) error {
+	modes := countActiveModes(conn)
+
+	if modes == 0 {
+		return fmt.Errorf("no connection mode specified\n\n" +
+			"Must specify exactly one connection mode:\n" +
+			"• Inline: Provide 'host' and either 'cluster_ca_certificate' or 'insecure = true'\n" +
+			"• Kubeconfig raw: Provide 'kubeconfig' content")
 	}
 
-	// Validate authentication is provided
-	hasAuth := !conn.Token.IsNull() ||
-		(!conn.ClientCertificate.IsNull() && !conn.ClientKey.IsNull()) ||
-		(conn.Exec != nil && !conn.Exec.APIVersion.IsNull())
-
-	if !hasAuth {
-		return fmt.Errorf("inline connections require at least one authentication method: token, client certificates, or exec")
+	if modes > 1 {
+		conflictingModes := buildMultipleModeError(conn)
+		return fmt.Errorf("multiple connection modes specified\n\n%s", conflictingModes)
 	}
 
 	return nil
+}
+
+// countActiveModes counts how many connection modes are configured
+func countActiveModes(conn ClusterConnectionModel) int {
+	modes := 0
+	if hasInlineMode(conn) {
+		modes++
+	}
+	if !conn.Kubeconfig.IsNull() {
+		modes++
+	}
+	return modes
+}
+
+// hasInlineMode checks if inline connection fields are present
+func hasInlineMode(conn ClusterConnectionModel) bool {
+	return !conn.Host.IsNull() || !conn.ClusterCACertificate.IsNull()
+}
+
+// buildMultipleModeError creates error message for multiple modes
+func buildMultipleModeError(conn ClusterConnectionModel) string {
+	conflictingModes := []string{}
+	if hasInlineMode(conn) {
+		conflictingModes = append(conflictingModes, "inline (host + cluster_ca_certificate)")
+	}
+	if !conn.Kubeconfig.IsNull() {
+		conflictingModes = append(conflictingModes, "kubeconfig")
+	}
+
+	return fmt.Sprintf("Only one connection mode can be specified. Found: %v\n\n"+
+		"Choose ONE of:\n"+
+		"• Remove 'kubeconfig' to use inline mode\n"+
+		"• Remove inline fields ('host', 'cluster_ca_certificate') to use kubeconfig",
+		conflictingModes)
+}
+
+// validateInlineConnection validates inline connection requirements
+func validateInlineConnection(conn ClusterConnectionModel) error {
+	// Check host is present
+	if conn.Host.IsNull() {
+		return fmt.Errorf("inline connection incomplete\n\n" +
+			"Inline connections require 'host' to be specified.")
+	}
+
+	// Check CA certificate OR insecure flag is present
+	if !hasValidTLSConfig(conn) {
+		return fmt.Errorf("inline connection incomplete\n\n" +
+			"Inline connections require either 'cluster_ca_certificate' or 'insecure = true'.\n\n" +
+			"For production use, provide the cluster CA certificate:\n" +
+			"• cluster_ca_certificate: Base64-encoded or PEM-format CA certificate\n\n" +
+			"For development/testing with self-signed certificates:\n" +
+			"• insecure = true (skips TLS verification - NOT recommended for production)")
+	}
+
+	// Validate authentication is provided
+	if !hasAuthentication(conn) {
+		return fmt.Errorf("inline connection missing authentication\n\n" +
+			"Inline connections require at least one authentication method:\n" +
+			"• Bearer token: Set 'token'\n" +
+			"• Client certificates: Set both 'client_certificate' and 'client_key'\n" +
+			"• Exec auth: Configure the 'exec' block")
+	}
+
+	return nil
+}
+
+// hasValidTLSConfig checks if TLS is properly configured (CA cert or insecure flag)
+func hasValidTLSConfig(conn ClusterConnectionModel) bool {
+	// Either have CA certificate OR insecure=true
+	hasCA := !conn.ClusterCACertificate.IsNull()
+	hasInsecure := !conn.Insecure.IsNull() && conn.Insecure.ValueBool()
+	return hasCA || hasInsecure
+}
+
+// hasAuthentication checks if any authentication method is configured
+func hasAuthentication(conn ClusterConnectionModel) bool {
+	return !conn.Token.IsNull() ||
+		hasClientCertAuth(conn) ||
+		hasExecAuth(conn)
+}
+
+// hasClientCertAuth checks if client certificate authentication is configured
+func hasClientCertAuth(conn ClusterConnectionModel) bool {
+	return !conn.ClientCertificate.IsNull() && !conn.ClientKey.IsNull()
+}
+
+// hasExecAuth checks if exec authentication is configured
+func hasExecAuth(conn ClusterConnectionModel) bool {
+	return conn.Exec != nil && !conn.Exec.APIVersion.IsNull()
 }
 
 // validateExecAuth validates exec authentication configuration
@@ -85,8 +152,22 @@ func validateExecAuth(exec *ExecAuthModel) error {
 
 	// If exec block exists and has API version, validate required fields
 	if !exec.APIVersion.IsNull() {
+		missingFields := []string{}
+
+		if exec.APIVersion.IsNull() {
+			missingFields = append(missingFields, "api_version")
+		}
 		if exec.Command.IsNull() {
-			return fmt.Errorf("exec authentication requires 'command' to be specified")
+			missingFields = append(missingFields, "command")
+		}
+
+		if len(missingFields) > 0 {
+			return fmt.Errorf("exec authentication incomplete\n\n"+
+				"When using exec authentication, all fields are required. Missing: %v\n\n"+
+				"Complete exec configuration requires:\n"+
+				"• api_version: Authentication API version (e.g., 'client.authentication.k8s.io/v1')\n"+
+				"• command: Executable command (e.g., 'aws', 'gcloud')",
+				missingFields)
 		}
 	}
 
@@ -99,10 +180,8 @@ func validateClientCertificates(conn ClusterConnectionModel) error {
 	hasKey := !conn.ClientKey.IsNull()
 
 	if hasCert != hasKey {
-		if hasCert {
-			return fmt.Errorf("client_certificate requires client_key to also be specified")
-		}
-		return fmt.Errorf("client_key requires client_certificate to also be specified")
+		return fmt.Errorf("client certificate configuration incomplete\n\n" +
+			"Both 'client_certificate' and 'client_key' must be provided together for client certificate authentication.")
 	}
 
 	return nil

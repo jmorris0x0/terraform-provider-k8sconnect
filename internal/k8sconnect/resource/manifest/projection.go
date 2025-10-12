@@ -188,11 +188,6 @@ func parseOwnedFields(ownership map[string]interface{}, prefix string, userObj i
 	}
 }
 
-// matchesMergeKey checks if an item matches the merge key criteria
-func matchesMergeKey(item map[string]interface{}, mergeKey map[string]interface{}) bool {
-	return matcher.ItemMatchesMergeKey(item, mergeKey)
-}
-
 // shouldIncludeUserField checks if a field from user's YAML should always be included
 func shouldIncludeUserField(path string) bool {
 	// Always include these core fields that define the resource identity

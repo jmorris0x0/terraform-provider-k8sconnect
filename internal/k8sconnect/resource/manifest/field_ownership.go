@@ -20,8 +20,3 @@ func parseFieldsV1ToPathMap(managedFields []metav1.ManagedFieldsEntry, userJSON 
 func extractFieldOwnership(obj *unstructured.Unstructured) map[string]FieldOwnership {
 	return fieldmanagement.ExtractFieldOwnership(obj)
 }
-
-// addCoreFields adds fields that are always owned by the creator
-func addCoreFields(paths []string, userJSON map[string]interface{}) []string {
-	return fieldmanagement.AddCoreFields(paths, userJSON)
-}

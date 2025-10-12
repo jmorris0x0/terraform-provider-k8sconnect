@@ -4,7 +4,6 @@ package manifest
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -377,13 +376,6 @@ func (r *manifestResource) performDryRun(ctx context.Context, client k8sclient.K
 	return dryRunResult, nil
 }
 
-// getFieldOwnershipPaths gets paths to use for projection
-func (r *manifestResource) getFieldOwnershipPaths(ctx context.Context, plannedData *manifestResourceModel, desiredObj *unstructured.Unstructured, client k8sclient.K8sClient) []string {
-	// Always use ALL fields from YAML (we force ownership of all user-specified fields)
-	paths := extractFieldPaths(desiredObj.Object, "")
-	return paths
-}
-
 // applyProjection projects fields and updates plan
 func (r *manifestResource) applyProjection(ctx context.Context, dryRunResult *unstructured.Unstructured, paths []string, plannedData *manifestResourceModel, resp *resource.ModifyPlanResponse) bool {
 	// Apply ignore_fields filtering if specified
@@ -622,125 +614,10 @@ func (r *manifestResource) checkFieldOwnershipConflicts(ctx context.Context, req
 	}
 }
 
-// filterFieldOwnership filters a field_ownership value to remove ignored fields
-func (r *manifestResource) filterFieldOwnership(ctx context.Context, ownershipValue types.Map, data *manifestResourceModel) types.Map {
-	if ownershipValue.IsNull() || ownershipValue.IsUnknown() {
-		return ownershipValue
-	}
-
-	// Convert to map[string]string
-	var ownershipMap map[string]string
-	diags := ownershipValue.ElementsAs(ctx, &ownershipMap, false)
-	if diags.HasError() {
-		// If we can't parse, just return the original value
-		return ownershipValue
-	}
-
-	// Filter out ignored fields
-	if ignoreFields := getIgnoreFields(ctx, data); ignoreFields != nil {
-		for _, ignorePath := range ignoreFields {
-			delete(ownershipMap, ignorePath)
-		}
-	}
-
-	// Convert back to types.Map
-	filteredMap, diags := types.MapValueFrom(ctx, types.StringType, ownershipMap)
-	if diags.HasError() {
-		return ownershipValue
-	}
-
-	return filteredMap
-}
-
 // FieldConflict represents a field that user wants but is owned by another controller
 type FieldConflict struct {
 	Path  string
 	Owner string
-}
-
-// FieldChange represents any field that is changing
-type FieldChange struct {
-	Path         string
-	CurrentValue interface{}
-	DesiredValue interface{}
-}
-
-// findChangedFields recursively finds all fields that differ between current and desired state
-func findChangedFields(current, desired map[string]interface{}, prefix string) []FieldChange {
-	var changes []FieldChange
-
-	// Check all desired fields
-	for key, desiredVal := range desired {
-		path := key
-		if prefix != "" {
-			path = prefix + "." + key
-		}
-
-		currentVal, exists := current[key]
-		if !exists {
-			// Field is being added
-			changes = append(changes, FieldChange{
-				Path:         path,
-				CurrentValue: nil,
-				DesiredValue: desiredVal,
-			})
-			continue
-		}
-
-		// Check if values differ
-		if !reflect.DeepEqual(currentVal, desiredVal) {
-			// Check if both are maps - recurse
-			if currentMap, ok := currentVal.(map[string]interface{}); ok {
-				if desiredMap, ok := desiredVal.(map[string]interface{}); ok {
-					// Recurse into nested objects
-					nestedChanges := findChangedFields(currentMap, desiredMap, path)
-					changes = append(changes, nestedChanges...)
-					continue
-				}
-			}
-
-			// Check if both are slices - compare as whole
-			if currentSlice, ok := currentVal.([]interface{}); ok {
-				if desiredSlice, ok := desiredVal.([]interface{}); ok {
-					// For now, treat array changes as single change
-					if !reflect.DeepEqual(currentSlice, desiredSlice) {
-						changes = append(changes, FieldChange{
-							Path:         path,
-							CurrentValue: currentSlice,
-							DesiredValue: desiredSlice,
-						})
-					}
-					continue
-				}
-			}
-
-			// Value changed
-			changes = append(changes, FieldChange{
-				Path:         path,
-				CurrentValue: currentVal,
-				DesiredValue: desiredVal,
-			})
-		}
-	}
-
-	// Check for removed fields
-	for key, currentVal := range current {
-		path := key
-		if prefix != "" {
-			path = prefix + "." + key
-		}
-
-		if _, exists := desired[key]; !exists {
-			// Field is being removed
-			changes = append(changes, FieldChange{
-				Path:         path,
-				CurrentValue: currentVal,
-				DesiredValue: nil,
-			})
-		}
-	}
-
-	return changes
 }
 
 // normalizePathForComparison converts paths with merge keys like "containers[name=nginx]"

@@ -223,22 +223,3 @@ func ExtractManagedFieldsForManager(obj *unstructured.Unstructured, fieldManager
 	// No fields managed by this manager
 	return "{}", nil
 }
-
-// AddCoreFields adds fields that are always owned by the creator
-func AddCoreFields(paths []string, userJSON map[string]interface{}) []string {
-	// Add core fields like apiVersion, kind, metadata.name
-	coreFields := []string{"apiVersion", "kind", "metadata.name", "metadata.namespace"}
-	for _, field := range coreFields {
-		found := false
-		for _, p := range paths {
-			if p == field {
-				found = true
-				break
-			}
-		}
-		if !found {
-			paths = append(paths, field)
-		}
-	}
-	return paths
-}
