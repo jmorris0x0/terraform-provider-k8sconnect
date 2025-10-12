@@ -268,18 +268,12 @@ func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteReques
 		return
 	}
 
-	// 5a. Surface any API warnings from get operation
-	surfaceK8sWarnings(ctx, rc.Client, &resp.Diagnostics)
-
 	// 6. Attempt normal deletion
 	err = rc.Client.Delete(ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName(), k8sclient.DeleteOptions{})
 	if err != nil && !errors.IsNotFound(err) {
 		resp.Diagnostics.AddError("Deletion Failed", err.Error())
 		return
 	}
-
-	// 6a. Surface any API warnings from delete operation
-	surfaceK8sWarnings(ctx, rc.Client, &resp.Diagnostics)
 
 	// 7. Wait for deletion with timeout
 	err = r.waitForDeletion(ctx, rc.Client, rc.GVR, rc.Object, timeout)
