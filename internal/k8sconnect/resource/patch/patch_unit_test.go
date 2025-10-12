@@ -61,7 +61,7 @@ func TestIsManagedByThisState(t *testing.T) {
 					"apiVersion": "v1",
 					"kind":       "ConfigMap",
 					"metadata": map[string]interface{}{
-						"name":         "test",
+						"name": "test",
 						"managedFields": []interface{}{
 							map[string]interface{}{
 								"manager": "k8sconnect",
@@ -80,7 +80,7 @@ func TestIsManagedByThisState(t *testing.T) {
 					"apiVersion": "v1",
 					"kind":       "ConfigMap",
 					"metadata": map[string]interface{}{
-						"name":         "test",
+						"name": "test",
 						"managedFields": []interface{}{
 							map[string]interface{}{
 								"manager": "k8sconnect-manifest",
@@ -99,7 +99,7 @@ func TestIsManagedByThisState(t *testing.T) {
 					"apiVersion": "v1",
 					"kind":       "ConfigMap",
 					"metadata": map[string]interface{}{
-						"name":         "test",
+						"name": "test",
 						"managedFields": []interface{}{
 							map[string]interface{}{
 								"manager": "k8sconnect-patch-abc",
@@ -118,7 +118,7 @@ func TestIsManagedByThisState(t *testing.T) {
 					"apiVersion": "v1",
 					"kind":       "ConfigMap",
 					"metadata": map[string]interface{}{
-						"name":         "test",
+						"name": "test",
 						"managedFields": []interface{}{
 							map[string]interface{}{
 								"manager": "eks.amazonaws.com",
@@ -201,9 +201,9 @@ func TestGroupFieldsByPreviousOwner(t *testing.T) {
 				"spec.template.spec.env": "eks.amazonaws.com",
 			},
 			want: map[string][]string{
-				"hpa":                {"spec.replicas"},
-				"kubectl":            {"metadata.labels.foo", "metadata.labels.bar"},
-				"eks.amazonaws.com":  {"spec.template.spec.env"},
+				"hpa":               {"spec.replicas"},
+				"kubectl":           {"metadata.labels.foo", "metadata.labels.bar"},
+				"eks.amazonaws.com": {"spec.template.spec.env"},
 			},
 		},
 		{

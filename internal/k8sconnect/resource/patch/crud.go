@@ -365,7 +365,7 @@ func (r *patchResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 				fieldsToTransfer := r.filterFieldsOwnedByManager(currentObj, fields, fieldManager)
 				if len(fieldsToTransfer) == 0 {
 					tflog.Debug(ctx, "No fields currently owned by this patch, skipping", map[string]interface{}{
-						"owner":       owner,
+						"owner":        owner,
 						"total_fields": len(fields),
 					})
 					continue

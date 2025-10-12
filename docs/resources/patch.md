@@ -46,7 +46,7 @@ When you `terraform destroy` a patch:
 
 - `cluster_connection` (Attributes) Kubernetes cluster connection for this specific patch. Can be different per-resource, enabling multi-cluster deployments without provider aliases. Supports inline credentials (token, exec, client certs) or kubeconfig. (see [below for nested schema](#nestedatt--cluster_connection))
 - `take_ownership` (Boolean) **Required acknowledgment.** Must be set to `true` to confirm you understand this patch will forcefully take field ownership from other controllers. This is not optional - it's a required safety acknowledgment. External controllers may fight back for control of these fields.
-- `target` (Attributes) Identifies the Kubernetes resource to patch. The resource must already exist. (see [below for nested schema](#nestedatt--target))
+- `target` (Attributes) Identifies the Kubernetes resource to patch. The resource must already exist. Changes to target require replacement. (see [below for nested schema](#nestedatt--target))
 
 ### Optional
 
@@ -98,13 +98,13 @@ Optional:
 
 Required:
 
-- `api_version` (String) API version of the target resource (e.g., 'apps/v1', 'v1').
-- `kind` (String) Kind of the target resource (e.g., 'DaemonSet', 'Deployment').
-- `name` (String) Name of the target resource.
+- `api_version` (String) API version of the target resource (e.g., 'apps/v1', 'v1'). Changes require replacement.
+- `kind` (String) Kind of the target resource (e.g., 'DaemonSet', 'Deployment'). Changes require replacement.
+- `name` (String) Name of the target resource. Changes require replacement.
 
 Optional:
 
-- `namespace` (String) Namespace of the target resource. Omit for cluster-scoped resources.
+- `namespace` (String) Namespace of the target resource. Omit for cluster-scoped resources. Changes require replacement.
 
 
 <a id="nestedatt--wait_for"></a>
