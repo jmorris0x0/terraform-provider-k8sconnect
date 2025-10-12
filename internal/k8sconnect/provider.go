@@ -16,6 +16,7 @@ import (
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/datasource/yaml_scoped"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/datasource/yaml_split"
 	manifestres "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/resource/manifest"
+	patchres "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/resource/patch"
 )
 
 // version is set by ldflags during build
@@ -72,6 +73,12 @@ func (p *k8sconnectProvider) Resources(ctx context.Context) []func() resource.Re
 		func() resource.Resource {
 			// For backward compatibility, wrap the new client factory to match old interface
 			return manifestres.NewManifestResourceWithClientGetter(func(conn auth.ClusterConnectionModel) (k8sclient.K8sClient, error) {
+				return p.clientFactory.GetClient(conn)
+			})
+		},
+		func() resource.Resource {
+			// Patch resource using same client getter pattern
+			return patchres.NewPatchResourceWithClientGetter(func(conn auth.ClusterConnectionModel) (k8sclient.K8sClient, error) {
 				return p.clientFactory.GetClient(conn)
 			})
 		},

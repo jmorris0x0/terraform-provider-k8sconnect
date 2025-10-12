@@ -111,3 +111,9 @@ Add a deep compare yaml helper function for the tests. string comparisons are br
 Add CI job to check/update cluster scoped resources list?
 
 Maybe call them: yaml_split and yaml_sort?
+
+Test section 15-18 in EDGE_CASES.md for the patch after I dogfood it a bit.
+
+Shhould wait_for even be in the patch resource? What aboout this take_ownership attribute. It's too dramatic.
+
+I've added a lot of thin wrappers while moving functions into common. Need to come back and swap out the common functios for the wrapper calls. 
