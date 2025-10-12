@@ -138,23 +138,35 @@ When you ` + "`terraform destroy`" + ` a patch:
 
 			"target": schema.SingleNestedAttribute{
 				Required:    true,
-				Description: "Identifies the Kubernetes resource to patch. The resource must already exist.",
+				Description: "Identifies the Kubernetes resource to patch. The resource must already exist. Changes to target require replacement.",
 				Attributes: map[string]schema.Attribute{
 					"api_version": schema.StringAttribute{
 						Required:    true,
-						Description: "API version of the target resource (e.g., 'apps/v1', 'v1').",
+						Description: "API version of the target resource (e.g., 'apps/v1', 'v1'). Changes require replacement.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
 					},
 					"kind": schema.StringAttribute{
 						Required:    true,
-						Description: "Kind of the target resource (e.g., 'DaemonSet', 'Deployment').",
+						Description: "Kind of the target resource (e.g., 'DaemonSet', 'Deployment'). Changes require replacement.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
 					},
 					"name": schema.StringAttribute{
 						Required:    true,
-						Description: "Name of the target resource.",
+						Description: "Name of the target resource. Changes require replacement.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
 					},
 					"namespace": schema.StringAttribute{
 						Optional:    true,
-						Description: "Namespace of the target resource. Omit for cluster-scoped resources.",
+						Description: "Namespace of the target resource. Omit for cluster-scoped resources. Changes require replacement.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
 					},
 				},
 			},
