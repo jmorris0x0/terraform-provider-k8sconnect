@@ -121,3 +121,5 @@ I've added a lot of thin wrappers while moving functions into common. Need to co
 Do a dead code search. It's been a month at least.
 
 Advertise patch resource in README.md
+
+Does version in terraform-registry-manifest.json actually matter? Does it need to match the actual version? Add to release automation?

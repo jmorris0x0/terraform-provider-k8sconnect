@@ -130,12 +130,7 @@ func (d *resourceDataSource) Read(ctx context.Context, req datasource.ReadReques
 	client, err := d.clientFactory.GetClient(conn)
 	if err != nil {
 		// Client creation errors are connection-related, classify them
-		severity, title, detail := k8serrors.ClassifyError(err, "Connect to Cluster", "cluster")
-		if severity == "warning" {
-			resp.Diagnostics.AddWarning(title, detail)
-		} else {
-			resp.Diagnostics.AddError(title, detail)
-		}
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Connect to Cluster", "cluster")
 		return
 	}
 
@@ -161,12 +156,7 @@ func (d *resourceDataSource) Read(ctx context.Context, req datasource.ReadReques
 	if err != nil {
 		// GVR resolution errors
 		resourceDesc := fmt.Sprintf("%s/%s", data.APIVersion.ValueString(), data.Kind.ValueString())
-		severity, title, detail := k8serrors.ClassifyError(err, "Resolve Resource Type", resourceDesc)
-		if severity == "warning" {
-			resp.Diagnostics.AddWarning(title, detail)
-		} else {
-			resp.Diagnostics.AddError(title, detail)
-		}
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Resolve Resource Type", resourceDesc)
 		return
 	}
 
@@ -180,12 +170,7 @@ func (d *resourceDataSource) Read(ctx context.Context, req datasource.ReadReques
 		if namespace != "" {
 			resourceDesc = fmt.Sprintf("%s %s/%s", data.Kind.ValueString(), namespace, metadata.Name.ValueString())
 		}
-		severity, title, detail := k8serrors.ClassifyError(err, "Read Resource", resourceDesc)
-		if severity == "warning" {
-			resp.Diagnostics.AddWarning(title, detail)
-		} else {
-			resp.Diagnostics.AddError(title, detail)
-		}
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Read Resource", resourceDesc)
 		return
 	}
 

@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"k8s.io/apimachinery/pkg/api/errors"
 )
 
@@ -88,6 +89,17 @@ func ClassifyError(err error, operation, resourceDesc string) (severity, title, 
 		return "error", fmt.Sprintf("%s: Kubernetes API Error", operation),
 			fmt.Sprintf("An unexpected error occurred while performing %s on %s. Details: %v",
 				operation, resourceDesc, err)
+	}
+}
+
+// AddClassifiedError classifies a K8s error and adds it to diagnostics
+// This is a convenience function that combines ClassifyError with adding to diagnostics
+func AddClassifiedError(diags *diag.Diagnostics, err error, operation, resourceDesc string) {
+	severity, title, detail := ClassifyError(err, operation, resourceDesc)
+	if severity == "warning" {
+		diags.AddWarning(title, detail)
+	} else {
+		diags.AddError(title, detail)
 	}
 }
 

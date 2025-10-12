@@ -60,12 +60,7 @@ func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, 
 			return
 		}
 		// Use error classification for other K8s API errors
-		severity, title, detail := k8serrors.ClassifyError(err, "Get Target Resource", formatTarget(target))
-		if severity == "warning" {
-			resp.Diagnostics.AddWarning(title, detail)
-		} else {
-			resp.Diagnostics.AddError(title, detail)
-		}
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Get Target Resource", formatTarget(target))
 		return
 	}
 
@@ -97,12 +92,7 @@ func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, 
 	fieldManager := fmt.Sprintf("k8sconnect-patch-%s", data.ID.ValueString())
 	patchedObj, err := r.applyPatch(ctx, client, targetObj, data, fieldManager, gvr)
 	if err != nil {
-		severity, title, detail := k8serrors.ClassifyError(err, "Apply Patch", formatTarget(target))
-		if severity == "warning" {
-			resp.Diagnostics.AddWarning(title, detail)
-		} else {
-			resp.Diagnostics.AddError(title, detail)
-		}
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Apply Patch", formatTarget(target))
 		return
 	}
 
@@ -171,12 +161,7 @@ func (r *patchResource) Read(ctx context.Context, req resource.ReadRequest, resp
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		severity, title, detail := k8serrors.ClassifyError(err, "Read Target Resource", formatTarget(target))
-		if severity == "warning" {
-			resp.Diagnostics.AddWarning(title, detail)
-		} else {
-			resp.Diagnostics.AddError(title, detail)
-		}
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Read Target Resource", formatTarget(target))
 		return
 	}
 
@@ -251,12 +236,7 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	// 6. Get current resource
 	gvr, currentObj, err := r.getTargetResource(ctx, client, target)
 	if err != nil {
-		severity, title, detail := k8serrors.ClassifyError(err, "Get Target Resource", formatTarget(target))
-		if severity == "warning" {
-			resp.Diagnostics.AddWarning(title, detail)
-		} else {
-			resp.Diagnostics.AddError(title, detail)
-		}
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Get Target Resource", formatTarget(target))
 		return
 	}
 
@@ -264,12 +244,7 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	fieldManager := fmt.Sprintf("k8sconnect-patch-%s", plan.ID.ValueString())
 	patchedObj, err := r.applyPatch(ctx, client, currentObj, plan, fieldManager, gvr)
 	if err != nil {
-		severity, title, detail := k8serrors.ClassifyError(err, "Update Patch", formatTarget(target))
-		if severity == "warning" {
-			resp.Diagnostics.AddWarning(title, detail)
-		} else {
-			resp.Diagnostics.AddError(title, detail)
-		}
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Update Patch", formatTarget(target))
 		return
 	}
 

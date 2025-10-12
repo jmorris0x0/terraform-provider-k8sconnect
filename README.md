@@ -1,10 +1,10 @@
-# terraform-provider-k8sconnect
+# K8sconnect Kubernetes Terraform Provider
 
 ![Tests](https://github.com/jmorris0x0/terraform-provider-k8sconnect/actions/workflows/test.yml/badge.svg)
 ![Security](https://github.com/jmorris0x0/terraform-provider-k8sconnect/actions/workflows/security.yml/badge.svg)
 ![Release](https://github.com/jmorris0x0/terraform-provider-k8sconnect/actions/workflows/release.yml/badge.svg)
 
-Bootstrap Kubernetes clusters and workloads in a **single `terraform apply`**—no two-phase deployments.
+Bootstrap Kubernetes clusters and workloads in a **single `terraform apply`**. No two-phase deployments.
 
 **k8sconnect** uses inline, per-resource connections to break Terraform's provider dependency hell. Create a cluster and deploy to it immediately, target multiple clusters from one module, or use dynamic outputs for authentication.
 
