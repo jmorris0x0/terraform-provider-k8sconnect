@@ -1,0 +1,292 @@
+// internal/k8sconnect/resource/patch/patch.go
+package patch
+
+import (
+	"context"
+
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/factory"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
+)
+
+var _ resource.Resource = (*patchResource)(nil)
+var _ resource.ResourceWithConfigValidators = (*patchResource)(nil)
+var _ resource.ResourceWithImportState = (*patchResource)(nil)
+var _ resource.ResourceWithConfigure = (*patchResource)(nil)
+
+// ClientGetter function type for dependency injection
+type ClientGetter func(auth.ClusterConnectionModel) (k8sclient.K8sClient, error)
+
+type patchResource struct {
+	clientGetter  ClientGetter
+	clientFactory factory.ClientFactory
+}
+
+type patchResourceModel struct {
+	ID                types.String `tfsdk:"id"`
+	Target            types.Object `tfsdk:"target"`
+	Patch             types.String `tfsdk:"patch"`
+	JSONPatch         types.String `tfsdk:"json_patch"`
+	MergePatch        types.String `tfsdk:"merge_patch"`
+	TakeOwnership     types.Bool   `tfsdk:"take_ownership"`
+	ClusterConnection types.Object `tfsdk:"cluster_connection"`
+	WaitFor           types.Object `tfsdk:"wait_for"`
+
+	// Computed fields
+	ManagedFields  types.String `tfsdk:"managed_fields"`
+	FieldOwnership types.Map    `tfsdk:"field_ownership"`
+	PreviousOwners types.Map    `tfsdk:"previous_owners"`
+}
+
+type patchTargetModel struct {
+	APIVersion types.String `tfsdk:"api_version"`
+	Kind       types.String `tfsdk:"kind"`
+	Name       types.String `tfsdk:"name"`
+	Namespace  types.String `tfsdk:"namespace"`
+}
+
+type waitForModel struct {
+	Field      types.String `tfsdk:"field"`
+	FieldValue types.Map    `tfsdk:"field_value"`
+	Condition  types.String `tfsdk:"condition"`
+	Rollout    types.Bool   `tfsdk:"rollout"`
+	Timeout    types.String `tfsdk:"timeout"`
+}
+
+// NewPatchResource creates a new patch resource
+func NewPatchResource() resource.Resource {
+	return &patchResource{}
+}
+
+// NewPatchResourceWithClientGetter creates a patch resource with custom client getter
+func NewPatchResourceWithClientGetter(getter ClientGetter) resource.Resource {
+	return &patchResource{
+		clientGetter: getter,
+	}
+}
+
+func (r *patchResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_patch"
+}
+
+func (r *patchResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+	// Skip if provider data is not available (e.g., during planning)
+	if req.ProviderData == nil {
+		return
+	}
+
+	// Try to get client factory
+	clientFactory, ok := req.ProviderData.(factory.ClientFactory)
+	if !ok {
+		resp.Diagnostics.AddError(
+			"Unexpected Provider Data Type",
+			"Expected factory.ClientFactory but got something else. This is a provider bug.",
+		)
+		return
+	}
+
+	// Store the client factory
+	r.clientFactory = clientFactory
+
+	// For backward compatibility, create a clientGetter that uses the factory
+	r.clientGetter = func(conn auth.ClusterConnectionModel) (k8sclient.K8sClient, error) {
+		return r.clientFactory.GetClient(conn)
+	}
+}
+
+func (r *patchResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
+	resp.Schema = schema.Schema{
+		MarkdownDescription: `Applies targeted patches to existing Kubernetes resources using Server-Side Apply.
+
+⚠️ **CRITICAL: This resource forcefully takes ownership of fields from other controllers**
+
+**ONLY use k8sconnect_patch for:**
+- ✅ Cloud provider defaults (AWS EKS, GCP GKE, Azure AKS system resources)
+- ✅ Operator-managed resources (cert-manager, nginx-ingress, etc.)
+- ✅ Helm chart deployments
+- ✅ Resources created by other tools
+
+**NEVER use k8sconnect_patch for:**
+- ❌ Resources managed by k8sconnect_manifest in the same state
+- ❌ Resources you want full lifecycle control over
+- ❌ Resources where you could use k8sconnect_manifest instead
+
+**Destroy behavior:**
+When you ` + "`terraform destroy`" + ` a patch:
+- ✅ Ownership is released
+- ✅ Patched values REMAIN on the resource
+- ❌ Values are NOT reverted to original state`,
+
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				Computed: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+				Description: "Unique identifier for this patch (generated by the provider).",
+			},
+
+			"target": schema.SingleNestedAttribute{
+				Required:    true,
+				Description: "Identifies the Kubernetes resource to patch. The resource must already exist.",
+				Attributes: map[string]schema.Attribute{
+					"api_version": schema.StringAttribute{
+						Required:    true,
+						Description: "API version of the target resource (e.g., 'apps/v1', 'v1').",
+					},
+					"kind": schema.StringAttribute{
+						Required:    true,
+						Description: "Kind of the target resource (e.g., 'DaemonSet', 'Deployment').",
+					},
+					"name": schema.StringAttribute{
+						Required:    true,
+						Description: "Name of the target resource.",
+					},
+					"namespace": schema.StringAttribute{
+						Optional:    true,
+						Description: "Namespace of the target resource. Omit for cluster-scoped resources.",
+					},
+				},
+			},
+
+			"patch": schema.StringAttribute{
+				Optional: true,
+				MarkdownDescription: "Strategic merge patch content (YAML or JSON). This is the recommended patch type for most use cases. " +
+					"Uses Kubernetes strategic merge semantics with merge keys for arrays.",
+				Validators: []validator.String{
+					stringvalidator.ConflictsWith(
+						path.MatchRoot("json_patch"),
+						path.MatchRoot("merge_patch"),
+					),
+					stringvalidator.AtLeastOneOf(
+						path.MatchRoot("patch"),
+						path.MatchRoot("json_patch"),
+						path.MatchRoot("merge_patch"),
+					),
+				},
+			},
+
+			"json_patch": schema.StringAttribute{
+				Optional: true,
+				MarkdownDescription: "JSON Patch (RFC 6902) operations as JSON array. " +
+					"Use for precise operations like adding/removing specific array elements. " +
+					"Example: `[{\"op\":\"add\",\"path\":\"/metadata/labels/foo\",\"value\":\"bar\"}]`",
+				Validators: []validator.String{
+					stringvalidator.ConflictsWith(
+						path.MatchRoot("patch"),
+						path.MatchRoot("merge_patch"),
+					),
+					stringvalidator.AtLeastOneOf(
+						path.MatchRoot("patch"),
+						path.MatchRoot("json_patch"),
+						path.MatchRoot("merge_patch"),
+					),
+				},
+			},
+
+			"merge_patch": schema.StringAttribute{
+				Optional: true,
+				MarkdownDescription: "JSON Merge Patch (RFC 7386) content. " +
+					"Simple key-value merges, replaces entire arrays. " +
+					"Least powerful but simplest patch type.",
+				Validators: []validator.String{
+					stringvalidator.ConflictsWith(
+						path.MatchRoot("patch"),
+						path.MatchRoot("json_patch"),
+					),
+					stringvalidator.AtLeastOneOf(
+						path.MatchRoot("patch"),
+						path.MatchRoot("json_patch"),
+						path.MatchRoot("merge_patch"),
+					),
+				},
+			},
+
+			"take_ownership": schema.BoolAttribute{
+				Required: true,
+				MarkdownDescription: "**Required acknowledgment.** Must be set to `true` to confirm you understand this patch will forcefully " +
+					"take field ownership from other controllers. This is not optional - it's a required safety acknowledgment. " +
+					"External controllers may fight back for control of these fields.",
+			},
+
+			"cluster_connection": schema.SingleNestedAttribute{
+				Required: true,
+				Description: "Kubernetes cluster connection for this specific patch. Can be different per-resource, enabling multi-cluster " +
+					"deployments without provider aliases. Supports inline credentials (token, exec, client certs) or kubeconfig.",
+				Attributes: auth.GetConnectionSchemaForResource(),
+			},
+
+			"wait_for": schema.SingleNestedAttribute{
+				Optional:    true,
+				Description: "Wait for resource to reach desired state after patching.",
+				Attributes: map[string]schema.Attribute{
+					"field": schema.StringAttribute{
+						Optional:    true,
+						Description: "JSONPath to field that must exist/be non-empty after patching. Example: 'status.conditions'",
+						Validators: []validator.String{
+							stringvalidator.ConflictsWith(
+								path.MatchRelative().AtParent().AtName("field_value"),
+								path.MatchRelative().AtParent().AtName("condition"),
+							),
+						},
+					},
+					"field_value": schema.MapAttribute{
+						Optional:    true,
+						ElementType: types.StringType,
+						Description: "Map of JSONPath to expected value. Example: {'status.phase': 'Running'}",
+					},
+					"condition": schema.StringAttribute{
+						Optional:    true,
+						Description: "Condition type that must be True after patching. Example: 'Ready'",
+						Validators: []validator.String{
+							stringvalidator.ConflictsWith(
+								path.MatchRelative().AtParent().AtName("field"),
+								path.MatchRelative().AtParent().AtName("field_value"),
+							),
+						},
+					},
+					"rollout": schema.BoolAttribute{
+						Optional: true,
+						Description: "Wait for Deployment/StatefulSet/DaemonSet rollout to complete after patching. " +
+							"Checks that all replicas are updated and available.",
+					},
+					"timeout": schema.StringAttribute{
+						Optional:    true,
+						Description: "Maximum time to wait. Defaults to 10m. Format: '30s', '5m', '1h'",
+					},
+				},
+			},
+
+			// Computed fields
+			"managed_fields": schema.StringAttribute{
+				Computed:    true,
+				Description: "JSON representation of only the fields managed by this patch. Used for drift detection.",
+			},
+
+			"field_ownership": schema.MapAttribute{
+				Computed:    true,
+				ElementType: types.StringType,
+				Description: "Map of field paths to their current owner (field manager). Shows which controller owns each patched field. " +
+					"After patch application, patched fields should show this patch's field manager as owner.",
+			},
+
+			"previous_owners": schema.MapAttribute{
+				Computed:    true,
+				ElementType: types.StringType,
+				Description: "Map of field paths to their owners BEFORE this patch was applied. " +
+					"Useful for understanding which controllers were managing fields before takeover. " +
+					"Only populated during initial patch creation.",
+			},
+		},
+	}
+}
