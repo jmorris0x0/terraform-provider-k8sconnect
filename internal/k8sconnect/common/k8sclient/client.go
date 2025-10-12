@@ -150,34 +150,40 @@ func (d *DynamicK8sClient) getResourceInterface(ctx context.Context, gvr schema.
 
 // getResourceInterfaceByNamespace handles Get/Delete operations that take namespace as parameter
 func (d *DynamicK8sClient) getResourceInterfaceByNamespace(ctx context.Context, gvr schema.GroupVersionResource, namespace string) (dynamic.ResourceInterface, error) {
-	// If namespace is empty, check if the resource is namespaced and use default
-	if namespace == "" {
-		var resourceList *metav1.APIResourceList
+	// Always check discovery to determine if resource is actually namespaced
+	// This prevents errors when user provides namespace for cluster-scoped resources
+	var resourceList *metav1.APIResourceList
 
-		// Wrap the discovery call in retry
-		err := withRetry(ctx, DefaultRetryConfig, func() error {
-			var err error
-			resourceList, err = d.discovery.ServerResourcesForGroupVersion(gvr.GroupVersion().String())
-			return err
-		})
+	// Wrap the discovery call in retry
+	err := withRetry(ctx, DefaultRetryConfig, func() error {
+		var err error
+		resourceList, err = d.discovery.ServerResourcesForGroupVersion(gvr.GroupVersion().String())
+		return err
+	})
 
-		if err != nil {
-			return nil, fmt.Errorf("failed to get resource info: %w", err)
-		}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get resource info: %w", err)
+	}
 
-		for _, apiResource := range resourceList.APIResources {
-			if apiResource.Name == gvr.Resource && apiResource.Namespaced {
-				namespace = "default"
-				break
-			}
+	// Find if this resource is actually namespaced
+	var isNamespaced bool
+	for _, apiResource := range resourceList.APIResources {
+		if apiResource.Name == gvr.Resource {
+			isNamespaced = apiResource.Namespaced
+			break
 		}
 	}
 
-	if namespace != "" {
+	// Only use namespace if resource is actually namespaced
+	if isNamespaced {
+		if namespace == "" {
+			namespace = "default"
+		}
 		return d.client.Resource(gvr).Namespace(namespace), nil
-	} else {
-		return d.client.Resource(gvr), nil
 	}
+
+	// Cluster-scoped resource - ignore provided namespace
+	return d.client.Resource(gvr), nil
 }
 
 // Apply performs server-side apply on the given object.
