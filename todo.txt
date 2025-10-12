@@ -117,4 +117,6 @@ Terraform wants to be declarative and stateful, Kubernetes wants to be self-heal
 Add a file with the terraform block for the examples? It would be nice to be fully copy pastable.
 
 Add a deep compare yaml helper function for the tests. string comparisons are brittle and have wasted a lot of time for me.
+ 
 
+Add CI job to check/update cluster scoped resources list?
