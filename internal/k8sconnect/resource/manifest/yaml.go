@@ -2,14 +2,11 @@
 package manifest
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"strings"
 
-	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	k8sschema "k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	sigsyaml "sigs.k8s.io/yaml"
 )
@@ -164,11 +161,6 @@ func (r *manifestResource) cleanObjectForExport(obj *unstructured.Unstructured) 
 	// This is safer than trying to guess what's system-generated
 
 	return cleaned
-}
-
-// getGVR determines the GroupVersionResource for an object
-func (r *manifestResource) getGVR(ctx context.Context, client k8sclient.K8sClient, obj *unstructured.Unstructured) (k8sschema.GroupVersionResource, error) {
-	return client.GetGVR(ctx, obj)
 }
 
 // ContainsInterpolation checks if YAML content contains Terraform interpolation syntax

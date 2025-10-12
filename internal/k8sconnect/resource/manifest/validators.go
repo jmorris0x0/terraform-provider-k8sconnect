@@ -34,11 +34,11 @@ func (r *manifestResource) ConfigValidators(ctx context.Context) []resource.Conf
 type clusterConnectionValidator struct{}
 
 func (v *clusterConnectionValidator) Description(ctx context.Context) string {
-	return "Ensures exactly one cluster connection mode is specified: inline (host + cluster_ca_certificate) or kubeconfig"
+	return "Ensures exactly one cluster connection mode is specified: inline (host + cluster_ca_certificate or insecure) or kubeconfig"
 }
 
 func (v *clusterConnectionValidator) MarkdownDescription(ctx context.Context) string {
-	return "Ensures exactly one cluster connection mode is specified: inline (`host` + `cluster_ca_certificate`), `kubeconfig`"
+	return "Ensures exactly one cluster connection mode is specified: inline (`host` + `cluster_ca_certificate` or `insecure`), `kubeconfig`"
 }
 
 // ValidateResource ensures exactly one connection mode is specified
@@ -65,16 +65,15 @@ func (v *clusterConnectionValidator) ValidateResource(ctx context.Context, req r
 		return // Unknown values during planning
 	}
 
-	// Validate connection modes
-	v.validateConnectionModes(connModel, resp)
-
-	// Validate inline connection if applicable
-	if v.hasInlineMode(connModel) {
-		v.validateInlineConnection(connModel, resp)
+	// Use common validation logic
+	err := auth.ValidateConnectionWithUnknowns(ctx, connModel)
+	if err != nil {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("cluster_connection"),
+			"Invalid Cluster Connection Configuration",
+			err.Error(),
+		)
 	}
-
-	// Validate client certificates
-	v.validateClientCertificates(connModel, resp)
 }
 
 // loadResourceData loads the manifest resource data from config
@@ -107,129 +106,6 @@ func (v *clusterConnectionValidator) getConnectionModel(ctx context.Context, con
 		return connModel, false
 	}
 	return connModel, true
-}
-
-// validateConnectionModes ensures exactly one connection mode is specified
-func (v *clusterConnectionValidator) validateConnectionModes(connModel auth.ClusterConnectionModel, resp *resource.ValidateConfigResponse) {
-	modes := v.countActiveModes(connModel)
-
-	if modes == 0 {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("cluster_connection"),
-			"No Connection Mode Specified",
-			"Must specify exactly one connection mode:\n"+
-				"• Inline: Provide 'host' and 'cluster_ca_certificate'\n"+
-				""+
-				"• Kubeconfig raw: Provide 'kubeconfig' content",
-		)
-	} else if modes > 1 {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("cluster_connection"),
-			"Multiple Connection Modes Specified",
-			v.buildMultipleModeError(connModel),
-		)
-	}
-}
-
-// countActiveModes counts how many connection modes are configured
-func (v *clusterConnectionValidator) countActiveModes(connModel auth.ClusterConnectionModel) int {
-	modes := 0
-	if v.hasInlineMode(connModel) {
-		modes++
-	}
-	if false {
-		modes++
-	}
-	if !connModel.Kubeconfig.IsNull() {
-		modes++
-	}
-	return modes
-}
-
-// hasInlineMode checks if inline connection fields are present
-func (v *clusterConnectionValidator) hasInlineMode(connModel auth.ClusterConnectionModel) bool {
-	return !connModel.Host.IsNull() || !connModel.ClusterCACertificate.IsNull()
-}
-
-// buildMultipleModeError creates error message for multiple modes
-func (v *clusterConnectionValidator) buildMultipleModeError(connModel auth.ClusterConnectionModel) string {
-	conflictingModes := []string{}
-	if v.hasInlineMode(connModel) {
-		conflictingModes = append(conflictingModes, "inline (host + cluster_ca_certificate)")
-	}
-	if false {
-		conflictingModes = append(conflictingModes, "kubeconfig_file")
-	}
-	if !connModel.Kubeconfig.IsNull() {
-		conflictingModes = append(conflictingModes, "kubeconfig")
-	}
-
-	return fmt.Sprintf("Only one connection mode can be specified. Found: %v\n\n"+
-		"Choose ONE of:\n"+
-		"• Remove 'kubeconfig' to use inline mode\n"+
-		"• Remove inline fields ('host', 'cluster_ca_certificate') to use kubeconfig",
-		conflictingModes)
-}
-
-// validateInlineConnection ensures inline connection has required fields
-func (v *clusterConnectionValidator) validateInlineConnection(connModel auth.ClusterConnectionModel, resp *resource.ValidateConfigResponse) {
-	// Check both host and CA are present
-	if !v.hasCompleteInlineConfig(connModel) {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("cluster_connection"),
-			"Incomplete Inline Connection",
-			"Inline connections require both 'host' and 'cluster_ca_certificate'.",
-		)
-		return
-	}
-
-	// Validate authentication is provided
-	if !v.hasAuthentication(connModel) {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("cluster_connection"),
-			"Missing Authentication",
-			"Inline connections require at least one authentication method:\n"+
-				"• Bearer token: Set 'token'\n"+
-				"• Client certificates: Set both 'client_certificate' and 'client_key'\n"+
-				"• Exec auth: Configure the 'exec' block",
-		)
-	}
-}
-
-// hasCompleteInlineConfig checks if inline config has both required fields
-func (v *clusterConnectionValidator) hasCompleteInlineConfig(connModel auth.ClusterConnectionModel) bool {
-	return !connModel.Host.IsNull() && !connModel.ClusterCACertificate.IsNull()
-}
-
-// hasAuthentication checks if any authentication method is configured
-func (v *clusterConnectionValidator) hasAuthentication(connModel auth.ClusterConnectionModel) bool {
-	return !connModel.Token.IsNull() ||
-		v.hasClientCertAuth(connModel) ||
-		v.hasExecAuth(connModel)
-}
-
-// hasClientCertAuth checks if client certificate authentication is configured
-func (v *clusterConnectionValidator) hasClientCertAuth(connModel auth.ClusterConnectionModel) bool {
-	return !connModel.ClientCertificate.IsNull() && !connModel.ClientKey.IsNull()
-}
-
-// hasExecAuth checks if exec authentication is configured
-func (v *clusterConnectionValidator) hasExecAuth(connModel auth.ClusterConnectionModel) bool {
-	return connModel.Exec != nil && !connModel.Exec.APIVersion.IsNull()
-}
-
-// validateClientCertificates ensures cert and key are provided together
-func (v *clusterConnectionValidator) validateClientCertificates(connModel auth.ClusterConnectionModel, resp *resource.ValidateConfigResponse) {
-	hasCert := !connModel.ClientCertificate.IsNull()
-	hasKey := !connModel.ClientKey.IsNull()
-
-	if hasCert != hasKey {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("cluster_connection"),
-			"Incomplete Client Certificate Configuration",
-			"Both 'client_certificate' and 'client_key' must be provided together for client certificate authentication.",
-		)
-	}
 }
 
 // =============================================================================
@@ -270,38 +146,17 @@ func (v *execAuthValidator) ValidateResource(ctx context.Context, req resource.V
 		return
 	}
 
-	exec := connModel.Exec
-	if exec == nil {
-		return // No exec config, nothing to validate
-	}
-
-	// Only validate exec fields if they're not unknown (during planning they might be)
-	// We can't meaningfully validate unknown values
-	if exec.APIVersion.IsUnknown() || exec.Command.IsUnknown() {
-		return // Skip validation during planning when values are unknown
-	}
-
-	// Check that all required exec fields are present
-	missingFields := []string{}
-
-	if exec.APIVersion.IsNull() {
-		missingFields = append(missingFields, "api_version")
-	}
-
-	if exec.Command.IsNull() {
-		missingFields = append(missingFields, "command")
-	}
-
-	if len(missingFields) > 0 {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("cluster_connection").AtName("exec"),
-			"Incomplete Exec Authentication Configuration",
-			fmt.Sprintf("When using exec authentication, all fields are required. Missing: %v\n\n"+
-				"Complete exec configuration requires:\n"+
-				"• **api_version**: Authentication API version (e.g., 'client.authentication.k8s.io/v1')\n"+
-				"• **command**: Executable command (e.g., 'aws', 'gcloud')",
-				missingFields),
-		)
+	// Use common validation logic (which includes exec validation)
+	err = auth.ValidateConnectionWithUnknowns(ctx, connModel)
+	if err != nil {
+		// Only report if it's an exec-related error
+		if strings.Contains(err.Error(), "exec authentication") {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("cluster_connection").AtName("exec"),
+				"Invalid Exec Authentication Configuration",
+				err.Error(),
+			)
+		}
 	}
 }
 

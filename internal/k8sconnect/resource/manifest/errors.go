@@ -22,15 +22,17 @@ func (r *manifestResource) classifyK8sError(err error, operation, resourceDesc s
 				operation, resourceDesc, err)
 
 	case errors.IsConflict(err):
+		conflictDetails := extractConflictDetails(err)
 		return "error", fmt.Sprintf("%s: Field Manager Conflict", operation),
 			fmt.Sprintf("Server-side apply conflict detected for %s.\n"+
 				"Another controller is managing one or more fields in this resource.\n\n"+
+				"Conflicting fields:\n%s\n\n"+
 				"To resolve this conflict do one of the following:\n"+
 				"1. Add conflicting field paths to 'ignore_fields' to release ownership to the other controller\n"+
 				"2. Remove the conflicting fields from your Terraform configuration\n"+
 				"3. Ensure only one controller manages these fields\n\n"+
 				"Details: %v",
-				resourceDesc, err)
+				resourceDesc, conflictDetails, err)
 
 	case errors.IsTimeout(err) || errors.IsServerTimeout(err):
 		return "error", fmt.Sprintf("%s: Kubernetes API Timeout", operation),

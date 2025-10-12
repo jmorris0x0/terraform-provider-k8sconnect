@@ -161,7 +161,8 @@ func (r *manifestResource) applyResourceWithConflictHandling(ctx context.Context
 		if isFieldConflictError(err) {
 			r.addFieldConflictError(resp, operation)
 		} else {
-			r.addOperationError(resp, operation, err)
+			resourceDesc := fmt.Sprintf("%s %s", rc.Object.GetKind(), rc.Object.GetName())
+			r.addOperationError(resp, operation, resourceDesc, err)
 		}
 		return err
 	}
@@ -340,12 +341,22 @@ func (r *manifestResource) addFieldConflictError(resp interface{}, operation str
 	}
 }
 
-func (r *manifestResource) addOperationError(resp interface{}, operation string, err error) {
-	errorMsg := fmt.Sprintf("%s Failed", operation)
+func (r *manifestResource) addOperationError(resp interface{}, operation string, resourceDesc string, err error) {
+	// Classify the error for user-friendly messages
+	severity, title, detail := r.classifyK8sError(err, operation, resourceDesc)
+
 	if createResp, ok := resp.(*resource.CreateResponse); ok {
-		createResp.Diagnostics.AddError(errorMsg, err.Error())
+		if severity == "warning" {
+			createResp.Diagnostics.AddWarning(title, detail)
+		} else {
+			createResp.Diagnostics.AddError(title, detail)
+		}
 	} else if updateResp, ok := resp.(*resource.UpdateResponse); ok {
-		updateResp.Diagnostics.AddError(errorMsg, err.Error())
+		if severity == "warning" {
+			updateResp.Diagnostics.AddWarning(title, detail)
+		} else {
+			updateResp.Diagnostics.AddError(title, detail)
+		}
 	}
 }
 
@@ -367,29 +378,6 @@ func (r *manifestResource) addWaitError(resp interface{}, action string, err err
 // Utility functions
 func isFieldConflictError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "conflict")
-}
-
-// Helper function to check if all conflicts are with our own field manager
-func conflictsOnlyWithSelf(err error) bool {
-	errMsg := err.Error()
-	// Check if the error mentions our field manager
-	if !strings.Contains(errMsg, `conflict with "k8sconnect"`) {
-		return false
-	}
-
-	// Count conflicts with our manager vs total conflicts
-	totalConflicts := strings.Count(errMsg, `conflict with "`)
-	ourConflicts := strings.Count(errMsg, `conflict with "k8sconnect"`)
-
-	// If all conflicts are with our manager, the counts should match
-	return totalConflicts == ourConflicts
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // getIgnoreFields extracts the ignore_fields list from the model.

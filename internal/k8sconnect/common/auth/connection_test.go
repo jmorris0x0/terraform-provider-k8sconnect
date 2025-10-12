@@ -218,7 +218,7 @@ func TestValidateConnection_NoMode(t *testing.T) {
 	err := ValidateConnection(context.Background(), conn)
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no cluster connection mode specified")
+	assert.Contains(t, err.Error(), "no connection mode specified")
 }
 
 func TestValidateConnection_MultipleModes(t *testing.T) {
@@ -230,7 +230,7 @@ func TestValidateConnection_MultipleModes(t *testing.T) {
 	err := ValidateConnection(context.Background(), conn)
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "multiple cluster connection modes specified")
+	assert.Contains(t, err.Error(), "multiple connection modes specified")
 }
 
 func TestValidateConnection_InlineValid(t *testing.T) {
@@ -258,7 +258,7 @@ func TestValidateConnection_ExecMissingCommand(t *testing.T) {
 	err := ValidateConnection(context.Background(), conn)
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "exec authentication requires 'command'")
+	assert.Contains(t, err.Error(), "exec authentication incomplete")
 }
 
 func TestValidateConnection_ClientCertWithoutKey(t *testing.T) {
@@ -272,7 +272,7 @@ func TestValidateConnection_ClientCertWithoutKey(t *testing.T) {
 	err := ValidateConnection(context.Background(), conn)
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "client_certificate requires client_key")
+	assert.Contains(t, err.Error(), "client certificate configuration incomplete")
 }
 
 func TestValidateConnection_ClientKeyWithoutCert(t *testing.T) {
@@ -286,7 +286,7 @@ func TestValidateConnection_ClientKeyWithoutCert(t *testing.T) {
 	err := ValidateConnection(context.Background(), conn)
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "client_key requires client_certificate")
+	assert.Contains(t, err.Error(), "client certificate configuration incomplete")
 }
 
 func TestValidateConnectionWithUnknowns_SkipsWhenUnknown(t *testing.T) {

@@ -36,25 +36,6 @@ func (r *manifestResource) setOwnershipAnnotation(obj *unstructured.Unstructured
 	obj.SetAnnotations(annotations)
 }
 
-// validateOwnership checks if we have permission to manage this Kubernetes resource
-func (r *manifestResource) validateOwnership(liveObj *unstructured.Unstructured, expectedID string) error {
-	annotations := liveObj.GetAnnotations()
-	if annotations == nil {
-		return fmt.Errorf("resource exists but has no ownership annotations - use 'terraform import' to adopt")
-	}
-
-	existingID := annotations[OwnershipAnnotation]
-	if existingID == "" {
-		return fmt.Errorf("resource exists but not managed by k8sconnect - use 'terraform import' to adopt")
-	}
-
-	if existingID != expectedID {
-		return fmt.Errorf("resource managed by different k8sconnect resource (Terraform ID: %s)", existingID)
-	}
-
-	return nil
-}
-
 // getOwnershipID extracts the Terraform resource ID from Kubernetes annotations
 func (r *manifestResource) getOwnershipID(obj *unstructured.Unstructured) string {
 	annotations := obj.GetAnnotations()

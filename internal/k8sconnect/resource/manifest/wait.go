@@ -82,12 +82,6 @@ func (r *manifestResource) waitForResource(ctx context.Context, client k8sclient
 	return nil
 }
 
-// shouldAutoWaitRollout determines if we should automatically wait for rollout
-func shouldAutoWaitRollout(obj *unstructured.Unstructured, waitConfig waitForModel) bool {
-	// Only wait for rollout if explicitly configured
-	return false
-}
-
 // waitForField waits for a field to exist and be non-empty
 func (r *manifestResource) waitForField(ctx context.Context, client k8sclient.K8sClient,
 	gvr schema.GroupVersionResource, obj *unstructured.Unstructured,
