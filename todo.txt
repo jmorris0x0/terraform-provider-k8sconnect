@@ -113,3 +113,5 @@ Add CI job to check/update cluster scoped resources list?
 Maybe call them: yaml_split and yaml_sort?
 
 Test section 15-18 in EDGE_CASES.md for the patch after I dogfood it a bit.
+
+Shhould wait_for even be in the patch resource? What aboout this take_ownership attribute. It's too dramatic.
