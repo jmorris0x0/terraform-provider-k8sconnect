@@ -8,13 +8,6 @@ Bootstrap Kubernetes clusters and workloads in a **single `terraform apply`**. N
 
 **k8sconnect** uses inline, per-resource connections to break Terraform's provider dependency hell. Create a cluster and deploy to it immediately, target multiple clusters from one module, or use dynamic outputs for authentication.
 
-
-> ### ⚠️ ALPHA RELEASE
-> **This provider is in alpha with limited production usage.** APIs and state formats may change before v1.0.
-> We recommend testing thoroughly and pinning to exact versions.
->
-> Targeting feature-complete release in December 2025.
-
 ---
 
 ## Why `k8sconnect`
@@ -27,6 +20,7 @@ Bootstrap Kubernetes clusters and workloads in a **single `terraform apply`**. N
 | CRD + CR in single apply              | ❌ Manual workaround or requires config                                     | ✅ Auto-retry, zero configuration                                           |
 | Field management conflicts            | ❌ Fights with controllers (HPA, cert-manager, webhooks)                    | ✅ Coexists with controllers via field ownership tracking                   |
 | Unpredictable plan diffs              | ❌ Plan shows what you send, not what K8s will do                           | ✅ Dry-run projections show exact changes before apply                      |
+| Surgical patches on managed resources | ❌ Import or take full ownership                                            | ✅ Patch EKS/GKE/Helm/operator resources                                    |
 
 
 **Stop fighting [Terraform's provider model](https://news.ycombinator.com/item?id=27434363). Create clusters and bootstrap workloads in one apply.**
@@ -174,7 +168,45 @@ resource "k8sconnect_manifest" "app" {
 
 The `yaml_split` data source creates stable IDs like `deployment.my-app.nginx` and `service.my-app.nginx`, preventing unnecessary resource recreation when manifests are reordered.
 
-**→ [Complete examples and patterns](examples/)**
+**→ [Browse 12 runnable examples](examples/)** - EKS bootstrap, HPA coexistence, patch patterns, and more
+
+---
+
+## Surgical Patching
+
+Modify resources managed by others without taking full ownership. Supports Strategic Merge Patch (shown), JSON Patch, and Merge Patch.
+
+```hcl
+# Patch AWS EKS system resources (using Strategic Merge Patch)
+resource "k8sconnect_patch" "aws_node_config" {
+  target = {
+    api_version = "apps/v1"
+    kind        = "DaemonSet"
+    name        = "aws-node"
+    namespace   = "kube-system"
+  }
+
+  patch = yamlencode({
+    spec = {
+      template = {
+        spec = {
+          containers = [{
+            name = "aws-node"
+            env  = [{ name = "ENABLE_PREFIX_DELEGATION", value = "true" }]
+          }]
+        }
+      }
+    }
+  })
+
+  take_ownership     = true
+  cluster_connection = var.cluster_connection
+}
+```
+
+Perfect for EKS/GKE defaults, Helm deployments, and operator-managed resources. On destroy, ownership transfers back cleanly.
+
+**→ [Patch examples](examples/patch-strategic-merge/)** | **[Documentation](docs/resources/patch.md)**
 
 ---
 
@@ -203,7 +235,7 @@ Import existing Kubernetes resources into Terraform management:
 # Set your kubeconfig
 export KUBECONFIG=~/.kube/config
 
-# Namespaced resources: context/namespace/Kind/name  
+# Namespaced resources: context/namespace/Kind/name
 terraform import k8sconnect_manifest.nginx "prod/default/Pod/nginx-abc123"
 
 # Cluster-scoped resources: context/Kind/name
@@ -211,6 +243,8 @@ terraform import k8sconnect_manifest.namespace "prod/Namespace/my-namespace"
 ```
 
 After import, add the `cluster_connection` block to your configuration to match how you want to connect during normal operations.
+
+> **Note:** Import is only available for `k8sconnect_manifest`. Patches are non-destructive modifications and don't support import.
 
 ---
 
@@ -227,10 +261,23 @@ All `cluster_connection` fields are marked sensitive and won't appear in logs or
 
 ---
 
+## Resources & Data Sources
+
+**Resources:**
+- `k8sconnect_manifest` - Full lifecycle management for any Kubernetes resource ([docs](docs/resources/manifest.md))
+- `k8sconnect_patch` - Surgical modifications to existing resources ([docs](docs/resources/patch.md))
+
+**Data Sources:**
+- `k8sconnect_yaml_split` - Parse multi-document YAML files ([docs](docs/data-sources/yaml_split.md))
+- `k8sconnect_resource` - Read existing cluster resources ([docs](docs/data-sources/resource.md))
+- `k8sconnect_yaml_scoped` - Filter resources by category ([docs](docs/data-sources/yaml_scoped.md))
+
+---
+
 ## Documentation
 
-- **[Resource Reference](docs/resources/manifest.md)** - Complete field documentation
 - **[Provider Configuration](docs/index.md)** - Provider-level settings
+- **[Complete Examples](examples/)** - Runnable examples for all features
 
 ---
 
@@ -244,7 +291,7 @@ All `cluster_connection` fields are marked sensitive and won't appear in logs or
 
 ## Installation
 
-### From Registry (Available Soon)
+### Coming to Registry Soon
 ```hcl
 terraform {
   required_providers {

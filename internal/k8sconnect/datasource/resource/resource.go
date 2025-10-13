@@ -64,7 +64,9 @@ func (d *resourceDataSource) Configure(ctx context.Context, req datasource.Confi
 
 func (d *resourceDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Reads an existing Kubernetes resource from the cluster",
+		Description: "Reads an existing Kubernetes resource from the cluster and makes its data available to Terraform configuration. " +
+			"Use this to reference cluster resources not managed by Terraform (e.g., cloud provider defaults, operator-created resources) " +
+			"or to access dynamic values like LoadBalancer IPs, Service endpoints, or ConfigMap data for use in other resources.",
 		Attributes: map[string]schema.Attribute{
 			"api_version": schema.StringAttribute{
 				Required:    true,

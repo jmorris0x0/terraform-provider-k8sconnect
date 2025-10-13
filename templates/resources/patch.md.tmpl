@@ -1,0 +1,150 @@
+---
+page_title: "{{.Type}} {{.Name}} - {{.ProviderName}}"
+subcategory: ""
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{.Type}}: {{.Name}}
+
+{{ .Description | trimspace }}
+
+## Example Usage - Strategic Merge Patch
+
+Strategic Merge Patch uses Kubernetes-native merge semantics with array merge keys. This is the recommended patch type for most use cases as it supports Server-Side Apply with field ownership tracking and accurate dry-run projections.
+
+```terraform
+resource "k8sconnect_patch" "coredns_label" {
+  target = {
+    api_version = "apps/v1"
+    kind        = "Deployment"
+    name        = "coredns"
+    namespace   = "kube-system"
+  }
+
+  patch = jsonencode({
+    metadata = {
+      labels = {
+        "example.com/managed-by" = "terraform"
+      }
+    }
+  })
+
+  take_ownership     = true
+  cluster_connection = var.cluster_connection
+}
+```
+
+## Example Usage - JSON Patch (RFC 6902)
+
+JSON Patch provides precise control with operations like `add`, `remove`, `replace`, `move`, `copy`, and `test`. Use this when you need exact control over array elements or want to perform conditional operations.
+
+```terraform
+resource "k8sconnect_patch" "kubernetes_svc_label" {
+  target = {
+    api_version = "v1"
+    kind        = "Service"
+    name        = "kubernetes"
+    namespace   = "default"
+  }
+
+  # Note: Use "~1" to escape "/" in JSON Pointer paths
+  json_patch = jsonencode([
+    {
+      op    = "add"
+      path  = "/metadata/labels/example.com~1patched-by"
+      value = "terraform-json-patch"
+    }
+  ])
+
+  take_ownership     = true
+  cluster_connection = var.cluster_connection
+}
+```
+
+## Example Usage - Merge Patch (RFC 7386)
+
+Merge Patch is the simplest patch type - just specify the fields to merge. Note that it replaces entire arrays rather than merging them.
+
+```terraform
+resource "k8sconnect_patch" "kube_dns_annotation" {
+  target = {
+    api_version = "v1"
+    kind        = "Service"
+    name        = "kube-dns"
+    namespace   = "kube-system"
+  }
+
+  merge_patch = jsonencode({
+    metadata = {
+      annotations = {
+        "example.com/managed-by" = "terraform"
+        "example.com/patch-type" = "merge-patch"
+      }
+    }
+  })
+
+  take_ownership     = true
+  cluster_connection = var.cluster_connection
+}
+```
+
+## Example Usage - Patching EKS AWS Node DaemonSet
+
+A common real-world use case is modifying cloud provider system resources:
+
+```terraform
+resource "k8sconnect_patch" "aws_node_env" {
+  target = {
+    api_version = "apps/v1"
+    kind        = "DaemonSet"
+    name        = "aws-node"
+    namespace   = "kube-system"
+  }
+
+  patch = yamlencode({
+    spec = {
+      template = {
+        spec = {
+          containers = [{
+            name = "aws-node"
+            env = [{
+              name  = "ENABLE_PREFIX_DELEGATION"
+              value = "true"
+            }]
+          }]
+        }
+      }
+    }
+  })
+
+  take_ownership = true
+
+  cluster_connection = {
+    host                   = aws_eks_cluster.main.endpoint
+    cluster_ca_certificate = base64decode(aws_eks_cluster.main.certificate_authority[0].data)
+    exec = {
+      api_version = "client.authentication.k8s.io/v1"
+      command     = "aws"
+      args        = ["eks", "get-token", "--cluster-name", aws_eks_cluster.main.name]
+    }
+  }
+}
+```
+
+## Choosing a Patch Type
+
+| Patch Type          | When to Use                                                                 | Pros                                                     | Cons                                      |
+|---------------------|-----------------------------------------------------------------------------|----------------------------------------------------------|-------------------------------------------|
+| Strategic Merge     | Most use cases, especially with arrays of objects                           | SSA field ownership, dry-run projections, merge keys     | Only works with resources that have merge strategies |
+| JSON Patch          | Precise array operations, conditional changes, when you need exact control  | Explicit operations, works with any resource             | No SSA, no dry-run, more verbose          |
+| Merge Patch         | Simple field updates, resources without strategic merge support             | Simplest syntax, works with any resource                 | No SSA, no dry-run, replaces entire arrays|
+
+{{ .SchemaMarkdown | trimspace }}
+
+{{- if .HasImport }}
+
+## Import
+
+Import is not supported for patch resources. Patches are non-destructive modifications that take ownership of specific fields. To manage an existing patch, recreate the resource configuration and run `terraform apply`.
+{{- end }}
