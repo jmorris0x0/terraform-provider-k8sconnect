@@ -281,10 +281,9 @@ func TestAccPatchResource_OwnershipTransferMultipleOwners(t *testing.T) {
 					createConfigMapWithFieldManager(t, k8sClient, ns, cmName, "kubectl", map[string]string{
 						"kubectl-field": "kubectl-value",
 					}),
-					// Add second field with hpa-controller field manager
+					// Add second field with hpa-controller field manager (ONLY hpa-field to preserve kubectl's ownership)
 					createConfigMapWithFieldManager(t, k8sClient, ns, cmName, "hpa-controller", map[string]string{
-						"kubectl-field": "kubectl-value",
-						"hpa-field":     "hpa-value",
+						"hpa-field": "hpa-value",
 					}),
 					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
 				),
