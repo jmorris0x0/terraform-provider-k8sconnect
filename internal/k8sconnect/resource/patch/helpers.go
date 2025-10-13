@@ -17,6 +17,7 @@ import (
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/fieldmanagement"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8serrors"
 )
 
 // setupClient creates a Kubernetes client from the patch resource's connection configuration
@@ -214,6 +215,18 @@ func (r *patchResource) applyJSONOrMergePatch(ctx context.Context, client k8scli
 
 	result, err := client.Patch(ctx, gvr, targetObj.GetNamespace(), targetObj.GetName(), patchType, patchBytes, patchOptions)
 	if err != nil {
+		// Check for immutable field errors and provide better error message
+		if k8serrors.IsImmutableFieldError(err) {
+			immutableFields := k8serrors.ExtractImmutableFields(err)
+			return nil, fmt.Errorf("cannot patch immutable field(s): %v on %s/%s in namespace %s\n\n"+
+				"The target resource has immutable fields that cannot be changed after creation.\n\n"+
+				"Options:\n"+
+				"1. Remove the immutable field from your patch\n"+
+				"2. If the field MUST change, recreate the target resource manually or use k8sconnect_manifest\n"+
+				"3. k8sconnect_manifest manages full resource lifecycle and can trigger automatic replacement\n\n"+
+				"Note: JSON Patch and Merge Patch cannot detect immutable fields during plan - errors only appear during apply",
+				immutableFields, targetObj.GetKind(), targetObj.GetName(), targetObj.GetNamespace())
+		}
 		return nil, fmt.Errorf("failed to apply patch: %w", err)
 	}
 
@@ -245,6 +258,18 @@ func (r *patchResource) applyStrategicMergePatch(ctx context.Context, client k8s
 		Force:        true, // Required because we're taking ownership
 	})
 	if err != nil {
+		// Check for immutable field errors and provide better error message
+		if k8serrors.IsImmutableFieldError(err) {
+			immutableFields := k8serrors.ExtractImmutableFields(err)
+			return nil, fmt.Errorf("cannot patch immutable field(s): %v on %s/%s in namespace %s\n\n"+
+				"The target resource has immutable fields that cannot be changed after creation.\n\n"+
+				"Options:\n"+
+				"1. Remove the immutable field from your patch\n"+
+				"2. If the field MUST change, recreate the target resource manually or use k8sconnect_manifest\n"+
+				"3. k8sconnect_manifest manages full resource lifecycle and can trigger automatic replacement\n\n"+
+				"Note: This error was caught during apply. When connections are ready, Strategic Merge patches can detect this during plan.",
+				immutableFields, targetObj.GetKind(), targetObj.GetName(), targetObj.GetNamespace())
+		}
 		return nil, fmt.Errorf("failed to apply patch: %w", err)
 	}
 
