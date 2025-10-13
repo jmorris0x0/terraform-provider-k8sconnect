@@ -10,7 +10,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
@@ -28,18 +27,14 @@ type resourceDataSource struct {
 type resourceDataSourceModel struct {
 	APIVersion        types.String `tfsdk:"api_version"`
 	Kind              types.String `tfsdk:"kind"`
-	Metadata          types.Object `tfsdk:"metadata"`
+	Name              types.String `tfsdk:"name"`
+	Namespace         types.String `tfsdk:"namespace"`
 	ClusterConnection types.Object `tfsdk:"cluster_connection"`
 
 	// Outputs
 	Manifest types.String  `tfsdk:"manifest"`
 	YAMLBody types.String  `tfsdk:"yaml_body"`
 	Object   types.Dynamic `tfsdk:"object"`
-}
-
-type metadataModel struct {
-	Name      types.String `tfsdk:"name"`
-	Namespace types.String `tfsdk:"namespace"`
 }
 
 func NewResourceDataSource() datasource.DataSource {
@@ -79,19 +74,13 @@ func (d *resourceDataSource) Schema(ctx context.Context, req datasource.SchemaRe
 				Required:    true,
 				Description: "Kind of the resource (e.g., 'ConfigMap', 'Deployment')",
 			},
-			"metadata": schema.SingleNestedAttribute{
+			"name": schema.StringAttribute{
 				Required:    true,
-				Description: "Metadata to identify the resource",
-				Attributes: map[string]schema.Attribute{
-					"name": schema.StringAttribute{
-						Required:    true,
-						Description: "Name of the resource",
-					},
-					"namespace": schema.StringAttribute{
-						Optional:    true,
-						Description: "Namespace of the resource (defaults to 'default' for namespaced resources)",
-					},
-				},
+				Description: "Name of the resource",
+			},
+			"namespace": schema.StringAttribute{
+				Optional:    true,
+				Description: "Namespace of the resource (optional for cluster-scoped resources, defaults to 'default' for namespaced resources if not specified)",
 			},
 			"cluster_connection": schema.SingleNestedAttribute{
 				Required:    true,
@@ -137,14 +126,6 @@ func (d *resourceDataSource) Read(ctx context.Context, req datasource.ReadReques
 		return
 	}
 
-	// Parse metadata
-	var metadata metadataModel
-	diags := data.Metadata.As(ctx, &metadata, basetypes.ObjectAsOptions{})
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
 	// Use the client's discovery-based GVR resolution instead of naive pluralization
 	// Create a minimal unstructured object for GVR discovery
 	tempObj := &unstructured.Unstructured{
@@ -163,15 +144,16 @@ func (d *resourceDataSource) Read(ctx context.Context, req datasource.ReadReques
 		return
 	}
 
-	// Get namespace (default to "default" for namespaced resources)
-	namespace := metadata.Namespace.ValueString()
+	// Get namespace from flat field
+	namespace := data.Namespace.ValueString()
+	name := data.Name.ValueString()
 
 	// Get the resource
-	obj, err := client.Get(ctx, gvr, namespace, metadata.Name.ValueString())
+	obj, err := client.Get(ctx, gvr, namespace, name)
 	if err != nil {
-		resourceDesc := fmt.Sprintf("%s %s", data.Kind.ValueString(), metadata.Name.ValueString())
+		resourceDesc := fmt.Sprintf("%s %s", data.Kind.ValueString(), name)
 		if namespace != "" {
-			resourceDesc = fmt.Sprintf("%s %s/%s", data.Kind.ValueString(), namespace, metadata.Name.ValueString())
+			resourceDesc = fmt.Sprintf("%s %s/%s", data.Kind.ValueString(), namespace, name)
 		}
 		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Read Resource", resourceDesc)
 		return

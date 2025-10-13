@@ -47,8 +47,8 @@ func TestAccResourceDataSource_basic(t *testing.T) {
 					// Verify data source can read it
 					resource.TestCheckResourceAttr("data.k8sconnect_resource.test", "kind", "ConfigMap"),
 					resource.TestCheckResourceAttr("data.k8sconnect_resource.test", "api_version", "v1"),
-					resource.TestCheckResourceAttr("data.k8sconnect_resource.test", "metadata.name", cmName),
-					resource.TestCheckResourceAttr("data.k8sconnect_resource.test", "metadata.namespace", ns),
+					resource.TestCheckResourceAttr("data.k8sconnect_resource.test", "name", cmName),
+					resource.TestCheckResourceAttr("data.k8sconnect_resource.test", "namespace", ns),
 					// Verify outputs are populated
 					resource.TestCheckResourceAttrSet("data.k8sconnect_resource.test", "manifest"),
 					resource.TestCheckResourceAttrSet("data.k8sconnect_resource.test", "yaml_body"),
@@ -108,16 +108,13 @@ YAML
 data "k8sconnect_resource" "test" {
   api_version = "v1"
   kind        = "ConfigMap"
-  
-  metadata = {
-    name      = var.name
-    namespace = var.namespace
-  }
-  
+  name        = var.name
+  namespace   = var.namespace
+
   cluster_connection = {
     kubeconfig = var.raw
   }
-  
+
   depends_on = [k8sconnect_manifest.test]
 }
 `, ns, name, ns)
