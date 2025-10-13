@@ -10,10 +10,12 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/validators"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/datasource/yaml_common"
 )
 
 var _ datasource.DataSource = (*yamlScopedDataSource)(nil)
+var _ datasource.DataSourceWithConfigValidators = (*yamlScopedDataSource)(nil)
 
 type yamlScopedDataSource struct{}
 
@@ -32,6 +34,16 @@ func NewYamlScopedDataSource() datasource.DataSource {
 
 func (d *yamlScopedDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_yaml_scoped"
+}
+
+// ConfigValidators implements datasource.DataSourceWithConfigValidators
+func (d *yamlScopedDataSource) ConfigValidators(ctx context.Context) []datasource.ConfigValidator {
+	return []datasource.ConfigValidator{
+		validators.ExactlyOneOf{
+			Attribute1: "content",
+			Attribute2: "pattern",
+		},
+	}
 }
 
 func (d *yamlScopedDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
@@ -78,25 +90,8 @@ func (d *yamlScopedDataSource) Read(ctx context.Context, req datasource.ReadRequ
 		return
 	}
 
-	// Validate exactly one of content or pattern is provided
+	// Determine which input mode to use (validation handled by ConfigValidators)
 	hasContent := !data.Content.IsNull() && data.Content.ValueString() != ""
-	hasPattern := !data.Pattern.IsNull() && data.Pattern.ValueString() != ""
-
-	if hasContent && hasPattern {
-		resp.Diagnostics.AddError(
-			"Conflicting Configuration",
-			"Exactly one of 'content' or 'pattern' must be specified, not both.",
-		)
-		return
-	}
-
-	if !hasContent && !hasPattern {
-		resp.Diagnostics.AddError(
-			"Missing Configuration",
-			"Either 'content' or 'pattern' must be specified.",
-		)
-		return
-	}
 
 	var documents []yaml_common.DocumentInfo
 	var sourceID string
