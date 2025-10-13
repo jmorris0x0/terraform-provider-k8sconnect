@@ -124,3 +124,4 @@ Does version in terraform-registry-manifest.json actually matter? Does it need t
 
 Make attributes of resource ds more like patch. kind, api version, name and namespace as optional.
 
+Should the resource datasource be restricted from looking at resources we own? I thought it was already but I guess not.
