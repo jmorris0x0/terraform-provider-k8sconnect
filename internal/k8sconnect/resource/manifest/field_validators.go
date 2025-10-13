@@ -9,6 +9,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"gopkg.in/yaml.v3"
 	"k8s.io/client-go/util/jsonpath"
+
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/validation"
 )
 
 // durationValidator validates that a string is a valid duration
@@ -62,7 +64,7 @@ func (v yamlValidator) ValidateString(ctx context.Context, req validator.StringR
 	value := req.ConfigValue.ValueString()
 
 	// Skip validation if YAML contains interpolations (will be resolved during apply)
-	if ContainsInterpolation(value) {
+	if validation.ContainsInterpolation(value) {
 		return
 	}
 

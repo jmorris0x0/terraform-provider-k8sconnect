@@ -118,8 +118,9 @@ Should wait_for even be in the patch resource? What aboout this take_ownership a
 
 I've added a lot of thin wrappers while moving functions into common. Need to come back and swap out the common functios for the wrapper calls. 
 
-Do a dead code search. It's been a month at least.
-
 Advertise patch resource in README.md
 
 Does version in terraform-registry-manifest.json actually matter? Does it need to match the actual version? Add to release automation?
+
+Make attributes of resource ds more like patch. kind, api version, name and namespace as optional.
+

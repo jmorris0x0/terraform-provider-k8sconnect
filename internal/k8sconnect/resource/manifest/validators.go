@@ -15,6 +15,7 @@ import (
 	sigsyaml "sigs.k8s.io/yaml"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/validation"
 )
 
 // ConfigValidators implements resource-level validation for the manifest resource
@@ -354,7 +355,8 @@ func (v ignoreFieldsValidator) ValidateString(ctx context.Context, req validator
 	fieldPath := req.ConfigValue.ValueString()
 
 	// Block any path under our internal annotation namespace
-	if strings.HasPrefix(fieldPath, "metadata.annotations.k8sconnect.terraform.io/") {
+	annotationPrefix := "metadata.annotations." + validation.ProviderAnnotationPrefix
+	if strings.HasPrefix(fieldPath, annotationPrefix) {
 		resp.Diagnostics.AddAttributeError(
 			req.Path,
 			"Cannot ignore provider internal annotations",
@@ -405,7 +407,7 @@ func (v serverManagedFieldsValidator) ValidateString(ctx context.Context, req va
 	yamlStr := req.ConfigValue.ValueString()
 
 	// Skip validation if YAML contains interpolations (will be resolved during apply)
-	if ContainsInterpolation(yamlStr) {
+	if validation.ContainsInterpolation(yamlStr) {
 		return
 	}
 
@@ -417,55 +419,47 @@ func (v serverManagedFieldsValidator) ValidateString(ctx context.Context, req va
 	}
 
 	// Check for provider internal annotations
-	if annotations, found, _ := unstructured.NestedStringMap(obj.Object, "metadata", "annotations"); found {
-		for key := range annotations {
-			if strings.HasPrefix(key, providerAnnotationPrefix) {
-				resp.Diagnostics.AddAttributeError(
-					req.Path,
-					"Provider internal annotations not allowed in yaml_body",
-					fmt.Sprintf("The annotation '%s' is used internally by the provider and should not be included in yaml_body.\n\n"+
-						"Provider internal annotations (k8sconnect.terraform.io/*) are automatically added by the provider for:\n"+
-						"• Resource deletion tracking\n"+
-						"• State management\n"+
-						"• Lifecycle operations\n\n"+
-						"This field appears to have been copy-pasted from cluster output (kubectl get). "+
-						"Please remove all k8sconnect.terraform.io/* annotations from your YAML.", key),
-				)
-				return
-			}
-		}
+	if hasAnnotations, key := validation.HasProviderAnnotations(obj); hasAnnotations {
+		resp.Diagnostics.AddAttributeError(
+			req.Path,
+			"Provider internal annotations not allowed in yaml_body",
+			fmt.Sprintf("The annotation '%s' is used internally by the provider and should not be included in yaml_body.\n\n"+
+				"Provider internal annotations (k8sconnect.terraform.io/*) are automatically added by the provider for:\n"+
+				"• Resource deletion tracking\n"+
+				"• State management\n"+
+				"• Lifecycle operations\n\n"+
+				validation.CopyPasteHint+
+				"Please remove all k8sconnect.terraform.io/* annotations from your YAML.", key),
+		)
+		return
 	}
 
 	// Check for server-managed metadata fields
-	if metadata, found := obj.Object["metadata"].(map[string]interface{}); found {
-		for _, field := range serverManagedMetadataFields {
-			if _, exists := metadata[field]; exists {
-				resp.Diagnostics.AddAttributeError(
-					req.Path,
-					"Server-managed fields not allowed in yaml_body",
-					fmt.Sprintf("The field 'metadata.%s' is managed by the Kubernetes API server and should not be included in yaml_body.\n\n"+
-						"Server-managed fields are:\n"+
-						"• uid\n"+
-						"• resourceVersion\n"+
-						"• generation\n"+
-						"• creationTimestamp\n"+
-						"• managedFields\n\n"+
-						"This field appears to have been copy-pasted from cluster output (kubectl get -o yaml). "+
-						"Please remove server-managed fields from your YAML.", field),
-				)
-				return
-			}
-		}
+	if hasFields, field := validation.HasServerManagedFields(obj); hasFields {
+		resp.Diagnostics.AddAttributeError(
+			req.Path,
+			"Server-managed fields not allowed in yaml_body",
+			fmt.Sprintf("The field 'metadata.%s' is managed by the Kubernetes API server and should not be included in yaml_body.\n\n"+
+				"Server-managed fields are:\n"+
+				"• uid\n"+
+				"• resourceVersion\n"+
+				"• generation\n"+
+				"• creationTimestamp\n"+
+				"• managedFields\n\n"+
+				validation.CopyPasteHintYAML+
+				"Please remove server-managed fields from your YAML.", field),
+		)
+		return
 	}
 
 	// Check for status field
-	if _, found := obj.Object["status"]; found {
+	if validation.HasStatusField(obj) {
 		resp.Diagnostics.AddAttributeError(
 			req.Path,
 			"Server-managed fields not allowed in yaml_body",
 			"The 'status' field is a read-only subresource managed by the Kubernetes API server and should not be included in yaml_body.\n\n"+
 				"The status field is automatically populated by controllers and should only be read via the 'status' computed attribute.\n\n"+
-				"This field appears to have been copy-pasted from cluster output (kubectl get -o yaml). "+
+				validation.CopyPasteHintYAML+
 				"Please remove the status field from your YAML.",
 		)
 	}

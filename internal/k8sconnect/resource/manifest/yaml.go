@@ -9,19 +9,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	sigsyaml "sigs.k8s.io/yaml"
+
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/validation"
 )
-
-// Provider annotation prefix for internal tracking
-const providerAnnotationPrefix = "k8sconnect.terraform.io/"
-
-// Server-managed metadata fields that will cause apply failures or are noise
-var serverManagedMetadataFields = []string{
-	"uid",
-	"resourceVersion",
-	"generation",
-	"creationTimestamp",
-	"managedFields",
-}
 
 // isMultiDocumentYAML checks if the YAML content contains multiple documents
 func isMultiDocumentYAML(yamlStr string) bool {
@@ -74,57 +64,11 @@ func (r *manifestResource) parseYAML(yamlStr string) (*unstructured.Unstructured
 	}
 
 	// Validate containers have names (critical for strategic merge)
-	if err := validateContainerNames(obj); err != nil {
+	if err := validation.ValidateContainerNames(obj); err != nil {
 		return nil, fmt.Errorf("invalid manifest: %w", err)
 	}
 
 	return obj, nil
-}
-
-// validateContainerNames ensures all containers have names for strategic merge to work correctly
-func validateContainerNames(obj *unstructured.Unstructured) error {
-	// Define all container paths that need validation
-	containerPaths := []struct {
-		path          []string
-		containerType string
-	}{
-		{[]string{"spec", "containers"}, "container"},
-		{[]string{"spec", "initContainers"}, "initContainer"},
-		{[]string{"spec", "template", "spec", "containers"}, "template container"},
-		{[]string{"spec", "template", "spec", "initContainers"}, "template initContainer"},
-	}
-
-	// Check each path
-	for _, cp := range containerPaths {
-		if err := validateContainersAtPath(obj.Object, cp.path, cp.containerType); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// validateContainersAtPath validates containers at a specific path in the object
-func validateContainersAtPath(obj map[string]interface{}, path []string, containerType string) error {
-	containers, found, _ := unstructured.NestedSlice(obj, path...)
-	if !found {
-		// No containers at this path, that's fine
-		return nil
-	}
-
-	for i, container := range containers {
-		containerMap, ok := container.(map[string]interface{})
-		if !ok {
-			return fmt.Errorf("%s at index %d is not a valid object", containerType, i)
-		}
-
-		name, _ := containerMap["name"].(string)
-		if name == "" {
-			return fmt.Errorf("%s at index %d is missing required 'name' field", containerType, i)
-		}
-	}
-
-	return nil
 }
 
 // objectToYAML converts an unstructured object back to clean YAML
@@ -150,7 +94,7 @@ func (r *manifestResource) cleanObjectForExport(obj *unstructured.Unstructured) 
 	metadata := cleaned.Object["metadata"].(map[string]interface{})
 
 	// Remove server-managed metadata fields using shared constant list
-	for _, field := range serverManagedMetadataFields {
+	for _, field := range validation.ServerManagedMetadataFields {
 		delete(metadata, field)
 	}
 
@@ -161,9 +105,4 @@ func (r *manifestResource) cleanObjectForExport(obj *unstructured.Unstructured) 
 	// This is safer than trying to guess what's system-generated
 
 	return cleaned
-}
-
-// ContainsInterpolation checks if YAML content contains Terraform interpolation syntax
-func ContainsInterpolation(content string) bool {
-	return strings.Contains(content, "${")
 }

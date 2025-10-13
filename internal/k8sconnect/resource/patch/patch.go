@@ -187,6 +187,7 @@ When you ` + "`terraform destroy`" + ` a patch:
 						path.MatchRoot("json_patch"),
 						path.MatchRoot("merge_patch"),
 					),
+					validators.StrategicMergePatch{},
 				},
 			},
 
@@ -205,6 +206,7 @@ When you ` + "`terraform destroy`" + ` a patch:
 						path.MatchRoot("json_patch"),
 						path.MatchRoot("merge_patch"),
 					),
+					validators.JSONPatchValidator{},
 				},
 			},
 
@@ -223,6 +225,7 @@ When you ` + "`terraform destroy`" + ` a patch:
 						path.MatchRoot("json_patch"),
 						path.MatchRoot("merge_patch"),
 					),
+					validators.MergePatchValidator{},
 				},
 			},
 
