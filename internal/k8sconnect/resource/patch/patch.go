@@ -111,24 +111,21 @@ func (r *patchResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 	resp.Schema = schema.Schema{
 		MarkdownDescription: `Applies targeted patches to existing Kubernetes resources using Server-Side Apply.
 
-⚠️ **CRITICAL: This resource forcefully takes ownership of fields from other controllers**
+**IMPORTANT:** This resource forcefully takes ownership of fields from other controllers.
 
-**ONLY use k8sconnect_patch for:**
-- ✅ Cloud provider defaults (AWS EKS, GCP GKE, Azure AKS system resources)
-- ✅ Operator-managed resources (cert-manager, nginx-ingress, etc.)
-- ✅ Helm chart deployments
-- ✅ Resources created by other tools
+**Appropriate use cases:**
+- Cloud provider system resources (AWS EKS, GCP GKE, Azure AKS defaults)
+- Operator-managed resources (cert-manager, nginx-ingress, etc.)
+- Helm chart deployments requiring customization
+- Resources created and managed by other tools
 
-**NEVER use k8sconnect_patch for:**
-- ❌ Resources managed by k8sconnect_manifest in the same state
-- ❌ Resources you want full lifecycle control over
-- ❌ Resources where you could use k8sconnect_manifest instead
+**NOT appropriate for:**
+- Resources managed by k8sconnect_manifest in the same state
+- Resources requiring full lifecycle control
+- Resources you could manage with k8sconnect_manifest instead
 
 **Destroy behavior:**
-When you ` + "`terraform destroy`" + ` a patch:
-- ✅ Ownership is released
-- ✅ Patched values REMAIN on the resource
-- ❌ Values are NOT reverted to original state`,
+When you destroy a patch resource, ownership is released but patched values remain on the target resource. Values are not reverted to their original state.`,
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{

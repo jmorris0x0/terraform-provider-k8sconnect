@@ -132,7 +132,7 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 			},
 			"force_destroy": schema.BoolAttribute{
 				Optional:            true,
-				MarkdownDescription: `Force deletion by removing finalizers. ⚠️ **WARNING**: Unlike other providers, this REMOVES finalizers after timeout. May cause data loss and orphaned cloud resources. See docs before using.`,
+				MarkdownDescription: `Force deletion by removing finalizers. **WARNING:** Unlike other providers, this REMOVES finalizers after timeout. May cause data loss and orphaned cloud resources. Consult documentation before enabling.`,
 			},
 			"managed_state_projection": schema.MapAttribute{
 				Computed:    true,
