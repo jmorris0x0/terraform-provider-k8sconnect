@@ -8,13 +8,16 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/factory"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8serrors"
 )
 
@@ -174,6 +177,9 @@ func (d *resourceDataSource) Read(ctx context.Context, req datasource.ReadReques
 		return
 	}
 
+	// Surface any API warnings from get operation
+	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
+
 	// Set outputs
 	jsonBytes, err := json.MarshalIndent(obj.Object, "", "  ")
 	if err != nil {
@@ -194,4 +200,18 @@ func (d *resourceDataSource) Read(ctx context.Context, req datasource.ReadReques
 	data.Object = types.DynamicNull()
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+}
+
+// surfaceK8sWarnings checks for Kubernetes API warnings and adds them as Terraform diagnostics
+func surfaceK8sWarnings(ctx context.Context, client k8sclient.K8sClient, diagnostics *diag.Diagnostics) {
+	warnings := client.GetWarnings()
+	for _, warning := range warnings {
+		diagnostics.AddWarning(
+			"Kubernetes API Warning",
+			fmt.Sprintf("The Kubernetes API server returned a warning:\n\n%s", warning),
+		)
+		tflog.Warn(ctx, "Kubernetes API warning", map[string]interface{}{
+			"warning": warning,
+		})
+	}
 }
