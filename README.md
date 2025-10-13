@@ -18,7 +18,7 @@ Bootstrap Kubernetes clusters and workloads in a **single `terraform apply`**. N
 | Module & multi-cluster limits         | ❌ Providers at root only, requires aliases for multiple clusters           | ✅ Self-contained resources work in any module, any cluster                 |
 | Static provider configuration         | ❌ Provider config must be hardcoded at plan time                           | ✅ Use outputs, computed values, and loops dynamically                      |
 | CRD + CR in single apply              | ❌ Manual workaround or requires config                                     | ✅ Auto-retry, zero configuration                                           |
-| Field management conflicts            | ❌ Fights with controllers (HPA, cert-manager, webhooks)                    | ✅ Coexists with controllers via field ownership tracking                   |
+| Controller coexistence                | ⚠️ SSA optional or no ignore_fields                                         | ✅ Always-on SSA + ignore_fields for HPA, webhooks, operators               |
 | Unpredictable plan diffs              | ❌ Plan shows what you send, not what K8s will do                           | ✅ Dry-run projections show exact changes before apply                      |
 | Surgical patches on managed resources | ❌ Import or take full ownership                                            | ✅ Patch EKS/GKE/Helm/operator resources                                    |
 
@@ -223,7 +223,7 @@ k8sconnect uses **Server-Side Apply with Dry-Run** for every operation, giving y
    - `managed_state_projection` diffs = External changes that will be corrected
    - `field_ownership` diffs = Ownership changes between controllers
 
-This is the first Terraform provider to combine dry-run projections with field ownership tracking for multi-controller orchestration.
+This provider combines Server-Side Apply field ownership tracking with dry-run projections during plan, enabling accurate diffs and multi-controller coexistence patterns via ignore_fields.
 
 ---
 
@@ -271,13 +271,6 @@ All `cluster_connection` fields are marked sensitive and won't appear in logs or
 - `k8sconnect_yaml_split` - Parse multi-document YAML files ([docs](docs/data-sources/yaml_split.md))
 - `k8sconnect_resource` - Read existing cluster resources ([docs](docs/data-sources/resource.md))
 - `k8sconnect_yaml_scoped` - Filter resources by category ([docs](docs/data-sources/yaml_scoped.md))
-
----
-
-## Documentation
-
-- **[Provider Configuration](docs/index.md)** - Provider-level settings
-- **[Complete Examples](examples/)** - Runnable examples for all features
 
 ---
 

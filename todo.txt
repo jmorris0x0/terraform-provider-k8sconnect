@@ -11,9 +11,7 @@ GB does this:
 
 DOCUMENTATION & RELEASE
 
-Registry landing page: Write main docs
 Verify attribute docs: Status changes need documentation updates
-Example improvements: Show both inline and template file patterns
 Nested Schema for wait_for: Needs love
 
 
@@ -21,25 +19,18 @@ TESTING GAPS
 
 Ownership edge cases: Create transition matrix and acceptance tests for all ownership scenarios
 Import blocks: Verify they work correctly
-Datasource testing: Dependency graph, unknowns handling, interpolation.
-Check for stubs/skips: Audit test suite for forgotten temporary code
 HPA simulation: Test multiple simultaneous ownership changes
 Find a way to test multicluster
 Delayed plan application: Handle out of date plans
-Add examples tests for resource datasource
 Autodetect the most recent terraform version for testing locally and in CI. Otherwise this is monthly toil.
 
 FEATURE ADDITIONS
 
 Custom ownership annotations: Solve cross-state conflicts
-Full JSON manifest: Make available as computed attribute. I think this is table stakes for parity. At least one of the other two have this. Take a look. I might already have this?
 Status field guardrails: Warn if field doesn't start with "status"
-Adding a patch resource would be a big differentiator. Not sure if wise though.
 
 UX IMPROVEMENTS
 
-Datasource args: Flatten nested structure unless adding more attributes
-Better datasource errors: Improve error messages
 Warnings for old versions: Terraform <1.6 or pre-SSA Kubernetes
 Lock down the interface before launch: The attributes and behavior I ship with will haunt me for years.
 https://registry.terraform.io/providers/gavinbunney/kubectl/latest/docs/resources/kubectl_manifest#attribute-reference
@@ -49,8 +40,6 @@ https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resourc
 CODE QUALITY
 
 Cyclomatic complexity: Reduce all functions to <15
-General refactoring: Spend three days on simplification pass
-Security scanning alerts: Address current GitHub code scanning issues
 
 MARKETING & GROWTH
 
@@ -65,7 +54,7 @@ Rename managed_state_projection. No!
 Fix makefile to install all dependencies. Try on fresh laptop.
 Add back cluster_info datasource that has more info than GB:
 https://registry.terraform.io/providers/gavinbunney/kubectl/latest/docs/data-sources/kubectl_server_version
-yaml_split intelligent reordering by default? Can't do this if we output to a simple map. (Do we use map? I hope so. Check!)
+
 
 Migration tooling!
 "Stuck with thousands of lines of Kubernetes HCL? We'll help you escape."
@@ -93,10 +82,6 @@ Could probably knock out an MVP using the Terraform provider schema definitions 
     - Could be nice. Not sure how hard.
 
 
-Under the readme main table I say "Conventional providers" I need to make sure that all these things apply to both hashi and gavin. Otherwise i'm not being fair. Gotta be nice.
-
-Update git repo tag line for new focus on single stage apply.
-
 Add override_namespace to manifest resource for multi-tenancy patterns
 
 Unmet needs and pain points:
@@ -114,16 +99,9 @@ Maybe call them: yaml_split and yaml_sort?
 
 Test section 15-18 in EDGE_CASES.md for the patch after I dogfood it a bit.
 
-Should wait_for even be in the patch resource? What aboout this take_ownership attribute. It's too dramatic.
-
-I've added a lot of thin wrappers while moving functions into common. Need to come back and swap out the common functios for the wrapper calls. 
-
-Advertise patch resource in README.md
+Should wait_for even be in the patch resource? What aboout this take_ownership attribute. It feels too dramatic.
 
 Does version in terraform-registry-manifest.json actually matter? Does it need to match the actual version? Add to release automation?
 
-Make attributes of resource ds more like patch. kind, api version, name and namespace as optional.
-
 Should the resource datasource be restricted from looking at resources we own? I thought it was already but I guess not.
-
 
