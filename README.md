@@ -14,13 +14,12 @@ Bootstrap Kubernetes clusters and workloads in a **single `terraform apply`**. N
 
 | Pain point                            | Conventional providers                                                      | **`k8sconnect`**                                                            |
 | ------------------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| Cluster‑first dependency hell         | ❌ Two-phase workflow: deploy cluster, configure provider, then deploy apps | ✅ Single apply handles cluster creation and workloads together             |
-| Module & multi-cluster limits         | ❌ Providers at root only, requires aliases for multiple clusters           | ✅ Self-contained resources work in any module, any cluster                 |
-| Static provider configuration         | ❌ Provider config must be hardcoded at plan time                           | ✅ Use outputs, computed values, and loops dynamically                      |
+| Cluster‑first dependency hell         | ❌ Two-phase workflow, providers at root only                               | ✅ Single, dynamic apply handles cluster creation and workloads together    |
 | CRD + CR in single apply              | ❌ Manual workaround or requires config                                     | ✅ Auto-retry, zero configuration                                           |
-| Field management conflicts            | ❌ Fights with controllers (HPA, cert-manager, webhooks)                    | ✅ Coexists with controllers via field ownership tracking                   |
+| Controller coexistence                | ⚠️ SSA optional or no ignore_fields                                         | ✅ Always-on SSA + ignore_fields for HPA, webhooks, operators               |
 | Unpredictable plan diffs              | ❌ Plan shows what you send, not what K8s will do                           | ✅ Dry-run projections show exact changes before apply                      |
 | Surgical patches on managed resources | ❌ Import or take full ownership                                            | ✅ Patch EKS/GKE/Helm/operator resources                                    |
+| Wait for readiness + use status       | ❌ Manual kubectl wait or null_resource provisioners                        | ✅ Built-in wait_for with status outputs for resource chaining             |
 
 
 **Stop fighting [Terraform's provider model](https://news.ycombinator.com/item?id=27434363). Create clusters and bootstrap workloads in one apply.**
@@ -210,6 +209,66 @@ Perfect for EKS/GKE defaults, Helm deployments, and operator-managed resources. 
 
 ---
 
+## Wait for Resources and Use Status
+
+Stop writing `null_resource` provisioners with kubectl wait. Built-in waiting with status outputs lets you chain resources naturally:
+
+```hcl
+# Wait for LoadBalancer IP and use it in other resources
+resource "k8sconnect_manifest" "service" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: my-service
+      namespace: prod
+    spec:
+      type: LoadBalancer
+      ports:
+      - port: 80
+        targetPort: 8080
+      selector:
+        app: myapp
+  YAML
+
+  wait_for = {
+    field   = "status.loadBalancer.ingress"
+    timeout = "5m"
+  }
+
+  cluster_connection = var.cluster_connection
+}
+
+# Use the LoadBalancer IP immediately
+resource "k8sconnect_manifest" "config" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: endpoints
+      namespace: prod
+    data:
+      service_url: "${k8sconnect_manifest.service.status.loadBalancer.ingress[0].ip}:80"
+  YAML
+
+  cluster_connection = var.cluster_connection
+}
+```
+
+**Wait strategies:**
+- `condition` - Wait for condition type to be True (e.g., `"Ready"`)
+- `rollout` - Wait for Deployment/StatefulSet/DaemonSet rollout completion
+- `field` - Wait for status field to exist (enables `.status` attribute output)
+- `field_value` - Wait for specific field values (e.g., `{"status.phase": "Running"}`)
+
+**Why this matters:**
+- **No more provisioners** - Native Terraform waiting and data flow
+- **Type-safe status access** - Use `resource.status.field.path` in expressions
+- **Proper dependencies** - Terraform understands the wait, not just `depends_on`
+- **Works with any resource** - Deployments, PVCs, CRDs - if it has status, you can wait for it
+
+---
+
 ## How It Works: SSA + Dry-Run = Predictable Infrastructure
 
 k8sconnect uses **Server-Side Apply with Dry-Run** for every operation, giving you:
@@ -223,7 +282,7 @@ k8sconnect uses **Server-Side Apply with Dry-Run** for every operation, giving y
    - `managed_state_projection` diffs = External changes that will be corrected
    - `field_ownership` diffs = Ownership changes between controllers
 
-This is the first Terraform provider to combine dry-run projections with field ownership tracking for multi-controller orchestration.
+This provider combines Server-Side Apply field ownership tracking with dry-run projections during plan, enabling accurate diffs and multi-controller coexistence patterns via ignore_fields.
 
 ---
 
@@ -269,15 +328,8 @@ All `cluster_connection` fields are marked sensitive and won't appear in logs or
 
 **Data Sources:**
 - `k8sconnect_yaml_split` - Parse multi-document YAML files ([docs](docs/data-sources/yaml_split.md))
-- `k8sconnect_resource` - Read existing cluster resources ([docs](docs/data-sources/resource.md))
 - `k8sconnect_yaml_scoped` - Filter resources by category ([docs](docs/data-sources/yaml_scoped.md))
-
----
-
-## Documentation
-
-- **[Provider Configuration](docs/index.md)** - Provider-level settings
-- **[Complete Examples](examples/)** - Runnable examples for all features
+- `k8sconnect_resource` - Read existing cluster resources ([docs](docs/data-sources/resource.md))
 
 ---
 

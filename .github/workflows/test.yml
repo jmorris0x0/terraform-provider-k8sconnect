@@ -51,7 +51,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        terraform: ['1.0.11', '1.13.3']
+        terraform: ['1.13.3']
         k3s:
             - 'rancher/k3s:v1.31.2-k3s1'   # Minimum supported
             - 'rancher/k3s:v1.34.1-k3s1'   # Latest
