@@ -116,8 +116,8 @@ func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, 
 	}
 	data.ManagedFields = types.StringValue(managedFields)
 
-	// 10. Extract field ownership
-	fieldOwnership := extractFieldOwnershipMap(patchedObj)
+	// 10. Extract field ownership (only for our manager)
+	fieldOwnership := extractFieldOwnershipForManager(patchedObj, fieldManager)
 	ownershipMap, diags := types.MapValueFrom(ctx, types.StringType, fieldOwnership)
 	resp.Diagnostics.Append(diags...)
 	if !resp.Diagnostics.HasError() {
@@ -191,8 +191,8 @@ func (r *patchResource) Read(ctx context.Context, req resource.ReadRequest, resp
 		data.ManagedFields = types.StringValue(currentManagedFields)
 	}
 
-	// 7. Update field ownership tracking
-	fieldOwnership := extractFieldOwnershipMap(currentObj)
+	// 7. Update field ownership tracking (only for our manager)
+	fieldOwnership := extractFieldOwnershipForManager(currentObj, fieldManager)
 	ownershipMap, diags := types.MapValueFrom(ctx, types.StringType, fieldOwnership)
 	resp.Diagnostics.Append(diags...)
 	if !resp.Diagnostics.HasError() {
@@ -277,8 +277,8 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	}
 	plan.ManagedFields = types.StringValue(managedFields)
 
-	// 9. Update field ownership
-	fieldOwnership := extractFieldOwnershipMap(patchedObj)
+	// 9. Update field ownership (only for our manager)
+	fieldOwnership := extractFieldOwnershipForManager(patchedObj, fieldManager)
 	ownershipMap, diags := types.MapValueFrom(ctx, types.StringType, fieldOwnership)
 	resp.Diagnostics.Append(diags...)
 	if !resp.Diagnostics.HasError() {

@@ -25,6 +25,7 @@ var _ resource.Resource = (*patchResource)(nil)
 var _ resource.ResourceWithConfigValidators = (*patchResource)(nil)
 var _ resource.ResourceWithImportState = (*patchResource)(nil)
 var _ resource.ResourceWithConfigure = (*patchResource)(nil)
+var _ resource.ResourceWithModifyPlan = (*patchResource)(nil)
 
 // ClientGetter function type for dependency injection
 type ClientGetter func(auth.ClusterConnectionModel) (k8sclient.K8sClient, error)
