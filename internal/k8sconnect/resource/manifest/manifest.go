@@ -19,6 +19,7 @@ import (
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/factory"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/validators"
 )
 
 var _ resource.Resource = (*manifestResource)(nil)
@@ -181,7 +182,7 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 								path.MatchRelative().AtParent().AtName("field_value"),
 								path.MatchRelative().AtParent().AtName("condition"),
 							),
-							jsonPathValidator{}, // Already added
+							validators.JSONPath{}, // From common validators
 						},
 					},
 					"field_value": schema.MapAttribute{
@@ -193,7 +194,7 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 								path.MatchRelative().AtParent().AtName("field"),
 								path.MatchRelative().AtParent().AtName("condition"),
 							),
-							jsonPathMapKeysValidator{}, // New validator for map keys
+							validators.JSONPathMapKeys{}, // From common validators
 						},
 					},
 					"condition": schema.StringAttribute{

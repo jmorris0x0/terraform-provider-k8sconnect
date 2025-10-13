@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
@@ -60,14 +61,12 @@ func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, 
 			return
 		}
 		// Use error classification for other K8s API errors
-		severity, title, detail := k8serrors.ClassifyError(err, "Get Target Resource", formatTarget(target))
-		if severity == "warning" {
-			resp.Diagnostics.AddWarning(title, detail)
-		} else {
-			resp.Diagnostics.AddError(title, detail)
-		}
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Get Target Resource", formatTarget(target))
 		return
 	}
+
+	// Surface any API warnings from get operation
+	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
 
 	// 6. CRITICAL VALIDATION: Prevent self-patching
 	if r.isManagedByThisState(ctx, targetObj) {
@@ -97,14 +96,12 @@ func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, 
 	fieldManager := fmt.Sprintf("k8sconnect-patch-%s", data.ID.ValueString())
 	patchedObj, err := r.applyPatch(ctx, client, targetObj, data, fieldManager, gvr)
 	if err != nil {
-		severity, title, detail := k8serrors.ClassifyError(err, "Apply Patch", formatTarget(target))
-		if severity == "warning" {
-			resp.Diagnostics.AddWarning(title, detail)
-		} else {
-			resp.Diagnostics.AddError(title, detail)
-		}
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Apply Patch", formatTarget(target))
 		return
 	}
+
+	// Surface any API warnings from patch operation
+	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
 
 	tflog.Info(ctx, "Patch applied successfully", map[string]interface{}{
 		"target":        formatTarget(target),
@@ -119,8 +116,8 @@ func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, 
 	}
 	data.ManagedFields = types.StringValue(managedFields)
 
-	// 10. Extract field ownership
-	fieldOwnership := extractFieldOwnershipMap(patchedObj)
+	// 10. Extract field ownership (only for our manager)
+	fieldOwnership := extractFieldOwnershipForManager(patchedObj, fieldManager)
 	ownershipMap, diags := types.MapValueFrom(ctx, types.StringType, fieldOwnership)
 	resp.Diagnostics.Append(diags...)
 	if !resp.Diagnostics.HasError() {
@@ -171,14 +168,12 @@ func (r *patchResource) Read(ctx context.Context, req resource.ReadRequest, resp
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		severity, title, detail := k8serrors.ClassifyError(err, "Read Target Resource", formatTarget(target))
-		if severity == "warning" {
-			resp.Diagnostics.AddWarning(title, detail)
-		} else {
-			resp.Diagnostics.AddError(title, detail)
-		}
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Read Target Resource", formatTarget(target))
 		return
 	}
+
+	// Surface any API warnings from get operation
+	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
 
 	// 5. Extract ONLY fields we patched (using our field manager)
 	fieldManager := fmt.Sprintf("k8sconnect-patch-%s", data.ID.ValueString())
@@ -196,8 +191,8 @@ func (r *patchResource) Read(ctx context.Context, req resource.ReadRequest, resp
 		data.ManagedFields = types.StringValue(currentManagedFields)
 	}
 
-	// 7. Update field ownership tracking
-	fieldOwnership := extractFieldOwnershipMap(currentObj)
+	// 7. Update field ownership tracking (only for our manager)
+	fieldOwnership := extractFieldOwnershipForManager(currentObj, fieldManager)
 	ownershipMap, diags := types.MapValueFrom(ctx, types.StringType, fieldOwnership)
 	resp.Diagnostics.Append(diags...)
 	if !resp.Diagnostics.HasError() {
@@ -251,27 +246,23 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	// 6. Get current resource
 	gvr, currentObj, err := r.getTargetResource(ctx, client, target)
 	if err != nil {
-		severity, title, detail := k8serrors.ClassifyError(err, "Get Target Resource", formatTarget(target))
-		if severity == "warning" {
-			resp.Diagnostics.AddWarning(title, detail)
-		} else {
-			resp.Diagnostics.AddError(title, detail)
-		}
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Get Target Resource", formatTarget(target))
 		return
 	}
+
+	// Surface any API warnings from get operation
+	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
 
 	// 7. Re-apply updated patch
 	fieldManager := fmt.Sprintf("k8sconnect-patch-%s", plan.ID.ValueString())
 	patchedObj, err := r.applyPatch(ctx, client, currentObj, plan, fieldManager, gvr)
 	if err != nil {
-		severity, title, detail := k8serrors.ClassifyError(err, "Update Patch", formatTarget(target))
-		if severity == "warning" {
-			resp.Diagnostics.AddWarning(title, detail)
-		} else {
-			resp.Diagnostics.AddError(title, detail)
-		}
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Update Patch", formatTarget(target))
 		return
 	}
+
+	// Surface any API warnings from patch operation
+	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
 
 	tflog.Info(ctx, "Patch updated successfully", map[string]interface{}{
 		"target":        formatTarget(target),
@@ -286,8 +277,8 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	}
 	plan.ManagedFields = types.StringValue(managedFields)
 
-	// 9. Update field ownership
-	fieldOwnership := extractFieldOwnershipMap(patchedObj)
+	// 9. Update field ownership (only for our manager)
+	fieldOwnership := extractFieldOwnershipForManager(patchedObj, fieldManager)
 	ownershipMap, diags := types.MapValueFrom(ctx, types.StringType, fieldOwnership)
 	resp.Diagnostics.Append(diags...)
 	if !resp.Diagnostics.HasError() {
@@ -340,6 +331,9 @@ func (r *patchResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 		return
 	}
 
+	// Surface any API warnings from get operation
+	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
+
 	// 5. Transfer ownership back to original owners (per-field clean handoff)
 	fieldManager := fmt.Sprintf("k8sconnect-patch-%s", data.ID.ValueString())
 
@@ -364,6 +358,8 @@ func (r *patchResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 				"error": err.Error(),
 			})
 		} else {
+			// Surface any API warnings from get operation
+			surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
 			// Group fields by their previous owner
 			fieldsByOwner := groupFieldsByPreviousOwner(previousOwnersMap)
 
@@ -388,6 +384,9 @@ func (r *patchResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 					continue
 				}
 
+				// Surface any API warnings from get operation
+				surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
+
 				// Filter fields to only transfer those currently owned by our patch manager
 				fieldsToTransfer := r.filterFieldsOwnedByManager(currentObj, fields, fieldManager)
 				if len(fieldsToTransfer) == 0 {
@@ -399,6 +398,10 @@ func (r *patchResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 				}
 
 				err = r.transferOwnershipForFields(ctx, client, currentObj, gvr, fieldsToTransfer, owner)
+
+				// Surface any API warnings from transfer operation
+				surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
+
 				if err != nil {
 					tflog.Warn(ctx, "Failed to transfer ownership for some fields", map[string]interface{}{
 						"owner": owner,
@@ -608,4 +611,18 @@ func setNestedValue(obj map[string]interface{}, parts []string, value interface{
 
 	// Set the final value
 	current[parts[len(parts)-1]] = value
+}
+
+// surfaceK8sWarnings checks for Kubernetes API warnings and adds them as Terraform diagnostics
+func surfaceK8sWarnings(ctx context.Context, client k8sclient.K8sClient, diagnostics *diag.Diagnostics) {
+	warnings := client.GetWarnings()
+	for _, warning := range warnings {
+		diagnostics.AddWarning(
+			"Kubernetes API Warning",
+			fmt.Sprintf("The Kubernetes API server returned a warning:\n\n%s", warning),
+		)
+		tflog.Warn(ctx, "Kubernetes API warning", map[string]interface{}{
+			"warning": warning,
+		})
+	}
 }

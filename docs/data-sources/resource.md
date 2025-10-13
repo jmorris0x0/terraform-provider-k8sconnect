@@ -20,7 +20,11 @@ Reads an existing Kubernetes resource from the cluster
 - `api_version` (String) API version of the resource (e.g., 'v1', 'apps/v1')
 - `cluster_connection` (Attributes) Cluster connection configuration (see [below for nested schema](#nestedatt--cluster_connection))
 - `kind` (String) Kind of the resource (e.g., 'ConfigMap', 'Deployment')
-- `metadata` (Attributes) Metadata to identify the resource (see [below for nested schema](#nestedatt--metadata))
+- `name` (String) Name of the resource
+
+### Optional
+
+- `namespace` (String) Namespace of the resource (optional for cluster-scoped resources, defaults to 'default' for namespaced resources if not specified)
 
 ### Read-Only
 
@@ -56,16 +60,3 @@ Optional:
 
 - `args` (List of String) Arguments to pass when executing the plugin.
 - `env` (Map of String) Environment variables to set when executing the plugin.
-
-
-
-<a id="nestedatt--metadata"></a>
-### Nested Schema for `metadata`
-
-Required:
-
-- `name` (String) Name of the resource
-
-Optional:
-
-- `namespace` (String) Namespace of the resource (defaults to 'default' for namespaced resources)

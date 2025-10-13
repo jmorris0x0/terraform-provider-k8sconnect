@@ -8,13 +8,15 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/factory"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8serrors"
 )
 
@@ -25,18 +27,14 @@ type resourceDataSource struct {
 type resourceDataSourceModel struct {
 	APIVersion        types.String `tfsdk:"api_version"`
 	Kind              types.String `tfsdk:"kind"`
-	Metadata          types.Object `tfsdk:"metadata"`
+	Name              types.String `tfsdk:"name"`
+	Namespace         types.String `tfsdk:"namespace"`
 	ClusterConnection types.Object `tfsdk:"cluster_connection"`
 
 	// Outputs
 	Manifest types.String  `tfsdk:"manifest"`
 	YAMLBody types.String  `tfsdk:"yaml_body"`
 	Object   types.Dynamic `tfsdk:"object"`
-}
-
-type metadataModel struct {
-	Name      types.String `tfsdk:"name"`
-	Namespace types.String `tfsdk:"namespace"`
 }
 
 func NewResourceDataSource() datasource.DataSource {
@@ -76,19 +74,13 @@ func (d *resourceDataSource) Schema(ctx context.Context, req datasource.SchemaRe
 				Required:    true,
 				Description: "Kind of the resource (e.g., 'ConfigMap', 'Deployment')",
 			},
-			"metadata": schema.SingleNestedAttribute{
+			"name": schema.StringAttribute{
 				Required:    true,
-				Description: "Metadata to identify the resource",
-				Attributes: map[string]schema.Attribute{
-					"name": schema.StringAttribute{
-						Required:    true,
-						Description: "Name of the resource",
-					},
-					"namespace": schema.StringAttribute{
-						Optional:    true,
-						Description: "Namespace of the resource (defaults to 'default' for namespaced resources)",
-					},
-				},
+				Description: "Name of the resource",
+			},
+			"namespace": schema.StringAttribute{
+				Optional:    true,
+				Description: "Namespace of the resource (optional for cluster-scoped resources, defaults to 'default' for namespaced resources if not specified)",
 			},
 			"cluster_connection": schema.SingleNestedAttribute{
 				Required:    true,
@@ -130,20 +122,7 @@ func (d *resourceDataSource) Read(ctx context.Context, req datasource.ReadReques
 	client, err := d.clientFactory.GetClient(conn)
 	if err != nil {
 		// Client creation errors are connection-related, classify them
-		severity, title, detail := k8serrors.ClassifyError(err, "Connect to Cluster", "cluster")
-		if severity == "warning" {
-			resp.Diagnostics.AddWarning(title, detail)
-		} else {
-			resp.Diagnostics.AddError(title, detail)
-		}
-		return
-	}
-
-	// Parse metadata
-	var metadata metadataModel
-	diags := data.Metadata.As(ctx, &metadata, basetypes.ObjectAsOptions{})
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Connect to Cluster", "cluster")
 		return
 	}
 
@@ -161,33 +140,27 @@ func (d *resourceDataSource) Read(ctx context.Context, req datasource.ReadReques
 	if err != nil {
 		// GVR resolution errors
 		resourceDesc := fmt.Sprintf("%s/%s", data.APIVersion.ValueString(), data.Kind.ValueString())
-		severity, title, detail := k8serrors.ClassifyError(err, "Resolve Resource Type", resourceDesc)
-		if severity == "warning" {
-			resp.Diagnostics.AddWarning(title, detail)
-		} else {
-			resp.Diagnostics.AddError(title, detail)
-		}
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Resolve Resource Type", resourceDesc)
 		return
 	}
 
-	// Get namespace (default to "default" for namespaced resources)
-	namespace := metadata.Namespace.ValueString()
+	// Get namespace from flat field
+	namespace := data.Namespace.ValueString()
+	name := data.Name.ValueString()
 
 	// Get the resource
-	obj, err := client.Get(ctx, gvr, namespace, metadata.Name.ValueString())
+	obj, err := client.Get(ctx, gvr, namespace, name)
 	if err != nil {
-		resourceDesc := fmt.Sprintf("%s %s", data.Kind.ValueString(), metadata.Name.ValueString())
+		resourceDesc := fmt.Sprintf("%s %s", data.Kind.ValueString(), name)
 		if namespace != "" {
-			resourceDesc = fmt.Sprintf("%s %s/%s", data.Kind.ValueString(), namespace, metadata.Name.ValueString())
+			resourceDesc = fmt.Sprintf("%s %s/%s", data.Kind.ValueString(), namespace, name)
 		}
-		severity, title, detail := k8serrors.ClassifyError(err, "Read Resource", resourceDesc)
-		if severity == "warning" {
-			resp.Diagnostics.AddWarning(title, detail)
-		} else {
-			resp.Diagnostics.AddError(title, detail)
-		}
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Read Resource", resourceDesc)
 		return
 	}
+
+	// Surface any API warnings from get operation
+	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
 
 	// Set outputs
 	jsonBytes, err := json.MarshalIndent(obj.Object, "", "  ")
@@ -209,4 +182,18 @@ func (d *resourceDataSource) Read(ctx context.Context, req datasource.ReadReques
 	data.Object = types.DynamicNull()
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+}
+
+// surfaceK8sWarnings checks for Kubernetes API warnings and adds them as Terraform diagnostics
+func surfaceK8sWarnings(ctx context.Context, client k8sclient.K8sClient, diagnostics *diag.Diagnostics) {
+	warnings := client.GetWarnings()
+	for _, warning := range warnings {
+		diagnostics.AddWarning(
+			"Kubernetes API Warning",
+			fmt.Sprintf("The Kubernetes API server returned a warning:\n\n%s", warning),
+		)
+		tflog.Warn(ctx, "Kubernetes API warning", map[string]interface{}{
+			"warning": warning,
+		})
+	}
 }

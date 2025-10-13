@@ -7,6 +7,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/mapvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -17,12 +18,14 @@ import (
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/factory"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/validators"
 )
 
 var _ resource.Resource = (*patchResource)(nil)
 var _ resource.ResourceWithConfigValidators = (*patchResource)(nil)
 var _ resource.ResourceWithImportState = (*patchResource)(nil)
 var _ resource.ResourceWithConfigure = (*patchResource)(nil)
+var _ resource.ResourceWithModifyPlan = (*patchResource)(nil)
 
 // ClientGetter function type for dependency injection
 type ClientGetter func(auth.ClusterConnectionModel) (k8sclient.K8sClient, error)
@@ -185,6 +188,7 @@ When you ` + "`terraform destroy`" + ` a patch:
 						path.MatchRoot("json_patch"),
 						path.MatchRoot("merge_patch"),
 					),
+					validators.StrategicMergePatch{},
 				},
 			},
 
@@ -203,6 +207,7 @@ When you ` + "`terraform destroy`" + ` a patch:
 						path.MatchRoot("json_patch"),
 						path.MatchRoot("merge_patch"),
 					),
+					validators.JSONPatchValidator{},
 				},
 			},
 
@@ -221,6 +226,7 @@ When you ` + "`terraform destroy`" + ` a patch:
 						path.MatchRoot("json_patch"),
 						path.MatchRoot("merge_patch"),
 					),
+					validators.MergePatchValidator{},
 				},
 			},
 
@@ -250,12 +256,20 @@ When you ` + "`terraform destroy`" + ` a patch:
 								path.MatchRelative().AtParent().AtName("field_value"),
 								path.MatchRelative().AtParent().AtName("condition"),
 							),
+							validators.JSONPath{}, // From common validators
 						},
 					},
 					"field_value": schema.MapAttribute{
 						Optional:    true,
 						ElementType: types.StringType,
 						Description: "Map of JSONPath to expected value. Example: {'status.phase': 'Running'}",
+						Validators: []validator.Map{
+							mapvalidator.ConflictsWith(
+								path.MatchRelative().AtParent().AtName("field"),
+								path.MatchRelative().AtParent().AtName("condition"),
+							),
+							validators.JSONPathMapKeys{}, // From common validators
+						},
 					},
 					"condition": schema.StringAttribute{
 						Optional:    true,

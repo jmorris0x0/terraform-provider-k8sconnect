@@ -164,6 +164,20 @@ func extractFieldOwnershipMap(obj *unstructured.Unstructured) map[string]string 
 	return fieldmanagement.ExtractFieldOwnershipMap(obj)
 }
 
+// extractFieldOwnershipForManager extracts field ownership for a specific field manager
+func extractFieldOwnershipForManager(obj *unstructured.Unstructured, fieldManager string) map[string]string {
+	allOwnership := fieldmanagement.ExtractFieldOwnershipMap(obj)
+	ourOwnership := make(map[string]string)
+
+	for path, manager := range allOwnership {
+		if manager == fieldManager {
+			ourOwnership[path] = manager
+		}
+	}
+
+	return ourOwnership
+}
+
 // applyPatch applies the patch to the target resource using the appropriate method based on patch type
 func (r *patchResource) applyPatch(ctx context.Context, client k8sclient.K8sClient, targetObj *unstructured.Unstructured, data patchResourceModel, fieldManager string, gvr schema.GroupVersionResource) (*unstructured.Unstructured, error) {
 	// Get patch content and type
