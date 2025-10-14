@@ -1,7 +1,7 @@
 # ADR-015: Actionable Error Messages and Diagnostic Context
 
 ## Status
-Accepted
+Implemented (Phase 1)
 
 ## Summary
 

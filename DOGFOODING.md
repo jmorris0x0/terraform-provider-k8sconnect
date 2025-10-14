@@ -337,8 +337,8 @@ Contact Foobix team about implementing stable output attributes.
 3. Add wait_for support to k8sconnect_resource data source
 
 ### Medium Priority
-1. Include resource context in API warning summaries to prevent aggregation
-2. Mark `cluster_connection.exec` block as sensitive in schema to reduce plan output noise
+1. ✅ Include resource context in API warning summaries to prevent aggregation
+2. ✅ Mark `cluster_connection.exec` block as sensitive in schema to reduce plan output noise
 3. Better destroy-time error handling for "cluster doesn't exist" scenarios
 4. Add more granular timeout controls
 
