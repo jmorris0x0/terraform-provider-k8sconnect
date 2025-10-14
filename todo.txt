@@ -105,3 +105,16 @@ Does version in terraform-registry-manifest.json actually matter? Does it need t
 
 Should the resource datasource be restricted from looking at resources we own? I thought it was already but I guess not.
 
+The examples linked in the readme aren't quite right. Need to verify links. The yaml split section leads to a list of all 12 examples rather than the yaml section
+
+Can you wait for stuff that isn't status? Is wait for really sold in the registry docs? We kinda forgot about it for a minute.
+
+Autotest markdown examples?
+
+Mention that that two kinds of patches aren't SSA therefore UX difference.
+
+Consider making all of cluster_connection sensitive. It's not bad but it would make create diffs slightly smaller.
+
+All delete failures or timeouts should come with a helpful dignostic. Especially true for namespaces. If there are still resources, then it should say so.
+
+
