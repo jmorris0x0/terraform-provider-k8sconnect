@@ -157,6 +157,23 @@ func (r *manifestResource) hasActiveWaitConditions(waitConfig waitForModel) bool
 		(!waitConfig.Rollout.IsNull() && waitConfig.Rollout.ValueBool())
 }
 
+// shouldTrackStatus determines if status field should be populated based on wait_for config
+// Only wait_for.field populates status (other wait types don't track status)
+func (r *manifestResource) shouldTrackStatus(ctx context.Context, data *manifestResourceModel) bool {
+	if data.WaitFor.IsNull() || data.WaitFor.IsUnknown() {
+		return false
+	}
+
+	var waitConfig waitForModel
+	diags := data.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
+	if diags.HasError() {
+		return false
+	}
+
+	// Only field waits populate status
+	return !waitConfig.Field.IsNull() && waitConfig.Field.ValueString() != ""
+}
+
 // updateStatus updates the status field based on wait results
 func (r *manifestResource) updateStatus(rc *ResourceContext, waited bool) error {
 	// No wait = no status
@@ -184,7 +201,8 @@ func (r *manifestResource) updateStatus(rc *ResourceContext, waited bool) error 
 	currentObj, err := rc.Client.Get(rc.Ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName())
 	if err != nil {
 		tflog.Warn(rc.Ctx, "Failed to read after wait", map[string]interface{}{"error": err.Error()})
-		rc.Data.Status = types.DynamicNull()
+		// Set to unknown so downstream resources are blocked until next apply
+		rc.Data.Status = types.DynamicUnknown()
 		return nil
 	}
 
@@ -201,19 +219,21 @@ func (r *manifestResource) updateStatus(rc *ResourceContext, waited bool) error 
 			statusValue, err := common.ConvertToAttrValue(rc.Ctx, prunedStatus)
 			if err != nil {
 				tflog.Warn(rc.Ctx, "Failed to convert pruned status", map[string]interface{}{"error": err.Error()})
-				rc.Data.Status = types.DynamicNull()
+				// Set to unknown so downstream resources are blocked until next apply
+				rc.Data.Status = types.DynamicUnknown()
 			} else {
 				rc.Data.Status = types.DynamicValue(statusValue)
 			}
 		} else {
-			tflog.Warn(rc.Ctx, "Field not found in status", map[string]interface{}{
+			tflog.Debug(rc.Ctx, "Field not found in status, setting to unknown", map[string]interface{}{
 				"field": waitConfig.Field.ValueString(),
 			})
-			rc.Data.Status = types.DynamicNull()
+			// Field not found YET - set to unknown so downstream is blocked and will retry
+			rc.Data.Status = types.DynamicUnknown()
 		}
 	} else {
-		// No status in K8s resource
-		rc.Data.Status = types.DynamicNull()
+		// No status in K8s resource YET - set to unknown so downstream is blocked
+		rc.Data.Status = types.DynamicUnknown()
 	}
 
 	return nil
