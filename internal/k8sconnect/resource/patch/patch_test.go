@@ -55,44 +55,6 @@ func TestAccPatchResource_SelfPatchingPrevention(t *testing.T) {
 	})
 }
 
-// TestAccPatchResource_TakeOwnershipRequired tests that take_ownership must be
-// explicitly set to true (EDGE_CASES.md 2.1-2.4)
-func TestAccPatchResource_TakeOwnershipRequired(t *testing.T) {
-	t.Parallel()
-
-	raw := os.Getenv("TF_ACC_KUBECONFIG")
-	if raw == "" {
-		t.Fatal("TF_ACC_KUBECONFIG must be set")
-	}
-
-	ns := fmt.Sprintf("take-ownership-ns-%d", time.Now().UnixNano()%1000000)
-	cmName := fmt.Sprintf("take-ownership-cm-%d", time.Now().UnixNano()%1000000)
-
-	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
-			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
-		},
-		Steps: []resource.TestStep{
-			// Step 1: Try without take_ownership (should fail)
-			{
-				Config: testAccPatchConfigTakeOwnershipFalse(ns, cmName),
-				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
-				},
-				ExpectError: regexp.MustCompile("Missing required argument|take_ownership.*required"),
-			},
-			// Step 2: Try with take_ownership = false (should fail)
-			{
-				Config: testAccPatchConfigTakeOwnershipExplicitFalse(ns, cmName),
-				ConfigVariables: config.Variables{
-					"raw": config.StringVariable(raw),
-				},
-				ExpectError: regexp.MustCompile("take_ownership.*[Rr]equired|must.*true"),
-			},
-		},
-	})
-}
-
 // TestAccPatchResource_BasicPatch tests basic patch creation and application
 // (EDGE_CASES.md 3.1, 4.4, 10.1-10.5)
 func TestAccPatchResource_BasicPatch(t *testing.T) {
@@ -640,73 +602,10 @@ data:
   patched: should-fail
 YAML
 
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_cm]
 }
 `, namespace, cmName, namespace, cmName, namespace)
-}
-
-func testAccPatchConfigTakeOwnershipFalse(namespace, cmName string) string {
-	return fmt.Sprintf(`
-variable "raw" { type = string }
-provider "k8sconnect" {}
-
-resource "k8sconnect_manifest" "test_ns" {
-  yaml_body = <<YAML
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: %s
-YAML
-  cluster_connection = { kubeconfig = var.raw }
-}
-
-resource "k8sconnect_patch" "test" {
-  target = {
-    api_version = "v1"
-    kind        = "ConfigMap"
-    name        = "nonexistent"
-    namespace   = "%s"
-  }
-
-  patch = "data:\n  key: value"
-  # Missing take_ownership - should fail
-  cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
-}
-`, namespace, namespace)
-}
-
-func testAccPatchConfigTakeOwnershipExplicitFalse(namespace, cmName string) string {
-	return fmt.Sprintf(`
-variable "raw" { type = string }
-provider "k8sconnect" {}
-
-resource "k8sconnect_manifest" "test_ns" {
-  yaml_body = <<YAML
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: %s
-YAML
-  cluster_connection = { kubeconfig = var.raw }
-}
-
-resource "k8sconnect_patch" "test" {
-  target = {
-    api_version = "v1"
-    kind        = "ConfigMap"
-    name        = "nonexistent"
-    namespace   = "%s"
-  }
-
-  patch = "data:\n  key: value"
-  take_ownership = false  # Explicitly false - should fail
-  cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
-}
-`, namespace, namespace)
 }
 
 func testAccPatchConfigBasic(namespace, cmName string) string {
@@ -737,7 +636,6 @@ data:
   patched: value-from-patch
 YAML
 
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_ns]
 }
@@ -768,7 +666,6 @@ resource "k8sconnect_patch" "test" {
   }
 
   patch = "data:\n  key: value"
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_ns]
 }
@@ -834,7 +731,6 @@ data:
   kubectl-field: patched-value
 YAML
 
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_ns]
 }
@@ -887,7 +783,6 @@ data:
   hpa-field: patched-hpa
 YAML
 
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_ns]
 }
@@ -921,7 +816,6 @@ resource "k8sconnect_patch" "test" {
   patch = "data:\n  key: value"
   json_patch = "[{\"op\":\"add\",\"path\":\"/data/key\",\"value\":\"value\"}]"
 
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_ns]
 }
@@ -956,7 +850,6 @@ data:
   patched: value1
 YAML
 
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_ns]
 }
@@ -991,7 +884,6 @@ data:
   patched: value2
 YAML
 
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_ns]
 }
@@ -1027,7 +919,6 @@ data:
   new-field: new-value
 YAML
 
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_ns]
 }
@@ -1058,7 +949,6 @@ resource "k8sconnect_patch" "test" {
   }
 
   patch = "data:\n  patched: value"
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_ns]
 }
@@ -1089,7 +979,6 @@ resource "k8sconnect_patch" "test" {
   }
 
   patch = "data:\n  patched: value"
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_ns]
 }

@@ -58,6 +58,9 @@ type K8sClient interface {
 	// GetWarnings retrieves any Kubernetes API warnings collected since the last call
 	// Returns a slice of warning messages (typically about deprecated APIs)
 	GetWarnings() []string
+
+	// List retrieves all resources of a given GVR in a namespace (or cluster-wide if namespace is empty)
+	List(ctx context.Context, gvr schema.GroupVersionResource, namespace string, opts metav1.ListOptions) (*unstructured.UnstructuredList, error)
 }
 
 // ApplyOptions holds options for server-side apply operations.
@@ -669,6 +672,29 @@ func (d *DynamicK8sClient) GetWarnings() []string {
 		return nil
 	}
 	return d.warningCollector.GetWarnings()
+}
+
+// List retrieves all resources of a given GVR in a namespace
+func (d *DynamicK8sClient) List(ctx context.Context, gvr schema.GroupVersionResource, namespace string, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+	var result *unstructured.UnstructuredList
+
+	err := withRetry(ctx, DefaultRetryConfig, func() error {
+		resource, err := d.getResourceInterfaceByNamespace(ctx, gvr, namespace)
+		if err != nil {
+			return err
+		}
+
+		result, err = resource.List(ctx, opts)
+		return err
+	})
+
+	return result, err
+}
+
+// ServerGroupsAndResources returns the supported groups and resources for all groups and versions
+// This is used for dynamic resource discovery (e.g., listing all resources in a namespace)
+func (d *DynamicK8sClient) ServerGroupsAndResources() ([]*metav1.APIGroup, []*metav1.APIResourceList, error) {
+	return d.discovery.ServerGroupsAndResources()
 }
 
 // Interface assertion to ensure DynamicK8sClient satisfies K8sClient

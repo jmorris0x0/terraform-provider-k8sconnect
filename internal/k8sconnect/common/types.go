@@ -20,6 +20,13 @@ func ConvertToAttrValue(ctx context.Context, data interface{}) (attr.Value, erro
 		attrValues := make(map[string]attr.Value)
 
 		for key, val := range v {
+			// Skip managedFields - it has heterogeneous list elements that violate
+			// Terraform's type system (each element has different fieldsV1 structure).
+			// Users can still access this via manifest/yaml_body if needed.
+			if key == "managedFields" {
+				continue
+			}
+
 			attrVal, err := ConvertToAttrValue(ctx, val)
 			if err != nil {
 				return nil, fmt.Errorf("failed to convert key %q: %w", key, err)

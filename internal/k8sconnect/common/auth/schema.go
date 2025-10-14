@@ -64,6 +64,7 @@ func GetConnectionSchemaForResource() map[string]resourceschema.Attribute {
 		},
 		"exec": resourceschema.SingleNestedAttribute{
 			Optional:    true,
+			Sensitive:   true,
 			Description: "Configuration for exec-based authentication.",
 			Attributes: map[string]resourceschema.Attribute{
 				"api_version": resourceschema.StringAttribute{

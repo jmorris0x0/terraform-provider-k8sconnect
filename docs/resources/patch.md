@@ -53,7 +53,6 @@ resource "k8sconnect_patch" "coredns_label" {
     }
   })
 
-  take_ownership     = true
   cluster_connection = var.cluster_connection
 }
 ```
@@ -80,7 +79,6 @@ resource "k8sconnect_patch" "kubernetes_svc_label" {
     }
   ])
 
-  take_ownership     = true
   cluster_connection = var.cluster_connection
 }
 ```
@@ -107,7 +105,6 @@ resource "k8sconnect_patch" "kube_dns_annotation" {
     }
   })
 
-  take_ownership     = true
   cluster_connection = var.cluster_connection
 }
 ```
@@ -141,7 +138,6 @@ resource "k8sconnect_patch" "aws_node_env" {
     }
   })
 
-  take_ownership = true
 
   cluster_connection = {
     host                   = aws_eks_cluster.main.endpoint
@@ -169,7 +165,6 @@ resource "k8sconnect_patch" "aws_node_env" {
 ### Required
 
 - `cluster_connection` (Attributes) Kubernetes cluster connection for this specific patch. Can be different per-resource, enabling multi-cluster deployments without provider aliases. Supports inline credentials (token, exec, client certs) or kubeconfig. (see [below for nested schema](#nestedatt--cluster_connection))
-- `take_ownership` (Boolean) **Required acknowledgment.** Must be set to `true` to confirm you understand this patch will forcefully take field ownership from other controllers. This is not optional - it's a required safety acknowledgment. External controllers may fight back for control of these fields.
 - `target` (Attributes) Identifies the Kubernetes resource to patch. The resource must already exist. Changes to target require replacement. (see [below for nested schema](#nestedatt--target))
 
 ### Optional
@@ -177,7 +172,6 @@ resource "k8sconnect_patch" "aws_node_env" {
 - `json_patch` (String) JSON Patch (RFC 6902) operations as JSON array. Use for precise operations like adding/removing specific array elements. Example: `[{"op":"add","path":"/metadata/labels/foo","value":"bar"}]`
 - `merge_patch` (String) JSON Merge Patch (RFC 7386) content. Simple key-value merges, replaces entire arrays. Least powerful but simplest patch type.
 - `patch` (String) Strategic merge patch content (YAML or JSON). This is the recommended patch type for most use cases. Uses Kubernetes strategic merge semantics with merge keys for arrays.
-- `wait_for` (Attributes) Wait for resource to reach desired state after patching. (see [below for nested schema](#nestedatt--wait_for))
 
 ### Read-Only
 
@@ -195,7 +189,7 @@ Optional:
 - `client_key` (String, Sensitive) Client certificate key for TLS authentication. Accepts PEM format or base64-encoded PEM - automatically detected.
 - `cluster_ca_certificate` (String, Sensitive) Root certificate bundle for TLS authentication. Accepts PEM format or base64-encoded PEM - automatically detected.
 - `context` (String) Context to use from the kubeconfig. Optional when kubeconfig contains exactly one context (that context will be used automatically). Required when kubeconfig contains multiple contexts to prevent accidental connection to the wrong cluster. Error will list available contexts if not specified when required.
-- `exec` (Attributes) Configuration for exec-based authentication. (see [below for nested schema](#nestedatt--cluster_connection--exec))
+- `exec` (Attributes, Sensitive) Configuration for exec-based authentication. (see [below for nested schema](#nestedatt--cluster_connection--exec))
 - `host` (String) The hostname (in form of URI) of the Kubernetes API server.
 - `insecure` (Boolean) Whether server should be accessed without verifying the TLS certificate.
 - `kubeconfig` (String, Sensitive) Raw kubeconfig file content.
@@ -229,15 +223,3 @@ Required:
 Optional:
 
 - `namespace` (String) Namespace of the target resource. Omit for cluster-scoped resources. Changes require replacement.
-
-
-<a id="nestedatt--wait_for"></a>
-### Nested Schema for `wait_for`
-
-Optional:
-
-- `condition` (String) Condition type that must be True after patching. Example: 'Ready'
-- `field` (String) JSONPath to field that must exist/be non-empty after patching. Example: 'status.conditions'
-- `field_value` (Map of String) Map of JSONPath to expected value. Example: {'status.phase': 'Running'}
-- `rollout` (Boolean) Wait for Deployment/StatefulSet/DaemonSet rollout to complete after patching. Checks that all replicas are updated and available.
-- `timeout` (String) Maximum time to wait. Defaults to 10m. Format: '30s', '5m', '1h'
