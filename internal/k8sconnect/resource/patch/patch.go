@@ -40,7 +40,6 @@ type patchResourceModel struct {
 	Patch             types.String `tfsdk:"patch"`
 	JSONPatch         types.String `tfsdk:"json_patch"`
 	MergePatch        types.String `tfsdk:"merge_patch"`
-	TakeOwnership     types.Bool   `tfsdk:"take_ownership"`
 	ClusterConnection types.Object `tfsdk:"cluster_connection"`
 
 	// Computed fields
@@ -215,13 +214,6 @@ When you destroy a patch resource, ownership is released but patched values rema
 					),
 					validators.MergePatchValidator{},
 				},
-			},
-
-			"take_ownership": schema.BoolAttribute{
-				Required: true,
-				MarkdownDescription: "**Required acknowledgment.** Must be set to `true` to confirm you understand this patch will forcefully " +
-					"take field ownership from other controllers. This is not optional - it's a required safety acknowledgment. " +
-					"External controllers may fight back for control of these fields.",
 			},
 
 			"cluster_connection": schema.SingleNestedAttribute{

@@ -53,7 +53,6 @@ resource "k8sconnect_patch" "coredns_label" {
     }
   })
 
-  take_ownership     = true
   cluster_connection = var.cluster_connection
 }
 ```
@@ -80,7 +79,6 @@ resource "k8sconnect_patch" "kubernetes_svc_label" {
     }
   ])
 
-  take_ownership     = true
   cluster_connection = var.cluster_connection
 }
 ```
@@ -107,7 +105,6 @@ resource "k8sconnect_patch" "kube_dns_annotation" {
     }
   })
 
-  take_ownership     = true
   cluster_connection = var.cluster_connection
 }
 ```
@@ -141,7 +138,6 @@ resource "k8sconnect_patch" "aws_node_env" {
     }
   })
 
-  take_ownership = true
 
   cluster_connection = {
     host                   = aws_eks_cluster.main.endpoint
@@ -169,7 +165,6 @@ resource "k8sconnect_patch" "aws_node_env" {
 ### Required
 
 - `cluster_connection` (Attributes) Kubernetes cluster connection for this specific patch. Can be different per-resource, enabling multi-cluster deployments without provider aliases. Supports inline credentials (token, exec, client certs) or kubeconfig. (see [below for nested schema](#nestedatt--cluster_connection))
-- `take_ownership` (Boolean) **Required acknowledgment.** Must be set to `true` to confirm you understand this patch will forcefully take field ownership from other controllers. This is not optional - it's a required safety acknowledgment. External controllers may fight back for control of these fields.
 - `target` (Attributes) Identifies the Kubernetes resource to patch. The resource must already exist. Changes to target require replacement. (see [below for nested schema](#nestedatt--target))
 
 ### Optional

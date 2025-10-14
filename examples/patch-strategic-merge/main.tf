@@ -20,7 +20,6 @@ resource "k8sconnect_patch" "coredns_label" {
     }
   })
 
-  take_ownership     = true
   cluster_connection = var.cluster_connection
 }
 

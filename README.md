@@ -198,7 +198,6 @@ resource "k8sconnect_patch" "aws_node_config" {
     }
   })
 
-  take_ownership     = true
   cluster_connection = var.cluster_connection
 }
 ```

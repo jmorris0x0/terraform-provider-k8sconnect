@@ -438,7 +438,6 @@ func (r *patchResource) ImportState(ctx context.Context, req resource.ImportStat
 			"Import is not supported because:\n"+
 			"1. Patches represent partial ownership, not full resource state\n"+
 			"2. There's no way to determine the original patch content from the current state\n"+
-			"3. The take_ownership acknowledgment must be explicit in configuration\n\n"+
 			"Instead, define the patch in your Terraform configuration.")
 }
 

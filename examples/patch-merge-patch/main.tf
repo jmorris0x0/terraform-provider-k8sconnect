@@ -21,7 +21,6 @@ resource "k8sconnect_patch" "kube_dns_annotation" {
     }
   })
 
-  take_ownership     = true
   cluster_connection = var.cluster_connection
 }
 

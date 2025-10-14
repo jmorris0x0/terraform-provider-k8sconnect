@@ -30,7 +30,6 @@ resource "k8sconnect_patch" "coredns_label" {
     }
   })
 
-  take_ownership     = true
   cluster_connection = var.cluster_connection
 }
 ```
@@ -57,7 +56,6 @@ resource "k8sconnect_patch" "kubernetes_svc_label" {
     }
   ])
 
-  take_ownership     = true
   cluster_connection = var.cluster_connection
 }
 ```
@@ -84,7 +82,6 @@ resource "k8sconnect_patch" "kube_dns_annotation" {
     }
   })
 
-  take_ownership     = true
   cluster_connection = var.cluster_connection
 }
 ```
@@ -118,7 +115,6 @@ resource "k8sconnect_patch" "aws_node_env" {
     }
   })
 
-  take_ownership = true
 
   cluster_connection = {
     host                   = aws_eks_cluster.main.endpoint

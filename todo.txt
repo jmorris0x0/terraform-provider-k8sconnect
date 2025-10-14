@@ -37,10 +37,6 @@ https://registry.terraform.io/providers/gavinbunney/kubectl/latest/docs/resource
 https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/manifest
 
 
-CODE QUALITY
-
-Cyclomatic complexity: Reduce all functions to <15
-
 MARKETING & GROWTH
 
 Launch content: Medium article, r/kubernetes, r/terraform, HackerNews posts, SweetOps Slack, Kubernetes Slack
@@ -48,13 +44,9 @@ Launch content: Medium article, r/kubernetes, r/terraform, HackerNews posts, Swe
 
 DEFERRED/COMPLEX
 
-Dynamic datasource lookup: Use same JSON-to-attribute logic as resource
 Migration plan for other providers
 Rename managed_state_projection. No!
 Fix makefile to install all dependencies. Try on fresh laptop.
-Add back cluster_info datasource that has more info than GB:
-https://registry.terraform.io/providers/gavinbunney/kubectl/latest/docs/data-sources/kubectl_server_version
-
 
 Migration tooling!
 "Stuck with thousands of lines of Kubernetes HCL? We'll help you escape."
@@ -95,11 +87,7 @@ Add a deep compare yaml helper function for the tests. string comparisons are br
 
 Add CI job to check/update cluster scoped resources list?
 
-Maybe call them: yaml_split and yaml_sort?
-
 Test section 15-18 in EDGE_CASES.md for the patch after I dogfood it a bit.
-
-Should wait_for even be in the patch resource? What aboout this take_ownership attribute. It feels too dramatic.
 
 Does version in terraform-registry-manifest.json actually matter? Does it need to match the actual version? Add to release automation?
 
@@ -112,4 +100,6 @@ Can you wait for stuff that isn't status? Is wait for really sold in the registr
 Autotest markdown examples?
 
 Mention that that two kinds of patches aren't SSA therefore UX difference.
+
+Should manifest datasource and patch be prevented from working on already managed resoruces? This might be a dupe.
 
