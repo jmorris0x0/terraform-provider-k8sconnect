@@ -7,7 +7,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 
-	"github.com/hashicorp/terraform-plugin-framework-validators/mapvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -43,7 +42,6 @@ type patchResourceModel struct {
 	MergePatch        types.String `tfsdk:"merge_patch"`
 	TakeOwnership     types.Bool   `tfsdk:"take_ownership"`
 	ClusterConnection types.Object `tfsdk:"cluster_connection"`
-	WaitFor           types.Object `tfsdk:"wait_for"`
 
 	// Computed fields
 	ManagedFields  types.String `tfsdk:"managed_fields"`
@@ -56,14 +54,6 @@ type patchTargetModel struct {
 	Kind       types.String `tfsdk:"kind"`
 	Name       types.String `tfsdk:"name"`
 	Namespace  types.String `tfsdk:"namespace"`
-}
-
-type waitForModel struct {
-	Field      types.String `tfsdk:"field"`
-	FieldValue types.Map    `tfsdk:"field_value"`
-	Condition  types.String `tfsdk:"condition"`
-	Rollout    types.Bool   `tfsdk:"rollout"`
-	Timeout    types.String `tfsdk:"timeout"`
 }
 
 // NewPatchResource creates a new patch resource
@@ -239,55 +229,6 @@ When you destroy a patch resource, ownership is released but patched values rema
 				Description: "Kubernetes cluster connection for this specific patch. Can be different per-resource, enabling multi-cluster " +
 					"deployments without provider aliases. Supports inline credentials (token, exec, client certs) or kubeconfig.",
 				Attributes: auth.GetConnectionSchemaForResource(),
-			},
-
-			"wait_for": schema.SingleNestedAttribute{
-				Optional:    true,
-				Description: "Wait for resource to reach desired state after patching.",
-				Attributes: map[string]schema.Attribute{
-					"field": schema.StringAttribute{
-						Optional:    true,
-						Description: "JSONPath to field that must exist/be non-empty after patching. Example: 'status.conditions'",
-						Validators: []validator.String{
-							stringvalidator.ConflictsWith(
-								path.MatchRelative().AtParent().AtName("field_value"),
-								path.MatchRelative().AtParent().AtName("condition"),
-							),
-							validators.JSONPath{}, // From common validators
-						},
-					},
-					"field_value": schema.MapAttribute{
-						Optional:    true,
-						ElementType: types.StringType,
-						Description: "Map of JSONPath to expected value. Example: {'status.phase': 'Running'}",
-						Validators: []validator.Map{
-							mapvalidator.ConflictsWith(
-								path.MatchRelative().AtParent().AtName("field"),
-								path.MatchRelative().AtParent().AtName("condition"),
-							),
-							validators.JSONPathMapKeys{}, // From common validators
-						},
-					},
-					"condition": schema.StringAttribute{
-						Optional:    true,
-						Description: "Condition type that must be True after patching. Example: 'Ready'",
-						Validators: []validator.String{
-							stringvalidator.ConflictsWith(
-								path.MatchRelative().AtParent().AtName("field"),
-								path.MatchRelative().AtParent().AtName("field_value"),
-							),
-						},
-					},
-					"rollout": schema.BoolAttribute{
-						Optional: true,
-						Description: "Wait for Deployment/StatefulSet/DaemonSet rollout to complete after patching. " +
-							"Checks that all replicas are updated and available.",
-					},
-					"timeout": schema.StringAttribute{
-						Optional:    true,
-						Description: "Maximum time to wait. Defaults to 10m. Format: '30s', '5m', '1h'",
-					},
-				},
 			},
 
 			// Computed fields

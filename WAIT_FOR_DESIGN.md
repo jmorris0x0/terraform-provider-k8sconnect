@@ -1,8 +1,8 @@
-# k8sconnect Data Source Design: wait_for Support
+# k8sconnect Data Source: wait_for Support Design
 
 ## Context
 
-The `wait-for-lb` bash script hack needs to be replaced with native k8sconnect functionality. This requires enhancing the data source to support waiting for resources and field conditions.
+The `wait-for-lb` bash script hack needs to be replaced with native k8sconnect functionality. This requires enhancing the `k8sconnect_manifest` data source to support waiting for resources and field conditions.
 
 ## Current State
 
@@ -27,7 +27,6 @@ data "k8sconnect_manifest" "nginx_lb" {
 }
 
 # Issues:
-# - object attribute returns null (must use jsondecode(manifest))
 # - No wait_for support
 # - Fails if resource doesn't exist yet (bootstrap problem)
 ```
@@ -237,7 +236,7 @@ data "k8sconnect_manifest" "nginx_lb" {
 
 **Verdict:** ❌ Bad idea for Terraform - timeouts should be explicit
 
-### Option D: Smart Defaults with Optional Overrides
+### Option D: Smart Defaults with Optional Overrides (RECOMMENDED)
 
 ```hcl
 # Minimal usage - relies on defaults
@@ -339,7 +338,8 @@ data "k8sconnect_manifest" "example" {
 # Outputs:
 # - id              (string): Resource identifier
 # - manifest        (string): Full YAML manifest
-# - object          (dynamic): Parsed Kubernetes object
+# - object          (dynamic): Parsed Kubernetes object (supports dot notation)
+# - yaml_body       (string): YAML representation
 # - api_version     (string): Actual apiVersion
 # - kind            (string): Actual kind
 # - namespace       (string): Actual namespace
@@ -529,55 +529,6 @@ data.k8sconnect_manifest.nginx_lb: Condition met! (2m45s elapsed)
 data.k8sconnect_manifest.nginx_lb: Read complete after 2m45s [id=v1/Service/ingress-nginx/ingress-nginx-controller]
 ```
 
-## Naming: k8sconnect_manifest vs k8sconnect_manifest
-
-### Current State
-- Resource: `k8sconnect_manifest`
-- Data source: `k8sconnect_manifest`
-
-### The Problem
-- "resource datasource" is awkward phrasing
-- Inconsistent naming between resource and data source
-- Confusing for users
-
-### Proposal: Rename to k8sconnect_manifest
-
-**Arguments for:**
-- ✅ Matches `resource "k8sconnect_manifest"`
-- ✅ Consistent terminology across provider
-- ✅ Clearer: both work with Kubernetes manifests
-- ✅ More intuitive: "read a manifest" vs "read a resource"
-
-**Arguments against:**
-- ⚠️ "manifest" traditionally implies input (YAML you write)
-- ⚠️ This data source outputs an object (parsed result)
-- ⚠️ Breaking change for existing users
-- ⚠️ "manifest" might imply it returns YAML only (but we return parsed object)
-
-### Alternative Names Considered
-
-| Name | Pros | Cons |
-|------|------|------|
-| `k8sconnect_manifest` | Matches resource name, consistent | "Manifest" implies input YAML |
-| `k8sconnect_manifest` | Current name, no breaking change | Inconsistent, awkward phrasing |
-| `k8sconnect_object` | Clear it returns parsed object | Different from resource name |
-| `k8sconnect_read` | Verb makes it clear it's reading | Too generic, unclear what it reads |
-| `k8sconnect_query` | Implies flexible reading | Doesn't match resource name |
-
-### Recommendation: Rename to k8sconnect_manifest
-
-**Rationale:**
-- Consistency matters more than perfect semantic accuracy
-- Users think in terms of "manifests" already
-- Both resource and data source work with the same underlying concept
-- The `object` output attribute makes it clear you get parsed data
-
-**Migration path:**
-1. Add `k8sconnect_manifest` data source with new implementation
-2. Deprecate `k8sconnect_manifest` with clear migration guide
-3. Keep both for 2-3 minor versions
-4. Remove `k8sconnect_manifest` in next major version
-
 ## Default Timeout Values
 
 ### Question: What are reasonable defaults?
@@ -637,11 +588,12 @@ const (
 
 ## Implementation Checklist
 
-### Phase 1: Fix object Attribute
-- [ ] Implement proper parsing of `manifest` to `object` attribute
-- [ ] Handle all Kubernetes API types correctly
-- [ ] Return null for fields that don't exist
-- [ ] Test with Services, Deployments, ConfigMaps, CRDs
+### Phase 1: Fix object Attribute ✅ COMPLETED
+- ✅ Implement proper parsing of `manifest` to `object` attribute
+- ✅ Handle all Kubernetes API types correctly
+- ✅ Return null for fields that don't exist
+- ✅ Test with Services, Deployments, ConfigMaps, CRDs
+- ✅ Update all documentation and examples
 
 ### Phase 2: Add Existence Waiting
 - [ ] Add `existence_timeout` attribute to schema
@@ -667,32 +619,29 @@ const (
 - [ ] Context cancellation support (Ctrl+C)
 - [ ] Detailed logging for debugging
 
-### Phase 5: Documentation & Migration
-- [ ] Rename to `k8sconnect_manifest` (deprecate `k8sconnect_manifest`)
+### Phase 5: Documentation & Examples
 - [ ] Complete provider documentation
 - [ ] Migration guide from wait-for-lb
 - [ ] Example: replacing wait-for-lb hack
 - [ ] Add to DOGFOODING.md
+- [ ] Update runnable examples
 
 ## Open Questions
 
 1. **Timeout strategy:** Separate timeouts (Option B/D) or single timeout (Option A)?
-   - **Leaning toward:** Option D (separate with smart defaults)
+   - **Decision:** Option D (separate with smart defaults)
 
 2. **Default timeouts:** Are 5m/10m reasonable?
-   - **Leaning toward:** Yes, matches real-world usage
+   - **Decision:** Yes, matches real-world usage
 
-3. **Naming:** `k8sconnect_manifest` or keep `k8sconnect_manifest`?
-   - **Leaning toward:** Rename to `k8sconnect_manifest` for consistency
+3. **Bootstrap handling:** Should it show "known after apply" during plan if resource doesn't exist?
+   - **Decision:** Yes, matches Terraform best practices
 
-4. **Bootstrap handling:** Should it show "known after apply" during plan if resource doesn't exist?
-   - **Leaning toward:** Yes, matches Terraform best practices
-
-5. **Condition syntax:** JSONPath-like or simpler dot notation?
+4. **Condition syntax:** JSONPath-like or simpler dot notation?
    - **Need to decide:** Balance power vs. complexity
 
-6. **Multiple conditions:** AND logic (all must be met) or OR logic (any can be met)?
-   - **Leaning toward:** AND only, user can create multiple data sources for OR
+5. **Multiple conditions:** AND logic (all must be met) or OR logic (any can be met)?
+   - **Decision:** AND only, user can create multiple data sources for OR
 
 ## Success Criteria
 

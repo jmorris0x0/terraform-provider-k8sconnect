@@ -113,8 +113,3 @@ Autotest markdown examples?
 
 Mention that that two kinds of patches aren't SSA therefore UX difference.
 
-Consider making all of cluster_connection sensitive. It's not bad but it would make create diffs slightly smaller.
-
-All delete failures or timeouts should come with a helpful dignostic. Especially true for namespaces. If there are still resources, then it should say so.
-
-

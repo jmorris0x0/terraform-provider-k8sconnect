@@ -177,7 +177,6 @@ resource "k8sconnect_patch" "aws_node_env" {
 - `json_patch` (String) JSON Patch (RFC 6902) operations as JSON array. Use for precise operations like adding/removing specific array elements. Example: `[{"op":"add","path":"/metadata/labels/foo","value":"bar"}]`
 - `merge_patch` (String) JSON Merge Patch (RFC 7386) content. Simple key-value merges, replaces entire arrays. Least powerful but simplest patch type.
 - `patch` (String) Strategic merge patch content (YAML or JSON). This is the recommended patch type for most use cases. Uses Kubernetes strategic merge semantics with merge keys for arrays.
-- `wait_for` (Attributes) Wait for resource to reach desired state after patching. (see [below for nested schema](#nestedatt--wait_for))
 
 ### Read-Only
 
@@ -229,15 +228,3 @@ Required:
 Optional:
 
 - `namespace` (String) Namespace of the target resource. Omit for cluster-scoped resources. Changes require replacement.
-
-
-<a id="nestedatt--wait_for"></a>
-### Nested Schema for `wait_for`
-
-Optional:
-
-- `condition` (String) Condition type that must be True after patching. Example: 'Ready'
-- `field` (String) JSONPath to field that must exist/be non-empty after patching. Example: 'status.conditions'
-- `field_value` (Map of String) Map of JSONPath to expected value. Example: {'status.phase': 'Running'}
-- `rollout` (Boolean) Wait for Deployment/StatefulSet/DaemonSet rollout to complete after patching. Checks that all replicas are updated and available.
-- `timeout` (String) Maximum time to wait. Defaults to 10m. Format: '30s', '5m', '1h'

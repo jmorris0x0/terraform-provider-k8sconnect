@@ -184,8 +184,7 @@ This is NOT a k8sconnect limitation. It's a foobix provider design issue that af
 
 **Impact:** Cannot yet replace wait-for-lb module hack
 
-**See DATASOURCE_DESIGN.md for complete design:**
-- Rename to `k8sconnect_manifest` for consistency
+**See WAIT_FOR_DESIGN.md for complete design:**
 - Add `existence_timeout` (wait for resource to appear)
 - Add `wait_for` conditions (wait for fields to populate)
 - Separate timeouts (5m existence, 10m per condition)

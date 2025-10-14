@@ -408,7 +408,10 @@ func handleProjectionFailure(
 }
 
 // surfaceK8sWarnings checks for Kubernetes API warnings and adds them as Terraform diagnostics
-func surfaceK8sWarnings(ctx context.Context, client k8sclient.K8sClient, obj interface{ GetKind() string; GetName() string }, diagnostics *diag.Diagnostics) {
+func surfaceK8sWarnings(ctx context.Context, client k8sclient.K8sClient, obj interface {
+	GetKind() string
+	GetName() string
+}, diagnostics *diag.Diagnostics) {
 	warnings := client.GetWarnings()
 	for _, warning := range warnings {
 		diagnostics.AddWarning(
