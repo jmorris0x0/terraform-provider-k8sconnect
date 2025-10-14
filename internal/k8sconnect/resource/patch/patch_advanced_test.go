@@ -1247,7 +1247,6 @@ spec:
           value: "true"
 YAML
 
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_ns]
 }
@@ -1335,7 +1334,6 @@ spec:
           value: "patched-value"
 YAML
 
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_ns]
 }
@@ -1370,7 +1368,6 @@ data:
   list: "new1,new2"
 YAML
 
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_ns]
 }
@@ -1446,7 +1443,6 @@ spec:
     name: http-patched
 YAML
 
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_ns]
 }
@@ -1534,7 +1530,6 @@ spec:
           value: "patched"
 YAML
 
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_ns]
 }
@@ -1612,7 +1607,6 @@ spec:
       mountPath: /etc/patched-config
 YAML
 
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_ns]
 }
@@ -1649,7 +1643,6 @@ data:
   key: ""
 YAML
 
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_ns]
 }
@@ -1686,7 +1679,6 @@ resource "k8sconnect_patch" "test" {
     }
   ])
 
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_ns]
 }
@@ -1768,7 +1760,6 @@ spec:
         stdin: false
 YAML
 
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_ns]
 }
@@ -1845,7 +1836,6 @@ spec:
   replicas: 3
 YAML
 
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_ns]
 }
@@ -1886,7 +1876,6 @@ data:
   key: %q
 YAML
 
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_ns]
 }
@@ -1926,7 +1915,6 @@ resource "k8sconnect_patch" "test" {
     }
   ])
 
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_ns]
 }
@@ -1963,7 +1951,6 @@ resource "k8sconnect_patch" "test" {
     }
   ])
 
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_ns]
 }
@@ -2001,7 +1988,6 @@ resource "k8sconnect_patch" "test" {
     }
   ])
 
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_ns]
 }
@@ -2039,7 +2025,6 @@ resource "k8sconnect_patch" "test" {
     }
   ])
 
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_ns]
 }
@@ -2077,7 +2062,6 @@ resource "k8sconnect_patch" "test" {
     }
   ])
 
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_ns]
 }
@@ -2120,7 +2104,6 @@ resource "k8sconnect_patch" "test" {
     }
   ])
 
-  take_ownership = true
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_manifest.test_ns]
 }

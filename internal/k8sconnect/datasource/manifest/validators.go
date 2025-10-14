@@ -1,5 +1,5 @@
 // internal/k8sconnect/datasource/resource/validators.go
-package resource
+package manifest
 
 import (
 	"context"
@@ -12,29 +12,29 @@ import (
 )
 
 // ConfigValidators implements datasource.DataSourceWithConfigValidators
-func (d *resourceDataSource) ConfigValidators(ctx context.Context) []datasource.ConfigValidator {
+func (d *manifestDataSource) ConfigValidators(ctx context.Context) []datasource.ConfigValidator {
 	return []datasource.ConfigValidator{
-		&resourceDSClusterConnectionValidator{},
-		&resourceDSExecAuthValidator{},
+		&manifestDSClusterConnectionValidator{},
+		&manifestDSExecAuthValidator{},
 	}
 }
 
 // =============================================================================
-// resourceDSClusterConnectionValidator ensures exactly one connection mode is specified
+// manifestDSClusterConnectionValidator ensures exactly one connection mode is specified
 // =============================================================================
 
-type resourceDSClusterConnectionValidator struct{}
+type manifestDSClusterConnectionValidator struct{}
 
-func (v *resourceDSClusterConnectionValidator) Description(ctx context.Context) string {
+func (v *manifestDSClusterConnectionValidator) Description(ctx context.Context) string {
 	return "Ensures exactly one cluster connection mode is specified: inline (host + cluster_ca_certificate or insecure) or kubeconfig"
 }
 
-func (v *resourceDSClusterConnectionValidator) MarkdownDescription(ctx context.Context) string {
+func (v *manifestDSClusterConnectionValidator) MarkdownDescription(ctx context.Context) string {
 	return "Ensures exactly one cluster connection mode is specified: inline (`host` + `cluster_ca_certificate` or `insecure`), `kubeconfig`"
 }
 
-func (v *resourceDSClusterConnectionValidator) ValidateDataSource(ctx context.Context, req datasource.ValidateConfigRequest, resp *datasource.ValidateConfigResponse) {
-	var data resourceDataSourceModel
+func (v *manifestDSClusterConnectionValidator) ValidateDataSource(ctx context.Context, req datasource.ValidateConfigRequest, resp *datasource.ValidateConfigResponse) {
+	var data manifestDataSourceModel
 	diags := req.Config.Get(ctx, &data)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
@@ -75,21 +75,21 @@ func (v *resourceDSClusterConnectionValidator) ValidateDataSource(ctx context.Co
 }
 
 // =============================================================================
-// resourceDSExecAuthValidator ensures complete exec configuration when present
+// manifestDSExecAuthValidator ensures complete exec configuration when present
 // =============================================================================
 
-type resourceDSExecAuthValidator struct{}
+type manifestDSExecAuthValidator struct{}
 
-func (v *resourceDSExecAuthValidator) Description(ctx context.Context) string {
+func (v *manifestDSExecAuthValidator) Description(ctx context.Context) string {
 	return "Ensures that if exec auth is specified, all required fields (api_version, command) are provided"
 }
 
-func (v *resourceDSExecAuthValidator) MarkdownDescription(ctx context.Context) string {
+func (v *manifestDSExecAuthValidator) MarkdownDescription(ctx context.Context) string {
 	return "Ensures that if exec auth is specified, all required fields (`api_version`, `command`) are provided"
 }
 
-func (v *resourceDSExecAuthValidator) ValidateDataSource(ctx context.Context, req datasource.ValidateConfigRequest, resp *datasource.ValidateConfigResponse) {
-	var data resourceDataSourceModel
+func (v *manifestDSExecAuthValidator) ValidateDataSource(ctx context.Context, req datasource.ValidateConfigRequest, resp *datasource.ValidateConfigResponse) {
+	var data manifestDataSourceModel
 	diags := req.Config.Get(ctx, &data)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {

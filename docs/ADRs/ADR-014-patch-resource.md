@@ -25,9 +25,7 @@ Accepted - Implemented (2025-10-11)
 
 **1. External Resources Only** - Patches are STRICTLY for resources NOT managed by `k8sconnect_manifest` in this state. Critical safety mechanism: `isManagedByThisState()` checks for k8sconnect annotations and field managers to prevent self-patching.
 
-**2. Explicit Acknowledgment** - Every patch requires `take_ownership = true` (validated, not optional). Users must acknowledge forceful field ownership transfer from other controllers.
-
-**3. Per-Field Ownership Transfer on Destroy** - When destroyed:
+**2. Per-Field Ownership Transfer on Destroy** - When destroyed:
 - Parse `previous_owners` map to group fields by their original controller
 - Transfer each field group back to its specific previous owner using SSA
 - Patched values remain in place
@@ -35,7 +33,7 @@ Accepted - Implemented (2025-10-11)
 
 This is NOT "most common owner" - each field returns to its specific original controller (e.g., if patching HPA-managed `spec.replicas` and EKS-managed `spec.proxy`, each field goes back to its respective owner).
 
-**4. Target Changes Require Replacement** - All target fields (apiVersion, kind, name, namespace) have `RequiresReplace()` plan modifiers. Changing what you're patching creates a new patch resource.
+**3. Target Changes Require Replacement** - All target fields (apiVersion, kind, name, namespace) have `RequiresReplace()` plan modifiers. Changing what you're patching creates a new patch resource.
 
 ### Schema
 
@@ -62,7 +60,6 @@ resource "k8sconnect_patch" "aws_node_proxy" {
     }
   })
 
-  take_ownership     = true  # Required
   cluster_connection = var.eks_connection
 
   # Computed
