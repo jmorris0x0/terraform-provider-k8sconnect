@@ -12,7 +12,7 @@ import (
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/factory"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
-	resourceds "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/datasource/resource"
+	manifestds "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/datasource/manifest"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/datasource/yaml_scoped"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/datasource/yaml_split"
 	manifestres "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/resource/manifest"
@@ -92,6 +92,6 @@ func (p *k8sconnectProvider) DataSources(ctx context.Context) []func() datasourc
 	return []func() datasource.DataSource{
 		yaml_split.NewYamlSplitDataSource,
 		yaml_scoped.NewYamlScopedDataSource,
-		resourceds.NewResourceDataSource,
+		manifestds.NewManifestDataSource,
 	}
 }

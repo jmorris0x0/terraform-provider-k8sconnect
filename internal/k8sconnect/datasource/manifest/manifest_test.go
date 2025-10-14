@@ -1,5 +1,5 @@
 // internal/k8sconnect/datasource/resource/resource_test.go
-package resource_test
+package manifest_test
 
 import (
 	"fmt"
@@ -16,7 +16,7 @@ import (
 	testhelpers "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/test"
 )
 
-func TestAccResourceDataSource_basic(t *testing.T) {
+func TestAccManifestDataSource_basic(t *testing.T) {
 	t.Parallel()
 
 	raw := os.Getenv("TF_ACC_KUBECONFIG")
@@ -35,7 +35,7 @@ func TestAccResourceDataSource_basic(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create resources and read with data source
 			{
-				Config: testAccResourceDataSourceConfig(ns, cmName),
+				Config: testAccManifestDataSourceConfig(ns, cmName),
 				ConfigVariables: config.Variables{
 					"raw":       config.StringVariable(raw),
 					"namespace": config.StringVariable(ns),
@@ -45,20 +45,20 @@ func TestAccResourceDataSource_basic(t *testing.T) {
 					// Verify the manifest resource created successfully
 					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
 					// Verify data source can read it
-					resource.TestCheckResourceAttr("data.k8sconnect_resource.test", "kind", "ConfigMap"),
-					resource.TestCheckResourceAttr("data.k8sconnect_resource.test", "api_version", "v1"),
-					resource.TestCheckResourceAttr("data.k8sconnect_resource.test", "name", cmName),
-					resource.TestCheckResourceAttr("data.k8sconnect_resource.test", "namespace", ns),
+					resource.TestCheckResourceAttr("data.k8sconnect_manifest.test", "kind", "ConfigMap"),
+					resource.TestCheckResourceAttr("data.k8sconnect_manifest.test", "api_version", "v1"),
+					resource.TestCheckResourceAttr("data.k8sconnect_manifest.test", "name", cmName),
+					resource.TestCheckResourceAttr("data.k8sconnect_manifest.test", "namespace", ns),
 					// Verify outputs are populated
-					resource.TestCheckResourceAttrSet("data.k8sconnect_resource.test", "manifest"),
-					resource.TestCheckResourceAttrSet("data.k8sconnect_resource.test", "yaml_body"),
+					resource.TestCheckResourceAttrSet("data.k8sconnect_manifest.test", "manifest"),
+					resource.TestCheckResourceAttrSet("data.k8sconnect_manifest.test", "yaml_body"),
 				),
 			},
 		},
 	})
 }
 
-func testAccResourceDataSourceConfig(ns, name string) string {
+func testAccManifestDataSourceConfig(ns, name string) string {
 	return fmt.Sprintf(`
 variable "raw" {
   type = string
@@ -105,7 +105,7 @@ YAML
 }
 
 # Now read it with the data source
-data "k8sconnect_resource" "test" {
+data "k8sconnect_manifest" "test" {
   api_version = "v1"
   kind        = "ConfigMap"
   name        = var.name

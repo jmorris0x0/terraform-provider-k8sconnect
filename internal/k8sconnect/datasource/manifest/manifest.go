@@ -1,5 +1,5 @@
 // internal/k8sconnect/datasource/resource/resource.go
-package resource
+package manifest
 
 import (
 	"context"
@@ -20,11 +20,11 @@ import (
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8serrors"
 )
 
-type resourceDataSource struct {
+type manifestDataSource struct {
 	clientFactory factory.ClientFactory
 }
 
-type resourceDataSourceModel struct {
+type manifestDataSourceModel struct {
 	APIVersion        types.String `tfsdk:"api_version"`
 	Kind              types.String `tfsdk:"kind"`
 	Name              types.String `tfsdk:"name"`
@@ -37,15 +37,15 @@ type resourceDataSourceModel struct {
 	Object   types.Dynamic `tfsdk:"object"`
 }
 
-func NewResourceDataSource() datasource.DataSource {
-	return &resourceDataSource{}
+func NewManifestDataSource() datasource.DataSource {
+	return &manifestDataSource{}
 }
 
-func (d *resourceDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
-	resp.TypeName = req.ProviderTypeName + "_resource"
+func (d *manifestDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_manifest"
 }
 
-func (d *resourceDataSource) Configure(ctx context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
+func (d *manifestDataSource) Configure(ctx context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
 	if req.ProviderData == nil {
 		return
 	}
@@ -62,7 +62,7 @@ func (d *resourceDataSource) Configure(ctx context.Context, req datasource.Confi
 	d.clientFactory = clientFactory
 }
 
-func (d *resourceDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+func (d *manifestDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Reads an existing Kubernetes resource from the cluster and makes its data available to Terraform configuration. " +
 			"Use this to reference cluster resources not managed by Terraform (e.g., cloud provider defaults, operator-created resources) " +
@@ -106,8 +106,8 @@ func (d *resourceDataSource) Schema(ctx context.Context, req datasource.SchemaRe
 	}
 }
 
-func (d *resourceDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
-	var data resourceDataSourceModel
+func (d *manifestDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	var data manifestDataSourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
 		return

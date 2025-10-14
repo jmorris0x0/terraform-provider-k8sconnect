@@ -1,9 +1,9 @@
-# examples/resource-datasource-kubernetes-service/main.tf
+# examples/manifest-datasource-kubernetes-service/main.tf
 
 provider "k8sconnect" {}
 
 # Read the kubernetes API server service (present in all clusters)
-data "k8sconnect_resource" "kubernetes_api" {
+data "k8sconnect_manifest" "kubernetes_api" {
   api_version = "v1"
   kind        = "Service"
   name        = "kubernetes"
@@ -26,7 +26,7 @@ resource "k8sconnect_manifest" "namespace" {
 
 # Parse the manifest JSON to access fields
 locals {
-  kubernetes_api = jsondecode(data.k8sconnect_resource.kubernetes_api.manifest)
+  kubernetes_api = jsondecode(data.k8sconnect_manifest.kubernetes_api.manifest)
 }
 
 # Use the datasource output to create a ConfigMap with API endpoint info

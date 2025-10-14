@@ -329,7 +329,7 @@ All `cluster_connection` fields are marked sensitive and won't appear in logs or
 **Data Sources:**
 - `k8sconnect_yaml_split` - Parse multi-document YAML files ([docs](docs/data-sources/yaml_split.md))
 - `k8sconnect_yaml_scoped` - Filter resources by category ([docs](docs/data-sources/yaml_scoped.md))
-- `k8sconnect_resource` - Read existing cluster resources ([docs](docs/data-sources/resource.md))
+- `k8sconnect_manifest` - Read existing cluster resources ([docs](docs/data-sources/resource.md))
 
 ---
 

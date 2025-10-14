@@ -177,11 +177,11 @@ This is NOT a k8sconnect limitation. It's a foobix provider design issue that af
 
 ### 1. Data Source Limitations
 
-**k8sconnect_resource data source issues:**
+**k8sconnect_manifest data source issues:**
 - `object` attribute returns null (must use `jsondecode(manifest)`)
 - No `wait_for` support (can't wait for LoadBalancer IP population)
 - Unknown if handles "connection unknown during plan" gracefully
-- Name inconsistent with resource (`k8sconnect_resource` vs `k8sconnect_manifest`)
+- Name inconsistent with resource (`k8sconnect_manifest` vs `k8sconnect_manifest`)
 
 **Impact:** Cannot yet replace wait-for-lb module hack
 
@@ -264,7 +264,7 @@ diagnostics.AddWarning(
 
 ### What k8sconnect Cannot Fix
 1. ❌ wait-for-eks hack (foobix provider limitation - doesn't expose cluster endpoint)
-2. ❌ wait-for-lb hack (needs k8sconnect_resource improvements first)
+2. ❌ wait-for-lb hack (needs k8sconnect_manifest improvements first)
 
 ## Foobix Provider Improvements Needed
 
@@ -333,8 +333,8 @@ Contact Foobix team about implementing stable output attributes.
 
 ### High Priority
 1. Fix namespace deletion detection issue (if reproducible)
-2. Implement k8sconnect_resource.object attribute
-3. Add wait_for support to k8sconnect_resource data source
+2. Implement k8sconnect_manifest.object attribute
+3. Add wait_for support to k8sconnect_manifest data source
 
 ### Medium Priority
 1. ✅ Include resource context in API warning summaries to prevent aggregation

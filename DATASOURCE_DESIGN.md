@@ -15,9 +15,9 @@ The `wait-for-lb` bash script hack needs to be replaced with native k8sconnect f
 # Never fails plan - just waits during apply
 ```
 
-**Current k8sconnect_resource data source:**
+**Current k8sconnect_manifest data source:**
 ```hcl
-data "k8sconnect_resource" "nginx_lb" {
+data "k8sconnect_manifest" "nginx_lb" {
   cluster_connection = local.cluster_connection
 
   api_version = "v1"
@@ -529,11 +529,11 @@ data.k8sconnect_manifest.nginx_lb: Condition met! (2m45s elapsed)
 data.k8sconnect_manifest.nginx_lb: Read complete after 2m45s [id=v1/Service/ingress-nginx/ingress-nginx-controller]
 ```
 
-## Naming: k8sconnect_manifest vs k8sconnect_resource
+## Naming: k8sconnect_manifest vs k8sconnect_manifest
 
 ### Current State
 - Resource: `k8sconnect_manifest`
-- Data source: `k8sconnect_resource`
+- Data source: `k8sconnect_manifest`
 
 ### The Problem
 - "resource datasource" is awkward phrasing
@@ -559,7 +559,7 @@ data.k8sconnect_manifest.nginx_lb: Read complete after 2m45s [id=v1/Service/ingr
 | Name | Pros | Cons |
 |------|------|------|
 | `k8sconnect_manifest` | Matches resource name, consistent | "Manifest" implies input YAML |
-| `k8sconnect_resource` | Current name, no breaking change | Inconsistent, awkward phrasing |
+| `k8sconnect_manifest` | Current name, no breaking change | Inconsistent, awkward phrasing |
 | `k8sconnect_object` | Clear it returns parsed object | Different from resource name |
 | `k8sconnect_read` | Verb makes it clear it's reading | Too generic, unclear what it reads |
 | `k8sconnect_query` | Implies flexible reading | Doesn't match resource name |
@@ -574,9 +574,9 @@ data.k8sconnect_manifest.nginx_lb: Read complete after 2m45s [id=v1/Service/ingr
 
 **Migration path:**
 1. Add `k8sconnect_manifest` data source with new implementation
-2. Deprecate `k8sconnect_resource` with clear migration guide
+2. Deprecate `k8sconnect_manifest` with clear migration guide
 3. Keep both for 2-3 minor versions
-4. Remove `k8sconnect_resource` in next major version
+4. Remove `k8sconnect_manifest` in next major version
 
 ## Default Timeout Values
 
@@ -668,7 +668,7 @@ const (
 - [ ] Detailed logging for debugging
 
 ### Phase 5: Documentation & Migration
-- [ ] Rename to `k8sconnect_manifest` (deprecate `k8sconnect_resource`)
+- [ ] Rename to `k8sconnect_manifest` (deprecate `k8sconnect_manifest`)
 - [ ] Complete provider documentation
 - [ ] Migration guide from wait-for-lb
 - [ ] Example: replacing wait-for-lb hack
@@ -682,7 +682,7 @@ const (
 2. **Default timeouts:** Are 5m/10m reasonable?
    - **Leaning toward:** Yes, matches real-world usage
 
-3. **Naming:** `k8sconnect_manifest` or keep `k8sconnect_resource`?
+3. **Naming:** `k8sconnect_manifest` or keep `k8sconnect_manifest`?
    - **Leaning toward:** Rename to `k8sconnect_manifest` for consistency
 
 4. **Bootstrap handling:** Should it show "known after apply" during plan if resource doesn't exist?

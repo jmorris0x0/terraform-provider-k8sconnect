@@ -13,7 +13,7 @@ description: |-
 
 ```terraform
 # Read the kubernetes API server service (present in all clusters)
-data "k8sconnect_resource" "kubernetes_api" {
+data "k8sconnect_manifest" "kubernetes_api" {
   api_version = "v1"
   kind        = "Service"
   name        = "kubernetes"
@@ -24,7 +24,7 @@ data "k8sconnect_resource" "kubernetes_api" {
 
 # Parse the manifest JSON to access fields
 locals {
-  kubernetes_api = jsondecode(data.k8sconnect_resource.kubernetes_api.manifest)
+  kubernetes_api = jsondecode(data.k8sconnect_manifest.kubernetes_api.manifest)
 }
 
 # Use the data in other resources
@@ -51,7 +51,7 @@ Read resources created by cloud providers (EKS, GKE, AKS):
 
 ```terraform
 # Read AWS EKS aws-node DaemonSet configuration
-data "k8sconnect_resource" "aws_node" {
+data "k8sconnect_manifest" "aws_node" {
   api_version = "apps/v1"
   kind        = "DaemonSet"
   name        = "aws-node"
@@ -69,7 +69,7 @@ data "k8sconnect_resource" "aws_node" {
 }
 
 locals {
-  aws_node = jsondecode(data.k8sconnect_resource.aws_node.manifest)
+  aws_node = jsondecode(data.k8sconnect_manifest.aws_node.manifest)
 }
 
 output "aws_node_image" {

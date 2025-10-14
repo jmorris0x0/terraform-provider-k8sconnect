@@ -272,7 +272,7 @@ resource "k8sconnect_manifest" "example" {
   managed_state_projection = computed  # Filtered
 }
 
-data "k8sconnect_resource" "example_complete" {
+data "k8sconnect_manifest" "example_complete" {
   namespace = "default"
   name      = "example"
 
@@ -407,7 +407,7 @@ After extensive analysis, the contract has a nuance:
 
 **If users need access to complete cluster state:**
 ```hcl
-data "k8sconnect_resource" "complete" {
+data "k8sconnect_manifest" "complete" {
   # Reference managed resource
   # Returns complete unfiltered state
 }

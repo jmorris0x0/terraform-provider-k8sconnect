@@ -1,11 +1,11 @@
 ---
-page_title: "Data Source k8sconnect_resource - terraform-provider-k8sconnect"
+page_title: "Data Source k8sconnect_manifest - terraform-provider-k8sconnect"
 subcategory: ""
 description: |-
   Reads an existing Kubernetes resource from the cluster and makes its data available to Terraform configuration. Use this to reference cluster resources not managed by Terraform (e.g., cloud provider defaults, operator-created resources) or to access dynamic values like LoadBalancer IPs, Service endpoints, or ConfigMap data for use in other resources.
 ---
 
-# Data Source: k8sconnect_resource
+# Data Source: k8sconnect_manifest
 
 Reads an existing Kubernetes resource from the cluster and makes its data available to Terraform configuration. Use this to reference cluster resources not managed by Terraform (e.g., cloud provider defaults, operator-created resources) or to access dynamic values like LoadBalancer IPs, Service endpoints, or ConfigMap data for use in other resources.
 
@@ -13,7 +13,7 @@ Reads an existing Kubernetes resource from the cluster and makes its data availa
 
 ```terraform
 # Read the kubernetes API server service (present in all clusters)
-data "k8sconnect_resource" "kubernetes_api" {
+data "k8sconnect_manifest" "kubernetes_api" {
   api_version = "v1"
   kind        = "Service"
   name        = "kubernetes"
@@ -24,7 +24,7 @@ data "k8sconnect_resource" "kubernetes_api" {
 
 # Parse the manifest JSON to access fields
 locals {
-  kubernetes_api = jsondecode(data.k8sconnect_resource.kubernetes_api.manifest)
+  kubernetes_api = jsondecode(data.k8sconnect_manifest.kubernetes_api.manifest)
 }
 
 # Use the data in other resources
@@ -51,7 +51,7 @@ Read resources created by cloud providers (EKS, GKE, AKS):
 
 ```terraform
 # Read AWS EKS aws-node DaemonSet configuration
-data "k8sconnect_resource" "aws_node" {
+data "k8sconnect_manifest" "aws_node" {
   api_version = "apps/v1"
   kind        = "DaemonSet"
   name        = "aws-node"
@@ -69,7 +69,7 @@ data "k8sconnect_resource" "aws_node" {
 }
 
 locals {
-  aws_node = jsondecode(data.k8sconnect_resource.aws_node.manifest)
+  aws_node = jsondecode(data.k8sconnect_manifest.aws_node.manifest)
 }
 
 output "aws_node_image" {
@@ -115,7 +115,7 @@ Optional:
 - `client_key` (String, Sensitive) Client certificate key for TLS authentication. Accepts PEM format or base64-encoded PEM - automatically detected.
 - `cluster_ca_certificate` (String, Sensitive) Root certificate bundle for TLS authentication. Accepts PEM format or base64-encoded PEM - automatically detected.
 - `context` (String) Context to use from the kubeconfig. Optional when kubeconfig contains exactly one context (that context will be used automatically). Required when kubeconfig contains multiple contexts to prevent accidental connection to the wrong cluster. Error will list available contexts if not specified when required.
-- `exec` (Attributes) Configuration for exec-based authentication. (see [below for nested schema](#nestedatt--cluster_connection--exec))
+- `exec` (Attributes, Sensitive) Configuration for exec-based authentication. (see [below for nested schema](#nestedatt--cluster_connection--exec))
 - `host` (String) The hostname (in form of URI) of the Kubernetes API server.
 - `insecure` (Boolean) Whether server should be accessed without verifying the TLS certificate.
 - `kubeconfig` (String, Sensitive) Raw kubeconfig file content.
