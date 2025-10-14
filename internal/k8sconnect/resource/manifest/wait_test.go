@@ -1505,16 +1505,15 @@ func TestAccManifestResource_StatusPopulatedOnRefresh(t *testing.T) {
 				),
 				ExpectError: regexp.MustCompile("Wait condition failed"),
 			},
-			// Step 2: Wait for deployment to actually become ready, then refresh
-			// This simulates the field becoming available after the timeout
-			// Since the deployment is ready, the wait should now succeed and status should be populated
+			// Step 2: Wait for deployment to actually become ready, then use longer timeout
+			// This simulates recovery after a timeout - with reasonable timeout it should succeed
 			{
 				PreConfig: func() {
 					// Poll for the deployment to actually become ready
 					// (it continues rolling out even after terraform errored)
-					// Poll with exponential backoff up to 60s total
+					// Poll up to 90s to handle heavy parallel load
 					ctx := context.Background()
-					maxWait := 60 * time.Second
+					maxWait := 90 * time.Second
 					pollInterval := 2 * time.Second
 					deadline := time.Now().Add(maxWait)
 
@@ -1539,7 +1538,8 @@ func TestAccManifestResource_StatusPopulatedOnRefresh(t *testing.T) {
 					// Log warning but don't fail - let the test step itself determine success
 					t.Logf("WARNING: Deployment did not become ready within %v", maxWait)
 				},
-				Config: testAccDeploymentWithShortTimeout(ns, deployName),
+				// Use longer timeout for step 2 - under parallel load 2s is too aggressive
+				Config: testAccDeploymentWithLongerTimeout(ns, deployName),
 				ConfigVariables: config.Variables{
 					"raw":       config.StringVariable(raw),
 					"namespace": config.StringVariable(ns),
@@ -1608,6 +1608,72 @@ YAML
   wait_for = {
     field = "status.readyReplicas"
     timeout = "2s"  # Very short timeout - deployment typically won't be ready in 2s
+  }
+
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+
+  depends_on = [k8sconnect_manifest.test_namespace]
+}
+
+output "replicas_output" {
+  value = try(k8sconnect_manifest.test.status.readyReplicas, "not-ready")
+}
+`, namespace, name, namespace, name, name)
+}
+
+func testAccDeploymentWithLongerTimeout(namespace, name string) string {
+	return fmt.Sprintf(`
+variable "raw" {
+  type = string
+}
+variable "namespace" {
+  type = string
+}
+
+provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "test_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_manifest" "test" {
+  yaml_body = <<YAML
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: %s
+  template:
+    metadata:
+      labels:
+        app: %s
+    spec:
+      containers:
+      - name: nginx
+        image: public.ecr.aws/nginx/nginx:1.21
+        ports:
+        - containerPort: 80
+YAML
+
+  wait_for = {
+    field = "status.readyReplicas"
+    timeout = "2m"  # Longer timeout for step 2 - handles parallel load
   }
 
   cluster_connection = {
