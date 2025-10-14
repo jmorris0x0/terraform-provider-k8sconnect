@@ -206,6 +206,11 @@ vet:
 
 .PHONY: docs
 docs:
+	@echo "📚 Generating provider documentation..."
+	@if ! command -v tfplugindocs >/dev/null 2>&1; then \
+		echo "Installing tfplugindocs..."; \
+		go install github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@latest; \
+	fi
 	tfplugindocs
 
 .PHONY: lint
