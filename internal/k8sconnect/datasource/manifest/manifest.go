@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
 
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/factory"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
@@ -179,9 +180,16 @@ func (d *manifestDataSource) Read(ctx context.Context, req datasource.ReadReques
 	}
 	data.YAMLBody = types.StringValue(string(yamlBytes))
 
-	// For now, don't set the object field - it's causing type conversion issues
-	// The manifest and yaml_body fields already provide the data in usable formats
-	data.Object = types.DynamicNull()
+	// Convert object to dynamic attribute for dot notation access
+	objectValue, err := common.ConvertToAttrValue(ctx, obj.Object)
+	if err != nil {
+		tflog.Warn(ctx, "Failed to convert object to dynamic type", map[string]interface{}{
+			"error": err.Error(),
+		})
+		data.Object = types.DynamicNull()
+	} else {
+		data.Object = types.DynamicValue(objectValue)
+	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }

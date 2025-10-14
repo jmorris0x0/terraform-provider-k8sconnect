@@ -52,6 +52,8 @@ func TestAccManifestDataSource_basic(t *testing.T) {
 					// Verify outputs are populated
 					resource.TestCheckResourceAttrSet("data.k8sconnect_manifest.test", "manifest"),
 					resource.TestCheckResourceAttrSet("data.k8sconnect_manifest.test", "yaml_body"),
+					// Verify we can access nested fields via .object attribute with dot notation
+					resource.TestCheckOutput("test_data_key1", "value1"),
 				),
 			},
 		},
@@ -100,7 +102,7 @@ YAML
   cluster_connection = {
     kubeconfig = var.raw
   }
-  
+
   depends_on = [k8sconnect_manifest.namespace]
 }
 
@@ -116,6 +118,11 @@ data "k8sconnect_manifest" "test" {
   }
 
   depends_on = [k8sconnect_manifest.test]
+}
+
+# Test that we can access nested fields via .object attribute
+output "test_data_key1" {
+  value = data.k8sconnect_manifest.test.object.data.key1
 }
 `, ns, name, ns)
 }

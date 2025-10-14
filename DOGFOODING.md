@@ -178,10 +178,9 @@ This is NOT a k8sconnect limitation. It's a foobix provider design issue that af
 ### 1. Data Source Limitations
 
 **k8sconnect_manifest data source issues:**
-- `object` attribute returns null (must use `jsondecode(manifest)`)
+- ✅ ~~`object` attribute returns null~~ - FIXED: Now properly populated with dot notation access
 - No `wait_for` support (can't wait for LoadBalancer IP population)
 - Unknown if handles "connection unknown during plan" gracefully
-- Name inconsistent with resource (`k8sconnect_manifest` vs `k8sconnect_manifest`)
 
 **Impact:** Cannot yet replace wait-for-lb module hack
 
@@ -194,10 +193,10 @@ This is NOT a k8sconnect limitation. It's a foobix provider design issue that af
 - Bootstrap scenario support
 
 **Needed implementations:**
-1. Fix `object` attribute properly
+1. ✅ ~~Fix `object` attribute properly~~ - DONE
 2. Add `wait_for` support with timeout controls
 3. Handle bootstrap scenario (resource doesn't exist yet)
-4. Rename data source to `k8sconnect_manifest`
+4. ✅ ~~Rename data source to `k8sconnect_manifest`~~ - DONE
 
 ### 2. Flux Template Warnings
 
@@ -333,7 +332,7 @@ Contact Foobix team about implementing stable output attributes.
 
 ### High Priority
 1. Fix namespace deletion detection issue (if reproducible)
-2. Implement k8sconnect_manifest.object attribute
+2. ✅ Implement k8sconnect_manifest.object attribute
 3. Add wait_for support to k8sconnect_manifest data source
 
 ### Medium Priority
