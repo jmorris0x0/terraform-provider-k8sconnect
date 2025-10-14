@@ -164,8 +164,10 @@ func (r *manifestResource) getDeleteTimeout(data manifestResourceModel) time.Dur
 
 		// Set default timeouts based on resource type
 		switch kind {
-		case "Namespace", "PersistentVolume", "PersistentVolumeClaim":
-			return 10 * time.Minute // Resources that often have finalizers
+		case "Namespace":
+			return 15 * time.Minute // Namespaces with many resources can take time to cascade delete
+		case "PersistentVolume", "PersistentVolumeClaim":
+			return 10 * time.Minute // Storage resources often have finalizers
 		case "CustomResourceDefinition":
 			return 15 * time.Minute // CRDs need extra time for controller cleanup
 		case "StatefulSet", "Job", "CronJob":
@@ -209,7 +211,13 @@ func (r *manifestResource) waitForDeletion(ctx context.Context, client k8sclient
 					// Successfully deleted
 					return nil
 				}
-				// Other errors are not deletion success, continue waiting
+				// Other errors are not deletion success, log and continue waiting
+				tflog.Warn(ctx, "Error checking deletion status", map[string]interface{}{
+					"error":     err.Error(),
+					"kind":      obj.GetKind(),
+					"name":      obj.GetName(),
+					"namespace": obj.GetNamespace(),
+				})
 			}
 
 			// Check if we've exceeded the timeout
