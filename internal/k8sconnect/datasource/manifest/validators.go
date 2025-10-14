@@ -1,4 +1,4 @@
-// internal/k8sconnect/datasource/resource/validators.go
+// internal/k8sconnect/datasource/manifest/validators.go
 package manifest
 
 import (
