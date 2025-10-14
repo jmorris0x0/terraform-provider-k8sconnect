@@ -331,7 +331,7 @@ func (r *manifestResource) performDryRun(ctx context.Context, client k8sclient.K
 	})
 
 	// Surface any API warnings from dry-run operation
-	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
+	surfaceK8sWarnings(ctx, client, desiredObj, &resp.Diagnostics)
 
 	if err != nil {
 		// ADR-002: Check if this is an immutable field error

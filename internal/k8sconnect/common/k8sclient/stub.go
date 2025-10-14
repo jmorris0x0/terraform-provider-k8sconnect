@@ -230,5 +230,12 @@ func (s *stubK8sClient) GetWarnings() []string {
 	return nil
 }
 
+func (s *stubK8sClient) List(ctx context.Context, gvr schema.GroupVersionResource, namespace string, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+	// Stub returns an empty list for testing
+	return &unstructured.UnstructuredList{
+		Items: []unstructured.Unstructured{},
+	}, nil
+}
+
 // Interface assertion to ensure stubK8sClient satisfies K8sClient
 var _ K8sClient = (*stubK8sClient)(nil)

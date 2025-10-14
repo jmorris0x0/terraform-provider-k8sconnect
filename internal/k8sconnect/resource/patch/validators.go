@@ -21,7 +21,6 @@ func (r *patchResource) ConfigValidators(ctx context.Context) []resource.ConfigV
 	return []resource.ConfigValidator{
 		&patchClusterConnectionValidator{},
 		&patchExecAuthValidator{},
-		&takeOwnershipValidator{},
 	}
 }
 
@@ -125,42 +124,6 @@ func (v *patchExecAuthValidator) ValidateResource(ctx context.Context, req resou
 				err.Error(),
 			)
 		}
-	}
-}
-
-// =============================================================================
-// takeOwnershipValidator ensures take_ownership is set to true
-// =============================================================================
-
-type takeOwnershipValidator struct{}
-
-func (v *takeOwnershipValidator) Description(ctx context.Context) string {
-	return "Validates that take_ownership is set to true"
-}
-
-func (v *takeOwnershipValidator) MarkdownDescription(ctx context.Context) string {
-	return "Validates that take_ownership is set to true"
-}
-
-func (v *takeOwnershipValidator) ValidateResource(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
-	var data patchResourceModel
-	diags := req.Config.Get(ctx, &data)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	// Check if take_ownership is set and true
-	if data.TakeOwnership.IsNull() || !data.TakeOwnership.ValueBool() {
-		resp.Diagnostics.AddError(
-			"take_ownership Required",
-			"Patches ALWAYS forcefully take field ownership from other controllers.\n\n"+
-				"You must explicitly set take_ownership = true to acknowledge that:\n"+
-				"1. This patch will force ownership transfer\n"+
-				"2. External controllers may fight back for control\n"+
-				"3. You understand the implications\n\n"+
-				"This is not optional - it's a required safety acknowledgment.",
-		)
 	}
 }
 

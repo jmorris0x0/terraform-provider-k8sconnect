@@ -21,7 +21,7 @@ Working examples showing k8sconnect provider usage patterns.
 - `yaml-scoped-dependency-ordering/` - Automatic dependency ordering by scope (CRDs → cluster-scoped → namespaced)
 
 ## Resource Data Source
-- `resource-datasource-kubernetes-service/` - Read existing cluster resources and use their data
+- `manifest-datasource-kubernetes-service/` - Read existing cluster resources and use their data
 
 ## Patch Resource
 - `patch-strategic-merge/` - Strategic Merge Patch with Server-Side Apply (SSA) field ownership
