@@ -183,13 +183,16 @@ func (d *manifestDataSource) Read(ctx context.Context, req datasource.ReadReques
 	// Convert object to dynamic attribute for dot notation access
 	objectValue, err := common.ConvertToAttrValue(ctx, obj.Object)
 	if err != nil {
-		tflog.Warn(ctx, "Failed to convert object to dynamic type", map[string]interface{}{
-			"error": err.Error(),
-		})
-		data.Object = types.DynamicNull()
-	} else {
-		data.Object = types.DynamicValue(objectValue)
+		resp.Diagnostics.AddError(
+			"Failed to Convert Resource Object",
+			fmt.Sprintf("Could not convert the Kubernetes resource to a Terraform object for field access.\n\n"+
+				"This is an internal error. The resource exists and was read successfully, but could not be converted "+
+				"for use in Terraform expressions.\n\n"+
+				"Error: %s", err.Error()),
+		)
+		return
 	}
+	data.Object = types.DynamicValue(objectValue)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
