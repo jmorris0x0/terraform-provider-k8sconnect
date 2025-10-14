@@ -8,33 +8,26 @@ GB does this:
    # Import the certmanager Issuer CRD named cluster-selfsigned-issuer-root-ca from the my-namespace namespace
    $ terraform import -provider kubectl module.kubernetes.kubectl_manifest.crd-example certmanager.k8s.io/v1alpha1//Issuer//cluster-selfsigned-issuer-root-ca//my-namespace
 
+Import blocks: Verify they work correctly
 
-DOCUMENTATION & RELEASE
 
-Verify attribute docs: Status changes need documentation updates
 Nested Schema for wait_for: Needs love
 
 
-TESTING GAPS
-
 Ownership edge cases: Create transition matrix and acceptance tests for all ownership scenarios
-Import blocks: Verify they work correctly
 Delayed plan application: Handle out of date plans
 Autodetect the most recent terraform version for testing locally and in CI. Otherwise this is monthly toil.
+
+Does ignore_fields let you ignore status? Does wait_for allow you to wait_for things that aren't status?
 
 FEATURE ADDITIONS
 
 Custom ownership annotations: Solve cross-state conflicts
-Status field guardrails: Warn if field doesn't start with "status"
+Status field guardrails: Warn if field doesn't start with "status". Do I have an error? Is it useful?
 
 MARKETING & GROWTH
 
 Launch content: Medium article, r/kubernetes, r/terraform, HackerNews posts, SweetOps Slack, Kubernetes Slack
-
-
-DEFERRED/COMPLEX
-
-Fix makefile to install all dependencies. Try on fresh laptop.
 
 Migration tooling!
 "Stuck with thousands of lines of Kubernetes HCL? We'll help you escape."
@@ -61,3 +54,8 @@ Can you wait for stuff that isn't status? Is wait_for really sold in the registr
 Autotest markdown examples?
 
 Mention that that two kinds of patches aren't SSA therefore UX difference.
+
+Hashicorp v2 provider already has IP/hostname lookup for ingress. I'm making false claims in my readme and their UX might be better than mine. Must investigate:
+https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/guides/v2-upgrade-guide#changes-to-the-load_balancers_ingress-block-on-service-and-ingress
+If I'm doing auto rollout wait, then what's the point of wait_for?
+I need to reconsider this feature.

@@ -1511,32 +1511,31 @@ func TestAccManifestResource_StatusPopulatedOnRefresh(t *testing.T) {
 				PreConfig: func() {
 					// Poll for the deployment to actually become ready
 					// (it continues rolling out even after terraform errored)
-					// Poll up to 90s to handle heavy parallel load
+					startTime := time.Now()
+					fmt.Printf("\n=== PreConfig starting at %v ===\n", startTime.Format(time.RFC3339))
+
 					ctx := context.Background()
 					maxWait := 90 * time.Second
 					pollInterval := 2 * time.Second
 					deadline := time.Now().Add(maxWait)
+					pollCount := 0
 
 					for time.Now().Before(deadline) {
+						pollCount++
 						deploy, err := k8sClient.AppsV1().Deployments(ns).Get(ctx, deployName, metav1.GetOptions{})
 						if err == nil && deploy.Status.ReadyReplicas >= 1 {
-							// Deployment is ready!
-							t.Logf("Deployment %s/%s became ready with %d ready replicas", ns, deployName, deploy.Status.ReadyReplicas)
+							elapsed := time.Since(startTime)
+							fmt.Printf("=== Deployment ready after %v (%d polls) ===\n\n", elapsed, pollCount)
 							return
 						}
-
-						if err != nil {
-							t.Logf("Error checking deployment readiness: %v", err)
-						} else {
-							t.Logf("Deployment %s/%s not ready yet: readyReplicas=%d, replicas=%d",
-								ns, deployName, deploy.Status.ReadyReplicas, deploy.Status.Replicas)
+						if pollCount%5 == 0 {
+							fmt.Printf("Poll %d: readyReplicas=%d\n", pollCount, deploy.Status.ReadyReplicas)
 						}
-
 						time.Sleep(pollInterval)
 					}
 
-					// Log warning but don't fail - let the test step itself determine success
-					t.Logf("WARNING: Deployment did not become ready within %v", maxWait)
+					elapsed := time.Since(startTime)
+					fmt.Printf("=== WARNING: Deployment NOT ready after %v (%d polls) ===\n\n", elapsed, pollCount)
 				},
 				// Use longer timeout for step 2 - under parallel load 2s is too aggressive
 				Config: testAccDeploymentWithLongerTimeout(ns, deployName),
