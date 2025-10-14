@@ -1510,10 +1510,34 @@ func TestAccManifestResource_StatusPopulatedOnRefresh(t *testing.T) {
 			// Since the deployment is ready, the wait should now succeed and status should be populated
 			{
 				PreConfig: func() {
-					// Wait for the deployment to actually become ready
+					// Poll for the deployment to actually become ready
 					// (it continues rolling out even after terraform errored)
-					// Increased to 30s to be safe - readiness probe needs 10s + pod startup time
-					time.Sleep(30 * time.Second)
+					// Poll with exponential backoff up to 60s total
+					ctx := context.Background()
+					maxWait := 60 * time.Second
+					pollInterval := 2 * time.Second
+					deadline := time.Now().Add(maxWait)
+
+					for time.Now().Before(deadline) {
+						deploy, err := k8sClient.AppsV1().Deployments(ns).Get(ctx, deployName, metav1.GetOptions{})
+						if err == nil && deploy.Status.ReadyReplicas >= 1 {
+							// Deployment is ready!
+							t.Logf("Deployment %s/%s became ready with %d ready replicas", ns, deployName, deploy.Status.ReadyReplicas)
+							return
+						}
+
+						if err != nil {
+							t.Logf("Error checking deployment readiness: %v", err)
+						} else {
+							t.Logf("Deployment %s/%s not ready yet: readyReplicas=%d, replicas=%d",
+								ns, deployName, deploy.Status.ReadyReplicas, deploy.Status.Replicas)
+						}
+
+						time.Sleep(pollInterval)
+					}
+
+					// Log warning but don't fail - let the test step itself determine success
+					t.Logf("WARNING: Deployment did not become ready within %v", maxWait)
 				},
 				Config: testAccDeploymentWithShortTimeout(ns, deployName),
 				ConfigVariables: config.Variables{
