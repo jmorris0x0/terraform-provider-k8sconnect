@@ -152,7 +152,14 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 	// 6. Update field ownership
 	r.updateFieldOwnershipData(ctx, &data, currentObj)
 
-	// 7. Save refreshed state
+	// 7. Update status field if wait_for.field is configured
+	// This ensures status is populated even after timeouts or external updates
+	shouldTrackStatus := r.shouldTrackStatus(ctx, &data)
+	if err := r.updateStatus(rc, shouldTrackStatus); err != nil {
+		tflog.Warn(ctx, "Failed to update status during read", map[string]interface{}{"error": err.Error()})
+	}
+
+	// 8. Save refreshed state
 	diags = resp.State.Set(ctx, &data)
 	resp.Diagnostics.Append(diags...)
 }

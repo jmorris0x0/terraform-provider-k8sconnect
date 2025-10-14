@@ -1,4 +1,4 @@
-// internal/k8sconnect/datasource/resource/resource.go
+// internal/k8sconnect/datasource/manifest/manifest.go
 package manifest
 
 import (

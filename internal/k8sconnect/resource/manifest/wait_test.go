@@ -18,9 +18,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect"
 	testhelpers "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/test"
@@ -1472,11 +1469,10 @@ YAML
 `, namespace, name, namespace)
 }
 
-// TestAccManifestResource_StatusExternalUpdate tests that external status updates are detected
-// This test is expected to FAIL due to a known issue with status field handling after wait timeout
-func TestAccManifestResource_StatusExternalUpdate(t *testing.T) {
-	t.Skip("Known issue: Status field not updated after wait timeout - see issue #XXX")
-
+// TestAccManifestResource_StatusPopulatedOnRefresh tests that Read() populates status after timeout
+// This verifies the fix for: when wait_for times out, subsequent refreshes should populate status
+// when the field becomes available
+func TestAccManifestResource_StatusPopulatedOnRefresh(t *testing.T) {
 	t.Parallel()
 
 	raw := os.Getenv("TF_ACC_KUBECONFIG")
@@ -1484,75 +1480,60 @@ func TestAccManifestResource_StatusExternalUpdate(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
-	ns := fmt.Sprintf("status-update-%d", time.Now().UnixNano()%1000000)
-	svcName := fmt.Sprintf("test-svc-%d", time.Now().UnixNano()%1000000)
+	ns := fmt.Sprintf("status-refresh-%d", time.Now().UnixNano()%1000000)
+	deployName := fmt.Sprintf("test-deploy-%d", time.Now().UnixNano()%1000000)
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
-
-	// Need raw clientset for patching status
-	restConfig, err := clientcmd.RESTConfigFromKubeConfig([]byte(raw))
-	if err != nil {
-		t.Fatalf("Failed to create REST config: %v", err)
-	}
-	clientset, err := kubernetes.NewForConfig(restConfig)
-	if err != nil {
-		t.Fatalf("Failed to create clientset: %v", err)
-	}
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
 			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
 		},
 		Steps: []resource.TestStep{
-			// Step 1: Create service with wait_for that will timeout
+			// Step 1: Create deployment with wait_for that will timeout
+			// The wait will fail BUT the resource will be saved to state (state is saved before wait)
 			{
-				Config: testAccServiceWithWaitTimeout(ns, svcName),
+				Config: testAccDeploymentWithShortTimeout(ns, deployName),
 				ConfigVariables: config.Variables{
 					"raw":       config.StringVariable(raw),
 					"namespace": config.StringVariable(ns),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					testhelpers.CheckServiceExists(k8sClient, ns, svcName),
-					// Status should be null after timeout
-					resource.TestCheckNoResourceAttr("k8sconnect_manifest.test", "status"),
+					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
+					// Note: Can't check output here because status is unknown (not null) when wait times out
+					// When status is unknown, outputs referencing it also become unknown
 				),
+				ExpectError: regexp.MustCompile("Wait condition failed"),
 			},
-			// Step 2: Patch status externally and verify it's detected
+			// Step 2: Wait for deployment to actually become ready, then refresh
+			// This simulates the field becoming available after the timeout
+			// Since the deployment is ready, the wait should now succeed and status should be populated
 			{
 				PreConfig: func() {
-					// Simulate external controller updating status
-					patch := []byte(`{"status":{"loadBalancer":{"ingress":[{"hostname":"external-lb.example.com"}]}}}`)
-					_, err := clientset.CoreV1().Services(ns).Patch(
-						context.Background(),
-						svcName,
-						types.MergePatchType,
-						patch,
-						metav1.PatchOptions{},
-						"status",
-					)
-					if err != nil {
-						t.Fatalf("Failed to patch status: %v", err)
-					}
-					t.Log("Patched status externally")
+					// Wait for the deployment to actually become ready
+					// (it continues rolling out even after terraform errored)
+					// Increased to 30s to be safe - readiness probe needs 10s + pod startup time
+					time.Sleep(30 * time.Second)
 				},
-				Config: testAccServiceWithWaitTimeout(ns, svcName),
+				Config: testAccDeploymentWithShortTimeout(ns, deployName),
 				ConfigVariables: config.Variables{
 					"raw":       config.StringVariable(raw),
 					"namespace": config.StringVariable(ns),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					// This SHOULD work but currently doesn't - status remains null
-					// Uncommenting this line will cause the test to fail
-					// resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.loadBalancer.ingress[0].hostname", "external-lb.example.com"),
-					resource.TestCheckOutput("load_balancer_hostname", "external-lb.example.com"),
+					// Now status should be populated because Read() calls updateStatus()
+					// This is the core fix being tested
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test", "status.readyReplicas", "1"),
+					resource.TestCheckOutput("replicas_output", "1"),
 				),
+				// No ExpectError - the wait should succeed now that the deployment is ready
 			},
 		},
-		CheckDestroy: testhelpers.CheckServiceDestroy(k8sClient, ns, svcName),
+		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, ns, deployName),
 	})
 }
 
-func testAccServiceWithWaitTimeout(namespace, name string) string {
+func testAccDeploymentWithShortTimeout(namespace, name string) string {
 	return fmt.Sprintf(`
 variable "raw" {
   type = string
@@ -1578,38 +1559,42 @@ YAML
 
 resource "k8sconnect_manifest" "test" {
   yaml_body = <<YAML
-apiVersion: v1
-kind: Service
+apiVersion: apps/v1
+kind: Deployment
 metadata:
   name: %s
   namespace: %s
 spec:
-  type: LoadBalancer
+  replicas: 1
   selector:
-    app: test
-  ports:
-  - port: 9997
-    targetPort: 8080
-    protocol: TCP
+    matchLabels:
+      app: %s
+  template:
+    metadata:
+      labels:
+        app: %s
+    spec:
+      containers:
+      - name: nginx
+        image: public.ecr.aws/nginx/nginx:1.21
+        ports:
+        - containerPort: 80
 YAML
 
   wait_for = {
-    field = "status.loadBalancer.ingress"
-    timeout = "2s"  # Very short timeout to ensure it fails
+    field = "status.readyReplicas"
+    timeout = "2s"  # Very short timeout - deployment typically won't be ready in 2s
   }
 
   cluster_connection = {
     kubeconfig = var.raw
   }
-  
+
   depends_on = [k8sconnect_manifest.test_namespace]
 }
 
-output "load_balancer_hostname" {
-  value = try(
-    k8sconnect_manifest.test.status.loadBalancer.ingress[0].hostname,
-    "not-populated"
-  )
+output "replicas_output" {
+  value = try(k8sconnect_manifest.test.status.readyReplicas, "not-ready")
 }
-`, namespace, name, namespace)
+`, namespace, name, namespace, name, name)
 }
