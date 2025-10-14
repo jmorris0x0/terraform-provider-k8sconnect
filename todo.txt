@@ -19,8 +19,6 @@ TESTING GAPS
 
 Ownership edge cases: Create transition matrix and acceptance tests for all ownership scenarios
 Import blocks: Verify they work correctly
-HPA simulation: Test multiple simultaneous ownership changes
-Find a way to test multicluster
 Delayed plan application: Handle out of date plans
 Autodetect the most recent terraform version for testing locally and in CI. Otherwise this is monthly toil.
 
@@ -29,14 +27,6 @@ FEATURE ADDITIONS
 Custom ownership annotations: Solve cross-state conflicts
 Status field guardrails: Warn if field doesn't start with "status"
 
-UX IMPROVEMENTS
-
-Warnings for old versions: Terraform <1.6 or pre-SSA Kubernetes
-Lock down the interface before launch: The attributes and behavior I ship with will haunt me for years.
-https://registry.terraform.io/providers/gavinbunney/kubectl/latest/docs/resources/kubectl_manifest#attribute-reference
-https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/manifest
-
-
 MARKETING & GROWTH
 
 Launch content: Medium article, r/kubernetes, r/terraform, HackerNews posts, SweetOps Slack, Kubernetes Slack
@@ -44,8 +34,6 @@ Launch content: Medium article, r/kubernetes, r/terraform, HackerNews posts, Swe
 
 DEFERRED/COMPLEX
 
-Migration plan for other providers
-Rename managed_state_projection. No!
 Fix makefile to install all dependencies. Try on fresh laptop.
 
 Migration tooling!
@@ -68,13 +56,7 @@ Could probably knock out an MVP using the Terraform provider schema definitions 
     - Useful for debugging SSA conflicts
     - HashiCorp has this, I auto-generate
     - Could be quite complex?
-  6. override_namespace - apply to different namespace than YAML specifies
-    - kubectl has this
-    - Useful for multi-tenancy patterns
-    - Could be nice. Not sure how hard.
 
-
-Add override_namespace to manifest resource for multi-tenancy patterns
 
 Unmet needs and pain points:
 
@@ -83,23 +65,17 @@ Terraform wants to be declarative and stateful, Kubernetes wants to be self-heal
 Add a file with the terraform block for the examples? It would be nice to be fully copy pastable.
 
 Add a deep compare yaml helper function for the tests. string comparisons are brittle and have wasted a lot of time for me.
- 
 
 Add CI job to check/update cluster scoped resources list?
 
 Test section 15-18 in EDGE_CASES.md for the patch after I dogfood it a bit.
 
-Does version in terraform-registry-manifest.json actually matter? Does it need to match the actual version? Add to release automation?
-
-Should the resource datasource be restricted from looking at resources we own? I thought it was already but I guess not.
+Should the resource datasource and patch be restricted from looking at resources we own? I thought it was already but I guess not. How would this work for plans where the cluster can't be reached?
 
 The examples linked in the readme aren't quite right. Need to verify links. The yaml split section leads to a list of all 12 examples rather than the yaml section
 
-Can you wait for stuff that isn't status? Is wait for really sold in the registry docs? We kinda forgot about it for a minute.
+Can you wait for stuff that isn't status? Is wait_for really sold in the registry docs? We kinda forgot about it for a minute.
 
 Autotest markdown examples?
 
 Mention that that two kinds of patches aren't SSA therefore UX difference.
-
-Should manifest datasource and patch be prevented from working on already managed resoruces? This might be a dupe.
-
