@@ -565,7 +565,7 @@ func (r *patchResource) addConflictWarning(resp *resource.ModifyPlanResponse, co
 		"Field Ownership Takeover",
 		fmt.Sprintf("This patch will forcefully take ownership of fields managed by other controllers:\n%s\n\n"+
 			"These fields will be taken over with force=true. The other controllers may fight back for control.\n\n"+
-			"This is expected behavior for patches (you acknowledged with take_ownership=true), but be aware that:\n"+
+			"This is expected behavior for patches (force=true is always used), but be aware that:\n"+
 			"• External controllers may revert your changes\n"+
 			"• You may need to disable or reconfigure those controllers\n"+
 			"• Consider if k8sconnect_manifest with ignore_fields would be better for full lifecycle management",
