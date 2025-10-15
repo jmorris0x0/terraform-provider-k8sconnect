@@ -106,9 +106,9 @@ func isolateExample(content string, testName string, hash string) string {
 
 	// System namespaces that should never be isolated
 	systemNamespaces := map[string]bool{
-		"default":     true,
-		"kube-system": true,
-		"kube-public": true,
+		"default":         true,
+		"kube-system":     true,
+		"kube-public":     true,
 		"kube-node-lease": true,
 	}
 

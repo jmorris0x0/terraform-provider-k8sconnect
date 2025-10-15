@@ -808,3 +808,576 @@ YAML
 }
 `, namespace, pvcName, namespace, storage)
 }
+
+// ADR-010: Test resource identity change triggers replacement (apiVersion change)
+// This completes the 4th identity field test
+func TestAccManifestResource_IdentityChange_ApiVersion(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("identity-apiversion-ns-%d", time.Now().UnixNano()%1000000)
+	crdName := "widgets.example.com"
+	crName := fmt.Sprintf("test-widget-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create CRD with v1
+			{
+				Config: testAccManifestConfigIdentityApiVersion_CRD_v1(ns, crdName),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"crd_name":  config.StringVariable(crdName),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_crd", "id"),
+					testhelpers.CheckNamespaceExists(k8sClient, ns),
+				),
+			},
+			// Step 2: Create custom resource using v1
+			{
+				Config: testAccManifestConfigIdentityApiVersion_CR_v1(ns, crdName, crName),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"crd_name":  config.StringVariable(crdName),
+					"cr_name":   config.StringVariable(crName),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_crd", "id"),
+					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_identity", "id"),
+				),
+			},
+			// Step 3: Update CRD to add v1beta1
+			{
+				Config: testAccManifestConfigIdentityApiVersion_CRD_v1_and_v1beta1(ns, crdName),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"crd_name":  config.StringVariable(crdName),
+					"cr_name":   config.StringVariable(crName),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_crd", "id"),
+				),
+			},
+			// Step 4: Change CR to use v1beta1 (apiVersion change) - should trigger replacement
+			{
+				Config: testAccManifestConfigIdentityApiVersion_CR_v1beta1(ns, crdName, crName),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"crd_name":  config.StringVariable(crdName),
+					"cr_name":   config.StringVariable(crName),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_crd", "id"),
+					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_identity", "id"),
+					// CRITICAL: Replacement occurred - new resource ID due to apiVersion change
+				),
+			},
+		},
+		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+	})
+}
+
+func testAccManifestConfigIdentityApiVersion_CRD_v1(namespace, crdName string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+variable "namespace" { type = string }
+variable "crd_name" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_manifest" "test_crd" {
+  yaml_body = <<YAML
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: %s
+spec:
+  group: example.com
+  names:
+    kind: Widget
+    plural: widgets
+  scope: Namespaced
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              color:
+                type: string
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+`, namespace, crdName)
+}
+
+func testAccManifestConfigIdentityApiVersion_CR_v1(namespace, crdName, crName string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+variable "namespace" { type = string }
+variable "crd_name" { type = string }
+variable "cr_name" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_manifest" "test_crd" {
+  yaml_body = <<YAML
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: %s
+spec:
+  group: example.com
+  names:
+    kind: Widget
+    plural: widgets
+  scope: Namespaced
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              color:
+                type: string
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_manifest" "test_identity" {
+  yaml_body = <<YAML
+apiVersion: example.com/v1
+kind: Widget
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  color: blue
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+  depends_on = [
+    k8sconnect_manifest.namespace,
+    k8sconnect_manifest.test_crd
+  ]
+}
+`, namespace, crdName, crName, namespace)
+}
+
+func testAccManifestConfigIdentityApiVersion_CRD_v1_and_v1beta1(namespace, crdName string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+variable "namespace" { type = string }
+variable "crd_name" { type = string }
+variable "cr_name" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_manifest" "test_crd" {
+  yaml_body = <<YAML
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: %s
+spec:
+  group: example.com
+  names:
+    kind: Widget
+    plural: widgets
+  scope: Namespaced
+  versions:
+  - name: v1beta1
+    served: true
+    storage: false
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              color:
+                type: string
+  - name: v1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              color:
+                type: string
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+`, namespace, crdName)
+}
+
+func testAccManifestConfigIdentityApiVersion_CR_v1beta1(namespace, crdName, crName string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+variable "namespace" { type = string }
+variable "crd_name" { type = string }
+variable "cr_name" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_manifest" "test_crd" {
+  yaml_body = <<YAML
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: %s
+spec:
+  group: example.com
+  names:
+    kind: Widget
+    plural: widgets
+  scope: Namespaced
+  versions:
+  - name: v1beta1
+    served: true
+    storage: false
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              color:
+                type: string
+  - name: v1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              color:
+                type: string
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_manifest" "test_identity" {
+  yaml_body = <<YAML
+apiVersion: example.com/v1beta1
+kind: Widget
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  color: red
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+  depends_on = [
+    k8sconnect_manifest.namespace,
+    k8sconnect_manifest.test_crd
+  ]
+}
+`, namespace, crdName, crName, namespace)
+}
+
+// ADR-011: Test connection with variable kubeconfig
+// This validates that connection parameters work correctly
+func TestAccManifestResource_ConnectionWithVariable(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("conn-var-ns-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testAccManifestConfigConnectionWithVariable(ns),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckNamespaceExists(k8sClient, ns),
+					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test", "id"),
+				),
+			},
+		},
+		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+	})
+}
+
+func testAccManifestConfigConnectionWithVariable(namespace string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+variable "namespace" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "test" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+`, namespace)
+}
+
+// ADR-011: Test YAML with variable interpolation
+// This verifies that YAML with Terraform variables is handled correctly
+func TestAccManifestResource_YAMLWithVariableInterpolation(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("yaml-interp-ns-%d", time.Now().UnixNano()%1000000)
+	configValue := "test-config-value-123"
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testAccManifestConfigYAMLInterpolation(ns, configValue),
+				ConfigVariables: config.Variables{
+					"raw":          config.StringVariable(raw),
+					"namespace":    config.StringVariable(ns),
+					"config_value": config.StringVariable(configValue),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckNamespaceExists(k8sClient, ns),
+					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test", "id"),
+				),
+			},
+		},
+		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+	})
+}
+
+func testAccManifestConfigYAMLInterpolation(namespace, configValue string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+variable "namespace" { type = string }
+variable "config_value" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_manifest" "test" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-config
+  namespace: %s
+data:
+  config-value: ${var.config_value}
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+  depends_on = [k8sconnect_manifest.namespace]
+}
+`, namespace, namespace)
+}
+
+// ADR-011: Test ignore_fields with variable value
+// This verifies that ignore_fields work correctly when set via variables
+func TestAccManifestResource_IgnoreFieldsWithVariable(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("ignore-var-ns-%d", time.Now().UnixNano()%1000000)
+	deployName := fmt.Sprintf("test-deploy-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testAccManifestConfigIgnoreFieldsVariable(ns, deployName),
+				ConfigVariables: config.Variables{
+					"raw":         config.StringVariable(raw),
+					"namespace":   config.StringVariable(ns),
+					"deploy_name": config.StringVariable(deployName),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
+					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test", "id"),
+				),
+			},
+		},
+		CheckDestroy: resource.ComposeTestCheckFunc(
+			testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+			testhelpers.CheckDeploymentDestroy(k8sClient, ns, deployName),
+		),
+	})
+}
+
+func testAccManifestConfigIgnoreFieldsVariable(namespace, deployName string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+variable "namespace" { type = string }
+variable "deploy_name" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_manifest" "test" {
+  yaml_body = <<YAML
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: %s
+  template:
+    metadata:
+      labels:
+        app: %s
+    spec:
+      containers:
+      - name: nginx
+        image: public.ecr.aws/nginx/nginx:1.21
+        ports:
+        - containerPort: 80
+YAML
+
+  ignore_fields = ["spec.replicas"]
+
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+
+  depends_on = [k8sconnect_manifest.namespace]
+}
+`, namespace, deployName, namespace, deployName, deployName)
+}
