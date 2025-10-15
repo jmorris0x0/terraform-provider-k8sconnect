@@ -43,7 +43,7 @@ func TestMarkdownDocumentation(t *testing.T) {
 
 	t.Logf("Found %d runnable examples in documentation", len(examples))
 
-	// Run each example as a subtest
+	// Run each example as a subtest in parallel
 	for _, example := range examples {
 		t.Run(example.Name, func(t *testing.T) {
 			t.Parallel()
@@ -104,18 +104,129 @@ func isolateExample(content string, testName string, hash string) string {
 	sanitizedTestName := strings.ToLower(testName)
 	sanitizedTestName = strings.ReplaceAll(sanitizedTestName, "_", "-")
 
-	// Create namespace suffix with test name and hash: example-wait-rollout-a1b2c3d4
-	namespaceSuffix := fmt.Sprintf("%s-%s", sanitizedTestName, hash)
+	// System namespaces that should never be isolated
+	systemNamespaces := map[string]bool{
+		"default":     true,
+		"kube-system": true,
+		"kube-public": true,
+		"kube-node-lease": true,
+	}
 
-	// Isolate "example" namespace to avoid conflicts when running tests in parallel
+	// Find all unique namespace references
+	namespaces := make(map[string]bool)
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		// Look for "namespace: xyz" patterns
+		if strings.Contains(line, "namespace:") {
+			parts := strings.Split(line, "namespace:")
+			if len(parts) > 1 {
+				ns := strings.TrimSpace(parts[1])
+				ns = strings.Trim(ns, `"`)
+				if ns != "" && !systemNamespaces[ns] {
+					namespaces[ns] = true
+				}
+			}
+		}
+		// Look for 'name: xyz' in Namespace kind resources
+		if strings.Contains(line, "name:") {
+			parts := strings.Split(line, "name:")
+			if len(parts) > 1 {
+				ns := strings.TrimSpace(parts[1])
+				ns = strings.Trim(ns, `"`)
+				if ns != "" && !systemNamespaces[ns] {
+					// Only add if this looks like a namespace name context
+					// (we'll be conservative and replace it anyway)
+					namespaces[ns] = true
+				}
+			}
+		}
+	}
+
+	// Isolate each namespace found
 	result := content
-	result = strings.ReplaceAll(result, `name: example`, fmt.Sprintf(`name: example-%s`, namespaceSuffix))
-	result = strings.ReplaceAll(result, `namespace: example`, fmt.Sprintf(`namespace: example-%s`, namespaceSuffix))
+	for ns := range namespaces {
+		// Create namespace suffix with test name and hash: prod-readme-wait-for-loadbalancer-a1b2c3d4
+		isolatedNs := fmt.Sprintf("%s-%s-%s", ns, sanitizedTestName, hash)
 
-	// Also handle quoted versions that might appear in ConfigMaps or outputs
-	result = strings.ReplaceAll(result, `"example"`, fmt.Sprintf(`"example-%s"`, namespaceSuffix))
+		// Replace all occurrences
+		result = strings.ReplaceAll(result, fmt.Sprintf("name: %s", ns), fmt.Sprintf("name: %s", isolatedNs))
+		result = strings.ReplaceAll(result, fmt.Sprintf("namespace: %s", ns), fmt.Sprintf("namespace: %s", isolatedNs))
+		result = strings.ReplaceAll(result, fmt.Sprintf(`"%s"`, ns), fmt.Sprintf(`"%s"`, isolatedNs))
+	}
+
+	// Randomize LoadBalancer service ports to avoid host port conflicts in k3d
+	// k3d's servicelb binds service ports to host ports, so parallel tests need unique ports
+	result = randomizeLoadBalancerPorts(result, hash)
 
 	return result
+}
+
+// randomizeLoadBalancerPorts finds LoadBalancer services and randomizes their ports
+// to avoid host port conflicts when running tests in parallel on k3d
+func randomizeLoadBalancerPorts(content string, hash string) string {
+	// Use hash to generate a deterministic but unique port offset
+	// Convert first 4 chars of hash to a number for port offset
+	hashNum := 0
+	for i := 0; i < 4 && i < len(hash); i++ {
+		hashNum = hashNum*16 + int(hash[i])
+		if hash[i] >= '0' && hash[i] <= '9' {
+			hashNum = hashNum - int('0')
+		} else if hash[i] >= 'a' && hash[i] <= 'f' {
+			hashNum = hashNum - int('a') + 10
+		}
+	}
+	// Map hash to port range 30000-32000 to avoid common ports
+	portOffset := 30000 + (hashNum % 2000)
+
+	lines := strings.Split(content, "\n")
+	inLoadBalancerService := false
+	inPortsSection := false
+
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+
+		// Detect if we're entering a LoadBalancer service
+		if strings.Contains(line, "kind: Service") || strings.Contains(line, `kind        = "Service"`) {
+			// Look ahead for type: LoadBalancer
+			for j := i; j < len(lines) && j < i+20; j++ {
+				if strings.Contains(lines[j], "type: LoadBalancer") || strings.Contains(lines[j], `type        = "LoadBalancer"`) {
+					inLoadBalancerService = true
+					break
+				}
+				// Stop looking if we hit the next resource
+				if strings.Contains(lines[j], "---") || (j > i && strings.Contains(lines[j], "apiVersion:")) {
+					break
+				}
+			}
+		}
+
+		// Reset when we hit a new resource
+		if strings.Contains(line, "---") || strings.HasPrefix(strings.TrimSpace(line), "apiVersion:") {
+			if i > 0 {
+				inLoadBalancerService = false
+				inPortsSection = false
+			}
+		}
+
+		// Detect ports section within a LoadBalancer service
+		if inLoadBalancerService && strings.Contains(line, "ports:") {
+			inPortsSection = true
+		}
+
+		// Replace port numbers in the ports section
+		if inLoadBalancerService && inPortsSection && strings.Contains(line, "port:") {
+			// Extract current port number
+			parts := strings.Split(line, "port:")
+			if len(parts) > 1 {
+				portStr := strings.TrimSpace(parts[1])
+				// Keep the same port offset relationship
+				lines[i] = strings.Replace(line, fmt.Sprintf("port: %s", portStr), fmt.Sprintf("port: %d", portOffset), 1)
+				portOffset++ // Increment for next port if multiple ports in same service
+			}
+		}
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 // ensureNamespaceExists scans the code for namespace references and automatically
