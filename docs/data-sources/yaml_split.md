@@ -11,7 +11,6 @@ Splits multi-document YAML content into individual manifests with stable, human-
 
 ## Example Usage - Inline Content
 
-<!-- runnable-test: yaml-split-inline -->
 ```terraform
 data "k8sconnect_yaml_split" "resources" {
   content = <<-YAML
@@ -46,7 +45,6 @@ resource "k8sconnect_manifest" "resources" {
   cluster_connection = var.cluster_connection
 }
 ```
-<!-- /runnable-test -->
 
 ## Example Usage - File Pattern
 

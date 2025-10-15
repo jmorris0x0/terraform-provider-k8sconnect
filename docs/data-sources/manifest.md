@@ -11,7 +11,6 @@ Reads an existing Kubernetes resource from the cluster and makes its data availa
 
 ## Example Usage - Reading Cluster Resources
 
-<!-- runnable-test: manifest-datasource-read-service -->
 ```terraform
 # Read the kubernetes API server service (present in all clusters)
 data "k8sconnect_manifest" "kubernetes_api" {
@@ -40,7 +39,6 @@ resource "k8sconnect_manifest" "api_endpoint_config" {
   cluster_connection = var.cluster_connection
 }
 ```
-<!-- /runnable-test -->
 
 ## Example Usage - Reading Cloud Provider Resources
 

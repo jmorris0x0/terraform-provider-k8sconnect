@@ -10,10 +10,10 @@ import (
 
 // RunnableExample represents a testable code example extracted from markdown
 type RunnableExample struct {
-	Name     string // Unique name from the marker
-	Source   string // Source file path
-	Code     string // Terraform code to test
-	LineNum  int    // Starting line number in source file
+	Name    string // Unique name from the marker
+	Source  string // Source file path
+	Code    string // Terraform code to test
+	LineNum int    // Starting line number in source file
 }
 
 var (
