@@ -34,10 +34,7 @@ Migration tooling!
 hcl2yaml main.tf > manifests.yaml
 Could probably knock out an MVP using the Terraform provider schema definitions to reverse the translation.
 
-
 Terraform wants to be declarative and stateful, Kubernetes wants to be self-healing and continuously reconciling, and developers just want to ship code without becoming infrastructure experts.
-
-Add a file with the terraform block for the examples? It would be nice to be fully copy pastable.
 
 Add a deep compare yaml helper function for the tests. string comparisons are brittle and have wasted a lot of time for me.
 
@@ -49,14 +46,9 @@ Should the resource datasource and patch be restricted from looking at resources
 
 Can you wait for stuff that isn't status? Is wait_for really sold in the registry docs? We kinda forgot about it for a minute.
 
-Autotest markdown examples?
-
 Mention that that two kinds of patches aren't SSA therefore UX difference.
 
 Should I make field_ownership sensitive? It's very noisy during destroy.
 
 Last minute decision: Should I change the name of managed_state_projection?
 
-I should be using varibles.tf in my example files, maybe. It might make it more pasteable, but at the cost of not being able to run markdown embedded examples later.
-
-Rename the  oidc-setup make target to create-cluster? When I built it oidc was the hard part but that was solved a long time ago.
