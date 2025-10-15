@@ -74,8 +74,8 @@ install:
 	echo "    }"; \
 	echo "  }"
 
-.PHONY: oidc-setup 
-oidc-setup:
+.PHONY: create-cluster
+create-cluster:
 	@echo "🔍 Checking for k3d installation..."
 	@if ! command -v k3d >/dev/null 2>&1; then \
 		echo "❌ k3d is not installed!"; \
@@ -143,7 +143,7 @@ oidc-setup:
 	@$(OIDC_DIR)/setup-certs.sh $(TESTBUILD_DIR) 2>/dev/null
 
 .PHONY: testacc
-testacc: oidc-setup
+testacc: create-cluster
 	@echo "🏃 Running acceptance tests..."; \
 	TF_VERSION="$${TF_ACC_TERRAFORM_VERSION:-$(TERRAFORM_VERSION)}"; \
 	if [ "$$TF_VERSION" != "$$(tfenv version-name)" ]; then \
@@ -180,7 +180,7 @@ testacc: oidc-setup
 	go test -cover -v ./internal/k8sconnect/... -timeout 30m -run "$$TEST_FILTER" $$PARALLEL_FLAG
 
 .PHONY: test-examples
-test-examples: oidc-setup install
+test-examples: create-cluster install
 	@echo "📚 Testing examples directory..."; \
 	TEST_FILTER="$${TEST:-}"; \
 	if [ -n "$$TEST_FILTER" ]; then \
@@ -193,7 +193,7 @@ test-examples: oidc-setup install
 	go test -v -timeout 30m -run "$$TEST_FILTER"
 
 .PHONY: test-docs-examples
-test-docs-examples: oidc-setup install
+test-docs-examples: create-cluster install
 	@echo "📖 Testing documentation examples..."; \
 	cd test/doctest && \
 	TF_ACC_KUBECONFIG="$$(cat ../../.testbuild/kubeconfig.yaml)" \
@@ -272,7 +272,7 @@ release-check:
 	goreleaser check
 
 .PHONY: coverage
-coverage: oidc-setup
+coverage: create-cluster
 	@echo "📊 Building unified coverage report"
 	@PROFILE=coverage.out ; \
 	TF_ACC=1 \
