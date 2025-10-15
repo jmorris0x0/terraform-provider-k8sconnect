@@ -1505,17 +1505,40 @@ func TestAccManifestResource_StatusPopulatedOnRefresh(t *testing.T) {
 				),
 				ExpectError: regexp.MustCompile("Wait condition failed"),
 			},
-			// Step 2: Wait for deployment to actually become ready, then refresh
-			// This simulates the field becoming available after the timeout
-			// Since the deployment is ready, the wait should now succeed and status should be populated
+			// Step 2: Wait for deployment to actually become ready, then use longer timeout
+			// This simulates recovery after a timeout - with reasonable timeout it should succeed
 			{
 				PreConfig: func() {
-					// Wait for the deployment to actually become ready
+					// Poll for the deployment to actually become ready
 					// (it continues rolling out even after terraform errored)
-					// Increased to 30s to be safe - readiness probe needs 10s + pod startup time
-					time.Sleep(30 * time.Second)
+					startTime := time.Now()
+					fmt.Printf("\n=== PreConfig starting at %v ===\n", startTime.Format(time.RFC3339))
+
+					ctx := context.Background()
+					maxWait := 90 * time.Second
+					pollInterval := 2 * time.Second
+					deadline := time.Now().Add(maxWait)
+					pollCount := 0
+
+					for time.Now().Before(deadline) {
+						pollCount++
+						deploy, err := k8sClient.AppsV1().Deployments(ns).Get(ctx, deployName, metav1.GetOptions{})
+						if err == nil && deploy.Status.ReadyReplicas >= 1 {
+							elapsed := time.Since(startTime)
+							fmt.Printf("=== Deployment ready after %v (%d polls) ===\n\n", elapsed, pollCount)
+							return
+						}
+						if pollCount%5 == 0 {
+							fmt.Printf("Poll %d: readyReplicas=%d\n", pollCount, deploy.Status.ReadyReplicas)
+						}
+						time.Sleep(pollInterval)
+					}
+
+					elapsed := time.Since(startTime)
+					fmt.Printf("=== WARNING: Deployment NOT ready after %v (%d polls) ===\n\n", elapsed, pollCount)
 				},
-				Config: testAccDeploymentWithShortTimeout(ns, deployName),
+				// Use longer timeout for step 2 - under parallel load 2s is too aggressive
+				Config: testAccDeploymentWithLongerTimeout(ns, deployName),
 				ConfigVariables: config.Variables{
 					"raw":       config.StringVariable(raw),
 					"namespace": config.StringVariable(ns),
@@ -1575,15 +1598,89 @@ spec:
         app: %s
     spec:
       containers:
-      - name: nginx
-        image: public.ecr.aws/nginx/nginx:1.21
-        ports:
-        - containerPort: 80
+      - name: slow-start
+        image: public.ecr.aws/docker/library/busybox:latest
+        command: ["sh", "-c", "sleep 10 && touch /tmp/ready && while true; do sleep 30; done"]
+        readinessProbe:
+          exec:
+            command: ["sh", "-c", "test -f /tmp/ready"]
+          initialDelaySeconds: 5
+          periodSeconds: 1
 YAML
 
   wait_for = {
     field = "status.readyReplicas"
-    timeout = "2s"  # Very short timeout - deployment typically won't be ready in 2s
+    timeout = "3s"  # Very short timeout - pod won't be ready (needs ~10-15s for sleep + readiness)
+  }
+
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+
+  depends_on = [k8sconnect_manifest.test_namespace]
+}
+
+output "replicas_output" {
+  value = try(k8sconnect_manifest.test.status.readyReplicas, "not-ready")
+}
+`, namespace, name, namespace, name, name)
+}
+
+func testAccDeploymentWithLongerTimeout(namespace, name string) string {
+	return fmt.Sprintf(`
+variable "raw" {
+  type = string
+}
+variable "namespace" {
+  type = string
+}
+
+provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "test_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_manifest" "test" {
+  yaml_body = <<YAML
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: %s
+  template:
+    metadata:
+      labels:
+        app: %s
+    spec:
+      containers:
+      - name: slow-start
+        image: public.ecr.aws/docker/library/busybox:latest
+        command: ["sh", "-c", "sleep 10 && touch /tmp/ready && while true; do sleep 30; done"]
+        readinessProbe:
+          exec:
+            command: ["sh", "-c", "test -f /tmp/ready"]
+          initialDelaySeconds: 5
+          periodSeconds: 1
+YAML
+
+  wait_for = {
+    field = "status.readyReplicas"
+    timeout = "2m"  # Longer timeout for step 2 - should succeed after pod becomes ready
   }
 
   cluster_connection = {

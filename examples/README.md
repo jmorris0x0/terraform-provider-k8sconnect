@@ -6,8 +6,29 @@ Working examples showing k8sconnect provider usage patterns.
 - `basic-deployment/` - Simple namespace and deployment
 
 ## Wait For Feature
-- `wait-for-loadbalancer/` - Wait for LoadBalancer to get IP/hostname (`wait_for.field`)
-- `wait-for-job-completion/` - Wait for Job to complete successfully (`wait_for.field_value`)
+
+The `wait_for` block supports four strategies. **Only `field` waits populate `.status` for resource chaining.**
+
+### Field Waits (with status output)
+- `wait-for-loadbalancer/` - Wait for LoadBalancer IP/hostname and use it in other resources (`wait_for.field`)
+  - **Populates `.status`** for chaining
+  - Example: `${resource.status.loadBalancer.ingress[0].ip}`
+
+### Field Value Waits (no status output)
+- `wait-for-job-completion/` - Wait for Job completion (`wait_for.field_value`)
+  - Waits for specific field values (e.g., `status.succeeded = "1"`)
+  - No `.status` output - use `depends_on` for chaining
+
+### Condition Waits (no status output)
+- `wait-for-condition/` - Wait for Kubernetes conditions (`wait_for.condition`)
+  - Waits for condition types like "Available", "Ready", "Progressing"
+  - No `.status` output - use `depends_on` for chaining
+
+### Rollout Waits (no status output)
+- `wait-for-deployment-rollout/` - Wait for Deployment rollout completion (`wait_for.rollout`)
+  - Ensures all replicas are updated and ready
+  - Works with Deployments, StatefulSets, DaemonSets
+  - No `.status` output - use `depends_on` for chaining
 
 ## Ignore Fields
 - `ignore-fields-hpa/` - Ignore HPA-managed replicas to prevent drift

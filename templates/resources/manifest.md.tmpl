@@ -140,9 +140,9 @@ resource "k8sconnect_manifest" "hpa" {
 }
 ```
 
-## Example Usage - Wait for LoadBalancer and Use Status
+## Example Usage - Wait for LoadBalancer and Use Status (field wait)
 
-Wait for a LoadBalancer to be provisioned and use its IP in other resources:
+Wait for a LoadBalancer to be provisioned and use its IP in other resources. **Only `field` waits populate `.status` for chaining.**
 
 ```terraform
 resource "k8sconnect_manifest" "loadbalancer_service" {
@@ -162,7 +162,7 @@ resource "k8sconnect_manifest" "loadbalancer_service" {
   YAML
 
   wait_for = {
-    field   = "status.loadBalancer.ingress"
+    field   = "status.loadBalancer.ingress"  # Enables .status output
     timeout = "5m"
   }
 
@@ -183,6 +183,119 @@ resource "k8sconnect_manifest" "endpoint_config" {
 
   cluster_connection = var.cluster_connection
   depends_on         = [k8sconnect_manifest.loadbalancer_service]
+}
+```
+
+## Example Usage - Wait for Deployment Rollout (rollout wait)
+
+Wait for a Deployment to fully roll out before continuing:
+
+```terraform
+resource "k8sconnect_manifest" "app" {
+  yaml_body = <<-YAML
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: web-app
+      namespace: example
+    spec:
+      replicas: 3
+      selector:
+        matchLabels:
+          app: web
+      template:
+        metadata:
+          labels:
+            app: web
+        spec:
+          containers:
+          - name: nginx
+            image: nginx:1.21
+            resources:
+              requests:
+                cpu: 100m
+                memory: 128Mi
+  YAML
+
+  # Wait for all replicas to be updated and ready
+  wait_for = {
+    rollout = true
+    timeout = "5m"
+  }
+
+  cluster_connection = var.cluster_connection
+}
+```
+
+## Example Usage - Wait for Condition (condition wait)
+
+Wait for a Kubernetes condition to be True:
+
+```terraform
+resource "k8sconnect_manifest" "app" {
+  yaml_body = <<-YAML
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: storage-app
+      namespace: example
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app: storage
+      template:
+        metadata:
+          labels:
+            app: storage
+        spec:
+          containers:
+          - name: app
+            image: busybox:latest
+            command: ["sh", "-c", "while true; do date; sleep 30; done"]
+  YAML
+
+  # Wait for "Available" condition (minimum availability reached)
+  wait_for = {
+    condition = "Available"
+    timeout   = "3m"
+  }
+
+  cluster_connection = var.cluster_connection
+}
+```
+
+## Example Usage - Wait for Field Value (field_value wait)
+
+Wait for specific field values:
+
+```terraform
+resource "k8sconnect_manifest" "migration_job" {
+  yaml_body = <<-YAML
+    apiVersion: batch/v1
+    kind: Job
+    metadata:
+      name: database-migration
+      namespace: example
+    spec:
+      template:
+        spec:
+          containers:
+          - name: migrate
+            image: busybox:latest
+            command: ["sh", "-c", "echo 'Running migrations...' && sleep 5"]
+          restartPolicy: Never
+  YAML
+
+  # Wait for exactly 1 successful completion
+  wait_for = {
+    field_value = {
+      "status.succeeded" = "1"
+    }
+    timeout = "5m"
+  }
+
+  cluster_connection = var.cluster_connection
 }
 ```
 

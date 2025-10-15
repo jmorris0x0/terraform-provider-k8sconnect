@@ -19,7 +19,7 @@ Bootstrap Kubernetes clusters and workloads in a **single `terraform apply`**. N
 | Controller coexistence                | ⚠️ SSA optional or no ignore_fields                                         | ✅ Always-on SSA + ignore_fields for HPA, webhooks, operators               |
 | Unpredictable plan diffs              | ❌ Plan shows what you send, not what K8s will do                           | ✅ Dry-run projections show exact changes before apply                      |
 | Surgical patches on managed resources | ❌ Import or take full ownership                                            | ✅ Patch EKS/GKE/Helm/operator resources                                    |
-| Wait for readiness + use status       | ❌ Manual kubectl wait or null_resource provisioners                        | ✅ Built-in wait_for with status outputs for resource chaining             |
+| Wait for readiness + use status       | ⚠️ wait_for available but status causes drift via computed_fields           | ✅ wait_for with selective status—no drift, no computed_fields workarounds  |
 
 
 **Stop fighting [Terraform's provider model](https://news.ycombinator.com/item?id=27434363). Create clusters and bootstrap workloads in one apply.**
@@ -167,7 +167,7 @@ resource "k8sconnect_manifest" "app" {
 
 The `yaml_split` data source creates stable IDs like `deployment.my-app.nginx` and `service.my-app.nginx`, preventing unnecessary resource recreation when manifests are reordered.
 
-**→ [Browse 12 runnable examples](examples/)** - EKS bootstrap, HPA coexistence, patch patterns, and more
+**→ [YAML split examples](examples/#yaml-split-data-source)** - Inline, file patterns, templated
 
 ---
 
@@ -204,7 +204,7 @@ resource "k8sconnect_patch" "aws_node_config" {
 
 Perfect for EKS/GKE defaults, Helm deployments, and operator-managed resources. On destroy, ownership transfers back cleanly.
 
-**→ [Patch examples](examples/patch-strategic-merge/)** | **[Documentation](docs/resources/patch.md)**
+**→ [Patch examples](examples/#patch-resource)** - Strategic Merge, JSON Patch, Merge Patch | **[Documentation](docs/resources/patch.md)**
 
 ---
 
@@ -255,16 +255,19 @@ resource "k8sconnect_manifest" "config" {
 ```
 
 **Wait strategies:**
-- `condition` - Wait for condition type to be True (e.g., `"Ready"`)
-- `rollout` - Wait for Deployment/StatefulSet/DaemonSet rollout completion
-- `field` - Wait for status field to exist (enables `.status` attribute output)
-- `field_value` - Wait for specific field values (e.g., `{"status.phase": "Running"}`)
+- `field` - Wait for status field to exist (enables `.status` attribute output for chaining)
+- `field_value` - Wait for specific field values (e.g., `{"status.phase": "Running"}`) - no status output
+- `condition` - Wait for condition type to be True (e.g., `"Ready"`) - no status output
+- `rollout` - Wait for Deployment/StatefulSet/DaemonSet rollout completion - no status output
 
 **Why this matters:**
+- **Selective status tracking** - Only `field` waits populate `.status`, preventing drift from volatile fields
 - **No more provisioners** - Native Terraform waiting and data flow
-- **Type-safe status access** - Use `resource.status.field.path` in expressions
+- **Type-safe status access** - Use `resource.status.field.path` in expressions when using `field` waits
 - **Proper dependencies** - Terraform understands the wait, not just `depends_on`
 - **Works with any resource** - Deployments, PVCs, CRDs - if it has status, you can wait for it
+
+**→ [Wait strategy examples](examples/#wait-for-feature)** - field, field_value, condition, rollout
 
 ---
 
@@ -329,6 +332,8 @@ All `cluster_connection` fields are marked sensitive and won't appear in logs or
 - `k8sconnect_yaml_split` - Parse multi-document YAML files ([docs](docs/data-sources/yaml_split.md))
 - `k8sconnect_yaml_scoped` - Filter resources by category ([docs](docs/data-sources/yaml_scoped.md))
 - `k8sconnect_manifest` - Read existing cluster resources ([docs](docs/data-sources/resource.md))
+
+**→ [Browse all 14 runnable examples](examples/)** with test coverage
 
 ---
 

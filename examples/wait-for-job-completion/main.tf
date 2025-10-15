@@ -47,7 +47,8 @@ resource "k8sconnect_manifest" "migration_job" {
 }
 
 # Deploy app only after migrations complete
-# Note: Since field_value doesn't populate status, we just rely on depends_on
+# Note: field_value waits don't populate .status (only field waits do)
+# We use depends_on to ensure this runs after the migration succeeds
 resource "k8sconnect_manifest" "app_deployment" {
   yaml_body = <<-YAML
     apiVersion: v1
