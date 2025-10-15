@@ -36,6 +36,7 @@ When you destroy a patch resource, ownership is released but patched values rema
 
 Strategic Merge Patch uses Kubernetes-native merge semantics with array merge keys. This is the recommended patch type for most use cases as it supports Server-Side Apply with field ownership tracking and accurate dry-run projections.
 
+<!-- runnable-test: patch-strategic-merge -->
 ```terraform
 resource "k8sconnect_patch" "coredns_label" {
   target = {
@@ -56,11 +57,13 @@ resource "k8sconnect_patch" "coredns_label" {
   cluster_connection = var.cluster_connection
 }
 ```
+<!-- /runnable-test -->
 
 ## Example Usage - JSON Patch (RFC 6902)
 
 JSON Patch provides precise control with operations like `add`, `remove`, `replace`, `move`, `copy`, and `test`. Use this when you need exact control over array elements or want to perform conditional operations.
 
+<!-- runnable-test: patch-json-patch -->
 ```terraform
 resource "k8sconnect_patch" "kubernetes_svc_label" {
   target = {
@@ -82,11 +85,13 @@ resource "k8sconnect_patch" "kubernetes_svc_label" {
   cluster_connection = var.cluster_connection
 }
 ```
+<!-- /runnable-test -->
 
 ## Example Usage - Merge Patch (RFC 7386)
 
 Merge Patch is the simplest patch type - just specify the fields to merge. Note that it replaces entire arrays rather than merging them.
 
+<!-- runnable-test: patch-merge-patch -->
 ```terraform
 resource "k8sconnect_patch" "kube_dns_annotation" {
   target = {
@@ -108,6 +113,7 @@ resource "k8sconnect_patch" "kube_dns_annotation" {
   cluster_connection = var.cluster_connection
 }
 ```
+<!-- /runnable-test -->
 
 ## Example Usage - Patching EKS AWS Node DaemonSet
 
