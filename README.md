@@ -185,7 +185,7 @@ resource "k8sconnect_patch" "aws_node_config" {
     namespace   = "kube-system"
   }
 
-  patch = yamlencode({
+  patch = jsonencode({
     spec = {
       template = {
         spec = {
@@ -254,18 +254,22 @@ resource "k8sconnect_manifest" "config" {
 }
 ```
 
-**Wait strategies:**
-- `field` - Wait for status field to exist (enables `.status` attribute output for chaining)
-- `field_value` - Wait for specific field values (e.g., `{"status.phase": "Running"}`) - no status output
-- `condition` - Wait for condition type to be True (e.g., `"Ready"`) - no status output
-- `rollout` - Wait for Deployment/StatefulSet/DaemonSet rollout completion - no status output
+**Choosing a wait strategy:**
+
+**Infrastructure resources** need status values for DNS, outputs, chaining:
+- LoadBalancer Services, Ingress, cert-manager Certificates, Crossplane resources, Custom CRDs with important status
+- Use `field` waits → populates `.status` attribute for use in other resources
+- Example: `wait_for = { field = "status.loadBalancer.ingress" }`
+
+**Workload resources** just need readiness confirmation:
+- Deployments, Jobs, StatefulSets, DaemonSets
+- Use `rollout`, `condition`, or `field_value` waits → no `.status` output, use `depends_on` for sequencing
+- Example: `wait_for = { rollout = true }`
 
 **Why this matters:**
 - **Selective status tracking** - Only `field` waits populate `.status`, preventing drift from volatile fields
 - **No more provisioners** - Native Terraform waiting and data flow
-- **Type-safe status access** - Use `resource.status.field.path` in expressions when using `field` waits
-- **Proper dependencies** - Terraform understands the wait, not just `depends_on`
-- **Works with any resource** - Deployments, PVCs, CRDs - if it has status, you can wait for it
+- **Works with any CRD** - If it has status fields you need, use `field` waits
 
 **→ [Wait strategy examples](examples/#wait-for-feature)** - field, field_value, condition, rollout
 
@@ -333,7 +337,7 @@ All `cluster_connection` fields are marked sensitive and won't appear in logs or
 - `k8sconnect_yaml_scoped` - Filter resources by category ([docs](docs/data-sources/yaml_scoped.md))
 - `k8sconnect_manifest` - Read existing cluster resources ([docs](docs/data-sources/resource.md))
 
-**→ [Browse all 14 runnable examples](examples/)** with test coverage
+**→ [Browse all 16 runnable examples](examples/)** with test coverage
 
 ---
 

@@ -140,9 +140,21 @@ resource "k8sconnect_manifest" "hpa" {
 }
 ```
 
+## Choosing a Wait Strategy
+
+**Infrastructure resources** (LoadBalancer, Ingress, cert-manager, Crossplane, Custom CRDs):
+- Need status values for DNS records, outputs, resource chaining
+- Use `field` waits → populates `.status` attribute
+- Example: `wait_for = { field = "status.loadBalancer.ingress" }`
+
+**Workload resources** (Deployment, Job, StatefulSet, DaemonSet):
+- Just need readiness confirmation for sequencing
+- Use `rollout`, `condition`, or `field_value` → no `.status` output, use `depends_on`
+- Example: `wait_for = { rollout = true }`
+
 ## Example Usage - Wait for LoadBalancer and Use Status (field wait)
 
-Wait for a LoadBalancer to be provisioned and use its IP in other resources. **Only `field` waits populate `.status` for chaining.**
+Wait for a LoadBalancer to be provisioned and use its IP in other resources.
 
 ```terraform
 resource "k8sconnect_manifest" "loadbalancer_service" {

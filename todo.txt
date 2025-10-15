@@ -55,7 +55,10 @@ Autotest markdown examples?
 
 Mention that that two kinds of patches aren't SSA therefore UX difference.
 
-Hashicorp v2 provider already has IP/hostname lookup for ingress. I'm making false claims in my readme and their UX might be better than mine. Must investigate:
-https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/guides/v2-upgrade-guide#changes-to-the-load_balancers_ingress-block-on-service-and-ingress
-If I'm doing auto rollout wait, then what's the point of wait_for?
-I need to reconsider this feature.
+Should I make field_ownership sensitive? It's very noisy during destroy.
+
+Last minute decision: Should I change the name of managed_state_projection?
+
+The patch on the main page has yamlencode() Why? Can it not autodetect json? Why does it need yaml? That makes no sense. And then the three runnable examples have jsonencode(). Why do we need this? Why sometimes yamlencode and sometimes json encode? Isn't it already yaml or json? Or does terraform need the string to be typecast for some reason?
+
+I should be using varibles.tf in my example files, maybe. It might make it more pasteable, but at the cost of not being able to run markdown embedded examples later.

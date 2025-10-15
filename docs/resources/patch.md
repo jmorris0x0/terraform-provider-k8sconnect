@@ -122,7 +122,7 @@ resource "k8sconnect_patch" "aws_node_env" {
     namespace   = "kube-system"
   }
 
-  patch = yamlencode({
+  patch = jsonencode({
     spec = {
       template = {
         spec = {
