@@ -154,8 +154,8 @@ testacc: oidc-setup
 	TEST_FILTER="$${TEST:-TestAcc}"; \
 	echo "Running tests matching: $$TEST_FILTER"; \
 	if [ -n "$$GITHUB_ACTIONS" ]; then \
-		PARALLEL_FLAG="-parallel=1"; \
-		echo "🐌 Running in GitHub Actions - parallelism disabled"; \
+		PARALLEL_FLAG="-parallel=4"; \
+		echo "🚀 Running in GitHub Actions with parallelism=4"; \
 	else \
 		PARALLEL_FLAG=""; \
 		echo "🚀 Running locally - using default parallelism"; \
