@@ -212,6 +212,7 @@ Perfect for EKS/GKE defaults, Helm deployments, and operator-managed resources. 
 
 Stop writing `null_resource` provisioners with kubectl wait. Built-in waiting with status outputs lets you chain resources naturally:
 
+<!-- runnable-test: readme-wait-for-loadbalancer -->
 ```hcl
 # Wait for LoadBalancer IP and use it in other resources
 resource "k8sconnect_manifest" "service" {
@@ -253,6 +254,7 @@ resource "k8sconnect_manifest" "config" {
   cluster_connection = var.cluster_connection
 }
 ```
+<!-- /runnable-test -->
 
 **Choosing a wait strategy:**
 

@@ -192,6 +192,13 @@ test-examples: oidc-setup install
 	TF_ACC_KUBECONFIG="$$(cat ../../.testbuild/kubeconfig.yaml)" \
 	go test -v -timeout 30m -run "$$TEST_FILTER"
 
+.PHONY: test-docs-examples
+test-docs-examples: oidc-setup install
+	@echo "📖 Testing documentation examples..."; \
+	cd test/doctest && \
+	TF_ACC_KUBECONFIG="$$(cat ../../.testbuild/kubeconfig.yaml)" \
+	go test -v -timeout 30m
+
 .PHONY: clean
 clean:
 	-docker rm -f dex
