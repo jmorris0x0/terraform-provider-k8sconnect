@@ -1598,15 +1598,19 @@ spec:
         app: %s
     spec:
       containers:
-      - name: nginx
-        image: public.ecr.aws/nginx/nginx:1.21
-        ports:
-        - containerPort: 80
+      - name: slow-start
+        image: public.ecr.aws/docker/library/busybox:latest
+        command: ["sh", "-c", "sleep 10 && touch /tmp/ready && while true; do sleep 30; done"]
+        readinessProbe:
+          exec:
+            command: ["sh", "-c", "test -f /tmp/ready"]
+          initialDelaySeconds: 5
+          periodSeconds: 1
 YAML
 
   wait_for = {
     field = "status.readyReplicas"
-    timeout = "2s"  # Very short timeout - deployment typically won't be ready in 2s
+    timeout = "3s"  # Very short timeout - pod won't be ready (needs ~10-15s for sleep + readiness)
   }
 
   cluster_connection = {
@@ -1664,15 +1668,19 @@ spec:
         app: %s
     spec:
       containers:
-      - name: nginx
-        image: public.ecr.aws/nginx/nginx:1.21
-        ports:
-        - containerPort: 80
+      - name: slow-start
+        image: public.ecr.aws/docker/library/busybox:latest
+        command: ["sh", "-c", "sleep 10 && touch /tmp/ready && while true; do sleep 30; done"]
+        readinessProbe:
+          exec:
+            command: ["sh", "-c", "test -f /tmp/ready"]
+          initialDelaySeconds: 5
+          periodSeconds: 1
 YAML
 
   wait_for = {
     field = "status.readyReplicas"
-    timeout = "2m"  # Longer timeout for step 2 - handles parallel load
+    timeout = "2m"  # Longer timeout for step 2 - should succeed after pod becomes ready
   }
 
   cluster_connection = {
