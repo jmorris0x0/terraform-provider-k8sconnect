@@ -137,6 +137,9 @@ func (r *manifestResource) checkDriftAndPreserveState(ctx context.Context, req r
 				}
 				// else: leave field_ownership as Unknown (default), Apply will compute it
 
+				// Preserve object_ref since resource identity hasn't changed
+				plannedData.ObjectRef = stateData.ObjectRef
+
 				// Note: ImportedWithoutAnnotations is now in private state, not model
 				// But still allow terraform-specific settings to update
 				// (delete_protection, ignore_fields, etc. are not preserved during import)

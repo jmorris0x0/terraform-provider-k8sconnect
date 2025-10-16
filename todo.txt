@@ -55,3 +55,7 @@ Last minute decision: Should I change the name of managed_state_projection?
 Rename manifest resource to k8sconnect_object. Better? Maybe.
 
 Stop docs tests from renaming resources. No reason to do that.
+
+Create a little FAQ for things like, why have a separate wait resource? There are probably other decisons in the ADRs that people might be curious about.
+
+Don't pass auth out of the object resource. There is no point. Either pass it inside of object_ref or not at all.
