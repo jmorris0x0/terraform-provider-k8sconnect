@@ -1174,7 +1174,7 @@ func testAccPatchConfigArrayContainerSetup(namespace, deployName string) string 
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -1184,7 +1184,7 @@ YAML
   cluster_connection = { kubeconfig = var.raw }
 }
 
-resource "k8sconnect_manifest" "test_deploy" {
+resource "k8sconnect_object" "test_deploy" {
   yaml_body = <<YAML
 apiVersion: apps/v1
 kind: Deployment
@@ -1208,7 +1208,7 @@ spec:
         image: busybox:1.28
 YAML
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, deployName, namespace)
 }
@@ -1218,7 +1218,7 @@ func testAccPatchConfigArrayContainerPatch(namespace, deployName string) string 
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -1248,7 +1248,7 @@ spec:
 YAML
 
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, deployName, namespace)
 }
@@ -1258,7 +1258,7 @@ func testAccPatchConfigArrayEnvSetup(namespace, deployName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -1268,7 +1268,7 @@ YAML
   cluster_connection = { kubeconfig = var.raw }
 }
 
-resource "k8sconnect_manifest" "test_deploy" {
+resource "k8sconnect_object" "test_deploy" {
   yaml_body = <<YAML
 apiVersion: apps/v1
 kind: Deployment
@@ -1295,7 +1295,7 @@ spec:
           value: "value2"
 YAML
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, deployName, namespace)
 }
@@ -1305,7 +1305,7 @@ func testAccPatchConfigArrayEnvPatch(namespace, deployName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -1335,7 +1335,7 @@ spec:
 YAML
 
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, deployName, namespace)
 }
@@ -1345,7 +1345,7 @@ func testAccPatchConfigSimpleArrayPatch(namespace, cmName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -1369,7 +1369,7 @@ data:
 YAML
 
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
 }
@@ -1379,7 +1379,7 @@ func testAccPatchConfigComplexArraySetup(namespace, svcName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -1389,7 +1389,7 @@ YAML
   cluster_connection = { kubeconfig = var.raw }
 }
 
-resource "k8sconnect_manifest" "test_svc" {
+resource "k8sconnect_object" "test_svc" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Service
@@ -1408,7 +1408,7 @@ spec:
     protocol: TCP
 YAML
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, svcName, namespace)
 }
@@ -1418,7 +1418,7 @@ func testAccPatchConfigComplexArrayPatch(namespace, svcName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -1444,7 +1444,7 @@ spec:
 YAML
 
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, svcName, namespace)
 }
@@ -1456,7 +1456,7 @@ func testAccPatchConfigDeepNestedSetup(namespace, deployName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -1466,7 +1466,7 @@ YAML
   cluster_connection = { kubeconfig = var.raw }
 }
 
-resource "k8sconnect_manifest" "test_deploy" {
+resource "k8sconnect_object" "test_deploy" {
   yaml_body = <<YAML
 apiVersion: apps/v1
 kind: Deployment
@@ -1491,7 +1491,7 @@ spec:
           value: "original"
 YAML
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, deployName, namespace)
 }
@@ -1501,7 +1501,7 @@ func testAccPatchConfigDeepNestedPatch(namespace, deployName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -1531,7 +1531,7 @@ spec:
 YAML
 
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, deployName, namespace)
 }
@@ -1541,7 +1541,7 @@ func testAccPatchConfigDeepVolumeSetup(namespace, podName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -1551,7 +1551,7 @@ YAML
   cluster_connection = { kubeconfig = var.raw }
 }
 
-resource "k8sconnect_manifest" "test_pod" {
+resource "k8sconnect_object" "test_pod" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Pod
@@ -1570,7 +1570,7 @@ spec:
     emptyDir: {}
 YAML
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, podName, namespace)
 }
@@ -1580,7 +1580,7 @@ func testAccPatchConfigDeepVolumePatch(namespace, podName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -1608,7 +1608,7 @@ spec:
 YAML
 
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, podName, namespace)
 }
@@ -1620,7 +1620,7 @@ func testAccPatchConfigEmptyString(namespace, cmName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -1644,7 +1644,7 @@ data:
 YAML
 
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
 }
@@ -1654,7 +1654,7 @@ func testAccPatchConfigNullValue(namespace, cmName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -1680,7 +1680,7 @@ resource "k8sconnect_patch" "test" {
   ])
 
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
 }
@@ -1690,7 +1690,7 @@ func testAccPatchConfigBooleanSetup(namespace, deployName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -1700,7 +1700,7 @@ YAML
   cluster_connection = { kubeconfig = var.raw }
 }
 
-resource "k8sconnect_manifest" "test_deploy" {
+resource "k8sconnect_object" "test_deploy" {
   yaml_body = <<YAML
 apiVersion: apps/v1
 kind: Deployment
@@ -1722,7 +1722,7 @@ spec:
         image: nginx:1.14.2
 YAML
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, deployName, namespace)
 }
@@ -1732,7 +1732,7 @@ func testAccPatchConfigBooleanPatch(namespace, deployName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -1761,7 +1761,7 @@ spec:
 YAML
 
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, deployName, namespace)
 }
@@ -1771,7 +1771,7 @@ func testAccPatchConfigNumericSetup(namespace, deployName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -1781,7 +1781,7 @@ YAML
   cluster_connection = { kubeconfig = var.raw }
 }
 
-resource "k8sconnect_manifest" "test_deploy" {
+resource "k8sconnect_object" "test_deploy" {
   yaml_body = <<YAML
 apiVersion: apps/v1
 kind: Deployment
@@ -1803,7 +1803,7 @@ spec:
         image: nginx:1.14.2
 YAML
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, deployName, namespace)
 }
@@ -1813,7 +1813,7 @@ func testAccPatchConfigNumericPatch(namespace, deployName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -1837,7 +1837,7 @@ spec:
 YAML
 
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, deployName, namespace)
 }
@@ -1853,7 +1853,7 @@ func testAccPatchConfigLargeString(namespace, cmName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -1877,7 +1877,7 @@ data:
 YAML
 
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace, largeValue)
 }
@@ -1889,7 +1889,7 @@ func testAccPatchConfigJSONPatchAdd(namespace, cmName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -1916,7 +1916,7 @@ resource "k8sconnect_patch" "test" {
   ])
 
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
 }
@@ -1926,7 +1926,7 @@ func testAccPatchConfigJSONPatchRemove(namespace, cmName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -1952,7 +1952,7 @@ resource "k8sconnect_patch" "test" {
   ])
 
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
 }
@@ -1962,7 +1962,7 @@ func testAccPatchConfigJSONPatchReplace(namespace, cmName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -1989,7 +1989,7 @@ resource "k8sconnect_patch" "test" {
   ])
 
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
 }
@@ -1999,7 +1999,7 @@ func testAccPatchConfigJSONPatchMove(namespace, cmName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -2026,7 +2026,7 @@ resource "k8sconnect_patch" "test" {
   ])
 
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
 }
@@ -2036,7 +2036,7 @@ func testAccPatchConfigJSONPatchCopy(namespace, cmName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -2063,7 +2063,7 @@ resource "k8sconnect_patch" "test" {
   ])
 
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
 }
@@ -2073,7 +2073,7 @@ func testAccPatchConfigJSONPatchTestSuccess(namespace, cmName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -2105,7 +2105,7 @@ resource "k8sconnect_patch" "test" {
   ])
 
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
 }

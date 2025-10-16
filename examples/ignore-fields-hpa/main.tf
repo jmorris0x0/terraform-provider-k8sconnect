@@ -1,7 +1,7 @@
 provider "k8sconnect" {}
 
 # Create a namespace for this example
-resource "k8sconnect_manifest" "namespace" {
+resource "k8sconnect_object" "namespace" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: Namespace
@@ -13,7 +13,7 @@ resource "k8sconnect_manifest" "namespace" {
 }
 
 # Create a deployment with HPA-managed replicas
-resource "k8sconnect_manifest" "app" {
+resource "k8sconnect_object" "app" {
   yaml_body = <<-YAML
     apiVersion: apps/v1
     kind: Deployment
@@ -40,7 +40,7 @@ resource "k8sconnect_manifest" "app" {
   YAML
 
   cluster_connection = var.cluster_connection
-  depends_on         = [k8sconnect_manifest.namespace]
+  depends_on         = [k8sconnect_object.namespace]
 
   # Ignore spec.replicas because HPA will modify it
   # Without this, Terraform would constantly try to reset replicas
@@ -48,8 +48,8 @@ resource "k8sconnect_manifest" "app" {
 }
 
 # Create HPA that will manage replicas
-resource "k8sconnect_manifest" "hpa" {
-  depends_on = [k8sconnect_manifest.app]
+resource "k8sconnect_object" "hpa" {
+  depends_on = [k8sconnect_object.app]
 
   yaml_body = <<-YAML
     apiVersion: autoscaling/v2

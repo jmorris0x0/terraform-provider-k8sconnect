@@ -35,22 +35,22 @@ All unit tests pass successfully.
 **Status**: ✅ **ALL PASSING (67 tests)**
 
 **Recently fixed:**
-- `TestAccManifestResource_DeleteWithStuckFinalizer` - Added Step 3 with PreConfig to remove finalizer before test cleanup runs
+- `TestAccObjectResource_DeleteWithStuckFinalizer` - Added Step 3 with PreConfig to remove finalizer before test cleanup runs
 
 **Passing tests:** All 67 acceptance tests pass, including:
 - All wait-related tests:
-  - `TestAccManifestResource_WaitForFieldExists`
-  - `TestAccManifestResource_WaitForFieldValue`
-  - `TestAccManifestResource_WaitForCondition`
-  - `TestAccManifestResource_WaitForPVCBinding`
-  - `TestAccManifestResource_WaitForMultipleValues`
-  - `TestAccManifestResource_WaitForFieldChange`
-  - `TestAccManifestResource_WaitTypeTransitionFieldValueToField`
-  - `TestAccManifestResource_WaitTypeTransitionFieldToFieldValue`
-  - `TestAccManifestResource_WaitTimeout`
-  - `TestAccManifestResource_ExplicitRollout`
-  - `TestAccManifestResource_StatefulSetRollout`
-  - `TestAccManifestResource_NoDefaultRollout`
+  - `TestAccObjectResource_WaitForFieldExists`
+  - `TestAccObjectResource_WaitForFieldValue`
+  - `TestAccObjectResource_WaitForCondition`
+  - `TestAccObjectResource_WaitForPVCBinding`
+  - `TestAccObjectResource_WaitForMultipleValues`
+  - `TestAccObjectResource_WaitForFieldChange`
+  - `TestAccObjectResource_WaitTypeTransitionFieldValueToField`
+  - `TestAccObjectResource_WaitTypeTransitionFieldToFieldValue`
+  - `TestAccObjectResource_WaitTimeout`
+  - `TestAccObjectResource_ExplicitRollout`
+  - `TestAccObjectResource_StatefulSetRollout`
+  - `TestAccObjectResource_NoDefaultRollout`
 - All lifecycle tests
 - All drift detection tests
 - All field ownership tests
@@ -73,10 +73,10 @@ All example tests pass, including wait-related examples:
 ### Implementation Location
 
 **Core files:**
-- `internal/k8sconnect/resource/manifest/crud.go` - Create/Update functions with wait execution
-- `internal/k8sconnect/resource/manifest/crud_common.go` - `addWaitError()` helper
-- `internal/k8sconnect/resource/manifest/crud_operations.go` - Wait execution and status tracking
-- `internal/k8sconnect/resource/manifest/plan_modifier.go` - Status field planning with pending wait detection
+- `internal/k8sconnect/resource/object/crud.go` - Create/Update functions with wait execution
+- `internal/k8sconnect/resource/object/crud_common.go` - `addWaitError()` helper
+- `internal/k8sconnect/resource/object/crud_operations.go` - Wait execution and status tracking
+- `internal/k8sconnect/resource/object/plan_modifier.go` - Status field planning with pending wait detection
 
 ### How Wait Currently Works
 
@@ -98,7 +98,7 @@ Same pattern - state saved before adding wait error (crud.go:247-257)
 **From crud_common.go:362-375:**
 
 ```go
-func (r *manifestResource) addWaitError(resp interface{}, action string, err error) {
+func (r *objectResource) addWaitError(resp interface{}, action string, err error) {
     msg := fmt.Sprintf("Wait condition failed after resource was %s", action)
     detailMsg := fmt.Sprintf("The resource was successfully %s, but the wait condition failed: %s\n\n"+
         "You need to either:\n"+
@@ -231,14 +231,14 @@ This is a clean baseline from which to implement the separate wait resource:
 Before implementing the separate wait resource, commit this baseline:
 
 ```bash
-git add docs/CURRENT_STATE_BASELINE.md internal/k8sconnect/resource/manifest/lifecycle_test.go
+git add docs/CURRENT_STATE_BASELINE.md internal/k8sconnect/resource/object/lifecycle_test.go
 git commit -m "Add baseline documentation and fix finalizer test
 
 Captures current state:
 - All 67 acceptance tests passing
 - All unit and example tests passing
 - Wait functionality working with known tainting issue
-- Fixed TestAccManifestResource_DeleteWithStuckFinalizer cleanup
+- Fixed TestAccObjectResource_DeleteWithStuckFinalizer cleanup
 - Ready to implement Option D (separate k8sconnect_wait resource)"
 ```
 

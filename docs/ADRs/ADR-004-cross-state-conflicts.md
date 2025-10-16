@@ -12,13 +12,13 @@ When multiple Terraform states (configurations) attempt to manage the same Kuber
 **Scenario**: Two separate Terraform projects manage the same Kubernetes namespace:
 ```hcl
 # State A (team-a.tfstate)
-resource "k8sconnect_manifest" "prod_ns" {
+resource "k8sconnect_object" "prod_ns" {
   yaml_body = "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: production"
   # ... connection config
 }
 
 # State B (team-b.tfstate) 
-resource "k8sconnect_manifest" "prod_namespace" {
+resource "k8sconnect_object" "prod_namespace" {
   yaml_body = "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: production"  
   # ... connection config
 }
@@ -283,7 +283,7 @@ type OwnershipContext struct {
 
 #### 2. Conflict Detection Logic
 ```go
-func (r *manifestResource) validateOwnership(liveObj *unstructured.Unstructured, expectedID string) error {
+func (r *objectResource) validateOwnership(liveObj *unstructured.Unstructured, expectedID string) error {
     annotations := liveObj.GetAnnotations()
     
     // Check for k8sconnect ownership
@@ -322,7 +322,7 @@ func (r *manifestResource) validateOwnership(liveObj *unstructured.Unstructured,
 
 #### 3. Context Generation Strategy
 ```go
-func generateOwnershipContext(data manifestResourceModel) OwnershipContext {
+func generateOwnershipContext(data objectResourceModel) OwnershipContext {
     // Create context hash from available information
     contextData := fmt.Sprintf("%s|%s|%s",
         data.YAMLBody.ValueString(),          // Configuration content

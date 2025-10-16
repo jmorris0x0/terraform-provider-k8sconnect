@@ -35,7 +35,7 @@ body:
       description: Relevant parts of your Terraform configuration
       render: hcl
       placeholder: |
-        resource "k8sconnect_manifest" "example" {
+        resource "k8sconnect_object" "example" {
           yaml_body = <<YAML
         apiVersion: v1
         kind: Pod

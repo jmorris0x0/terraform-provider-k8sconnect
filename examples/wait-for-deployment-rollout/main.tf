@@ -2,7 +2,7 @@
 
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "namespace" {
+resource "k8sconnect_object" "namespace" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: Namespace
@@ -14,7 +14,7 @@ resource "k8sconnect_manifest" "namespace" {
 }
 
 # Create deployment
-resource "k8sconnect_manifest" "app" {
+resource "k8sconnect_object" "app" {
   yaml_body = <<-YAML
     apiVersion: apps/v1
     kind: Deployment
@@ -50,7 +50,7 @@ resource "k8sconnect_manifest" "app" {
   YAML
 
   cluster_connection = var.cluster_connection
-  depends_on         = [k8sconnect_manifest.namespace]
+  depends_on         = [k8sconnect_object.namespace]
 }
 
 # Wait for rollout completion - ensures all 3 replicas are updated and ready
@@ -60,7 +60,7 @@ resource "k8sconnect_manifest" "app" {
 # - status.readyReplicas == spec.replicas
 # - metadata.generation == status.observedGeneration
 resource "k8sconnect_wait" "app" {
-  object_ref = k8sconnect_manifest.app.object_ref
+  object_ref = k8sconnect_object.app.object_ref
 
   cluster_connection = var.cluster_connection
 
@@ -72,7 +72,7 @@ resource "k8sconnect_wait" "app" {
 
 # Deploy service only after deployment is fully rolled out
 # This prevents exposing traffic to partially-ready deployments
-resource "k8sconnect_manifest" "service" {
+resource "k8sconnect_object" "service" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: Service

@@ -55,7 +55,7 @@ func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, 
 				fmt.Sprintf("k8sconnect_patch can only modify existing resources. "+
 					"The target resource does not exist.\n\n"+
 					"Target: %s\n\n"+
-					"To create new resources, use k8sconnect_manifest instead.",
+					"To create new resources, use k8sconnect_object instead.",
 					formatTarget(target)),
 			)
 			return
@@ -72,10 +72,10 @@ func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, 
 	if r.isManagedByThisState(ctx, targetObj) {
 		resp.Diagnostics.AddError(
 			"Cannot Patch Own Resource",
-			fmt.Sprintf("This resource is already managed by k8sconnect_manifest "+
+			fmt.Sprintf("This resource is already managed by k8sconnect_object "+
 				"in this Terraform state.\n\n"+
 				"You cannot patch resources you already own. Instead:\n"+
-				"1. Modify the k8sconnect_manifest directly, or\n"+
+				"1. Modify the k8sconnect_object directly, or\n"+
 				"2. Use ignore_fields to allow external controllers to manage specific fields\n\n"+
 				"Target: %s",
 				formatTarget(target)),

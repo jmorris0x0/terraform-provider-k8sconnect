@@ -59,9 +59,9 @@ The `manifests.yaml` file contains:
 
 Terraform will apply resources in this order:
 
-1. CRD (`k8sconnect_manifest.crds`)
-2. Namespace and ClusterRole (`k8sconnect_manifest.cluster_scoped`)
-3. Deployment, ConfigMap, and Database CR (`k8sconnect_manifest.namespaced`)
+1. CRD (`k8sconnect_object.crds`)
+2. Namespace and ClusterRole (`k8sconnect_object.cluster_scoped`)
+3. Deployment, ConfigMap, and Database CR (`k8sconnect_object.namespaced`)
 
 This ensures:
 - The CRD exists before the Database custom resource is created

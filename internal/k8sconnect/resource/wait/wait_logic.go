@@ -437,6 +437,7 @@ func (r *waitResource) processWatchEvents(ctx context.Context, watcher watch.Int
 	checker func(*unstructured.Unstructured) bool, conditionType string, timeout time.Duration) error {
 
 	timeoutCh := time.After(timeout)
+	var lastSeenObj *unstructured.Unstructured
 
 	for {
 		select {
@@ -444,7 +445,7 @@ func (r *waitResource) processWatchEvents(ctx context.Context, watcher watch.Int
 			return ctx.Err()
 
 		case <-timeoutCh:
-			return fmt.Errorf("timeout after %v waiting for condition %q", timeout, conditionType)
+			return r.buildConditionTimeoutError(ctx, lastSeenObj, conditionType, timeout)
 
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
@@ -453,6 +454,13 @@ func (r *waitResource) processWatchEvents(ctx context.Context, watcher watch.Int
 
 			if err := r.handleWatchEvent(ctx, event, checker, conditionType); err != nil {
 				return err
+			}
+
+			// Track last seen object for better timeout diagnostics
+			if event.Type == watch.Modified || event.Type == watch.Added {
+				if obj, ok := event.Object.(*unstructured.Unstructured); ok {
+					lastSeenObj = obj
+				}
 			}
 
 			if r.isConditionMetByEvent(event, checker) {
@@ -493,6 +501,179 @@ func (r *waitResource) isConditionMetByEvent(event watch.Event, checker func(*un
 // isWatchError determines if an error is watch-related
 func (r *waitResource) isWatchError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "watch")
+}
+
+// buildConditionTimeoutError creates a detailed timeout error with current conditions
+// Following ADR-015: Actionable Error Messages and Diagnostic Context
+func (r *waitResource) buildConditionTimeoutError(ctx context.Context, obj *unstructured.Unstructured,
+	conditionType string, timeout time.Duration) error {
+
+	if obj == nil {
+		return fmt.Errorf("timeout after %v waiting for condition %q (no status available)", timeout, conditionType)
+	}
+
+	kind := obj.GetKind()
+	name := obj.GetName()
+	namespace := obj.GetNamespace()
+
+	resourceRef := fmt.Sprintf("%s/%s", kind, name)
+	if namespace != "" {
+		resourceRef = fmt.Sprintf("%s/%s/%s", kind, namespace, name)
+	}
+
+	// Extract all conditions for diagnostics
+	conditions, found, err := unstructured.NestedSlice(obj.Object, "status", "conditions")
+	if err != nil || !found || len(conditions) == 0 {
+		return r.buildNoConditionsError(resourceRef, kind, name, namespace, conditionType, timeout)
+	}
+
+	// Parse conditions
+	var conditionDetails []string
+	var targetCondition map[string]interface{}
+	var targetFound bool
+
+	for _, cond := range conditions {
+		condMap, ok := cond.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		typeVal, _ := condMap["type"].(string)
+		statusVal, _ := condMap["status"].(string)
+		reason, _ := condMap["reason"].(string)
+
+		condStr := fmt.Sprintf("  • %s = %s", typeVal, statusVal)
+		if reason != "" {
+			condStr += fmt.Sprintf(" (reason: %s)", reason)
+		}
+
+		conditionDetails = append(conditionDetails, condStr)
+
+		if typeVal == conditionType {
+			targetCondition = condMap
+			targetFound = true
+		}
+	}
+
+	// Build error message following ADR-015 template
+	errMsg := fmt.Sprintf("Wait Timeout: %s\n\n%s did not reach condition %q=True within %v\n\n",
+		resourceRef, kind, conditionType, timeout)
+
+	// Current state - show workload-specific details only for known types
+	errMsg += "Current status:\n"
+	if r.isWorkloadResource(kind) {
+		if replicaStatus := r.extractReplicaStatus(obj); replicaStatus != "" {
+			errMsg += fmt.Sprintf("  %s\n", replicaStatus)
+		}
+	}
+	errMsg += "  Conditions:\n"
+	errMsg += strings.Join(conditionDetails, "\n")
+	errMsg += "\n\n"
+
+	// WHY section
+	if targetFound {
+		statusVal, _ := targetCondition["status"].(string)
+		reason, _ := targetCondition["reason"].(string)
+		message, _ := targetCondition["message"].(string)
+
+		errMsg += fmt.Sprintf("WHY: Condition %q exists but is %s", conditionType, statusVal)
+		if reason != "" {
+			errMsg += fmt.Sprintf(" (reason: %s)", reason)
+		}
+		if message != "" {
+			errMsg += fmt.Sprintf(". %s", message)
+		}
+		errMsg += "\n\n"
+	} else {
+		errMsg += fmt.Sprintf("WHY: Condition %q never appeared in status. ", conditionType)
+		errMsg += "The resource controller may not be running or the condition may not exist for this resource type.\n\n"
+	}
+
+	// WHAT TO DO section - generic with workload-specific additions
+	errMsg += "WHAT TO DO:\n"
+
+	// Add workload-specific guidance only for known workload types
+	if r.isWorkloadResource(kind) {
+		replicaStatus := r.extractReplicaStatus(obj)
+		errMsg += fmt.Sprintf("• Check pod status:\n    kubectl get pods -n %s -l [selector]\n", namespace)
+		if strings.Contains(replicaStatus, "0/") {
+			errMsg += "• Check why pods aren't starting:\n"
+			errMsg += fmt.Sprintf("    kubectl describe %s %s -n %s\n", kind, name, namespace)
+			errMsg += fmt.Sprintf("    kubectl get events -n %s --sort-by='.lastTimestamp'\n", namespace)
+		}
+	}
+
+	// Generic guidance for all resources
+	if namespace != "" {
+		errMsg += fmt.Sprintf("• View resource status and events:\n    kubectl describe %s %s -n %s\n", kind, name, namespace)
+		errMsg += fmt.Sprintf("• View full resource YAML:\n    kubectl get %s %s -n %s -o yaml\n", kind, name, namespace)
+	} else {
+		errMsg += fmt.Sprintf("• View resource status and events:\n    kubectl describe %s %s\n", kind, name)
+		errMsg += fmt.Sprintf("• View full resource YAML:\n    kubectl get %s %s -o yaml\n", kind, name)
+	}
+
+	errMsg += fmt.Sprintf("• Increase timeout if needed:\n    wait_for = { condition = %q, timeout = \"10m\" }", conditionType)
+
+	return fmt.Errorf("%s", errMsg)
+}
+
+// isWorkloadResource checks if the resource is a workload type with pods
+func (r *waitResource) isWorkloadResource(kind string) bool {
+	return kind == "Deployment" || kind == "StatefulSet" || kind == "DaemonSet" || kind == "ReplicaSet"
+}
+
+// extractReplicaStatus extracts replica information for workload resources
+// Returns empty string if fields don't exist (not an error)
+func (r *waitResource) extractReplicaStatus(obj *unstructured.Unstructured) string {
+	replicas, hasReplicas, _ := unstructured.NestedInt64(obj.Object, "spec", "replicas")
+	readyReplicas, _, _ := unstructured.NestedInt64(obj.Object, "status", "readyReplicas")
+	availableReplicas, _, _ := unstructured.NestedInt64(obj.Object, "status", "availableReplicas")
+	unavailableReplicas, _, _ := unstructured.NestedInt64(obj.Object, "status", "unavailableReplicas")
+
+	// If spec.replicas doesn't exist, this isn't a workload resource
+	if !hasReplicas {
+		return ""
+	}
+
+	if replicas == 0 {
+		replicas = 1 // Default for some resources
+	}
+
+	return fmt.Sprintf("Replicas: %d/%d ready, %d available, %d unavailable",
+		readyReplicas, replicas, availableReplicas, unavailableReplicas)
+}
+
+// buildNoConditionsError builds error for resources with no conditions
+func (r *waitResource) buildNoConditionsError(resourceRef, kind, name, namespace, conditionType string, timeout time.Duration) error {
+	errMsg := fmt.Sprintf("Wait Timeout: %s\n\n", resourceRef)
+	errMsg += fmt.Sprintf("%s did not become ready within %v\n\n", kind, timeout)
+
+	// Check if it's a workload resource and include replica status
+	if r.isWorkloadResource(kind) {
+		// For workload resources, provide more specific guidance
+		errMsg += fmt.Sprintf("No %q condition found in status.\n\n", conditionType)
+		errMsg += "WHY: The resource may not be creating pods, or the controller may not be running.\n\n"
+		errMsg += "WHAT TO DO:\n"
+		errMsg += fmt.Sprintf("• Check if pods are being created:\n    kubectl get pods -n %s -l [selector]\n", namespace)
+		errMsg += fmt.Sprintf("• Check resource status:\n    kubectl describe %s %s -n %s\n", kind, name, namespace)
+		errMsg += fmt.Sprintf("• Check controller events:\n    kubectl get events -n %s --sort-by='.lastTimestamp'\n", namespace)
+	} else {
+		// For other resources (CRDs, etc), provide generic guidance
+		errMsg += fmt.Sprintf("No conditions found in status. The resource may not report conditions, or the controller may not be running.\n\n")
+		errMsg += fmt.Sprintf("WHY: Not all Kubernetes resources have conditions. Condition %q may not exist for %s.\n\n", conditionType, kind)
+		errMsg += "WHAT TO DO:\n"
+		if namespace != "" {
+			errMsg += fmt.Sprintf("• Check resource status:\n    kubectl get %s %s -n %s -o yaml\n", kind, name, namespace)
+			errMsg += fmt.Sprintf("• Check for errors:\n    kubectl describe %s %s -n %s\n", kind, name, namespace)
+		} else {
+			errMsg += fmt.Sprintf("• Check resource status:\n    kubectl get %s %s -o yaml\n", kind, name)
+			errMsg += fmt.Sprintf("• Check for errors:\n    kubectl describe %s %s\n", kind, name)
+		}
+		errMsg += "• Verify the resource type supports conditions\n"
+		errMsg += fmt.Sprintf("• Consider using wait_for.field or wait_for.field_value instead for %s\n", kind)
+	}
+
+	return fmt.Errorf("%s", errMsg)
 }
 
 // pollForCondition polls for condition when watch is not available

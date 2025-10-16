@@ -335,7 +335,7 @@ func (d *DynamicK8sClient) getGVR(ctx context.Context, obj *unstructured.Unstruc
 			return schema.GroupVersionResource{}, fmt.Errorf(
 				"failed to discover resources for %s: %w\n\nThis usually means:\n"+
 					"1. The API group/version doesn't exist in the cluster\n"+
-					"2. A CRD needs to be installed first (try: depends_on = [k8sconnect_manifest.your_crd])\n"+
+					"2. A CRD needs to be installed first (try: depends_on = [k8sconnect_object.your_crd])\n"+
 					"3. Your cluster connection has insufficient permissions\n"+
 					"4. The cluster is unreachable",
 				gvk.GroupVersion(), err)
@@ -362,7 +362,7 @@ func (d *DynamicK8sClient) getGVR(ctx context.Context, obj *unstructured.Unstruc
 		"no resource found for %s\n\nAvailable kinds in %s: %s\n\n"+
 			"This usually means:\n"+
 			"1. The resource kind doesn't exist (check spelling)\n"+
-			"2. A CRD needs to be installed first (try: depends_on = [k8sconnect_manifest.your_crd])\n"+
+			"2. A CRD needs to be installed first (try: depends_on = [k8sconnect_object.your_crd])\n"+
 			"3. The API version is incorrect",
 		gvk, gvk.GroupVersion(), d.listAvailableKinds(resources))
 }

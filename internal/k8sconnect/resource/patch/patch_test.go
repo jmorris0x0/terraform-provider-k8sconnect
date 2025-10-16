@@ -26,7 +26,7 @@ import (
 )
 
 // TestAccPatchResource_SelfPatchingPrevention tests that we cannot patch resources
-// managed by k8sconnect_manifest in the same state (EDGE_CASES.md 1.1-1.5)
+// managed by k8sconnect_object in the same state (EDGE_CASES.md 1.1-1.5)
 func TestAccPatchResource_SelfPatchingPrevention(t *testing.T) {
 	t.Parallel()
 
@@ -49,7 +49,7 @@ func TestAccPatchResource_SelfPatchingPrevention(t *testing.T) {
 					"raw": config.StringVariable(raw),
 				},
 				// Should fail with self-patching error
-				ExpectError: regexp.MustCompile("Cannot Patch Own Resource|already managed by k8sconnect_manifest"),
+				ExpectError: regexp.MustCompile("Cannot Patch Own Resource|already managed by k8sconnect_object"),
 			},
 		},
 	})
@@ -548,7 +548,7 @@ func testAccPatchConfigEmptyWithNamespace(namespace string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -565,7 +565,7 @@ func testAccPatchConfigSelfPatchingPrevention(namespace, cmName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -575,7 +575,7 @@ YAML
   cluster_connection = { kubeconfig = var.raw }
 }
 
-resource "k8sconnect_manifest" "test_cm" {
+resource "k8sconnect_object" "test_cm" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: ConfigMap
@@ -586,7 +586,7 @@ data:
   key: value
 YAML
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 
 resource "k8sconnect_patch" "test" {
@@ -603,7 +603,7 @@ data:
 YAML
 
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_cm]
+  depends_on = [k8sconnect_object.test_cm]
 }
 `, namespace, cmName, namespace, cmName, namespace)
 }
@@ -613,7 +613,7 @@ func testAccPatchConfigBasic(namespace, cmName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -637,7 +637,7 @@ data:
 YAML
 
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
 }
@@ -647,7 +647,7 @@ func testAccPatchConfigNonExistent(namespace string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -667,7 +667,7 @@ resource "k8sconnect_patch" "test" {
 
   patch = "data:\n  key: value"
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, namespace)
 }
@@ -677,7 +677,7 @@ func testAccPatchConfigOwnershipTransferSetup(namespace, cmName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -687,7 +687,7 @@ YAML
   cluster_connection = { kubeconfig = var.raw }
 }
 
-resource "k8sconnect_manifest" "test_cm" {
+resource "k8sconnect_object" "test_cm" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: ConfigMap
@@ -698,7 +698,7 @@ data:
   kubectl-field: original-value
 YAML
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
 }
@@ -708,7 +708,7 @@ func testAccPatchConfigOwnershipTransferPatch(namespace, cmName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -732,7 +732,7 @@ data:
 YAML
 
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
 }
@@ -742,7 +742,7 @@ func testAccPatchConfigMultiOwnerSetup(namespace, cmName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -759,7 +759,7 @@ func testAccPatchConfigMultiOwnerPatch(namespace, cmName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -784,7 +784,7 @@ data:
 YAML
 
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
 }
@@ -794,7 +794,7 @@ func testAccPatchConfigMultiplePatchTypes(namespace string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -817,7 +817,7 @@ resource "k8sconnect_patch" "test" {
   json_patch = "[{\"op\":\"add\",\"path\":\"/data/key\",\"value\":\"value\"}]"
 
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, namespace)
 }
@@ -827,7 +827,7 @@ func testAccPatchConfigUpdate1(namespace, cmName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -851,7 +851,7 @@ data:
 YAML
 
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
 }
@@ -861,7 +861,7 @@ func testAccPatchConfigUpdate2(namespace, cmName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -885,7 +885,7 @@ data:
 YAML
 
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
 }
@@ -895,7 +895,7 @@ func testAccPatchConfigUpdate3(namespace, cmName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -920,7 +920,7 @@ data:
 YAML
 
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
 }
@@ -930,7 +930,7 @@ func testAccPatchConfigTargetChange1(namespace, cmName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -950,7 +950,7 @@ resource "k8sconnect_patch" "test" {
 
   patch = "data:\n  patched: value"
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
 }
@@ -960,7 +960,7 @@ func testAccPatchConfigTargetChange2(namespace, cmName string) string {
 variable "raw" { type = string }
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_ns" {
+resource "k8sconnect_object" "test_ns" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -980,7 +980,7 @@ resource "k8sconnect_patch" "test" {
 
   patch = "data:\n  patched: value"
   cluster_connection = { kubeconfig = var.raw }
-  depends_on = [k8sconnect_manifest.test_ns]
+  depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
 }

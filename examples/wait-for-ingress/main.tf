@@ -2,7 +2,7 @@
 
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "namespace" {
+resource "k8sconnect_object" "namespace" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: Namespace
@@ -14,7 +14,7 @@ resource "k8sconnect_manifest" "namespace" {
 }
 
 # Create backend service
-resource "k8sconnect_manifest" "backend" {
+resource "k8sconnect_object" "backend" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: Service
@@ -30,11 +30,11 @@ resource "k8sconnect_manifest" "backend" {
   YAML
 
   cluster_connection = var.cluster_connection
-  depends_on         = [k8sconnect_manifest.namespace]
+  depends_on         = [k8sconnect_object.namespace]
 }
 
 # Create Ingress
-resource "k8sconnect_manifest" "ingress" {
+resource "k8sconnect_object" "ingress" {
   yaml_body = <<-YAML
     apiVersion: networking.k8s.io/v1
     kind: Ingress
@@ -56,13 +56,13 @@ resource "k8sconnect_manifest" "ingress" {
   YAML
 
   cluster_connection = var.cluster_connection
-  depends_on         = [k8sconnect_manifest.backend]
+  depends_on         = [k8sconnect_object.backend]
 }
 
 # Wait for Ingress controller to assign hostname/IP
 # Infrastructure pattern: use field wait to get status for DNS
 resource "k8sconnect_wait" "ingress" {
-  object_ref = k8sconnect_manifest.ingress.object_ref
+  object_ref = k8sconnect_object.ingress.object_ref
 
   cluster_connection = var.cluster_connection
 
@@ -73,7 +73,7 @@ resource "k8sconnect_wait" "ingress" {
 }
 
 # Use the Ingress hostname in DNS configuration
-resource "k8sconnect_manifest" "dns_config" {
+resource "k8sconnect_object" "dns_config" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: ConfigMap

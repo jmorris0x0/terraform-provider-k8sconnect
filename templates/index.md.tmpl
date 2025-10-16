@@ -22,7 +22,7 @@ resource "aws_eks_cluster" "main" {
 }
 
 # Deploy workloads immediately - no waiting for provider configuration!
-resource "k8sconnect_manifest" "cert_manager" {
+resource "k8sconnect_object" "cert_manager" {
   yaml_body = file("cert-manager.yaml")
 
   cluster_connection = {
@@ -93,13 +93,13 @@ cluster_connection = {
 
 ## Resources
 
-- `k8sconnect_manifest` - Full lifecycle management for any Kubernetes resource
+- `k8sconnect_object` - Full lifecycle management for any Kubernetes resource
 - `k8sconnect_patch` - Surgical modifications to existing resources
 
 ## Data Sources
 
 - `k8sconnect_yaml_split` - Parse multi-document YAML files
-- `k8sconnect_manifest` - Read existing cluster resources
+- `k8sconnect_object` - Read existing cluster resources
 - `k8sconnect_yaml_scoped` - Filter resources by category (CRDs, cluster-scoped, namespaced)
 
 {{ .SchemaMarkdown | trimspace }}

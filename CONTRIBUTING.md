@@ -168,7 +168,7 @@ Integration tests against a real k3d Kubernetes cluster. These verify the provid
 make testacc
 
 # Run a specific test
-TEST=TestAccManifestResource_Basic make testacc
+TEST=TestAccObjectResource_Basic make testacc
 
 # Reduce output noise
 make testacc 2>&1 | grep FAIL
@@ -309,7 +309,7 @@ Other ADRs document specific features like CRD retry, immutable resources, ident
 
 ### File Organization
 
-- **Resource layer**: `internal/k8sconnect/resource/manifest/`
+- **Resource layer**: `internal/k8sconnect/resource/object/`
   - `manifest.go` - Schema definition
   - `plan_modifier.go` - ModifyPlan with dry-run
   - `crud.go` - CRUD operations

@@ -2,7 +2,7 @@
 
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "namespace" {
+resource "k8sconnect_object" "namespace" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: Namespace
@@ -13,7 +13,7 @@ resource "k8sconnect_manifest" "namespace" {
   cluster_connection = var.cluster_connection
 }
 
-resource "k8sconnect_manifest" "loadbalancer_service" {
+resource "k8sconnect_object" "loadbalancer_service" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: Service
@@ -30,11 +30,11 @@ resource "k8sconnect_manifest" "loadbalancer_service" {
   YAML
 
   cluster_connection = var.cluster_connection
-  depends_on         = [k8sconnect_manifest.namespace]
+  depends_on         = [k8sconnect_object.namespace]
 }
 
 resource "k8sconnect_wait" "loadbalancer_service" {
-  object_ref = k8sconnect_manifest.loadbalancer_service.object_ref
+  object_ref = k8sconnect_object.loadbalancer_service.object_ref
 
   cluster_connection = var.cluster_connection
 
@@ -44,7 +44,7 @@ resource "k8sconnect_wait" "loadbalancer_service" {
   }
 }
 
-resource "k8sconnect_manifest" "endpoint_config" {
+resource "k8sconnect_object" "endpoint_config" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: ConfigMap

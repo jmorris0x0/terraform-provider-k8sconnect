@@ -24,7 +24,7 @@ Current k8sconnect behavior:
 
 When users change immutable fields in Terraform configuration:
 ```hcl
-resource "k8sconnect_manifest" "pvc" {
+resource "k8sconnect_object" "pvc" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -164,8 +164,8 @@ During ModifyPlan, after dry-run:
 ### User Experience
 Plan output shows:
 ```
-# k8sconnect_manifest.pvc must be replaced
--/+ resource "k8sconnect_manifest" "pvc" {
+# k8sconnect_object.pvc must be replaced
+-/+ resource "k8sconnect_object" "pvc" {
     ~ yaml_body = <<YAML
         spec:
           resources:

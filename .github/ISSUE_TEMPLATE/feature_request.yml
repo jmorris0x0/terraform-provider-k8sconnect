@@ -31,7 +31,7 @@ body:
 
         Example configuration:
         ```hcl
-        resource "k8sconnect_manifest" "example" {
+        resource "k8sconnect_object" "example" {
           new_feature = "value"
         }
         ```
@@ -54,7 +54,7 @@ body:
       label: Feature Scope
       description: What area does this feature relate to?
       options:
-        - Resource (k8sconnect_manifest)
+        - Resource (k8sconnect_object)
         - Data Source (yaml_split, yaml_scoped, etc.)
         - Connection/Authentication
         - Field Ownership/Drift Detection

@@ -97,7 +97,7 @@ func (r *waitResource) Configure(ctx context.Context, req resource.ConfigureRequ
 func (r *waitResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Waits for a Kubernetes resource to reach a desired state. " +
-			"Use this resource to wait for resources created by k8sconnect_manifest without risking resource tainting on timeout. " +
+			"Use this resource to wait for resources created by k8sconnect_object without risking resource tainting on timeout. " +
 			"Follows the pattern: create resource -> wait for readiness -> use outputs.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -110,7 +110,7 @@ func (r *waitResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 			"object_ref": schema.SingleNestedAttribute{
 				Required: true,
 				Description: "Reference to the Kubernetes object to wait for. " +
-					"Typically populated from k8sconnect_manifest.resource_name.object_ref output.",
+					"Typically populated from k8sconnect_object.resource_name.object_ref output.",
 				Attributes: map[string]schema.Attribute{
 					"api_version": schema.StringAttribute{
 						Required:    true,
@@ -133,7 +133,7 @@ func (r *waitResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 			"cluster_connection": schema.SingleNestedAttribute{
 				Required: true,
 				Description: "Kubernetes cluster connection for accessing the resource. " +
-					"Should match the connection used by the k8sconnect_manifest resource.",
+					"Should match the connection used by the k8sconnect_object resource.",
 				Attributes: auth.GetConnectionSchemaForResource(),
 			},
 			"wait_for": schema.SingleNestedAttribute{

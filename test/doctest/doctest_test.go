@@ -24,10 +24,10 @@ func TestMarkdownDocumentation(t *testing.T) {
 	docFiles := []string{
 		"../../README.md",
 		"../../docs/index.md",
-		"../../docs/resources/manifest.md",
+		"../../docs/resources/object.md",
 		"../../docs/resources/wait.md",
 		"../../docs/resources/patch.md",
-		"../../docs/data-sources/manifest.md",
+		"../../docs/data-sources/object.md",
 		"../../docs/data-sources/yaml_split.md",
 		"../../docs/data-sources/yaml_scoped.md",
 	}
@@ -264,7 +264,7 @@ func ensureNamespaceExists(content string) string {
 		// Use namespace name in resource name to avoid conflicts in parallel tests
 		// Replace hyphens with underscores for valid Terraform identifiers
 		resourceName := strings.ReplaceAll(foundNamespace, "-", "_")
-		namespaceResource := fmt.Sprintf(`resource "k8sconnect_manifest" "ns_%s" {
+		namespaceResource := fmt.Sprintf(`resource "k8sconnect_object" "ns_%s" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: Namespace

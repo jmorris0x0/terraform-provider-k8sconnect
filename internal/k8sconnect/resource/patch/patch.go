@@ -109,9 +109,9 @@ func (r *patchResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 - Resources created and managed by other tools
 
 **NOT appropriate for:**
-- Resources managed by k8sconnect_manifest in the same state
+- Resources managed by k8sconnect_object in the same state
 - Resources requiring full lifecycle control
-- Resources you could manage with k8sconnect_manifest instead
+- Resources you could manage with k8sconnect_object instead
 
 **Destroy behavior:**
 When you destroy a patch resource, ownership is released but patched values remain on the target resource. Values are not reverted to their original state.`,

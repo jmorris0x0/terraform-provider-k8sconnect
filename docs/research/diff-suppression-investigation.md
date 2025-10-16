@@ -27,7 +27,7 @@
 ### The Desired Pattern
 
 ```terraform
-resource "k8sconnect_manifest" "example" {
+resource "k8sconnect_object" "example" {
   yaml_body = file("deployment.yaml")
 
   # Store complete cluster state
@@ -268,11 +268,11 @@ The framework simply does not provide APIs to:
 ### Alternative 2: Data Source for Complete State
 
 ```hcl
-resource "k8sconnect_manifest" "example" {
+resource "k8sconnect_object" "example" {
   managed_state_projection = computed  # Filtered
 }
 
-data "k8sconnect_manifest" "example_complete" {
+data "k8sconnect_object" "example_complete" {
   namespace = "default"
   name      = "example"
 
@@ -300,7 +300,7 @@ data "k8sconnect_manifest" "example_complete" {
 ### Alternative 4: Resource-Level ModifyPlan with JSON Manipulation
 
 ```go
-func (r *manifestResource) ModifyPlan(...) {
+func (r *objectResource) ModifyPlan(...) {
     // Filter cluster_state JSON, compare, conditionally preserve
     if filteredStatesEqual(plan, state, ignoreFields) {
         plan.ClusterState = state.ClusterState
@@ -407,7 +407,7 @@ After extensive analysis, the contract has a nuance:
 
 **If users need access to complete cluster state:**
 ```hcl
-data "k8sconnect_manifest" "complete" {
+data "k8sconnect_object" "complete" {
   # Reference managed resource
   # Returns complete unfiltered state
 }
@@ -623,7 +623,7 @@ The k8sconnect approach of filtering state by SSA managedFields is:
 - gavinbunney/terraform-provider-kubectl: `kubernetes/resource_kubectl_manifest.go` (fingerprinting)
 
 **Code:**
-- `internal/k8sconnect/resource/manifest/manifest.go`
-- `internal/k8sconnect/resource/manifest/plan_modifier.go`
-- `internal/k8sconnect/resource/manifest/projection.go`
-- `internal/k8sconnect/resource/manifest/crud_common.go`
+- `internal/k8sconnect/resource/object/manifest.go`
+- `internal/k8sconnect/resource/object/plan_modifier.go`
+- `internal/k8sconnect/resource/object/projection.go`
+- `internal/k8sconnect/resource/object/crud_common.go`

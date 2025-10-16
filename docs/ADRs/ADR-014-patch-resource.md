@@ -23,7 +23,7 @@ Accepted - Implemented (2025-10-11)
 
 ### Core Design Principles
 
-**1. External Resources Only** - Patches are STRICTLY for resources NOT managed by `k8sconnect_manifest` in this state. Critical safety mechanism: `isManagedByThisState()` checks for k8sconnect annotations and field managers to prevent self-patching.
+**1. External Resources Only** - Patches are STRICTLY for resources NOT managed by `k8sconnect_object` in this state. Critical safety mechanism: `isManagedByThisState()` checks for k8sconnect annotations and field managers to prevent self-patching.
 
 **2. Per-Field Ownership Transfer on Destroy** - When destroyed:
 - Parse `previous_owners` map to group fields by their original controller
@@ -101,7 +101,7 @@ resource "k8sconnect_patch" "aws_node_proxy" {
 
 ### Challenge 4: Testing Custom Field Managers
 
-**Problem**: Need to test ownership transfer, but `k8sconnect_manifest` hardcodes `field_manager = "k8sconnect"`.
+**Problem**: Need to test ownership transfer, but `k8sconnect_object` hardcodes `field_manager = "k8sconnect"`.
 
 **Options considered:**
 1. Add `field_manager` attribute to manifest resource - Rejected: Big change, out of scope

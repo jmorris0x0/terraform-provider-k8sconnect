@@ -48,7 +48,7 @@ resource "aws_eks_cluster" "main" {
 }
 
 # Deploy workloads immediately - no waiting for provider configuration!
-resource "k8sconnect_manifest" "cert_manager" {
+resource "k8sconnect_object" "cert_manager" {
   yaml_body = file("cert-manager.yaml")
 
   cluster_connection = {
@@ -130,12 +130,12 @@ locals {
 }
 
 # Deploy to different clusters in one apply
-resource "k8sconnect_manifest" "prod_app" {
+resource "k8sconnect_object" "prod_app" {
   yaml_body          = file("app.yaml")
   cluster_connection = local.prod_connection
 }
 
-resource "k8sconnect_manifest" "staging_app" {
+resource "k8sconnect_object" "staging_app" {
   yaml_body          = file("app.yaml")
   cluster_connection = local.staging_connection
 }
@@ -154,7 +154,7 @@ data "k8sconnect_yaml_split" "app" {
 }
 
 # Apply each manifest individually  
-resource "k8sconnect_manifest" "app" {
+resource "k8sconnect_object" "app" {
   for_each = data.k8sconnect_yaml_split.app.manifests
   
   yaml_body = each.value
@@ -215,7 +215,7 @@ Stop writing `null_resource` provisioners with kubectl wait. Built-in waiting wi
 <!-- runnable-test: readme-wait-for-loadbalancer -->
 ```hcl
 # Create the LoadBalancer Service
-resource "k8sconnect_manifest" "service" {
+resource "k8sconnect_object" "service" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: Service
@@ -236,7 +236,7 @@ resource "k8sconnect_manifest" "service" {
 
 # Wait for LoadBalancer IP to be assigned
 resource "k8sconnect_wait" "service" {
-  object_ref = k8sconnect_manifest.service.object_ref
+  object_ref = k8sconnect_object.service.object_ref
 
   wait_for = {
     field   = "status.loadBalancer.ingress"
@@ -247,7 +247,7 @@ resource "k8sconnect_wait" "service" {
 }
 
 # Use the LoadBalancer IP immediately
-resource "k8sconnect_manifest" "config" {
+resource "k8sconnect_object" "config" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: ConfigMap
@@ -311,15 +311,15 @@ Import existing Kubernetes resources into Terraform management:
 export KUBECONFIG=~/.kube/config
 
 # Namespaced resources: context/namespace/Kind/name
-terraform import k8sconnect_manifest.nginx "prod/default/Pod/nginx-abc123"
+terraform import k8sconnect_object.nginx "prod/default/Pod/nginx-abc123"
 
 # Cluster-scoped resources: context/Kind/name
-terraform import k8sconnect_manifest.namespace "prod/Namespace/my-namespace"
+terraform import k8sconnect_object.namespace "prod/Namespace/my-namespace"
 ```
 
 After import, add the `cluster_connection` block to your configuration to match how you want to connect during normal operations.
 
-> **Note:** Import is only available for `k8sconnect_manifest`. Patches are non-destructive modifications and don't support import.
+> **Note:** Import is only available for `k8sconnect_object`. Patches are non-destructive modifications and don't support import.
 
 ---
 
@@ -339,14 +339,14 @@ All `cluster_connection` fields are marked sensitive and won't appear in logs or
 ## Resources & Data Sources
 
 **Resources:**
-- `k8sconnect_manifest` - Full lifecycle management for any Kubernetes resource ([docs](docs/resources/manifest.md))
+- `k8sconnect_object` - Full lifecycle management for any Kubernetes resource ([docs](docs/resources/manifest.md))
 - `k8sconnect_wait` - Wait for resources to reach desired state with status outputs ([docs](docs/resources/wait.md))
 - `k8sconnect_patch` - Surgical modifications to existing resources ([docs](docs/resources/patch.md))
 
 **Data Sources:**
 - `k8sconnect_yaml_split` - Parse multi-document YAML files ([docs](docs/data-sources/yaml_split.md))
 - `k8sconnect_yaml_scoped` - Filter resources by category ([docs](docs/data-sources/yaml_scoped.md))
-- `k8sconnect_manifest` - Read existing cluster resources ([docs](docs/data-sources/resource.md))
+- `k8sconnect_object` - Read existing cluster resources ([docs](docs/data-sources/resource.md))
 
 **→ [Browse all 16 runnable examples](examples/)** with test coverage
 
