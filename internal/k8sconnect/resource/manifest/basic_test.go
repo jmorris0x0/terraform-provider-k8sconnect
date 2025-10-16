@@ -60,6 +60,12 @@ func TestAccManifestResource_Basic(t *testing.T) {
 					resource.TestCheckResourceAttr("k8sconnect_manifest.test_exec", "yaml_body", testNamespaceYAML(ns)),
 					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_exec", "id"),
 
+					// ✅ Verify object_ref is populated correctly
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test_exec", "object_ref.api_version", "v1"),
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test_exec", "object_ref.kind", "Namespace"),
+					resource.TestCheckResourceAttr("k8sconnect_manifest.test_exec", "object_ref.name", ns),
+					// Note: namespace field is null for cluster-scoped resources, so it won't appear in state
+
 					// ✅ Verify namespace actually exists in Kubernetes
 					testhelpers.CheckNamespaceExists(k8sClient, ns),
 				),

@@ -1,5 +1,5 @@
-// internal/k8sconnect/resource/manifest/wait.go
-package manifest
+// internal/k8sconnect/resource/wait/wait_logic.go
+package wait
 
 import (
 	"context"
@@ -18,7 +18,7 @@ import (
 )
 
 // waitForResource waits for resource to meet configured conditions
-func (r *manifestResource) waitForResource(ctx context.Context, client k8sclient.K8sClient,
+func (r *waitResource) waitForResource(ctx context.Context, client k8sclient.K8sClient,
 	gvr schema.GroupVersionResource, obj *unstructured.Unstructured, waitConfig waitForModel) error {
 
 	// Determine timeout
@@ -83,7 +83,7 @@ func (r *manifestResource) waitForResource(ctx context.Context, client k8sclient
 }
 
 // waitForField waits for a field to exist and be non-empty
-func (r *manifestResource) waitForField(ctx context.Context, client k8sclient.K8sClient,
+func (r *waitResource) waitForField(ctx context.Context, client k8sclient.K8sClient,
 	gvr schema.GroupVersionResource, obj *unstructured.Unstructured,
 	fieldPath string, timeout time.Duration) error {
 
@@ -163,7 +163,7 @@ func (r *manifestResource) waitForField(ctx context.Context, client k8sclient.K8
 }
 
 // pollForField falls back to polling when watch is not available
-func (r *manifestResource) pollForField(ctx context.Context, client k8sclient.K8sClient,
+func (r *waitResource) pollForField(ctx context.Context, client k8sclient.K8sClient,
 	gvr schema.GroupVersionResource, obj *unstructured.Unstructured,
 	jp *jsonpath.JSONPath, fieldPath string, timeout time.Duration) error {
 
@@ -205,7 +205,7 @@ func (r *manifestResource) pollForField(ctx context.Context, client k8sclient.K8
 }
 
 // waitForFieldValues waits for fields to have specific values
-func (r *manifestResource) waitForFieldValues(ctx context.Context, client k8sclient.K8sClient,
+func (r *waitResource) waitForFieldValues(ctx context.Context, client k8sclient.K8sClient,
 	gvr schema.GroupVersionResource, obj *unstructured.Unstructured,
 	fieldValues map[string]string, timeout time.Duration) error {
 
@@ -290,7 +290,7 @@ func (r *manifestResource) waitForFieldValues(ctx context.Context, client k8scli
 }
 
 // pollForFieldValues polls for field values when watch is not available
-func (r *manifestResource) pollForFieldValues(ctx context.Context, client k8sclient.K8sClient,
+func (r *waitResource) pollForFieldValues(ctx context.Context, client k8sclient.K8sClient,
 	gvr schema.GroupVersionResource, obj *unstructured.Unstructured,
 	checkFunc func(*unstructured.Unstructured) bool, fieldValues map[string]string, timeout time.Duration) error {
 
@@ -324,7 +324,7 @@ func (r *manifestResource) pollForFieldValues(ctx context.Context, client k8scli
 }
 
 // waitForCondition waits for a Kubernetes condition to be True
-func (r *manifestResource) waitForCondition(ctx context.Context, client k8sclient.K8sClient,
+func (r *waitResource) waitForCondition(ctx context.Context, client k8sclient.K8sClient,
 	gvr schema.GroupVersionResource, obj *unstructured.Unstructured,
 	conditionType string, timeout time.Duration) error {
 
@@ -351,7 +351,7 @@ func (r *manifestResource) waitForCondition(ctx context.Context, client k8sclien
 }
 
 // createConditionChecker returns a function that checks if a condition is met
-func (r *manifestResource) createConditionChecker(conditionType string) func(*unstructured.Unstructured) bool {
+func (r *waitResource) createConditionChecker(conditionType string) func(*unstructured.Unstructured) bool {
 	return func(obj *unstructured.Unstructured) bool {
 		conditions, found, err := unstructured.NestedSlice(obj.Object, "status", "conditions")
 		if err != nil || !found {
@@ -368,7 +368,7 @@ func (r *manifestResource) createConditionChecker(conditionType string) func(*un
 }
 
 // isConditionMet checks if a single condition matches and is True
-func (r *manifestResource) isConditionMet(cond interface{}, conditionType string) bool {
+func (r *waitResource) isConditionMet(cond interface{}, conditionType string) bool {
 	condMap, ok := cond.(map[string]interface{})
 	if !ok {
 		return false
@@ -381,7 +381,7 @@ func (r *manifestResource) isConditionMet(cond interface{}, conditionType string
 }
 
 // checkConditionImmediately checks if condition is already satisfied
-func (r *manifestResource) checkConditionImmediately(ctx context.Context, client k8sclient.K8sClient,
+func (r *waitResource) checkConditionImmediately(ctx context.Context, client k8sclient.K8sClient,
 	gvr schema.GroupVersionResource, obj *unstructured.Unstructured,
 	checker func(*unstructured.Unstructured) bool, conditionType string) (bool, error) {
 
@@ -401,7 +401,7 @@ func (r *manifestResource) checkConditionImmediately(ctx context.Context, client
 }
 
 // watchForCondition sets up a watch for condition changes
-func (r *manifestResource) watchForCondition(ctx context.Context, client k8sclient.K8sClient,
+func (r *waitResource) watchForCondition(ctx context.Context, client k8sclient.K8sClient,
 	gvr schema.GroupVersionResource, obj *unstructured.Unstructured,
 	checker func(*unstructured.Unstructured) bool, conditionType string, timeout time.Duration) error {
 
@@ -426,14 +426,14 @@ func (r *manifestResource) watchForCondition(ctx context.Context, client k8sclie
 }
 
 // createWatchOptions creates watch options for the resource
-func (r *manifestResource) createWatchOptions(obj *unstructured.Unstructured) metav1.ListOptions {
+func (r *waitResource) createWatchOptions(obj *unstructured.Unstructured) metav1.ListOptions {
 	return metav1.ListOptions{
 		FieldSelector: fmt.Sprintf("metadata.name=%s", obj.GetName()),
 	}
 }
 
 // processWatchEvents processes events from the watcher
-func (r *manifestResource) processWatchEvents(ctx context.Context, watcher watch.Interface,
+func (r *waitResource) processWatchEvents(ctx context.Context, watcher watch.Interface,
 	checker func(*unstructured.Unstructured) bool, conditionType string, timeout time.Duration) error {
 
 	timeoutCh := time.After(timeout)
@@ -466,7 +466,7 @@ func (r *manifestResource) processWatchEvents(ctx context.Context, watcher watch
 }
 
 // handleWatchEvent handles a single watch event
-func (r *manifestResource) handleWatchEvent(ctx context.Context, event watch.Event,
+func (r *waitResource) handleWatchEvent(ctx context.Context, event watch.Event,
 	checker func(*unstructured.Unstructured) bool, conditionType string) error {
 
 	if event.Type == watch.Error {
@@ -477,7 +477,7 @@ func (r *manifestResource) handleWatchEvent(ctx context.Context, event watch.Eve
 }
 
 // isConditionMetByEvent checks if the event indicates condition is met
-func (r *manifestResource) isConditionMetByEvent(event watch.Event, checker func(*unstructured.Unstructured) bool) bool {
+func (r *waitResource) isConditionMetByEvent(event watch.Event, checker func(*unstructured.Unstructured) bool) bool {
 	if event.Type != watch.Modified && event.Type != watch.Added {
 		return false
 	}
@@ -491,12 +491,12 @@ func (r *manifestResource) isConditionMetByEvent(event watch.Event, checker func
 }
 
 // isWatchError determines if an error is watch-related
-func (r *manifestResource) isWatchError(err error) bool {
+func (r *waitResource) isWatchError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "watch")
 }
 
 // pollForCondition polls for condition when watch is not available
-func (r *manifestResource) pollForCondition(ctx context.Context, client k8sclient.K8sClient,
+func (r *waitResource) pollForCondition(ctx context.Context, client k8sclient.K8sClient,
 	gvr schema.GroupVersionResource, obj *unstructured.Unstructured,
 	checkFunc func(*unstructured.Unstructured) bool, conditionType string, timeout time.Duration) error {
 
@@ -530,7 +530,7 @@ func (r *manifestResource) pollForCondition(ctx context.Context, client k8sclien
 }
 
 // waitForRollout waits for Deployment/StatefulSet/DaemonSet rollout
-func (r *manifestResource) waitForRollout(ctx context.Context, client k8sclient.K8sClient,
+func (r *waitResource) waitForRollout(ctx context.Context, client k8sclient.K8sClient,
 	gvr schema.GroupVersionResource, obj *unstructured.Unstructured, timeout time.Duration) error {
 
 	kind := obj.GetKind()
@@ -547,7 +547,7 @@ func (r *manifestResource) waitForRollout(ctx context.Context, client k8sclient.
 }
 
 // waitForDeploymentRollout waits for a Deployment to complete its rollout
-func (r *manifestResource) waitForDeploymentRollout(ctx context.Context, client k8sclient.K8sClient,
+func (r *waitResource) waitForDeploymentRollout(ctx context.Context, client k8sclient.K8sClient,
 	gvr schema.GroupVersionResource, obj *unstructured.Unstructured, timeout time.Duration) error {
 
 	checkRollout := func(obj *unstructured.Unstructured) (bool, string) {
@@ -580,7 +580,7 @@ func (r *manifestResource) waitForDeploymentRollout(ctx context.Context, client 
 }
 
 // waitForStatefulSetRollout waits for a StatefulSet to complete its rollout
-func (r *manifestResource) waitForStatefulSetRollout(ctx context.Context, client k8sclient.K8sClient,
+func (r *waitResource) waitForStatefulSetRollout(ctx context.Context, client k8sclient.K8sClient,
 	gvr schema.GroupVersionResource, obj *unstructured.Unstructured, timeout time.Duration) error {
 
 	checkRollout := func(obj *unstructured.Unstructured) (bool, string) {
@@ -612,7 +612,7 @@ func (r *manifestResource) waitForStatefulSetRollout(ctx context.Context, client
 }
 
 // waitForDaemonSetRollout waits for a DaemonSet to complete its rollout
-func (r *manifestResource) waitForDaemonSetRollout(ctx context.Context, client k8sclient.K8sClient,
+func (r *waitResource) waitForDaemonSetRollout(ctx context.Context, client k8sclient.K8sClient,
 	gvr schema.GroupVersionResource, obj *unstructured.Unstructured, timeout time.Duration) error {
 
 	checkRollout := func(obj *unstructured.Unstructured) (bool, string) {
@@ -639,7 +639,7 @@ func (r *manifestResource) waitForDaemonSetRollout(ctx context.Context, client k
 }
 
 // waitWithCheck is a generic wait function using a check function
-func (r *manifestResource) waitWithCheck(ctx context.Context, client k8sclient.K8sClient,
+func (r *waitResource) waitWithCheck(ctx context.Context, client k8sclient.K8sClient,
 	gvr schema.GroupVersionResource, obj *unstructured.Unstructured,
 	checkFunc func(*unstructured.Unstructured) (bool, string), waitType string, timeout time.Duration) error {
 
@@ -713,7 +713,7 @@ func (r *manifestResource) waitWithCheck(ctx context.Context, client k8sclient.K
 }
 
 // pollWithCheck polls using a check function when watch is not available
-func (r *manifestResource) pollWithCheck(ctx context.Context, client k8sclient.K8sClient,
+func (r *waitResource) pollWithCheck(ctx context.Context, client k8sclient.K8sClient,
 	gvr schema.GroupVersionResource, obj *unstructured.Unstructured,
 	checkFunc func(*unstructured.Unstructured) (bool, string), waitType string, timeout time.Duration) error {
 

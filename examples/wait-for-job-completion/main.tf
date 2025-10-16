@@ -28,12 +28,21 @@ resource "k8sconnect_manifest" "migration_job" {
           containers:
           - name: migrate
             image: public.ecr.aws/docker/library/busybox:latest
-            command: 
+            command:
             - sh
             - -c
             - echo "Running migrations..." && sleep 5 && echo "Complete!"
           restartPolicy: Never
   YAML
+
+  cluster_connection = var.cluster_connection
+  depends_on         = [k8sconnect_manifest.namespace]
+}
+
+resource "k8sconnect_wait" "migration_job" {
+  object_ref = k8sconnect_manifest.migration_job.object_ref
+
+  cluster_connection = var.cluster_connection
 
   wait_for = {
     field_value = {
@@ -41,9 +50,6 @@ resource "k8sconnect_manifest" "migration_job" {
     }
     timeout = "2m"
   }
-
-  cluster_connection = var.cluster_connection
-  depends_on         = [k8sconnect_manifest.namespace]
 }
 
 # Deploy app only after migrations complete
@@ -62,7 +68,7 @@ resource "k8sconnect_manifest" "app_deployment" {
   YAML
 
   cluster_connection = var.cluster_connection
-  depends_on         = [k8sconnect_manifest.migration_job]
+  depends_on         = [k8sconnect_wait.migration_job]
 }
 
 output "job_deployed" {

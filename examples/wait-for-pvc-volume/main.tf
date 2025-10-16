@@ -34,8 +34,7 @@ resource "k8sconnect_manifest" "pv" {
   cluster_connection = var.cluster_connection
 }
 
-# Create PVC and wait for it to be bound
-# Infrastructure resource - wait for binding to complete before proceeding
+# Create PVC
 resource "k8sconnect_manifest" "pvc" {
   yaml_body = <<-YAML
     apiVersion: v1
@@ -52,14 +51,20 @@ resource "k8sconnect_manifest" "pvc" {
           storage: 5Gi
   YAML
 
-  # Wait for PVC to be bound before proceeding with dependent resources
+  cluster_connection = var.cluster_connection
+  depends_on         = [k8sconnect_manifest.namespace, k8sconnect_manifest.pv]
+}
+
+# Wait for PVC to be bound before proceeding with dependent resources
+resource "k8sconnect_wait" "pvc" {
+  object_ref = k8sconnect_manifest.pvc.object_ref
+
+  cluster_connection = var.cluster_connection
+
   wait_for = {
     field_value = { "status.phase" = "Bound" }
     timeout     = "1m"
   }
-
-  cluster_connection = var.cluster_connection
-  depends_on         = [k8sconnect_manifest.namespace, k8sconnect_manifest.pv]
 }
 
 # Dependent resource that requires PVC to be bound
@@ -77,5 +82,5 @@ resource "k8sconnect_manifest" "volume_metadata" {
   YAML
 
   cluster_connection = var.cluster_connection
-  depends_on         = [k8sconnect_manifest.pvc]
+  depends_on         = [k8sconnect_wait.pvc]
 }

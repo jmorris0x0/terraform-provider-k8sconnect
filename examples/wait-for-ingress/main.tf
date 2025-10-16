@@ -33,8 +33,7 @@ resource "k8sconnect_manifest" "backend" {
   depends_on         = [k8sconnect_manifest.namespace]
 }
 
-# Create Ingress and wait for hostname
-# Infrastructure resource - need hostname for DNS configuration
+# Create Ingress
 resource "k8sconnect_manifest" "ingress" {
   yaml_body = <<-YAML
     apiVersion: networking.k8s.io/v1
@@ -56,15 +55,21 @@ resource "k8sconnect_manifest" "ingress" {
                   number: 8080
   YAML
 
-  # Wait for Ingress controller to assign hostname/IP
-  # Infrastructure pattern: use field wait to get status for DNS
+  cluster_connection = var.cluster_connection
+  depends_on         = [k8sconnect_manifest.backend]
+}
+
+# Wait for Ingress controller to assign hostname/IP
+# Infrastructure pattern: use field wait to get status for DNS
+resource "k8sconnect_wait" "ingress" {
+  object_ref = k8sconnect_manifest.ingress.object_ref
+
+  cluster_connection = var.cluster_connection
+
   wait_for = {
     field   = "status.loadBalancer.ingress"
     timeout = "2m"
   }
-
-  cluster_connection = var.cluster_connection
-  depends_on         = [k8sconnect_manifest.backend]
 }
 
 # Use the Ingress hostname in DNS configuration
@@ -76,15 +81,15 @@ resource "k8sconnect_manifest" "dns_config" {
       name: dns-config
       namespace: example
     data:
-      ingress_hostname: "${try(k8sconnect_manifest.ingress.status.loadBalancer.ingress[0].hostname, k8sconnect_manifest.ingress.status.loadBalancer.ingress[0].ip)}"
+      ingress_hostname: "${try(k8sconnect_wait.ingress.status.loadBalancer.ingress[0].hostname, k8sconnect_wait.ingress.status.loadBalancer.ingress[0].ip)}"
       external_url: "https://api.example.com"
   YAML
 
   cluster_connection = var.cluster_connection
-  depends_on         = [k8sconnect_manifest.ingress]
+  depends_on         = [k8sconnect_wait.ingress]
 }
 
 output "ingress_endpoint" {
-  value       = try(k8sconnect_manifest.ingress.status.loadBalancer.ingress[0].hostname, k8sconnect_manifest.ingress.status.loadBalancer.ingress[0].ip)
+  value       = try(k8sconnect_wait.ingress.status.loadBalancer.ingress[0].hostname, k8sconnect_wait.ingress.status.loadBalancer.ingress[0].ip)
   description = "Ingress controller assigned hostname or IP"
 }

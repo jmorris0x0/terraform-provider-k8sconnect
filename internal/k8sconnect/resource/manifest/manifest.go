@@ -8,9 +8,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
-	"github.com/hashicorp/terraform-plugin-framework-validators/mapvalidator"
-	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
-	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -19,7 +16,6 @@ import (
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/factory"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
-	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/validators"
 )
 
 var _ resource.Resource = (*manifestResource)(nil)
@@ -37,25 +33,23 @@ type manifestResource struct {
 }
 
 type manifestResourceModel struct {
-	ID                     types.String  `tfsdk:"id"`
-	YAMLBody               types.String  `tfsdk:"yaml_body"`
-	ClusterConnection      types.Object  `tfsdk:"cluster_connection"`
-	DeleteProtection       types.Bool    `tfsdk:"delete_protection"`
-	DeleteTimeout          types.String  `tfsdk:"delete_timeout"`
-	FieldOwnership         types.Map     `tfsdk:"field_ownership"`
-	ForceDestroy           types.Bool    `tfsdk:"force_destroy"`
-	IgnoreFields           types.List    `tfsdk:"ignore_fields"`
-	ManagedStateProjection types.Map     `tfsdk:"managed_state_projection"`
-	WaitFor                types.Object  `tfsdk:"wait_for"`
-	Status                 types.Dynamic `tfsdk:"status"`
+	ID                     types.String `tfsdk:"id"`
+	YAMLBody               types.String `tfsdk:"yaml_body"`
+	ClusterConnection      types.Object `tfsdk:"cluster_connection"`
+	DeleteProtection       types.Bool   `tfsdk:"delete_protection"`
+	DeleteTimeout          types.String `tfsdk:"delete_timeout"`
+	FieldOwnership         types.Map    `tfsdk:"field_ownership"`
+	ForceDestroy           types.Bool   `tfsdk:"force_destroy"`
+	IgnoreFields           types.List   `tfsdk:"ignore_fields"`
+	ManagedStateProjection types.Map    `tfsdk:"managed_state_projection"`
+	ObjectRef              types.Object `tfsdk:"object_ref"`
 }
 
-type waitForModel struct {
-	Field      types.String `tfsdk:"field"`
-	FieldValue types.Map    `tfsdk:"field_value"`
-	Condition  types.String `tfsdk:"condition"`
-	Rollout    types.Bool   `tfsdk:"rollout"`
-	Timeout    types.String `tfsdk:"timeout"`
+type objectRefModel struct {
+	APIVersion types.String `tfsdk:"api_version"`
+	Kind       types.String `tfsdk:"kind"`
+	Name       types.String `tfsdk:"name"`
+	Namespace  types.String `tfsdk:"namespace"`
 }
 
 // Creates a manifest resource with custom client getter
@@ -163,61 +157,27 @@ func (r *manifestResource) Schema(ctx context.Context, req resource.SchemaReques
 					"(e.g., when HPA takes ownership of spec.replicas). Empty/hidden when ownership is unchanged. " +
 					"Critical for understanding SSA conflicts and knowing which controller controls what.",
 			},
-			"status": schema.DynamicAttribute{
+			"object_ref": schema.SingleNestedAttribute{
 				Computed: true,
-				Description: "Resource status from the cluster, populated only when using wait_for with field='status.path'. " +
-					"Contains resource-specific runtime information like LoadBalancer IPs, Pod conditions, Deployment replicas. " +
-					"Follows the principle: 'You get only what you wait for' to avoid storing volatile status fields that cause drift. " +
-					"Returns null when wait_for is not configured or uses non-field wait types.",
-			},
-			"wait_for": schema.SingleNestedAttribute{
-				Optional:    true,
-				Description: "Wait for resource to reach desired state during apply. Automatically enables status tracking.",
+				Description: "Kubernetes object reference containing the identity of the applied resource. " +
+					"Populated after successful apply. Used by k8sconnect_wait resource to locate the object for waiting. " +
+					"Contains api_version, kind, name, and namespace (if namespaced).",
 				Attributes: map[string]schema.Attribute{
-					"field": schema.StringAttribute{
-						Optional:    true,
-						Description: "JSONPath to field that must exist/be non-empty. Example: 'status.loadBalancer.ingress'",
-						Validators: []validator.String{
-							stringvalidator.ConflictsWith(
-								path.MatchRelative().AtParent().AtName("field_value"),
-								path.MatchRelative().AtParent().AtName("condition"),
-							),
-							validators.JSONPath{}, // From common validators
-						},
+					"api_version": schema.StringAttribute{
+						Computed:    true,
+						Description: "Kubernetes API version (e.g., 'v1', 'apps/v1')",
 					},
-					"field_value": schema.MapAttribute{
-						Optional:    true,
-						ElementType: types.StringType,
-						Description: "Map of JSONPath to expected value. Example: {'status.phase': 'Running'}",
-						Validators: []validator.Map{
-							mapvalidator.ConflictsWith(
-								path.MatchRelative().AtParent().AtName("field"),
-								path.MatchRelative().AtParent().AtName("condition"),
-							),
-							validators.JSONPathMapKeys{}, // From common validators
-						},
+					"kind": schema.StringAttribute{
+						Computed:    true,
+						Description: "Kubernetes resource kind (e.g., 'Pod', 'Deployment')",
 					},
-					"condition": schema.StringAttribute{
-						Optional:    true,
-						Description: "Condition type that must be True. Example: 'Ready'",
-						Validators: []validator.String{
-							stringvalidator.ConflictsWith(
-								path.MatchRelative().AtParent().AtName("field"),
-								path.MatchRelative().AtParent().AtName("field_value"),
-							),
-						},
+					"name": schema.StringAttribute{
+						Computed:    true,
+						Description: "Resource name from metadata.name",
 					},
-					"rollout": schema.BoolAttribute{
-						Optional: true,
-						Description: "Wait for Deployment/StatefulSet/DaemonSet to complete rollout before considering the resource ready. " +
-							"Optional - rollout waiting is not automatic. Checks that all replicas are updated and available.",
-					},
-					"timeout": schema.StringAttribute{
-						Optional:    true,
-						Description: "Maximum time to wait. Defaults to 10m. Format: '30s', '5m', '1h'",
-						Validators: []validator.String{
-							durationValidator{},
-						},
+					"namespace": schema.StringAttribute{
+						Computed:    true,
+						Description: "Resource namespace from metadata.namespace. Null for cluster-scoped resources.",
 					},
 				},
 			},

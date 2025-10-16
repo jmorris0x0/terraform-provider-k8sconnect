@@ -293,14 +293,12 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		IgnoreFields:           types.ListNull(types.StringType),
 		ManagedStateProjection: projectionMapValue,
 		FieldOwnership:         fieldOwnershipMap,
-		WaitFor: types.ObjectNull(map[string]attr.Type{
-			"condition":   types.StringType,
-			"field":       types.StringType,
-			"field_value": types.MapType{ElemType: types.StringType},
-			"rollout":     types.BoolType,
-			"timeout":     types.StringType,
+		ObjectRef: types.ObjectNull(map[string]attr.Type{
+			"api_version": types.StringType,
+			"kind":        types.StringType,
+			"name":        types.StringType,
+			"namespace":   types.StringType,
 		}),
-		Status: types.DynamicNull(),
 	}
 
 	diags := resp.State.Set(ctx, &importedData)

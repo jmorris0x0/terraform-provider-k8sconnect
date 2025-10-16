@@ -52,3 +52,6 @@ Should I make field_ownership sensitive? It's very noisy during destroy.
 
 Last minute decision: Should I change the name of managed_state_projection?
 
+Rename manifest resource to k8sconnect_object. Better? Maybe.
+
+Stop docs tests from renaming resources. No reason to do that.
