@@ -11,6 +11,7 @@ Applies a single‑document Kubernetes YAML manifest to a cluster, with per‑re
 
 ## Example Usage - Basic Deployment
 
+<!-- runnable-test: manifest-basic-deployment -->
 ```terraform
 resource "k8sconnect_manifest" "namespace" {
   yaml_body = <<-YAML
@@ -49,6 +50,7 @@ resource "k8sconnect_manifest" "deployment" {
   depends_on         = [k8sconnect_manifest.namespace]
 }
 ```
+<!-- /runnable-test -->
 
 ## Example Usage - Bootstrap EKS Cluster with Workloads
 
@@ -80,6 +82,7 @@ resource "k8sconnect_manifest" "cert_manager" {
 
 Use `ignore_fields` to let the HorizontalPodAutoscaler manage replicas:
 
+<!-- runnable-test: manifest-hpa-coexistence -->
 ```terraform
 resource "k8sconnect_manifest" "app" {
   yaml_body = <<-YAML
@@ -139,11 +142,25 @@ resource "k8sconnect_manifest" "hpa" {
   depends_on         = [k8sconnect_manifest.app]
 }
 ```
+<!-- /runnable-test -->
+
+## Choosing a Wait Strategy
+
+**Infrastructure resources** (LoadBalancer, Ingress, cert-manager, Crossplane, Custom CRDs):
+- Need status values for DNS records, outputs, resource chaining
+- Use `field` waits → populates `.status` attribute
+- Example: `wait_for = { field = "status.loadBalancer.ingress" }`
+
+**Workload resources** (Deployment, Job, StatefulSet, DaemonSet):
+- Just need readiness confirmation for sequencing
+- Use `rollout`, `condition`, or `field_value` → no `.status` output, use `depends_on`
+- Example: `wait_for = { rollout = true }`
 
 ## Example Usage - Wait for LoadBalancer and Use Status (field wait)
 
-Wait for a LoadBalancer to be provisioned and use its IP in other resources. **Only `field` waits populate `.status` for chaining.**
+Wait for a LoadBalancer to be provisioned and use its IP in other resources.
 
+<!-- runnable-test: manifest-wait-loadbalancer -->
 ```terraform
 resource "k8sconnect_manifest" "loadbalancer_service" {
   yaml_body = <<-YAML
@@ -185,11 +202,13 @@ resource "k8sconnect_manifest" "endpoint_config" {
   depends_on         = [k8sconnect_manifest.loadbalancer_service]
 }
 ```
+<!-- /runnable-test -->
 
 ## Example Usage - Wait for Deployment Rollout (rollout wait)
 
 Wait for a Deployment to fully roll out before continuing:
 
+<!-- runnable-test: manifest-wait-rollout -->
 ```terraform
 resource "k8sconnect_manifest" "app" {
   yaml_body = <<-YAML
@@ -226,11 +245,13 @@ resource "k8sconnect_manifest" "app" {
   cluster_connection = var.cluster_connection
 }
 ```
+<!-- /runnable-test -->
 
 ## Example Usage - Wait for Condition (condition wait)
 
 Wait for a Kubernetes condition to be True:
 
+<!-- runnable-test: manifest-wait-condition -->
 ```terraform
 resource "k8sconnect_manifest" "app" {
   yaml_body = <<-YAML
@@ -264,11 +285,13 @@ resource "k8sconnect_manifest" "app" {
   cluster_connection = var.cluster_connection
 }
 ```
+<!-- /runnable-test -->
 
 ## Example Usage - Wait for Field Value (field_value wait)
 
 Wait for specific field values:
 
+<!-- runnable-test: manifest-wait-field-value -->
 ```terraform
 resource "k8sconnect_manifest" "migration_job" {
   yaml_body = <<-YAML
@@ -298,6 +321,7 @@ resource "k8sconnect_manifest" "migration_job" {
   cluster_connection = var.cluster_connection
 }
 ```
+<!-- /runnable-test -->
 
 ## Example Usage - Multi-Cluster Deployment
 

@@ -450,6 +450,16 @@ func (r *manifestResource) determineCreateStatus(ctx context.Context, plannedDat
 
 // determineUpdateStatus handles status for UPDATE operations
 func (r *manifestResource) determineUpdateStatus(ctx context.Context, req resource.ModifyPlanRequest, plannedData *manifestResourceModel, resp *resource.ModifyPlanResponse) {
+	// Check for pending wait from previous failed wait (similar to ADR-006 projection recovery)
+	// This is critical: when wait times out, we set status=null+flag to satisfy Terraform contract
+	// During next plan, we detect the flag and set status=unknown to block downstream DAG
+	hasPendingWait := checkPendingWaitStatusFlag(ctx, req.Private)
+	if hasPendingWait {
+		tflog.Info(ctx, "Detected pending wait from previous timeout, setting status to unknown to block DAG")
+		plannedData.Status = types.DynamicUnknown()
+		return
+	}
+
 	// Get state data
 	var stateData manifestResourceModel
 	diags := req.State.Get(ctx, &stateData)

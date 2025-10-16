@@ -92,6 +92,12 @@ jobs:
           TF_ACC_KUBECONFIG: "$(cat .testbuild/kubeconfig.yaml)"
         run: make test-examples
 
+      - name: Run documentation examples tests
+        env:
+          TF_ACC_TERRAFORM_VERSION: ${{ matrix.terraform }}
+          TF_ACC_KUBECONFIG: "$(cat .testbuild/kubeconfig.yaml)"
+        run: make test-docs-examples
+
       - name: Clean up K3d cluster
         if: always()
         run: k3d cluster delete k8sconnect-test || true

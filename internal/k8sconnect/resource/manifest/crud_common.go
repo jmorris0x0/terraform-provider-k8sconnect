@@ -195,23 +195,22 @@ func (r *manifestResource) readResourceAfterCreate(ctx context.Context, rc *Reso
 	})
 }
 
-// handleWaitExecution handles wait conditions and returns whether waiting occurred
-func (r *manifestResource) handleWaitExecution(ctx context.Context, rc *ResourceContext, resp interface{}, action string) bool {
-	waited := false
+// handleWaitExecution handles wait conditions and returns whether waiting occurred and any error
+// NOTE: Does NOT add error to diagnostics - caller must do that AFTER saving state
+// This allows state to be saved even when wait times out (critical for retry behavior)
+func (r *manifestResource) handleWaitExecution(ctx context.Context, rc *ResourceContext, action string) (waited bool, waitErr error) {
 	if err := r.executeWait(rc); err != nil {
-		r.addWaitError(resp, action, err)
-		waited = true
+		// Return error but DON'T add to diagnostics yet
+		// Caller will save state first, then add error
+		return true, err
 	} else if !rc.Data.WaitFor.IsNull() {
 		var waitConfig waitForModel
 		diags := rc.Data.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
-		if respWithDiags, ok := resp.(interface{ Append(...interface{}) }); ok {
-			respWithDiags.Append(diags)
-		}
 		if !diags.HasError() && r.hasActiveWaitConditions(waitConfig) {
-			waited = true
+			return true, nil
 		}
 	}
-	return waited
+	return false, nil
 }
 
 // verifyOwnership checks if resource is owned by this Terraform resource

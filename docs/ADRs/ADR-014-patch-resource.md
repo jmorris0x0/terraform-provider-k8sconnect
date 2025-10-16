@@ -47,7 +47,7 @@ resource "k8sconnect_patch" "aws_node_proxy" {
   }
 
   # Choose one patch type: patch (strategic merge), json_patch (RFC 6902), merge_patch (RFC 7386)
-  patch = yamlencode({
+  patch = jsonencode({
     spec = {
       template = {
         spec = {
