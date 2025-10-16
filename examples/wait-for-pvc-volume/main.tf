@@ -34,8 +34,8 @@ resource "k8sconnect_manifest" "pv" {
   cluster_connection = var.cluster_connection
 }
 
-# Create PVC and wait for volumeName
-# Infrastructure resource - need volumeName for monitoring/tracking
+# Create PVC and wait for it to be bound
+# Infrastructure resource - wait for binding to complete before proceeding
 resource "k8sconnect_manifest" "pvc" {
   yaml_body = <<-YAML
     apiVersion: v1
@@ -52,17 +52,18 @@ resource "k8sconnect_manifest" "pvc" {
           storage: 5Gi
   YAML
 
-  # Infrastructure pattern: wait for volumeName to track which PV was bound
+  # Wait for PVC to be bound before proceeding with dependent resources
   wait_for = {
-    field   = "status.volumeName"
-    timeout = "1m"
+    field_value = { "status.phase" = "Bound" }
+    timeout     = "1m"
   }
 
   cluster_connection = var.cluster_connection
   depends_on         = [k8sconnect_manifest.namespace, k8sconnect_manifest.pv]
 }
 
-# Use the bound PV name in monitoring configuration
+# Dependent resource that requires PVC to be bound
+# Uses explicit depends_on since wait ensures binding is complete
 resource "k8sconnect_manifest" "volume_metadata" {
   yaml_body = <<-YAML
     apiVersion: v1
@@ -72,20 +73,9 @@ resource "k8sconnect_manifest" "volume_metadata" {
       namespace: example
     data:
       pvc_name: "app-data"
-      bound_pv: "${k8sconnect_manifest.pvc.status.volumeName}"
       capacity: "5Gi"
   YAML
 
   cluster_connection = var.cluster_connection
   depends_on         = [k8sconnect_manifest.pvc]
-}
-
-output "bound_volume" {
-  value       = k8sconnect_manifest.pvc.status.volumeName
-  description = "Name of the PersistentVolume bound to this claim"
-}
-
-output "pvc_phase" {
-  value       = k8sconnect_manifest.pvc.status.phase
-  description = "Current phase of the PVC (should be Bound)"
 }

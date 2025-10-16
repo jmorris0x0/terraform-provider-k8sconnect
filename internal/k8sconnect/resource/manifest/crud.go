@@ -68,17 +68,25 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 	diags = resp.State.Set(ctx, rc.Data)
 	resp.Diagnostics.Append(diags...)
 
-	// 10. Execute wait conditions (now AFTER state save)
-	waited := r.handleWaitExecution(ctx, rc, resp, "created")
+	// 10. Execute wait conditions (now AFTER initial state save)
+	waited, waitErr := r.handleWaitExecution(ctx, rc, "created")
 
-	// 11. Update status field
-	if err := r.updateStatus(rc, waited); err != nil {
+	// 11. Update status field with private state for pending wait tracking
+	if err := r.updateStatus(rc, waited, resp.Private, resp.Private); err != nil {
 		tflog.Warn(ctx, "Failed to update status", map[string]interface{}{"error": err.Error()})
 	}
 
 	// 12. Save state again with status update
+	// CRITICAL: This must happen BEFORE adding wait error to diagnostics
+	// Otherwise Terraform will reject the entire operation including state save
 	diags = resp.State.Set(ctx, rc.Data)
 	resp.Diagnostics.Append(diags...)
+
+	// 13. Add wait error to diagnostics (AFTER state is saved)
+	if waitErr != nil {
+		r.addWaitError(resp, "created", waitErr)
+		return
+	}
 }
 
 func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -154,8 +162,9 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 
 	// 7. Update status field if wait_for.field is configured
 	// This ensures status is populated even after timeouts or external updates
+	// Pass private state for pending wait tracking
 	shouldTrackStatus := r.shouldTrackStatus(ctx, &data)
-	if err := r.updateStatus(rc, shouldTrackStatus); err != nil {
+	if err := r.updateStatus(rc, shouldTrackStatus, req.Private, resp.Private); err != nil {
 		tflog.Warn(ctx, "Failed to update status during read", map[string]interface{}{"error": err.Error()})
 	}
 
@@ -207,10 +216,10 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 	})
 
 	// 5. Execute wait conditions
-	waited := r.handleWaitExecution(ctx, rc, resp, "updated")
+	waited, waitErr := r.handleWaitExecution(ctx, rc, "updated")
 
-	// 6. Update status
-	if err := r.updateStatus(rc, waited); err != nil {
+	// 6. Update status with private state for pending wait tracking
+	if err := r.updateStatus(rc, waited, req.Private, resp.Private); err != nil {
 		tflog.Warn(ctx, "Failed to update status", map[string]interface{}{"error": err.Error()})
 	}
 
@@ -235,8 +244,15 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 
 	// 10. Save updated state
+	// CRITICAL: This must happen BEFORE adding wait error to diagnostics
 	diags = resp.State.Set(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
+
+	// 11. Add wait error to diagnostics (AFTER state is saved)
+	if waitErr != nil {
+		r.addWaitError(resp, "updated", waitErr)
+		return
+	}
 }
 
 func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -367,6 +383,28 @@ func clearImportedWithoutAnnotationsFlag(ctx context.Context, setter interface {
 	SetKey(context.Context, string, []byte) diag.Diagnostics
 }) {
 	setter.SetKey(ctx, "imported_without_annotations", nil)
+}
+
+// checkPendingWaitStatusFlag checks if there's a pending wait from a previous failed wait
+func checkPendingWaitStatusFlag(ctx context.Context, getter interface {
+	GetKey(context.Context, string) ([]byte, diag.Diagnostics)
+}) bool {
+	data, _ := getter.GetKey(ctx, "pending_wait_status")
+	return data != nil && string(data) == "true"
+}
+
+// setPendingWaitStatusFlag sets the pending wait status flag in private state
+func setPendingWaitStatusFlag(ctx context.Context, setter interface {
+	SetKey(context.Context, string, []byte) diag.Diagnostics
+}) {
+	setter.SetKey(ctx, "pending_wait_status", []byte("true"))
+}
+
+// clearPendingWaitStatusFlag clears the pending wait status flag in private state
+func clearPendingWaitStatusFlag(ctx context.Context, setter interface {
+	SetKey(context.Context, string, []byte) diag.Diagnostics
+}) {
+	setter.SetKey(ctx, "pending_wait_status", nil)
 }
 
 // handleProjectionSuccess handles successful projection recovery per ADR-006

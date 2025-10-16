@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -175,10 +176,23 @@ func (r *manifestResource) shouldTrackStatus(ctx context.Context, data *manifest
 }
 
 // updateStatus updates the status field based on wait results
-func (r *manifestResource) updateStatus(rc *ResourceContext, waited bool) error {
-	// No wait = no status
+// Uses private state to handle pending waits (similar to ADR-006 projection recovery)
+func (r *manifestResource) updateStatus(
+	rc *ResourceContext,
+	waited bool,
+	privateGetter interface {
+		GetKey(context.Context, string) ([]byte, diag.Diagnostics)
+	},
+	privateSetter interface {
+		SetKey(context.Context, string, []byte) diag.Diagnostics
+	},
+) error {
+	// No wait = no status, clear any pending flag
 	if !waited {
 		rc.Data.Status = types.DynamicNull()
+		if privateGetter != nil && privateSetter != nil {
+			clearPendingWaitStatusFlag(rc.Ctx, privateSetter)
+		}
 		return nil
 	}
 
@@ -201,8 +215,12 @@ func (r *manifestResource) updateStatus(rc *ResourceContext, waited bool) error 
 	currentObj, err := rc.Client.Get(rc.Ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName())
 	if err != nil {
 		tflog.Warn(rc.Ctx, "Failed to read after wait", map[string]interface{}{"error": err.Error()})
-		// Set to unknown so downstream resources are blocked until next apply
-		rc.Data.Status = types.DynamicUnknown()
+		// Set to null (not unknown - Terraform contract!) and mark pending
+		// Plan modifier will set to unknown during next plan to block downstream DAG
+		rc.Data.Status = types.DynamicNull()
+		if privateSetter != nil {
+			setPendingWaitStatusFlag(rc.Ctx, privateSetter)
+		}
 		return nil
 	}
 
@@ -219,21 +237,36 @@ func (r *manifestResource) updateStatus(rc *ResourceContext, waited bool) error 
 			statusValue, err := common.ConvertToAttrValue(rc.Ctx, prunedStatus)
 			if err != nil {
 				tflog.Warn(rc.Ctx, "Failed to convert pruned status", map[string]interface{}{"error": err.Error()})
-				// Set to unknown so downstream resources are blocked until next apply
-				rc.Data.Status = types.DynamicUnknown()
+				// Set to null and mark pending (not unknown - Terraform contract!)
+				rc.Data.Status = types.DynamicNull()
+				if privateSetter != nil {
+					setPendingWaitStatusFlag(rc.Ctx, privateSetter)
+				}
 			} else {
+				// Success! Set the actual value and clear any pending flag
 				rc.Data.Status = types.DynamicValue(statusValue)
+				if privateSetter != nil {
+					clearPendingWaitStatusFlag(rc.Ctx, privateSetter)
+				}
 			}
 		} else {
-			tflog.Debug(rc.Ctx, "Field not found in status, setting to unknown", map[string]interface{}{
+			tflog.Debug(rc.Ctx, "Field not found in status, setting to null with pending flag", map[string]interface{}{
 				"field": waitConfig.Field.ValueString(),
 			})
-			// Field not found YET - set to unknown so downstream is blocked and will retry
-			rc.Data.Status = types.DynamicUnknown()
+			// Field not found YET - set to null and mark pending (not unknown!)
+			// Plan modifier will set to unknown during next plan to block downstream
+			rc.Data.Status = types.DynamicNull()
+			if privateSetter != nil {
+				setPendingWaitStatusFlag(rc.Ctx, privateSetter)
+			}
 		}
 	} else {
-		// No status in K8s resource YET - set to unknown so downstream is blocked
-		rc.Data.Status = types.DynamicUnknown()
+		// No status in K8s resource YET - set to null and mark pending
+		tflog.Debug(rc.Ctx, "No status in K8s resource, setting to null with pending flag")
+		rc.Data.Status = types.DynamicNull()
+		if privateSetter != nil {
+			setPendingWaitStatusFlag(rc.Ctx, privateSetter)
+		}
 	}
 
 	return nil
