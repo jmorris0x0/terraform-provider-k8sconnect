@@ -24,10 +24,10 @@ func TestMarkdownDocumentation(t *testing.T) {
 	docFiles := []string{
 		"../../README.md",
 		"../../docs/index.md",
-		"../../docs/resources/manifest.md",
+		"../../docs/resources/object.md",
 		"../../docs/resources/wait.md",
 		"../../docs/resources/patch.md",
-		"../../docs/data-sources/manifest.md",
+		"../../docs/data-sources/object.md",
 		"../../docs/data-sources/yaml_split.md",
 		"../../docs/data-sources/yaml_scoped.md",
 	}
