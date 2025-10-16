@@ -313,7 +313,7 @@ Based on ADR analysis, these scenarios should be ADDED to hardening checklist:
 ### Immediate (Before Launch)
 
 1. **Add chaos testing framework** (2-3 days)
-   - Create `internal/k8sconnect/resource/manifest/chaos_test.go`
+   - Create `internal/k8sconnect/resource/object/chaos_test.go`
    - Test network failures, SIGINT, SIGKILL scenarios
    - Validate ADR-006 projection recovery
 

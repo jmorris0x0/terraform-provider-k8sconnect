@@ -309,7 +309,7 @@ Other ADRs document specific features like CRD retry, immutable resources, ident
 
 ### File Organization
 
-- **Resource layer**: `internal/k8sconnect/resource/manifest/`
+- **Resource layer**: `internal/k8sconnect/resource/object/`
   - `manifest.go` - Schema definition
   - `plan_modifier.go` - ModifyPlan with dry-run
   - `crud.go` - CRUD operations
