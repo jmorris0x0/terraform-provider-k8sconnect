@@ -6,15 +6,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 )
@@ -126,150 +123,6 @@ func (r *manifestResource) loadConnectionFromData(
 	}
 
 	return conn, nil
-}
-
-// executeWait handles wait conditions
-func (r *manifestResource) executeWait(rc *ResourceContext) error {
-	if rc.Data.WaitFor.IsNull() {
-		return nil
-	}
-
-	var waitConfig waitForModel
-	diags := rc.Data.WaitFor.As(rc.Ctx, &waitConfig, basetypes.ObjectAsOptions{})
-	if diags.HasError() {
-		return fmt.Errorf("invalid wait_for configuration: %s", diags.Errors())
-	}
-
-	// Check if we have actual conditions
-	if !r.hasActiveWaitConditions(waitConfig) {
-		tflog.Debug(rc.Ctx, "wait_for configured but no active conditions")
-		return nil
-	}
-
-	// Execute the wait
-	return r.waitForResource(rc.Ctx, rc.Client, rc.GVR, rc.Object, waitConfig)
-}
-
-// hasActiveWaitConditions checks if there are real conditions to wait for
-func (r *manifestResource) hasActiveWaitConditions(waitConfig waitForModel) bool {
-	return (!waitConfig.Field.IsNull() && waitConfig.Field.ValueString() != "") ||
-		!waitConfig.FieldValue.IsNull() ||
-		(!waitConfig.Condition.IsNull() && waitConfig.Condition.ValueString() != "") ||
-		(!waitConfig.Rollout.IsNull() && waitConfig.Rollout.ValueBool())
-}
-
-// shouldTrackStatus determines if status field should be populated based on wait_for config
-// Only wait_for.field populates status (other wait types don't track status)
-func (r *manifestResource) shouldTrackStatus(ctx context.Context, data *manifestResourceModel) bool {
-	if data.WaitFor.IsNull() || data.WaitFor.IsUnknown() {
-		return false
-	}
-
-	var waitConfig waitForModel
-	diags := data.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
-	if diags.HasError() {
-		return false
-	}
-
-	// Only field waits populate status
-	return !waitConfig.Field.IsNull() && waitConfig.Field.ValueString() != ""
-}
-
-// updateStatus updates the status field based on wait results
-// Uses private state to handle pending waits (similar to ADR-006 projection recovery)
-func (r *manifestResource) updateStatus(
-	rc *ResourceContext,
-	waited bool,
-	privateGetter interface {
-		GetKey(context.Context, string) ([]byte, diag.Diagnostics)
-	},
-	privateSetter interface {
-		SetKey(context.Context, string, []byte) diag.Diagnostics
-	},
-) error {
-	// No wait = no status, clear any pending flag
-	if !waited {
-		rc.Data.Status = types.DynamicNull()
-		if privateGetter != nil && privateSetter != nil {
-			clearPendingWaitStatusFlag(rc.Ctx, privateSetter)
-		}
-		return nil
-	}
-
-	// Parse wait configuration
-	var waitConfig waitForModel
-	diags := rc.Data.WaitFor.As(rc.Ctx, &waitConfig, basetypes.ObjectAsOptions{})
-	if diags.HasError() {
-		rc.Data.Status = types.DynamicNull()
-		return nil
-	}
-
-	// Only field waits populate status
-	if waitConfig.Field.IsNull() || waitConfig.Field.ValueString() == "" {
-		rc.Data.Status = types.DynamicNull()
-		tflog.Debug(rc.Ctx, "Not populating status - not a field wait")
-		return nil
-	}
-
-	// Get current state from cluster
-	currentObj, err := rc.Client.Get(rc.Ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName())
-	if err != nil {
-		tflog.Warn(rc.Ctx, "Failed to read after wait", map[string]interface{}{"error": err.Error()})
-		// Set to null (not unknown - Terraform contract!) and mark pending
-		// Plan modifier will set to unknown during next plan to block downstream DAG
-		rc.Data.Status = types.DynamicNull()
-		if privateSetter != nil {
-			setPendingWaitStatusFlag(rc.Ctx, privateSetter)
-		}
-		return nil
-	}
-
-	// Extract and prune status
-	if statusRaw, found, _ := unstructured.NestedMap(currentObj.Object, "status"); found && len(statusRaw) > 0 {
-		// PRUNE to only the waited-for field
-		prunedStatus := pruneStatusToField(statusRaw, waitConfig.Field.ValueString())
-
-		if prunedStatus != nil {
-			tflog.Debug(rc.Ctx, "Pruned status to waited field", map[string]interface{}{
-				"field": waitConfig.Field.ValueString(),
-			})
-
-			statusValue, err := common.ConvertToAttrValue(rc.Ctx, prunedStatus)
-			if err != nil {
-				tflog.Warn(rc.Ctx, "Failed to convert pruned status", map[string]interface{}{"error": err.Error()})
-				// Set to null and mark pending (not unknown - Terraform contract!)
-				rc.Data.Status = types.DynamicNull()
-				if privateSetter != nil {
-					setPendingWaitStatusFlag(rc.Ctx, privateSetter)
-				}
-			} else {
-				// Success! Set the actual value and clear any pending flag
-				rc.Data.Status = types.DynamicValue(statusValue)
-				if privateSetter != nil {
-					clearPendingWaitStatusFlag(rc.Ctx, privateSetter)
-				}
-			}
-		} else {
-			tflog.Debug(rc.Ctx, "Field not found in status, setting to null with pending flag", map[string]interface{}{
-				"field": waitConfig.Field.ValueString(),
-			})
-			// Field not found YET - set to null and mark pending (not unknown!)
-			// Plan modifier will set to unknown during next plan to block downstream
-			rc.Data.Status = types.DynamicNull()
-			if privateSetter != nil {
-				setPendingWaitStatusFlag(rc.Ctx, privateSetter)
-			}
-		}
-	} else {
-		// No status in K8s resource YET - set to null and mark pending
-		tflog.Debug(rc.Ctx, "No status in K8s resource, setting to null with pending flag")
-		rc.Data.Status = types.DynamicNull()
-		if privateSetter != nil {
-			setPendingWaitStatusFlag(rc.Ctx, privateSetter)
-		}
-	}
-
-	return nil
 }
 
 // updateProjection updates managed state projection and field ownership

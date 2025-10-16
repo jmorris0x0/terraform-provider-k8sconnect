@@ -9,7 +9,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -49,13 +48,6 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 		plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
 		plannedData.FieldOwnership = types.MapUnknown(types.StringType)
 
-		// Handle status based on wait_for
-		if !plannedData.WaitFor.IsNull() {
-			plannedData.Status = types.DynamicUnknown()
-		} else {
-			plannedData.Status = types.DynamicNull()
-		}
-
 		// Save the plan with unknown computed fields
 		diags = resp.Plan.Set(ctx, &plannedData)
 		resp.Diagnostics.Append(diags...)
@@ -70,13 +62,6 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 			// Mark computed fields as unknown
 			plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
 			plannedData.FieldOwnership = types.MapUnknown(types.StringType)
-
-			// Handle status based on wait_for
-			if !plannedData.WaitFor.IsNull() {
-				plannedData.Status = types.DynamicUnknown()
-			} else {
-				plannedData.Status = types.DynamicNull()
-			}
 
 			// Save the plan with unknown computed fields
 			diags = resp.Plan.Set(ctx, &plannedData)
@@ -106,9 +91,6 @@ func (r *manifestResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 	// Check drift and preserve state if needed
 	r.checkDriftAndPreserveState(ctx, req, &plannedData, resp)
 
-	// Determine status field behavior based on wait_for
-	r.determineStatusField(ctx, req, &plannedData, resp)
-
 	// Save the modified plan
 	diags = resp.Plan.Set(ctx, &plannedData)
 	resp.Diagnostics.Append(diags...)
@@ -130,29 +112,6 @@ func (r *manifestResource) setProjectionUnknown(ctx context.Context, plannedData
 // isCreateOperation checks if this is a create vs update
 func isCreateOperation(req resource.ModifyPlanRequest) bool {
 	return req.State.Raw.IsNull()
-}
-
-// isFieldWait checks if wait config is for a field wait
-func isFieldWait(waitConfig waitForModel) bool {
-	return !waitConfig.Field.IsNull() && waitConfig.Field.ValueString() != ""
-}
-
-// hasActiveWaitConditions checks if wait config has any active conditions
-func hasActiveWaitConditions(waitConfig waitForModel) bool {
-	return (!waitConfig.Field.IsNull() && waitConfig.Field.ValueString() != "") ||
-		!waitConfig.FieldValue.IsNull() ||
-		(!waitConfig.Condition.IsNull() && waitConfig.Condition.ValueString() != "") ||
-		(!waitConfig.Rollout.IsNull() && waitConfig.Rollout.ValueBool())
-}
-
-// parseWaitConfig safely parses wait_for configuration
-func parseWaitConfig(ctx context.Context, waitFor types.Object) (waitForModel, bool) {
-	var config waitForModel
-	if waitFor.IsNull() {
-		return config, false
-	}
-	diags := waitFor.As(ctx, &config, basetypes.ObjectAsOptions{})
-	return config, !diags.HasError()
 }
 
 // checkDriftAndPreserveState compares projections and preserves state if no changes
@@ -177,6 +136,9 @@ func (r *manifestResource) checkDriftAndPreserveState(ctx context.Context, req r
 					plannedData.FieldOwnership = stateData.FieldOwnership
 				}
 				// else: leave field_ownership as Unknown (default), Apply will compute it
+
+				// Preserve object_ref since resource identity hasn't changed
+				plannedData.ObjectRef = stateData.ObjectRef
 
 				// Note: ImportedWithoutAnnotations is now in private state, not model
 				// But still allow terraform-specific settings to update
@@ -412,124 +374,6 @@ func (r *manifestResource) applyProjection(ctx context.Context, dryRunResult *un
 	})
 
 	return true
-}
-
-// determineStatusField handles complex status field logic based on wait_for
-func (r *manifestResource) determineStatusField(ctx context.Context, req resource.ModifyPlanRequest, plannedData *manifestResourceModel, resp *resource.ModifyPlanResponse) {
-	if isCreateOperation(req) {
-		r.determineCreateStatus(ctx, plannedData)
-	} else {
-		r.determineUpdateStatus(ctx, req, plannedData, resp)
-	}
-}
-
-// determineCreateStatus handles status for CREATE operations
-func (r *manifestResource) determineCreateStatus(ctx context.Context, plannedData *manifestResourceModel) {
-	waitConfig, ok := parseWaitConfig(ctx, plannedData.WaitFor)
-	if !ok {
-		plannedData.Status = types.DynamicNull()
-		tflog.Debug(ctx, "CREATE: No wait_for configured, status will be null")
-		return
-	}
-
-	// Check wait conditions
-	hasConditions := hasActiveWaitConditions(waitConfig)
-
-	if hasConditions && isFieldWait(waitConfig) {
-		plannedData.Status = types.DynamicUnknown()
-		tflog.Debug(ctx, "CREATE: wait_for.field configured, marking status as unknown")
-	} else {
-		plannedData.Status = types.DynamicNull()
-		if hasConditions {
-			tflog.Debug(ctx, "CREATE: non-field wait type, status will be null")
-		} else {
-			tflog.Debug(ctx, "CREATE: wait_for has no actual conditions, status will be null")
-		}
-	}
-}
-
-// determineUpdateStatus handles status for UPDATE operations
-func (r *manifestResource) determineUpdateStatus(ctx context.Context, req resource.ModifyPlanRequest, plannedData *manifestResourceModel, resp *resource.ModifyPlanResponse) {
-	// Check for pending wait from previous failed wait (similar to ADR-006 projection recovery)
-	// This is critical: when wait times out, we set status=null+flag to satisfy Terraform contract
-	// During next plan, we detect the flag and set status=unknown to block downstream DAG
-	hasPendingWait := checkPendingWaitStatusFlag(ctx, req.Private)
-	if hasPendingWait {
-		tflog.Info(ctx, "Detected pending wait from previous timeout, setting status to unknown to block DAG")
-		plannedData.Status = types.DynamicUnknown()
-		return
-	}
-
-	// Get state data
-	var stateData manifestResourceModel
-	diags := req.State.Get(ctx, &stateData)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	// Parse configurations
-	planWaitConfig, hasPlanWait := parseWaitConfig(ctx, plannedData.WaitFor)
-	stateWaitConfig, hasStateWait := parseWaitConfig(ctx, stateData.WaitFor)
-
-	// Determine status based on wait configurations
-	status := r.calculateUpdateStatus(
-		hasPlanWait, hasStateWait,
-		planWaitConfig, stateWaitConfig,
-		!stateData.Status.IsNull(),
-	)
-
-	// Apply the status decision
-	if status.preserve {
-		plannedData.Status = stateData.Status
-	} else if status.unknown {
-		plannedData.Status = types.DynamicUnknown()
-	} else {
-		plannedData.Status = types.DynamicNull()
-	}
-
-	tflog.Debug(ctx, fmt.Sprintf("UPDATE: %s", status.reason))
-}
-
-// statusDecision represents the outcome of status calculation
-type statusDecision struct {
-	preserve bool
-	unknown  bool
-	reason   string
-}
-
-// calculateUpdateStatus determines what status should be for updates
-func (r *manifestResource) calculateUpdateStatus(hasPlanWait, hasStateWait bool, planConfig, stateConfig waitForModel, stateHasStatus bool) statusDecision {
-	// No wait_for configured
-	if !hasPlanWait {
-		return statusDecision{reason: "wait_for removed or not configured"}
-	}
-
-	planIsFieldWait := isFieldWait(planConfig)
-
-	// Not a field wait
-	if !planIsFieldWait {
-		return statusDecision{reason: "not a field wait"}
-	}
-
-	// New field wait (no previous wait_for)
-	if !hasStateWait {
-		return statusDecision{unknown: true, reason: "new field wait"}
-	}
-
-	// Compare with previous wait_for
-	stateIsFieldWait := isFieldWait(stateConfig)
-
-	// Check if field unchanged
-	if stateIsFieldWait && planConfig.Field.Equal(stateConfig.Field) {
-		if stateHasStatus {
-			return statusDecision{preserve: true, reason: "field unchanged"}
-		}
-		return statusDecision{reason: "field unchanged, already tried"}
-	}
-
-	// Field changed or different wait type
-	return statusDecision{unknown: true, reason: "field changed or new"}
 }
 
 // checkFieldOwnershipConflicts detects when fields managed by other controllers are being changed

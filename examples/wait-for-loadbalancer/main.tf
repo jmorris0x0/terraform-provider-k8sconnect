@@ -29,13 +29,19 @@ resource "k8sconnect_manifest" "loadbalancer_service" {
         app: demo
   YAML
 
+  cluster_connection = var.cluster_connection
+  depends_on         = [k8sconnect_manifest.namespace]
+}
+
+resource "k8sconnect_wait" "loadbalancer_service" {
+  object_ref = k8sconnect_manifest.loadbalancer_service.object_ref
+
+  cluster_connection = var.cluster_connection
+
   wait_for = {
     field   = "status.loadBalancer.ingress"
     timeout = "2m"
   }
-
-  cluster_connection = var.cluster_connection
-  depends_on         = [k8sconnect_manifest.namespace]
 }
 
 resource "k8sconnect_manifest" "endpoint_config" {
@@ -46,18 +52,18 @@ resource "k8sconnect_manifest" "endpoint_config" {
       name: external-endpoints
       namespace: example
     data:
-      service_endpoint: "${k8sconnect_manifest.loadbalancer_service.status.loadBalancer.ingress[0].ip}:8080"
+      service_endpoint: "${k8sconnect_wait.loadbalancer_service.status.loadBalancer.ingress[0].ip}:8080"
       endpoint_ready: "true"
   YAML
 
   cluster_connection = var.cluster_connection
-  depends_on         = [k8sconnect_manifest.loadbalancer_service]
+  depends_on         = [k8sconnect_wait.loadbalancer_service]
 }
 
 output "loadbalancer_endpoint" {
   value = try(
-    "${k8sconnect_manifest.loadbalancer_service.status.loadBalancer.ingress[0].ip}:8080",
-    "${k8sconnect_manifest.loadbalancer_service.status.loadBalancer.ingress[0].hostname}:8080",
+    "${k8sconnect_wait.loadbalancer_service.status.loadBalancer.ingress[0].ip}:8080",
+    "${k8sconnect_wait.loadbalancer_service.status.loadBalancer.ingress[0].hostname}:8080",
     "pending"
   )
   description = "The LoadBalancer endpoint for the demo service"

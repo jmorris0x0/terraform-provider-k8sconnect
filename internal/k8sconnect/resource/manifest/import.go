@@ -284,6 +284,36 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		return
 	}
 
+	// Populate object_ref from imported resource
+	objRef := objectRefModel{
+		APIVersion: types.StringValue(liveObj.GetAPIVersion()),
+		Kind:       types.StringValue(liveObj.GetKind()),
+		Name:       types.StringValue(liveObj.GetName()),
+	}
+
+	// Namespace is optional (null for cluster-scoped resources)
+	if ns := liveObj.GetNamespace(); ns != "" {
+		objRef.Namespace = types.StringValue(ns)
+	} else {
+		objRef.Namespace = types.StringNull()
+	}
+
+	// Convert object_ref to types.Object
+	objRefValue, objRefDiags := types.ObjectValueFrom(ctx, map[string]attr.Type{
+		"api_version": types.StringType,
+		"kind":        types.StringType,
+		"name":        types.StringType,
+		"namespace":   types.StringType,
+	}, objRef)
+
+	if objRefDiags.HasError() {
+		resp.Diagnostics.AddError(
+			"Import Failed: ObjectRef Conversion Error",
+			fmt.Sprintf("Failed to convert object_ref: %v", objRefDiags),
+		)
+		return
+	}
+
 	// Create imported data with managed state projection
 	importedData := manifestResourceModel{
 		ID:                     types.StringValue(resourceID),
@@ -293,14 +323,7 @@ func (r *manifestResource) ImportState(ctx context.Context, req resource.ImportS
 		IgnoreFields:           types.ListNull(types.StringType),
 		ManagedStateProjection: projectionMapValue,
 		FieldOwnership:         fieldOwnershipMap,
-		WaitFor: types.ObjectNull(map[string]attr.Type{
-			"condition":   types.StringType,
-			"field":       types.StringType,
-			"field_value": types.MapType{ElemType: types.StringType},
-			"rollout":     types.BoolType,
-			"timeout":     types.StringType,
-		}),
-		Status: types.DynamicNull(),
+		ObjectRef:              objRefValue,
 	}
 
 	diags := resp.State.Set(ctx, &importedData)

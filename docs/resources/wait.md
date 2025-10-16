@@ -1,0 +1,498 @@
+---
+page_title: "Resource k8sconnect_wait - terraform-provider-k8sconnect"
+subcategory: ""
+description: |-
+  Waits for a Kubernetes resource to reach a desired state. Use this resource to wait for resources created by k8sconnect_manifest without risking resource tainting on timeout. Follows the pattern: create resource -> wait for readiness -> use outputs.
+---
+
+# Resource: k8sconnect_wait
+
+Waits for a Kubernetes resource to reach a desired state. Use this resource to wait for resources created by k8sconnect_manifest without risking resource tainting on timeout. Follows the pattern: create resource -> wait for readiness -> use outputs.
+
+The `k8sconnect_wait` resource waits for Kubernetes resources to reach a desired state. It references a `k8sconnect_manifest` resource via `object_ref` and blocks until the specified wait condition is met.
+
+## Wait Strategies
+
+Choose the right wait strategy based on your use case:
+
+### Field Wait (`field`)
+**Use for**: Infrastructure resources that need status values for DNS, outputs, or resource chaining
+- LoadBalancer Services, Ingress, cert-manager Certificates, Crossplane resources, Custom CRDs
+- **Populates `.status` attribute** for use in other resources
+- Only the waited-for field is tracked in status to prevent drift
+
+### Rollout Wait (`rollout`)
+**Use for**: Workloads that need complete deployment confirmation
+- Deployments, StatefulSets, DaemonSets
+- **Does NOT populate `.status`** - use `depends_on` for sequencing
+- Checks replicas, updatedReplicas, readyReplicas, and observedGeneration
+
+### Condition Wait (`condition`)
+**Use for**: Resources with Kubernetes conditions (Ready, Available, etc.)
+- Deployments (Available, Progressing), Custom CRDs with conditions
+- **Does NOT populate `.status`** - use `depends_on` for sequencing
+- Waits for condition status to be "True"
+
+### Field Value Wait (`field_value`)
+**Use for**: Waiting for specific field values (Job completion, PVC binding, etc.)
+- Jobs (status.succeeded), PVCs (status.phase)
+- **Does NOT populate `.status`** - use `depends_on` for sequencing
+- Checks exact string match for field values
+
+## Example Usage - Wait for LoadBalancer (field wait)
+
+Wait for a LoadBalancer to be provisioned and use its IP in other resources.
+
+<!-- runnable-test: wait-loadbalancer -->
+```terraform
+resource "k8sconnect_manifest" "service" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: demo-lb
+      namespace: example
+    spec:
+      type: LoadBalancer
+      ports:
+      - port: 80
+        targetPort: 8080
+      selector:
+        app: demo
+  YAML
+
+  cluster_connection = var.cluster_connection
+}
+
+resource "k8sconnect_wait" "service" {
+  object_ref = k8sconnect_manifest.service.object_ref
+
+  wait_for = {
+    field   = "status.loadBalancer.ingress"
+    timeout = "5m"
+  }
+
+  cluster_connection = var.cluster_connection
+}
+
+# Use the LoadBalancer IP in another resource
+resource "k8sconnect_manifest" "endpoint_config" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: external-endpoints
+      namespace: example
+    data:
+      service_endpoint: "${k8sconnect_wait.service.status.loadBalancer.ingress[0].ip}:80"
+  YAML
+
+  cluster_connection = var.cluster_connection
+  depends_on         = [k8sconnect_wait.service]
+}
+```
+<!-- /runnable-test -->
+
+## Example Usage - Wait for Deployment Rollout (rollout wait)
+
+Wait for a Deployment to fully roll out before continuing.
+
+<!-- runnable-test: wait-rollout -->
+```terraform
+resource "k8sconnect_manifest" "app" {
+  yaml_body = <<-YAML
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: web-app
+      namespace: example
+    spec:
+      replicas: 3
+      selector:
+        matchLabels:
+          app: web
+      template:
+        metadata:
+          labels:
+            app: web
+        spec:
+          containers:
+          - name: nginx
+            image: nginx:1.21
+            resources:
+              requests:
+                cpu: 100m
+                memory: 128Mi
+  YAML
+
+  cluster_connection = var.cluster_connection
+}
+
+# Wait for all replicas to be updated and ready
+resource "k8sconnect_wait" "app" {
+  object_ref = k8sconnect_manifest.app.object_ref
+
+  wait_for = {
+    rollout = true
+    timeout = "5m"
+  }
+
+  cluster_connection = var.cluster_connection
+}
+
+# Deploy service only after deployment is fully rolled out
+resource "k8sconnect_manifest" "service" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: web-svc
+      namespace: example
+    spec:
+      type: ClusterIP
+      ports:
+      - port: 80
+        targetPort: 80
+      selector:
+        app: web
+  YAML
+
+  cluster_connection = var.cluster_connection
+  depends_on         = [k8sconnect_wait.app]
+}
+```
+<!-- /runnable-test -->
+
+## Example Usage - Wait for Condition (condition wait)
+
+Wait for a Kubernetes condition to be True.
+
+<!-- runnable-test: wait-condition -->
+```terraform
+resource "k8sconnect_manifest" "storage_app" {
+  yaml_body = <<-YAML
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: storage-app
+      namespace: example
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app: storage
+      template:
+        metadata:
+          labels:
+            app: storage
+        spec:
+          containers:
+          - name: app
+            image: public.ecr.aws/docker/library/busybox:latest
+            command: ["sh", "-c", "while true; do date; sleep 30; done"]
+            resources:
+              requests:
+                cpu: 50m
+                memory: 64Mi
+  YAML
+
+  cluster_connection = var.cluster_connection
+}
+
+# Wait for "Available" condition (minimum availability reached)
+resource "k8sconnect_wait" "storage_app" {
+  object_ref = k8sconnect_manifest.storage_app.object_ref
+
+  wait_for = {
+    condition = "Available"
+    timeout   = "3m"
+  }
+
+  cluster_connection = var.cluster_connection
+}
+```
+<!-- /runnable-test -->
+
+## Example Usage - Wait for Field Value (field_value wait)
+
+Wait for specific field values (e.g., Job completion).
+
+<!-- runnable-test: wait-field-value -->
+```terraform
+resource "k8sconnect_manifest" "migration_job" {
+  yaml_body = <<-YAML
+    apiVersion: batch/v1
+    kind: Job
+    metadata:
+      name: database-migration
+      namespace: example
+    spec:
+      backoffLimit: 1
+      completions: 1
+      template:
+        spec:
+          containers:
+          - name: migrate
+            image: public.ecr.aws/docker/library/busybox:latest
+            command: ["sh", "-c", "echo 'Running migrations...' && sleep 5"]
+          restartPolicy: Never
+  YAML
+
+  cluster_connection = var.cluster_connection
+}
+
+# Wait for exactly 1 successful completion
+resource "k8sconnect_wait" "migration_job" {
+  object_ref = k8sconnect_manifest.migration_job.object_ref
+
+  wait_for = {
+    field_value = {
+      "status.succeeded" = "1"
+    }
+    timeout = "2m"
+  }
+
+  cluster_connection = var.cluster_connection
+}
+
+# Deploy app only after migrations complete
+resource "k8sconnect_manifest" "app_deployment" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: app-config
+      namespace: example
+    data:
+      database_ready: "true"
+      migrations_complete: "true"
+  YAML
+
+  cluster_connection = var.cluster_connection
+  depends_on         = [k8sconnect_wait.migration_job]
+}
+```
+<!-- /runnable-test -->
+
+## Example Usage - Wait for PVC Binding (field_value wait)
+
+Wait for a PersistentVolumeClaim to be bound to a PersistentVolume.
+
+<!-- runnable-test: wait-pvc -->
+```terraform
+resource "k8sconnect_manifest" "pv" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: PersistentVolume
+    metadata:
+      name: example-pv
+    spec:
+      capacity:
+        storage: 1Gi
+      accessModes:
+        - ReadWriteOnce
+      persistentVolumeReclaimPolicy: Delete
+      storageClassName: manual
+      hostPath:
+        path: /tmp/example-pv
+  YAML
+
+  cluster_connection = var.cluster_connection
+}
+
+resource "k8sconnect_manifest" "pvc" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      name: data-claim
+      namespace: example
+    spec:
+      accessModes:
+        - ReadWriteOnce
+      storageClassName: manual
+      resources:
+        requests:
+          storage: 1Gi
+  YAML
+
+  cluster_connection = var.cluster_connection
+  depends_on         = [k8sconnect_manifest.pv]
+}
+
+# Wait for PVC to be bound
+resource "k8sconnect_wait" "pvc" {
+  object_ref = k8sconnect_manifest.pvc.object_ref
+
+  wait_for = {
+    field_value = {
+      "status.phase" = "Bound"
+    }
+    timeout = "2m"
+  }
+
+  cluster_connection = var.cluster_connection
+}
+
+# Create deployment that uses the PVC - only after it's bound
+resource "k8sconnect_manifest" "app" {
+  yaml_body = <<-YAML
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: storage-app
+      namespace: example
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app: storage
+      template:
+        metadata:
+          labels:
+            app: storage
+        spec:
+          containers:
+          - name: app
+            image: public.ecr.aws/docker/library/busybox:latest
+            command: ["sh", "-c", "while true; do date >> /data/log.txt; sleep 30; done"]
+            volumeMounts:
+            - name: data
+              mountPath: /data
+            resources:
+              requests:
+                cpu: 50m
+                memory: 64Mi
+          volumes:
+          - name: data
+            persistentVolumeClaim:
+              claimName: data-claim
+  YAML
+
+  cluster_connection = var.cluster_connection
+  depends_on         = [k8sconnect_wait.pvc]
+}
+```
+<!-- /runnable-test -->
+
+<!-- schema generated by tfplugindocs -->
+## Schema
+
+### Required
+
+- `cluster_connection` (Attributes) Kubernetes cluster connection for accessing the resource. Should match the connection used by the k8sconnect_manifest resource. (see [below for nested schema](#nestedatt--cluster_connection))
+- `object_ref` (Attributes) Reference to the Kubernetes object to wait for. Typically populated from k8sconnect_manifest.resource_name.object_ref output. (see [below for nested schema](#nestedatt--object_ref))
+- `wait_for` (Attributes) Conditions to wait for before considering the resource ready. (see [below for nested schema](#nestedatt--wait_for))
+
+### Read-Only
+
+- `id` (String) Unique identifier for this wait operation (generated by the provider).
+- `status` (Dynamic) Resource status from the cluster, populated when wait completes successfully. Contains resource-specific runtime information. Follows ADR-008: 'You get only what you wait for' - only populated when waiting on status fields.
+
+<a id="nestedatt--cluster_connection"></a>
+### Nested Schema for `cluster_connection`
+
+Optional:
+
+- `client_certificate` (String, Sensitive) Client certificate for TLS authentication. Accepts PEM format or base64-encoded PEM - automatically detected.
+- `client_key` (String, Sensitive) Client certificate key for TLS authentication. Accepts PEM format or base64-encoded PEM - automatically detected.
+- `cluster_ca_certificate` (String, Sensitive) Root certificate bundle for TLS authentication. Accepts PEM format or base64-encoded PEM - automatically detected.
+- `context` (String) Context to use from the kubeconfig. Optional when kubeconfig contains exactly one context (that context will be used automatically). Required when kubeconfig contains multiple contexts to prevent accidental connection to the wrong cluster. Error will list available contexts if not specified when required.
+- `exec` (Attributes, Sensitive) Configuration for exec-based authentication. (see [below for nested schema](#nestedatt--cluster_connection--exec))
+- `host` (String) The hostname (in form of URI) of the Kubernetes API server.
+- `insecure` (Boolean) Whether server should be accessed without verifying the TLS certificate.
+- `kubeconfig` (String, Sensitive) Raw kubeconfig file content.
+- `proxy_url` (String) URL of the proxy to use for requests.
+- `token` (String, Sensitive) Token to authenticate to the Kubernetes API server.
+
+<a id="nestedatt--cluster_connection--exec"></a>
+### Nested Schema for `cluster_connection.exec`
+
+Required:
+
+- `api_version` (String) API version to use when encoding the ExecCredentials resource.
+- `command` (String) Command to execute.
+
+Optional:
+
+- `args` (List of String) Arguments to pass when executing the plugin.
+- `env` (Map of String) Environment variables to set when executing the plugin.
+
+
+
+<a id="nestedatt--object_ref"></a>
+### Nested Schema for `object_ref`
+
+Required:
+
+- `api_version` (String) Kubernetes API version (e.g., 'v1', 'apps/v1')
+- `kind` (String) Kubernetes resource kind (e.g., 'Pod', 'Deployment')
+- `name` (String) Resource name
+
+Optional:
+
+- `namespace` (String) Resource namespace. Omit for cluster-scoped resources.
+
+
+<a id="nestedatt--wait_for"></a>
+### Nested Schema for `wait_for`
+
+Optional:
+
+- `condition` (String) Condition type that must be True. Example: 'Ready'
+- `field` (String) JSONPath to field that must exist/be non-empty. Example: 'status.loadBalancer.ingress'
+- `field_value` (Map of String) Map of JSONPath to expected value. Example: {'status.phase': 'Running'}
+- `rollout` (Boolean) Wait for Deployment/StatefulSet/DaemonSet to complete rollout. Checks that all replicas are updated and available.
+- `timeout` (String) Maximum time to wait. Defaults to 10m. Format: '30s', '5m', '1h'
+
+## Status Output
+
+Only **field waits** populate the `status` attribute. The status contains only the waited-for field to prevent drift from volatile or controller-managed fields.
+
+**Example:**
+```terraform
+resource "k8sconnect_wait" "service" {
+  object_ref = k8sconnect_manifest.service.object_ref
+
+  wait_for = {
+    field = "status.loadBalancer.ingress"
+  }
+
+  cluster_connection = var.cluster_connection
+}
+
+# Access the pruned status
+output "loadbalancer_ip" {
+  value = k8sconnect_wait.service.status.loadBalancer.ingress[0].ip
+}
+```
+
+**Other wait types** (`rollout`, `condition`, `field_value`) do NOT populate status. Use `depends_on` to sequence resources:
+
+```terraform
+resource "k8sconnect_wait" "app" {
+  object_ref = k8sconnect_manifest.app.object_ref
+
+  wait_for = {
+    rollout = true
+  }
+
+  cluster_connection = var.cluster_connection
+}
+
+resource "k8sconnect_manifest" "next" {
+  # ... config ...
+  depends_on = [k8sconnect_wait.app]
+}
+```
+
+## Timeouts
+
+All wait operations support configurable timeouts. The default timeout is 5 minutes if not specified.
+
+```terraform
+wait_for = {
+  field   = "status.loadBalancer.ingress"
+  timeout = "10m"  # Options: "30s", "5m", "1h"
+}
+```

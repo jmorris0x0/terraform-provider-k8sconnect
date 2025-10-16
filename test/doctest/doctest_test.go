@@ -25,6 +25,7 @@ func TestMarkdownDocumentation(t *testing.T) {
 		"../../README.md",
 		"../../docs/index.md",
 		"../../docs/resources/manifest.md",
+		"../../docs/resources/wait.md",
 		"../../docs/resources/patch.md",
 		"../../docs/data-sources/manifest.md",
 		"../../docs/data-sources/yaml_split.md",

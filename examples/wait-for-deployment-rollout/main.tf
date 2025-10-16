@@ -13,8 +13,7 @@ resource "k8sconnect_manifest" "namespace" {
   cluster_connection = var.cluster_connection
 }
 
-# Wait for deployment rollout to complete
-# This ensures all replicas are updated and ready before continuing
+# Create deployment
 resource "k8sconnect_manifest" "app" {
   yaml_body = <<-YAML
     apiVersion: apps/v1
@@ -50,19 +49,25 @@ resource "k8sconnect_manifest" "app" {
                 memory: 256Mi
   YAML
 
-  # Wait for rollout completion - ensures all 3 replicas are updated and ready
-  # This checks:
-  # - status.replicas == spec.replicas
-  # - status.updatedReplicas == spec.replicas
-  # - status.readyReplicas == spec.replicas
-  # - metadata.generation == status.observedGeneration
+  cluster_connection = var.cluster_connection
+  depends_on         = [k8sconnect_manifest.namespace]
+}
+
+# Wait for rollout completion - ensures all 3 replicas are updated and ready
+# This checks:
+# - status.replicas == spec.replicas
+# - status.updatedReplicas == spec.replicas
+# - status.readyReplicas == spec.replicas
+# - metadata.generation == status.observedGeneration
+resource "k8sconnect_wait" "app" {
+  object_ref = k8sconnect_manifest.app.object_ref
+
+  cluster_connection = var.cluster_connection
+
   wait_for = {
     rollout = true
     timeout = "5m"
   }
-
-  cluster_connection = var.cluster_connection
-  depends_on         = [k8sconnect_manifest.namespace]
 }
 
 # Deploy service only after deployment is fully rolled out
@@ -84,7 +89,7 @@ resource "k8sconnect_manifest" "service" {
   YAML
 
   cluster_connection = var.cluster_connection
-  depends_on         = [k8sconnect_manifest.app]
+  depends_on         = [k8sconnect_wait.app]
 }
 
 # Output confirms deployment completed

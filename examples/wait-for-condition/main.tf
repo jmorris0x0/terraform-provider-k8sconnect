@@ -35,8 +35,7 @@ resource "k8sconnect_manifest" "pv" {
   depends_on         = [k8sconnect_manifest.namespace]
 }
 
-# Create PVC and wait for "Bound" condition
-# PVCs expose status.conditions with types like "Resizing", etc.
+# Create PVC
 resource "k8sconnect_manifest" "pvc" {
   yaml_body = <<-YAML
     apiVersion: v1
@@ -53,17 +52,24 @@ resource "k8sconnect_manifest" "pvc" {
           storage: 1Gi
   YAML
 
-  # Note: PVCs don't have a "Ready" condition - they just have status.phase
-  # This example shows waiting for phase via field_value instead
+  cluster_connection = var.cluster_connection
+  depends_on         = [k8sconnect_manifest.pv]
+}
+
+# Wait for PVC to be bound
+# Note: PVCs don't have a "Ready" condition - they just have status.phase
+# This example shows waiting for phase via field_value instead
+resource "k8sconnect_wait" "pvc" {
+  object_ref = k8sconnect_manifest.pvc.object_ref
+
+  cluster_connection = var.cluster_connection
+
   wait_for = {
     field_value = {
       "status.phase" = "Bound"
     }
     timeout = "2m"
   }
-
-  cluster_connection = var.cluster_connection
-  depends_on         = [k8sconnect_manifest.pv]
 }
 
 # Create deployment that uses the PVC
@@ -102,16 +108,22 @@ resource "k8sconnect_manifest" "app" {
               claimName: data-claim
   YAML
 
-  # Wait for "Available" condition to be True
-  # This means the deployment has minimum availability (at least 1 replica ready)
-  # Available conditions: "Available", "Progressing", "ReplicaFailure"
+  cluster_connection = var.cluster_connection
+  depends_on         = [k8sconnect_wait.pvc]
+}
+
+# Wait for "Available" condition to be True
+# This means the deployment has minimum availability (at least 1 replica ready)
+# Available conditions: "Available", "Progressing", "ReplicaFailure"
+resource "k8sconnect_wait" "app" {
+  object_ref = k8sconnect_manifest.app.object_ref
+
+  cluster_connection = var.cluster_connection
+
   wait_for = {
     condition = "Available"
     timeout   = "3m"
   }
-
-  cluster_connection = var.cluster_connection
-  depends_on         = [k8sconnect_manifest.pvc]
 }
 
 output "pvc_bound" {

@@ -214,7 +214,7 @@ Stop writing `null_resource` provisioners with kubectl wait. Built-in waiting wi
 
 <!-- runnable-test: readme-wait-for-loadbalancer -->
 ```hcl
-# Wait for LoadBalancer IP and use it in other resources
+# Create the LoadBalancer Service
 resource "k8sconnect_manifest" "service" {
   yaml_body = <<-YAML
     apiVersion: v1
@@ -230,6 +230,13 @@ resource "k8sconnect_manifest" "service" {
       selector:
         app: myapp
   YAML
+
+  cluster_connection = var.cluster_connection
+}
+
+# Wait for LoadBalancer IP to be assigned
+resource "k8sconnect_wait" "service" {
+  object_ref = k8sconnect_manifest.service.object_ref
 
   wait_for = {
     field   = "status.loadBalancer.ingress"
@@ -248,10 +255,11 @@ resource "k8sconnect_manifest" "config" {
       name: endpoints
       namespace: prod
     data:
-      service_url: "${k8sconnect_manifest.service.status.loadBalancer.ingress[0].ip}:80"
+      service_url: "${k8sconnect_wait.service.status.loadBalancer.ingress[0].ip}:80"
   YAML
 
   cluster_connection = var.cluster_connection
+  depends_on         = [k8sconnect_wait.service]
 }
 ```
 <!-- /runnable-test -->
@@ -273,7 +281,7 @@ resource "k8sconnect_manifest" "config" {
 - **No more provisioners** - Native Terraform waiting and data flow
 - **Works with any CRD** - If it has status fields you need, use `field` waits
 
-**→ [Wait strategy examples](examples/#wait-for-feature)** - field, field_value, condition, rollout
+**→ [Wait resource documentation](docs/resources/wait.md)** | **[Wait strategy examples](examples/#wait-for-feature)** - field, field_value, condition, rollout
 
 ---
 
@@ -332,6 +340,7 @@ All `cluster_connection` fields are marked sensitive and won't appear in logs or
 
 **Resources:**
 - `k8sconnect_manifest` - Full lifecycle management for any Kubernetes resource ([docs](docs/resources/manifest.md))
+- `k8sconnect_wait` - Wait for resources to reach desired state with status outputs ([docs](docs/resources/wait.md))
 - `k8sconnect_patch` - Surgical modifications to existing resources ([docs](docs/resources/patch.md))
 
 **Data Sources:**

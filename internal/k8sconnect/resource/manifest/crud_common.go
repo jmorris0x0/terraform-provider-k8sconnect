@@ -9,7 +9,6 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -195,24 +194,6 @@ func (r *manifestResource) readResourceAfterCreate(ctx context.Context, rc *Reso
 	})
 }
 
-// handleWaitExecution handles wait conditions and returns whether waiting occurred and any error
-// NOTE: Does NOT add error to diagnostics - caller must do that AFTER saving state
-// This allows state to be saved even when wait times out (critical for retry behavior)
-func (r *manifestResource) handleWaitExecution(ctx context.Context, rc *ResourceContext, action string) (waited bool, waitErr error) {
-	if err := r.executeWait(rc); err != nil {
-		// Return error but DON'T add to diagnostics yet
-		// Caller will save state first, then add error
-		return true, err
-	} else if !rc.Data.WaitFor.IsNull() {
-		var waitConfig waitForModel
-		diags := rc.Data.WaitFor.As(ctx, &waitConfig, basetypes.ObjectAsOptions{})
-		if !diags.HasError() && r.hasActiveWaitConditions(waitConfig) {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
 // verifyOwnership checks if resource is owned by this Terraform resource
 func (r *manifestResource) verifyOwnership(currentObj *unstructured.Unstructured, expectedID string, obj *unstructured.Unstructured, resp *resource.ReadResponse) error {
 	annotations := currentObj.GetAnnotations()
@@ -356,21 +337,6 @@ func (r *manifestResource) addOperationError(resp interface{}, operation string,
 		} else {
 			updateResp.Diagnostics.AddError(title, detail)
 		}
-	}
-}
-
-func (r *manifestResource) addWaitError(resp interface{}, action string, err error) {
-	msg := fmt.Sprintf("Wait condition failed after resource was %s", action)
-	detailMsg := fmt.Sprintf("The resource was successfully %s, but the wait condition failed: %s\n\n"+
-		"You need to either:\n"+
-		"1. Increase the timeout if more time is needed\n"+
-		"2. Fix the underlying issue preventing the condition from being met\n"+
-		"3. Review your wait_for configuration", action, err)
-
-	if createResp, ok := resp.(*resource.CreateResponse); ok {
-		createResp.Diagnostics.AddError(msg, detailMsg)
-	} else if updateResp, ok := resp.(*resource.UpdateResponse); ok {
-		updateResp.Diagnostics.AddError(msg, detailMsg)
 	}
 }
 

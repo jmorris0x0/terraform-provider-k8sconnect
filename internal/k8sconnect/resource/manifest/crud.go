@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
@@ -63,30 +64,15 @@ func (r *manifestResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	// 9. SAVE STATE IMMEDIATELY after successful creation
-	// This ensures state is saved even if wait operations fail
-	diags = resp.State.Set(ctx, rc.Data)
-	resp.Diagnostics.Append(diags...)
-
-	// 10. Execute wait conditions (now AFTER initial state save)
-	waited, waitErr := r.handleWaitExecution(ctx, rc, "created")
-
-	// 11. Update status field with private state for pending wait tracking
-	if err := r.updateStatus(rc, waited, resp.Private, resp.Private); err != nil {
-		tflog.Warn(ctx, "Failed to update status", map[string]interface{}{"error": err.Error()})
-	}
-
-	// 12. Save state again with status update
-	// CRITICAL: This must happen BEFORE adding wait error to diagnostics
-	// Otherwise Terraform will reject the entire operation including state save
-	diags = resp.State.Set(ctx, rc.Data)
-	resp.Diagnostics.Append(diags...)
-
-	// 13. Add wait error to diagnostics (AFTER state is saved)
-	if waitErr != nil {
-		r.addWaitError(resp, "created", waitErr)
+	// 8a. Populate object_ref output
+	if err := r.populateObjectRef(ctx, rc); err != nil {
+		resp.Diagnostics.AddError("Failed to populate object_ref", err.Error())
 		return
 	}
+
+	// 9. SAVE STATE after successful creation
+	diags = resp.State.Set(ctx, rc.Data)
+	resp.Diagnostics.Append(diags...)
 }
 
 func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -160,15 +146,7 @@ func (r *manifestResource) Read(ctx context.Context, req resource.ReadRequest, r
 	// 6. Update field ownership
 	r.updateFieldOwnershipData(ctx, &data, currentObj)
 
-	// 7. Update status field if wait_for.field is configured
-	// This ensures status is populated even after timeouts or external updates
-	// Pass private state for pending wait tracking
-	shouldTrackStatus := r.shouldTrackStatus(ctx, &data)
-	if err := r.updateStatus(rc, shouldTrackStatus, req.Private, resp.Private); err != nil {
-		tflog.Warn(ctx, "Failed to update status during read", map[string]interface{}{"error": err.Error()})
-	}
-
-	// 8. Save refreshed state
+	// 7. Save refreshed state
 	diags = resp.State.Set(ctx, &data)
 	resp.Diagnostics.Append(diags...)
 }
@@ -215,15 +193,7 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 		"namespace": rc.Object.GetNamespace(),
 	})
 
-	// 5. Execute wait conditions
-	waited, waitErr := r.handleWaitExecution(ctx, rc, "updated")
-
-	// 6. Update status with private state for pending wait tracking
-	if err := r.updateStatus(rc, waited, req.Private, resp.Private); err != nil {
-		tflog.Warn(ctx, "Failed to update status", map[string]interface{}{"error": err.Error()})
-	}
-
-	// 7. Update projection (with recovery logic - ADR-006)
+	// 5. Update projection (with recovery logic - ADR-006)
 	if err := r.updateProjection(rc); err != nil {
 		handleProjectionFailure(ctx, rc, resp.Private, &resp.State, &resp.Diagnostics, "updated", err)
 		return
@@ -232,27 +202,20 @@ func (r *manifestResource) Update(ctx context.Context, req resource.UpdateReques
 	// Projection succeeded - clear pending flag if it was set
 	handleProjectionSuccess(ctx, hasPendingProjection, resp.Private, "from previous apply")
 
-	// 8. Handle status transitions
-	if !state.Status.IsNull() && plan.WaitFor.IsNull() {
-		plan.Status = types.DynamicNull()
-		tflog.Info(ctx, "Clearing status - wait_for was removed")
+	// 6. Populate object_ref output
+	if err := r.populateObjectRef(ctx, rc); err != nil {
+		resp.Diagnostics.AddError("Failed to populate object_ref", err.Error())
+		return
 	}
 
-	// 9. Clear ImportedWithoutAnnotations flag after first update
+	// 7. Clear ImportedWithoutAnnotations flag after first update
 	if checkImportedWithoutAnnotationsFlag(ctx, req.Private) {
 		clearImportedWithoutAnnotationsFlag(ctx, resp.Private)
 	}
 
-	// 10. Save updated state
-	// CRITICAL: This must happen BEFORE adding wait error to diagnostics
+	// 8. Save updated state
 	diags = resp.State.Set(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
-
-	// 11. Add wait error to diagnostics (AFTER state is saved)
-	if waitErr != nil {
-		r.addWaitError(resp, "updated", waitErr)
-		return
-	}
 }
 
 func (r *manifestResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -385,28 +348,6 @@ func clearImportedWithoutAnnotationsFlag(ctx context.Context, setter interface {
 	setter.SetKey(ctx, "imported_without_annotations", nil)
 }
 
-// checkPendingWaitStatusFlag checks if there's a pending wait from a previous failed wait
-func checkPendingWaitStatusFlag(ctx context.Context, getter interface {
-	GetKey(context.Context, string) ([]byte, diag.Diagnostics)
-}) bool {
-	data, _ := getter.GetKey(ctx, "pending_wait_status")
-	return data != nil && string(data) == "true"
-}
-
-// setPendingWaitStatusFlag sets the pending wait status flag in private state
-func setPendingWaitStatusFlag(ctx context.Context, setter interface {
-	SetKey(context.Context, string, []byte) diag.Diagnostics
-}) {
-	setter.SetKey(ctx, "pending_wait_status", []byte("true"))
-}
-
-// clearPendingWaitStatusFlag clears the pending wait status flag in private state
-func clearPendingWaitStatusFlag(ctx context.Context, setter interface {
-	SetKey(context.Context, string, []byte) diag.Diagnostics
-}) {
-	setter.SetKey(ctx, "pending_wait_status", nil)
-}
-
 // handleProjectionSuccess handles successful projection recovery per ADR-006
 func handleProjectionSuccess(ctx context.Context, hasPendingProjection bool, privateSetter interface {
 	SetKey(context.Context, string, []byte) diag.Diagnostics
@@ -469,4 +410,35 @@ func surfaceK8sWarnings(ctx context.Context, client k8sclient.K8sClient, obj int
 			"name":    obj.GetName(),
 		})
 	}
+}
+
+// populateObjectRef extracts resource identity and populates object_ref output
+func (r *manifestResource) populateObjectRef(ctx context.Context, rc *ResourceContext) error {
+	objRef := objectRefModel{
+		APIVersion: types.StringValue(rc.Object.GetAPIVersion()),
+		Kind:       types.StringValue(rc.Object.GetKind()),
+		Name:       types.StringValue(rc.Object.GetName()),
+	}
+
+	// Namespace is optional (null for cluster-scoped resources)
+	if ns := rc.Object.GetNamespace(); ns != "" {
+		objRef.Namespace = types.StringValue(ns)
+	} else {
+		objRef.Namespace = types.StringNull()
+	}
+
+	// Convert to types.Object
+	objRefValue, diags := types.ObjectValueFrom(ctx, map[string]attr.Type{
+		"api_version": types.StringType,
+		"kind":        types.StringType,
+		"name":        types.StringType,
+		"namespace":   types.StringType,
+	}, objRef)
+
+	if diags.HasError() {
+		return fmt.Errorf("failed to convert object_ref to types.Object: %v", diags)
+	}
+
+	rc.Data.ObjectRef = objRefValue
+	return nil
 }
