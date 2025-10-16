@@ -1430,7 +1430,24 @@ func TestAccManifestResource_DeleteWithStuckFinalizer(t *testing.T) {
 				},
 				ExpectError: regexp.MustCompile("timed out waiting for resource to be deleted|deletion timeout|finalizer|Deletion Blocked"),
 			},
+			// Step 3: Clean up the finalizer, then remove the resource successfully
+			// This prevents the test framework's automatic cleanup from hitting the finalizer
+			{
+				PreConfig: func() {
+					testhelpers.CleanupFinalizer(t, k8sClient, ns, cmName)
+				},
+				Config: testAccManifestConfigStuckFinalizerEmpty(ns),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					// ConfigMap should now be successfully deleted
+					testhelpers.CheckConfigMapDestroy(k8sClient, ns, cmName),
+				),
+			},
 		},
+		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, ns),
 	})
 }
 
