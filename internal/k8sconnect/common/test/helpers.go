@@ -10,6 +10,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -487,4 +488,83 @@ func CheckClusterRoleBindingDestroy(client kubernetes.Interface, name string) re
 		}
 		return fmt.Errorf("clusterrolebinding %s still exists after deletion", name)
 	}
+}
+
+// CreateConfigMapDirectly creates a ConfigMap directly using the K8s client (bypassing Terraform)
+// This is useful for testing scenarios where a resource already exists in the cluster
+func CreateConfigMapDirectly(t *testing.T, client kubernetes.Interface, namespace, name string, data map[string]string) {
+	ctx := context.Background()
+
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Data: data,
+	}
+
+	_, err := client.CoreV1().ConfigMaps(namespace).Create(ctx, cm, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create ConfigMap directly: %v", err)
+	}
+
+	fmt.Printf("✅ Pre-created ConfigMap %s/%s directly in cluster\n", namespace, name)
+}
+
+// CleanupFinalizer removes all finalizers from a ConfigMap to allow deletion
+// This is useful for cleaning up resources stuck in deletion due to test finalizers
+func CleanupFinalizer(t *testing.T, client kubernetes.Interface, namespace, name string) {
+	ctx := context.Background()
+
+	cm, err := client.CoreV1().ConfigMaps(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		// If the resource is already gone, no cleanup needed
+		if strings.Contains(err.Error(), "not found") {
+			return
+		}
+		t.Logf("Warning: Failed to get ConfigMap for finalizer cleanup: %v", err)
+		return
+	}
+
+	// Remove all finalizers
+	cm.Finalizers = []string{}
+
+	_, err = client.CoreV1().ConfigMaps(namespace).Update(ctx, cm, metav1.UpdateOptions{})
+	if err != nil {
+		t.Logf("Warning: Failed to remove finalizers from ConfigMap: %v", err)
+		return
+	}
+
+	// Try to delete the ConfigMap
+	err = client.CoreV1().ConfigMaps(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	if err != nil && !strings.Contains(err.Error(), "not found") {
+		t.Logf("Warning: Failed to delete ConfigMap after removing finalizers: %v", err)
+	} else {
+		fmt.Printf("🧹 Cleaned up ConfigMap %s/%s (removed finalizers)\n", namespace, name)
+	}
+}
+
+// CleanupNamespace forcefully deletes a namespace
+// This is useful for cleaning up test namespaces
+func CleanupNamespace(t *testing.T, client kubernetes.Interface, namespace string) {
+	ctx := context.Background()
+
+	err := client.CoreV1().Namespaces().Delete(ctx, namespace, metav1.DeleteOptions{})
+	if err != nil {
+		if !strings.Contains(err.Error(), "not found") {
+			t.Logf("Warning: Failed to delete namespace %s: %v", namespace, err)
+		}
+		return
+	}
+
+	// Wait for namespace to be deleted (up to 30 seconds)
+	for i := 0; i < 30; i++ {
+		_, err := client.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
+		if err != nil && strings.Contains(err.Error(), "not found") {
+			fmt.Printf("🧹 Cleaned up namespace %s\n", namespace)
+			return
+		}
+		time.Sleep(1 * time.Second)
+	}
+	t.Logf("Warning: Namespace %s still exists after cleanup attempt", namespace)
 }

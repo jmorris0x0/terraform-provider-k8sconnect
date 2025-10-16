@@ -1381,3 +1381,226 @@ YAML
 }
 `, namespace, deployName, namespace, deployName, deployName)
 }
+
+// Test deletion timeout when resource has stuck finalizer
+// This exercises the deletion timeout and finalizer explanation code paths
+func TestAccManifestResource_DeleteWithStuckFinalizer(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("finalizer-ns-%d", time.Now().UnixNano()%1000000)
+	cmName := fmt.Sprintf("stuck-cm-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	// Clean up the stuck finalizer after the test
+	t.Cleanup(func() {
+		testhelpers.CleanupFinalizer(t, k8sClient, ns, cmName)
+		testhelpers.CleanupNamespace(t, k8sClient, ns)
+	})
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create ConfigMap with custom finalizer and short timeout
+			{
+				Config: testAccManifestConfigStuckFinalizer(ns, cmName),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"cm_name":   config.StringVariable(cmName),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_cm", "id"),
+					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
+				),
+			},
+			// Step 2: Remove the resource - should timeout waiting for deletion
+			// The finalizer will block deletion and we have a 2s timeout
+			{
+				Config: testAccManifestConfigStuckFinalizerEmpty(ns),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+				},
+				ExpectError: regexp.MustCompile("timed out waiting for resource to be deleted|deletion timeout|finalizer|Deletion Blocked"),
+			},
+		},
+	})
+}
+
+func testAccManifestConfigStuckFinalizer(namespace, cmName string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+variable "namespace" { type = string }
+variable "cm_name" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_manifest" "test_cm" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: %s
+  namespace: %s
+  finalizers:
+  - k8sconnect.test/blocking-finalizer
+data:
+  test: value
+YAML
+
+  delete_timeout = "2s"
+
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+  depends_on = [k8sconnect_manifest.namespace]
+}
+`, namespace, cmName, namespace)
+}
+
+func testAccManifestConfigStuckFinalizerEmpty(namespace string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+variable "namespace" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+`, namespace)
+}
+
+// Test creating a resource that already exists (exercises IsAlreadyExists error path)
+// This test verifies that the provider properly handles the case where a resource
+// already exists in the cluster (without using Terraform import)
+func TestAccManifestResource_CreateAlreadyExists(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("already-exists-ns-%d", time.Now().UnixNano()%1000000)
+	cmName := fmt.Sprintf("existing-cm-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create namespace first
+			{
+				Config: testAccManifestConfigAlreadyExistsNamespace(ns),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+				},
+				Check: testhelpers.CheckNamespaceExists(k8sClient, ns),
+			},
+			// Step 2: Pre-create ConfigMap directly with K8s client, then try to create with Terraform
+			{
+				PreConfig: func() {
+					testhelpers.CreateConfigMapDirectly(t, k8sClient, ns, cmName, map[string]string{"pre-created": "true"})
+				},
+				Config: testAccManifestConfigAlreadyExistsConfigMap(ns, cmName),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"cm_name":   config.StringVariable(cmName),
+				},
+				// Terraform should attempt SSA which will succeed by taking ownership
+				// (This is actually the correct behavior with SSA - it doesn't fail on already exists)
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_manifest.test_cm", "id"),
+					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
+				),
+			},
+		},
+		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+	})
+}
+
+func testAccManifestConfigAlreadyExistsNamespace(namespace string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+variable "namespace" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+`, namespace)
+}
+
+func testAccManifestConfigAlreadyExistsConfigMap(namespace, cmName string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+variable "namespace" { type = string }
+variable "cm_name" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_manifest" "namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_manifest" "test_cm" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: %s
+  namespace: %s
+data:
+  managed: "true"
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+  depends_on = [k8sconnect_manifest.namespace]
+}
+`, namespace, cmName, namespace)
+}
