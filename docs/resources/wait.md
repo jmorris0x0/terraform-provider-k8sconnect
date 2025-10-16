@@ -2,14 +2,14 @@
 page_title: "Resource k8sconnect_wait - terraform-provider-k8sconnect"
 subcategory: ""
 description: |-
-  Waits for a Kubernetes resource to reach a desired state. Use this resource to wait for resources created by k8sconnect_manifest without risking resource tainting on timeout. Follows the pattern: create resource -> wait for readiness -> use outputs.
+  Waits for a Kubernetes resource to reach a desired state. Use this resource to wait for resources created by k8sconnect_object without risking resource tainting on timeout. Follows the pattern: create resource -> wait for readiness -> use outputs.
 ---
 
 # Resource: k8sconnect_wait
 
-Waits for a Kubernetes resource to reach a desired state. Use this resource to wait for resources created by k8sconnect_manifest without risking resource tainting on timeout. Follows the pattern: create resource -> wait for readiness -> use outputs.
+Waits for a Kubernetes resource to reach a desired state. Use this resource to wait for resources created by k8sconnect_object without risking resource tainting on timeout. Follows the pattern: create resource -> wait for readiness -> use outputs.
 
-The `k8sconnect_wait` resource waits for Kubernetes resources to reach a desired state. It references a `k8sconnect_manifest` resource via `object_ref` and blocks until the specified wait condition is met.
+The `k8sconnect_wait` resource waits for Kubernetes resources to reach a desired state. It references a `k8sconnect_object` resource via `object_ref` and blocks until the specified wait condition is met.
 
 ## Wait Strategies
 
@@ -45,7 +45,7 @@ Wait for a LoadBalancer to be provisioned and use its IP in other resources.
 
 <!-- runnable-test: wait-loadbalancer -->
 ```terraform
-resource "k8sconnect_manifest" "service" {
+resource "k8sconnect_object" "service" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: Service
@@ -65,7 +65,7 @@ resource "k8sconnect_manifest" "service" {
 }
 
 resource "k8sconnect_wait" "service" {
-  object_ref = k8sconnect_manifest.service.object_ref
+  object_ref = k8sconnect_object.service.object_ref
 
   wait_for = {
     field   = "status.loadBalancer.ingress"
@@ -76,7 +76,7 @@ resource "k8sconnect_wait" "service" {
 }
 
 # Use the LoadBalancer IP in another resource
-resource "k8sconnect_manifest" "endpoint_config" {
+resource "k8sconnect_object" "endpoint_config" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: ConfigMap
@@ -99,7 +99,7 @@ Wait for a Deployment to fully roll out before continuing.
 
 <!-- runnable-test: wait-rollout -->
 ```terraform
-resource "k8sconnect_manifest" "app" {
+resource "k8sconnect_object" "app" {
   yaml_body = <<-YAML
     apiVersion: apps/v1
     kind: Deployment
@@ -130,7 +130,7 @@ resource "k8sconnect_manifest" "app" {
 
 # Wait for all replicas to be updated and ready
 resource "k8sconnect_wait" "app" {
-  object_ref = k8sconnect_manifest.app.object_ref
+  object_ref = k8sconnect_object.app.object_ref
 
   wait_for = {
     rollout = true
@@ -141,7 +141,7 @@ resource "k8sconnect_wait" "app" {
 }
 
 # Deploy service only after deployment is fully rolled out
-resource "k8sconnect_manifest" "service" {
+resource "k8sconnect_object" "service" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: Service
@@ -169,7 +169,7 @@ Wait for a Kubernetes condition to be True.
 
 <!-- runnable-test: wait-condition -->
 ```terraform
-resource "k8sconnect_manifest" "storage_app" {
+resource "k8sconnect_object" "storage_app" {
   yaml_body = <<-YAML
     apiVersion: apps/v1
     kind: Deployment
@@ -201,7 +201,7 @@ resource "k8sconnect_manifest" "storage_app" {
 
 # Wait for "Available" condition (minimum availability reached)
 resource "k8sconnect_wait" "storage_app" {
-  object_ref = k8sconnect_manifest.storage_app.object_ref
+  object_ref = k8sconnect_object.storage_app.object_ref
 
   wait_for = {
     condition = "Available"
@@ -219,7 +219,7 @@ Wait for specific field values (e.g., Job completion).
 
 <!-- runnable-test: wait-field-value -->
 ```terraform
-resource "k8sconnect_manifest" "migration_job" {
+resource "k8sconnect_object" "migration_job" {
   yaml_body = <<-YAML
     apiVersion: batch/v1
     kind: Job
@@ -243,7 +243,7 @@ resource "k8sconnect_manifest" "migration_job" {
 
 # Wait for exactly 1 successful completion
 resource "k8sconnect_wait" "migration_job" {
-  object_ref = k8sconnect_manifest.migration_job.object_ref
+  object_ref = k8sconnect_object.migration_job.object_ref
 
   wait_for = {
     field_value = {
@@ -256,7 +256,7 @@ resource "k8sconnect_wait" "migration_job" {
 }
 
 # Deploy app only after migrations complete
-resource "k8sconnect_manifest" "app_deployment" {
+resource "k8sconnect_object" "app_deployment" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: ConfigMap
@@ -280,7 +280,7 @@ Wait for a PersistentVolumeClaim to be bound to a PersistentVolume.
 
 <!-- runnable-test: wait-pvc -->
 ```terraform
-resource "k8sconnect_manifest" "pv" {
+resource "k8sconnect_object" "pv" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: PersistentVolume
@@ -300,7 +300,7 @@ resource "k8sconnect_manifest" "pv" {
   cluster_connection = var.cluster_connection
 }
 
-resource "k8sconnect_manifest" "pvc" {
+resource "k8sconnect_object" "pvc" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: PersistentVolumeClaim
@@ -317,12 +317,12 @@ resource "k8sconnect_manifest" "pvc" {
   YAML
 
   cluster_connection = var.cluster_connection
-  depends_on         = [k8sconnect_manifest.pv]
+  depends_on         = [k8sconnect_object.pv]
 }
 
 # Wait for PVC to be bound
 resource "k8sconnect_wait" "pvc" {
-  object_ref = k8sconnect_manifest.pvc.object_ref
+  object_ref = k8sconnect_object.pvc.object_ref
 
   wait_for = {
     field_value = {
@@ -335,7 +335,7 @@ resource "k8sconnect_wait" "pvc" {
 }
 
 # Create deployment that uses the PVC - only after it's bound
-resource "k8sconnect_manifest" "app" {
+resource "k8sconnect_object" "app" {
   yaml_body = <<-YAML
     apiVersion: apps/v1
     kind: Deployment
@@ -380,8 +380,8 @@ resource "k8sconnect_manifest" "app" {
 
 ### Required
 
-- `cluster_connection` (Attributes) Kubernetes cluster connection for accessing the resource. Should match the connection used by the k8sconnect_manifest resource. (see [below for nested schema](#nestedatt--cluster_connection))
-- `object_ref` (Attributes) Reference to the Kubernetes object to wait for. Typically populated from k8sconnect_manifest.resource_name.object_ref output. (see [below for nested schema](#nestedatt--object_ref))
+- `cluster_connection` (Attributes) Kubernetes cluster connection for accessing the resource. Should match the connection used by the k8sconnect_object resource. (see [below for nested schema](#nestedatt--cluster_connection))
+- `object_ref` (Attributes) Reference to the Kubernetes object to wait for. Typically populated from k8sconnect_object.resource_name.object_ref output. (see [below for nested schema](#nestedatt--object_ref))
 - `wait_for` (Attributes) Conditions to wait for before considering the resource ready. (see [below for nested schema](#nestedatt--wait_for))
 
 ### Read-Only
@@ -452,7 +452,7 @@ Only **field waits** populate the `status` attribute. The status contains only t
 **Example:**
 ```terraform
 resource "k8sconnect_wait" "service" {
-  object_ref = k8sconnect_manifest.service.object_ref
+  object_ref = k8sconnect_object.service.object_ref
 
   wait_for = {
     field = "status.loadBalancer.ingress"
@@ -471,7 +471,7 @@ output "loadbalancer_ip" {
 
 ```terraform
 resource "k8sconnect_wait" "app" {
-  object_ref = k8sconnect_manifest.app.object_ref
+  object_ref = k8sconnect_object.app.object_ref
 
   wait_for = {
     rollout = true
@@ -480,7 +480,7 @@ resource "k8sconnect_wait" "app" {
   cluster_connection = var.cluster_connection
 }
 
-resource "k8sconnect_manifest" "next" {
+resource "k8sconnect_object" "next" {
   # ... config ...
   depends_on = [k8sconnect_wait.app]
 }

@@ -39,7 +39,7 @@ data "k8sconnect_yaml_split" "resources" {
   YAML
 }
 
-resource "k8sconnect_manifest" "resources" {
+resource "k8sconnect_object" "resources" {
   for_each = data.k8sconnect_yaml_split.resources.manifests
 
   yaml_body          = each.value
@@ -56,7 +56,7 @@ data "k8sconnect_yaml_split" "all_manifests" {
   pattern = "${path.module}/manifests/*.yaml"
 }
 
-resource "k8sconnect_manifest" "all" {
+resource "k8sconnect_object" "all" {
   for_each = data.k8sconnect_yaml_split.all_manifests.manifests
 
   yaml_body          = each.value

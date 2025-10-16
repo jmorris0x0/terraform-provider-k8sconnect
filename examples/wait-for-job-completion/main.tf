@@ -2,7 +2,7 @@
 
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "namespace" {
+resource "k8sconnect_object" "namespace" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: Namespace
@@ -13,7 +13,7 @@ resource "k8sconnect_manifest" "namespace" {
   cluster_connection = var.cluster_connection
 }
 
-resource "k8sconnect_manifest" "migration_job" {
+resource "k8sconnect_object" "migration_job" {
   yaml_body = <<-YAML
     apiVersion: batch/v1
     kind: Job
@@ -36,11 +36,11 @@ resource "k8sconnect_manifest" "migration_job" {
   YAML
 
   cluster_connection = var.cluster_connection
-  depends_on         = [k8sconnect_manifest.namespace]
+  depends_on         = [k8sconnect_object.namespace]
 }
 
 resource "k8sconnect_wait" "migration_job" {
-  object_ref = k8sconnect_manifest.migration_job.object_ref
+  object_ref = k8sconnect_object.migration_job.object_ref
 
   cluster_connection = var.cluster_connection
 
@@ -55,7 +55,7 @@ resource "k8sconnect_wait" "migration_job" {
 # Deploy app only after migrations complete
 # Note: field_value waits don't populate .status (only field waits do)
 # We use depends_on to ensure this runs after the migration succeeds
-resource "k8sconnect_manifest" "app_deployment" {
+resource "k8sconnect_object" "app_deployment" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: ConfigMap

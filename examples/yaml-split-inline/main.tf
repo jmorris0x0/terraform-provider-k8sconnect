@@ -28,7 +28,7 @@ data "k8sconnect_yaml_split" "resources" {
   YAML
 }
 
-resource "k8sconnect_manifest" "resources" {
+resource "k8sconnect_object" "resources" {
   for_each = data.k8sconnect_yaml_split.resources.manifests
 
   yaml_body          = each.value

@@ -12,10 +12,10 @@ import (
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/factory"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
-	manifestds "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/datasource/manifest"
+	objectds "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/datasource/object"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/datasource/yaml_scoped"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/datasource/yaml_split"
-	manifestres "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/resource/manifest"
+	objectres "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/resource/object"
 	patchres "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/resource/patch"
 	waitres "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/resource/wait"
 )
@@ -76,7 +76,7 @@ func (p *k8sconnectProvider) Resources(ctx context.Context) []func() resource.Re
 	return []func() resource.Resource{
 		func() resource.Resource {
 			// For backward compatibility, wrap the new client factory to match old interface
-			return manifestres.NewManifestResourceWithClientGetter(func(conn auth.ClusterConnectionModel) (k8sclient.K8sClient, error) {
+			return objectres.NewObjectResourceWithClientGetter(func(conn auth.ClusterConnectionModel) (k8sclient.K8sClient, error) {
 				return p.clientFactory.GetClient(conn)
 			})
 		},
@@ -99,6 +99,6 @@ func (p *k8sconnectProvider) DataSources(ctx context.Context) []func() datasourc
 	return []func() datasource.DataSource{
 		yaml_split.NewYamlSplitDataSource,
 		yaml_scoped.NewYamlScopedDataSource,
-		manifestds.NewManifestDataSource,
+		objectds.NewObjectDataSource,
 	}
 }

@@ -53,4 +53,4 @@ Detection checks for "no matches for kind" or "could not find the requested reso
 
 ## Test Coverage
 
-`TestAccManifestResource_CRDAndCRTogether` proves CRD + CR work in single apply (~24s) without configuration.
+`TestAccObjectResource_CRDAndCRTogether` proves CRD + CR work in single apply (~24s) without configuration.

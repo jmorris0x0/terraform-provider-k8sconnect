@@ -19,7 +19,7 @@ data "k8sconnect_yaml_scoped" "all" {
 }
 
 # Apply CRDs first - must exist before custom resources can be created
-resource "k8sconnect_manifest" "crds" {
+resource "k8sconnect_object" "crds" {
   for_each = data.k8sconnect_yaml_scoped.all.crds
 
   yaml_body          = each.value
@@ -27,25 +27,25 @@ resource "k8sconnect_manifest" "crds" {
 }
 
 # Apply cluster-scoped resources second (Namespaces, ClusterRoles, etc.)
-resource "k8sconnect_manifest" "cluster_scoped" {
+resource "k8sconnect_object" "cluster_scoped" {
   for_each = data.k8sconnect_yaml_scoped.all.cluster_scoped
 
   yaml_body          = each.value
   cluster_connection = var.cluster_connection
 
-  depends_on = [k8sconnect_manifest.crds]
+  depends_on = [k8sconnect_object.crds]
 }
 
 # Apply namespaced resources last (Deployments, Services, ConfigMaps, Custom Resources, etc.)
-resource "k8sconnect_manifest" "namespaced" {
+resource "k8sconnect_object" "namespaced" {
   for_each = data.k8sconnect_yaml_scoped.all.namespaced
 
   yaml_body          = each.value
   cluster_connection = var.cluster_connection
 
   depends_on = [
-    k8sconnect_manifest.crds,
-    k8sconnect_manifest.cluster_scoped
+    k8sconnect_object.crds,
+    k8sconnect_object.cluster_scoped
   ]
 }
 ```

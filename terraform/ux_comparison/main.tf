@@ -51,7 +51,7 @@ locals {
   }
 }
 # Create TWO namespaces - one for each provider's resources
-resource "k8sconnect_manifest" "namespace_k8sconnect" {
+resource "k8sconnect_object" "namespace_k8sconnect" {
   yaml_body          = <<-YAML
     apiVersion: v1
     kind: Namespace
@@ -93,15 +93,15 @@ locals {
   )
 }
 # Using k8sconnect - with inline cluster connection
-resource "k8sconnect_manifest" "nginx_deployment" {
+resource "k8sconnect_object" "nginx_deployment" {
   yaml_body          = local.deployment_k8sconnect
   cluster_connection = local.cluster_connection
-  depends_on         = [k8sconnect_manifest.namespace_k8sconnect]
+  depends_on         = [k8sconnect_object.namespace_k8sconnect]
 }
-resource "k8sconnect_manifest" "nginx_service" {
+resource "k8sconnect_object" "nginx_service" {
   yaml_body          = local.service_k8sconnect
   cluster_connection = local.cluster_connection
-  depends_on         = [k8sconnect_manifest.namespace_k8sconnect]
+  depends_on         = [k8sconnect_object.namespace_k8sconnect]
 }
 # Using kubectl provider - requires provider configuration
 resource "kubectl_manifest" "nginx_deployment" {

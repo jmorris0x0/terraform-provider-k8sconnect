@@ -2,7 +2,7 @@
 
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "namespace" {
+resource "k8sconnect_object" "namespace" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: Namespace
@@ -14,7 +14,7 @@ resource "k8sconnect_manifest" "namespace" {
 }
 
 # Create PersistentVolume for this example
-resource "k8sconnect_manifest" "pv" {
+resource "k8sconnect_object" "pv" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: PersistentVolume
@@ -32,11 +32,11 @@ resource "k8sconnect_manifest" "pv" {
   YAML
 
   cluster_connection = var.cluster_connection
-  depends_on         = [k8sconnect_manifest.namespace]
+  depends_on         = [k8sconnect_object.namespace]
 }
 
 # Create PVC
-resource "k8sconnect_manifest" "pvc" {
+resource "k8sconnect_object" "pvc" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: PersistentVolumeClaim
@@ -53,14 +53,14 @@ resource "k8sconnect_manifest" "pvc" {
   YAML
 
   cluster_connection = var.cluster_connection
-  depends_on         = [k8sconnect_manifest.pv]
+  depends_on         = [k8sconnect_object.pv]
 }
 
 # Wait for PVC to be bound
 # Note: PVCs don't have a "Ready" condition - they just have status.phase
 # This example shows waiting for phase via field_value instead
 resource "k8sconnect_wait" "pvc" {
-  object_ref = k8sconnect_manifest.pvc.object_ref
+  object_ref = k8sconnect_object.pvc.object_ref
 
   cluster_connection = var.cluster_connection
 
@@ -74,7 +74,7 @@ resource "k8sconnect_wait" "pvc" {
 
 # Create deployment that uses the PVC
 # Deployments have status.conditions including "Available" and "Progressing"
-resource "k8sconnect_manifest" "app" {
+resource "k8sconnect_object" "app" {
   yaml_body = <<-YAML
     apiVersion: apps/v1
     kind: Deployment
@@ -116,7 +116,7 @@ resource "k8sconnect_manifest" "app" {
 # This means the deployment has minimum availability (at least 1 replica ready)
 # Available conditions: "Available", "Progressing", "ReplicaFailure"
 resource "k8sconnect_wait" "app" {
-  object_ref = k8sconnect_manifest.app.object_ref
+  object_ref = k8sconnect_object.app.object_ref
 
   cluster_connection = var.cluster_connection
 

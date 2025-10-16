@@ -7,7 +7,7 @@ description: |-
   Appropriate use cases:
   Cloud provider system resources (AWS EKS, GCP GKE, Azure AKS defaults)Operator-managed resources (cert-manager, nginx-ingress, etc.)Helm chart deployments requiring customizationResources created and managed by other tools
   NOT appropriate for:
-  Resources managed by k8sconnect_manifest in the same stateResources requiring full lifecycle controlResources you could manage with k8sconnect_manifest instead
+  Resources managed by k8sconnect_object in the same stateResources requiring full lifecycle controlResources you could manage with k8sconnect_object instead
   Destroy behavior:
   When you destroy a patch resource, ownership is released but patched values remain on the target resource. Values are not reverted to their original state.
 ---
@@ -25,9 +25,9 @@ Applies targeted patches to existing Kubernetes resources using Server-Side Appl
 - Resources created and managed by other tools
 
 **NOT appropriate for:**
-- Resources managed by k8sconnect_manifest in the same state
+- Resources managed by k8sconnect_object in the same state
 - Resources requiring full lifecycle control
-- Resources you could manage with k8sconnect_manifest instead
+- Resources you could manage with k8sconnect_object instead
 
 **Destroy behavior:**
 When you destroy a patch resource, ownership is released but patched values remain on the target resource. Values are not reverted to their original state.

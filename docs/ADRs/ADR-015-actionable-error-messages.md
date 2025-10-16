@@ -91,7 +91,7 @@ Implement a **diagnostic-first error strategy**:
 When a namespace deletion times out, **perform a diagnostic API call** to list remaining resources:
 
 ```go
-func (r *manifestResource) explainNamespaceDeletionFailure(ctx context.Context, client k8sclient.K8sClient, namespace string) string {
+func (r *objectResource) explainNamespaceDeletionFailure(ctx context.Context, client k8sclient.K8sClient, namespace string) string {
     // Single LIST call to get diagnostic context
     resourceList, err := client.ListNamespaceResources(ctx, namespace)
     if err != nil {
@@ -256,7 +256,7 @@ WHAT TO DO:
 Distinguish between "doesn't exist" and "not ready yet":
 
 ```go
-func (r *manifestResource) classifyCRDError(err error, crdName string) (severity, title, detail string) {
+func (r *objectResource) classifyCRDError(err error, crdName string) (severity, title, detail string) {
     if isDiscoveryError(err) {
         // Perform diagnostic: check if CRD exists
         crd, checkErr := client.GetCRD(ctx, crdName)

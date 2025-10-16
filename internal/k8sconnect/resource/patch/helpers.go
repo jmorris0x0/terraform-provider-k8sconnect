@@ -222,8 +222,8 @@ func (r *patchResource) applyJSONOrMergePatch(ctx context.Context, client k8scli
 				"The target resource has immutable fields that cannot be changed after creation.\n\n"+
 				"Options:\n"+
 				"1. Remove the immutable field from your patch\n"+
-				"2. If the field MUST change, recreate the target resource manually or use k8sconnect_manifest\n"+
-				"3. k8sconnect_manifest manages full resource lifecycle and can trigger automatic replacement\n\n"+
+				"2. If the field MUST change, recreate the target resource manually or use k8sconnect_object\n"+
+				"3. k8sconnect_object manages full resource lifecycle and can trigger automatic replacement\n\n"+
 				"Note: JSON Patch and Merge Patch cannot detect immutable fields during plan - errors only appear during apply",
 				immutableFields, targetObj.GetKind(), targetObj.GetName(), targetObj.GetNamespace())
 		}
@@ -265,8 +265,8 @@ func (r *patchResource) applyStrategicMergePatch(ctx context.Context, client k8s
 				"The target resource has immutable fields that cannot be changed after creation.\n\n"+
 				"Options:\n"+
 				"1. Remove the immutable field from your patch\n"+
-				"2. If the field MUST change, recreate the target resource manually or use k8sconnect_manifest\n"+
-				"3. k8sconnect_manifest manages full resource lifecycle and can trigger automatic replacement\n\n"+
+				"2. If the field MUST change, recreate the target resource manually or use k8sconnect_object\n"+
+				"3. k8sconnect_object manages full resource lifecycle and can trigger automatic replacement\n\n"+
 				"Note: This error was caught during apply. When connections are ready, Strategic Merge patches can detect this during plan.",
 				immutableFields, targetObj.GetKind(), targetObj.GetName(), targetObj.GetNamespace())
 		}

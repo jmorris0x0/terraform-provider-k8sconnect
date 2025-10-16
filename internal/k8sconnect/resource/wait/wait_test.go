@@ -61,7 +61,7 @@ variable "raw" {
 
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test" {
+resource "k8sconnect_object" "test" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -75,7 +75,7 @@ YAML
 }
 
 resource "k8sconnect_wait" "test" {
-  object_ref = k8sconnect_manifest.test.object_ref
+  object_ref = k8sconnect_object.test.object_ref
 
   cluster_connection = {
     kubeconfig = var.raw
@@ -133,7 +133,7 @@ variable "raw" {
 
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test" {
+resource "k8sconnect_object" "test" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -147,7 +147,7 @@ YAML
 }
 
 resource "k8sconnect_wait" "test" {
-  object_ref = k8sconnect_manifest.test.object_ref
+  object_ref = k8sconnect_object.test.object_ref
 
   cluster_connection = {
     kubeconfig = var.raw
@@ -208,7 +208,7 @@ variable "namespace" {
 
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_namespace" {
+resource "k8sconnect_object" "test_namespace" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -221,7 +221,7 @@ YAML
   }
 }
 
-resource "k8sconnect_manifest" "test" {
+resource "k8sconnect_object" "test" {
   yaml_body = <<YAML
 apiVersion: apps/v1
 kind: Deployment
@@ -249,11 +249,11 @@ YAML
     kubeconfig = var.raw
   }
 
-  depends_on = [k8sconnect_manifest.test_namespace]
+  depends_on = [k8sconnect_object.test_namespace]
 }
 
 resource "k8sconnect_wait" "test" {
-  object_ref = k8sconnect_manifest.test.object_ref
+  object_ref = k8sconnect_object.test.object_ref
 
   cluster_connection = {
     kubeconfig = var.raw
@@ -314,7 +314,7 @@ variable "namespace" {
 
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_namespace" {
+resource "k8sconnect_object" "test_namespace" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -327,7 +327,7 @@ YAML
   }
 }
 
-resource "k8sconnect_manifest" "test" {
+resource "k8sconnect_object" "test" {
   yaml_body = <<YAML
 apiVersion: apps/v1
 kind: Deployment
@@ -355,11 +355,11 @@ YAML
     kubeconfig = var.raw
   }
 
-  depends_on = [k8sconnect_manifest.test_namespace]
+  depends_on = [k8sconnect_object.test_namespace]
 }
 
 resource "k8sconnect_wait" "test" {
-  object_ref = k8sconnect_manifest.test.object_ref
+  object_ref = k8sconnect_object.test.object_ref
 
   cluster_connection = {
     kubeconfig = var.raw
@@ -420,7 +420,7 @@ variable "namespace" {
 
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_namespace" {
+resource "k8sconnect_object" "test_namespace" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -433,7 +433,7 @@ YAML
   }
 }
 
-resource "k8sconnect_manifest" "test" {
+resource "k8sconnect_object" "test" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: ConfigMap
@@ -448,11 +448,11 @@ YAML
     kubeconfig = var.raw
   }
 
-  depends_on = [k8sconnect_manifest.test_namespace]
+  depends_on = [k8sconnect_object.test_namespace]
 }
 
 resource "k8sconnect_wait" "test" {
-  object_ref = k8sconnect_manifest.test.object_ref
+  object_ref = k8sconnect_object.test.object_ref
 
   cluster_connection = {
     kubeconfig = var.raw
@@ -512,7 +512,7 @@ variable "namespace" {
 
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_namespace" {
+resource "k8sconnect_object" "test_namespace" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -526,7 +526,7 @@ YAML
 }
 
 # First create a PersistentVolume
-resource "k8sconnect_manifest" "pv" {
+resource "k8sconnect_object" "pv" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: PersistentVolume
@@ -549,7 +549,7 @@ YAML
 }
 
 # Then create PVC
-resource "k8sconnect_manifest" "pvc" {
+resource "k8sconnect_object" "pvc" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -569,12 +569,12 @@ YAML
     kubeconfig = var.raw
   }
 
-  depends_on = [k8sconnect_manifest.pv, k8sconnect_manifest.test_namespace]
+  depends_on = [k8sconnect_object.pv, k8sconnect_object.test_namespace]
 }
 
 # Separate wait resource waits for binding
 resource "k8sconnect_wait" "pvc" {
-  object_ref = k8sconnect_manifest.pvc.object_ref
+  object_ref = k8sconnect_object.pvc.object_ref
 
   cluster_connection = {
     kubeconfig = var.raw
@@ -636,7 +636,7 @@ variable "namespace" {
 
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_namespace" {
+resource "k8sconnect_object" "test_namespace" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -649,7 +649,7 @@ YAML
   }
 }
 
-resource "k8sconnect_manifest" "test" {
+resource "k8sconnect_object" "test" {
   yaml_body = <<YAML
 apiVersion: apps/v1
 kind: Deployment
@@ -677,11 +677,11 @@ YAML
     kubeconfig = var.raw
   }
 
-  depends_on = [k8sconnect_manifest.test_namespace]
+  depends_on = [k8sconnect_object.test_namespace]
 }
 
 resource "k8sconnect_wait" "test" {
-  object_ref = k8sconnect_manifest.test.object_ref
+  object_ref = k8sconnect_object.test.object_ref
 
   cluster_connection = {
     kubeconfig = var.raw
@@ -743,7 +743,7 @@ variable "namespace" {
 
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_namespace" {
+resource "k8sconnect_object" "test_namespace" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -756,7 +756,7 @@ YAML
   }
 }
 
-resource "k8sconnect_manifest" "test" {
+resource "k8sconnect_object" "test" {
   yaml_body = <<YAML
 apiVersion: apps/v1
 kind: StatefulSet
@@ -785,11 +785,11 @@ YAML
     kubeconfig = var.raw
   }
 
-  depends_on = [k8sconnect_manifest.test_namespace]
+  depends_on = [k8sconnect_object.test_namespace]
 }
 
 resource "k8sconnect_wait" "test" {
-  object_ref = k8sconnect_manifest.test.object_ref
+  object_ref = k8sconnect_object.test.object_ref
 
   cluster_connection = {
     kubeconfig = var.raw
@@ -842,7 +842,7 @@ variable "namespace" {
 
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "test_namespace" {
+resource "k8sconnect_object" "test_namespace" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: Namespace
@@ -855,7 +855,7 @@ YAML
   }
 }
 
-resource "k8sconnect_manifest" "test" {
+resource "k8sconnect_object" "test" {
   yaml_body = <<YAML
 apiVersion: v1
 kind: ConfigMap
@@ -870,11 +870,11 @@ YAML
     kubeconfig = var.raw
   }
 
-  depends_on = [k8sconnect_manifest.test_namespace]
+  depends_on = [k8sconnect_object.test_namespace]
 }
 
 resource "k8sconnect_wait" "test" {
-  object_ref = k8sconnect_manifest.test.object_ref
+  object_ref = k8sconnect_object.test.object_ref
 
   cluster_connection = {
     kubeconfig = var.raw

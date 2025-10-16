@@ -127,7 +127,7 @@ func (v *patchExecAuthValidator) ValidateResource(ctx context.Context, req resou
 	}
 }
 
-// isManagedByThisState checks if a resource is managed by k8sconnect_manifest
+// isManagedByThisState checks if a resource is managed by k8sconnect_object
 // This is the critical safety mechanism to prevent self-patching
 func (r *patchResource) isManagedByThisState(ctx context.Context, obj *unstructured.Unstructured) bool {
 	// Check 1: Does it have our ownership annotation?
@@ -154,7 +154,7 @@ func (r *patchResource) isManagedByThisState(ctx context.Context, obj *unstructu
 		// k8sconnect manifest uses "k8sconnect" as field manager
 		// k8sconnect_patch uses "k8sconnect-patch-{id}" as field manager
 		if manager == "k8sconnect" || (strings.HasPrefix(manager, "k8sconnect") && !strings.Contains(manager, "patch")) {
-			tflog.Debug(ctx, "Resource managed by k8sconnect_manifest",
+			tflog.Debug(ctx, "Resource managed by k8sconnect_object",
 				map[string]interface{}{"manager": manager})
 			return true
 		}

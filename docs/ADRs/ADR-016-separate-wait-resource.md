@@ -11,7 +11,7 @@ This ADR changes WHO drives status population, not the principle itself. ADR-008
 
 ### The Problem
 
-When a `wait_for` condition times out on a `k8sconnect_manifest` resource, Terraform automatically taints the resource even though it was successfully created in Kubernetes. This causes the next `terraform apply` to **destroy and recreate** the resource instead of retrying the wait condition in-place.
+When a `wait_for` condition times out on a `k8sconnect_object` resource, Terraform automatically taints the resource even though it was successfully created in Kubernetes. This causes the next `terraform apply` to **destroy and recreate** the resource instead of retrying the wait condition in-place.
 
 **User Scenario:**
 1. User creates a PVC with `wait_for.field_value = { "status.phase" = "Bound" }`
@@ -59,7 +59,7 @@ Terraform's plugin framework automatically taints resources when:
 **Our Current Implementation (Correct State Save Pattern):**
 
 ```go
-// internal/k8sconnect/resource/manifest/crud.go
+// internal/k8sconnect/resource/object/crud.go
 
 // 9. SAVE STATE IMMEDIATELY after successful SSA apply
 diags = resp.State.Set(ctx, rc.Data)
@@ -144,12 +144,12 @@ if hasPendingWait {
 AddWarning doesn't block the Terraform dependency graph:
 
 ```hcl
-resource "k8sconnect_manifest" "pvc" {
+resource "k8sconnect_object" "pvc" {
   wait_for = { field_value = { "status.phase" = "Bound" } }
 }
 
-resource "k8sconnect_manifest" "pod" {
-  depends_on = [k8sconnect_manifest.pvc]
+resource "k8sconnect_object" "pod" {
+  depends_on = [k8sconnect_object.pvc]
   # Pod spec references the PVC
 }
 ```
@@ -280,14 +280,14 @@ Follow the official kubernetes provider and accept tainting as expected behavior
 
 ```hcl
 # Create PVC (no wait_for attribute)
-resource "k8sconnect_manifest" "pvc" {
+resource "k8sconnect_object" "pvc" {
   yaml_body = "..."  # PVC YAML
   cluster_connection = var.cluster_connection
 }
 
 # Separate wait resource blocks on PVC being bound
 resource "k8sconnect_wait" "pvc_ready" {
-  resource_ref = k8sconnect_manifest.pvc.resource_ref
+  resource_ref = k8sconnect_object.pvc.resource_ref
   wait_for = {
     field_value = { "status.phase" = "Bound" }
     timeout = "5m"
@@ -295,7 +295,7 @@ resource "k8sconnect_wait" "pvc_ready" {
 }
 
 # Pod depends on wait resource, not manifest resource
-resource "k8sconnect_manifest" "pod" {
+resource "k8sconnect_object" "pod" {
   depends_on = [k8sconnect_wait.pvc_ready]
   yaml_body = "..."  # Pod YAML mounting the PVC
   cluster_connection = var.cluster_connection
@@ -314,7 +314,7 @@ resource "k8sconnect_manifest" "pod" {
 The manifest resource has a computed output containing the minimum information needed to locate and connect to the resource:
 
 ```hcl
-# Computed output from k8sconnect_manifest.pvc
+# Computed output from k8sconnect_object.pvc
 resource_ref = {
   cluster_connection = { ... }  # Auth credentials and endpoint
   api_version        = "v1"     # Resource identity
@@ -337,11 +337,11 @@ resource_ref = {
 **Dependency Flow:**
 
 ```
-k8sconnect_manifest.pvc (creates PVC)
+k8sconnect_object.pvc (creates PVC)
          ↓ (outputs resource_ref)
 k8sconnect_wait.pvc_ready (waits for PVC to be bound)
          ↓ (depends_on)
-k8sconnect_manifest.pod (creates Pod that uses PVC)
+k8sconnect_object.pod (creates Pod that uses PVC)
 ```
 
 **Edge Cases:**
@@ -357,7 +357,7 @@ k8sconnect_manifest.pod (creates Pod that uses PVC)
 ✅ **SATISFIED**
 
 When wait times out:
-1. `k8sconnect_manifest.pvc` succeeds (PVC created)
+1. `k8sconnect_object.pvc` succeeds (PVC created)
 2. `k8sconnect_wait.pvc_ready` fails with AddError
 3. Apply stops with exit code 1
 4. User sees error and knows something is wrong
@@ -438,7 +438,7 @@ When user retries after fixing the issue:
 
 Following ADR-008 "You only get what you wait for", status should only be populated for fields that are waited on. Implementation options:
 
-1. **Wait resource has its own status field:** Wait resource stores the pruned status for the field it's waiting on. Users access status via `k8sconnect_wait.pvc_ready.status` instead of `k8sconnect_manifest.pvc.status`. Manifest resource never populates status when using separate wait.
+1. **Wait resource has its own status field:** Wait resource stores the pruned status for the field it's waiting on. Users access status via `k8sconnect_wait.pvc_ready.status` instead of `k8sconnect_object.pvc.status`. Manifest resource never populates status when using separate wait.
 
 2. **Manifest Read operation checks for wait resources:** Manifest detects if any wait resources reference it, reads their wait_for configs, populates its own status field accordingly. Complex cross-resource dependency.
 

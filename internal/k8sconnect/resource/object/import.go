@@ -1,0 +1,366 @@
+// internal/k8sconnect/resource/object/import.go
+package object
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
+
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
+)
+
+// ImportState method implementing kubeconfig strategy with managed fields tracking
+func (r *objectResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	tflog.Info(ctx, "ImportState called", map[string]interface{}{"import_id": req.ID})
+
+	// Parse import ID: "context/namespace/kind/name" or "context/kind/name" for cluster-scoped
+	kubeContext, namespace, kind, name, err := r.parseImportID(req.ID)
+
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Invalid Import ID",
+			fmt.Sprintf("Expected format: <context>/<namespace>/<kind>/<n> or <context>/<kind>/<n>\n\nExamples:\n"+
+				"  prod/default/Pod/nginx\n"+
+				"  staging/kube-system/Service/coredns\n"+
+				"  prod/Namespace/my-namespace\n"+
+				"  dev/ClusterRole/admin\n\nError: %s", err.Error()),
+		)
+		return
+	}
+
+	// Validate required parts
+	if kubeContext == "" {
+		resp.Diagnostics.AddError(
+			"Import Failed: Missing Context",
+			"The import ID must include a kubeconfig context as the first part.\n\n"+
+				"Format: <context>/<namespace>/<kind>/<n> or <context>/<kind>/<n>\n\n"+
+				"Available contexts can be found with: kubectl config get-contexts",
+		)
+		return
+	}
+	if kind == "" {
+		resp.Diagnostics.AddError(
+			"Import Failed: Missing Kind",
+			"The resource kind cannot be empty in the import ID.",
+		)
+		return
+	}
+	if name == "" {
+		resp.Diagnostics.AddError(
+			"Import Failed: Missing Name",
+			"The resource name cannot be empty in the import ID.",
+		)
+		return
+	}
+
+	// Read kubeconfig from KUBECONFIG env var or default location
+	kubeconfigPath := os.Getenv("KUBECONFIG")
+
+	if kubeconfigPath == "" {
+		homeDir := os.Getenv("HOME")
+
+		if homeDir == "" {
+			resp.Diagnostics.AddError(
+				"Import Failed: KUBECONFIG Not Found",
+				"KUBECONFIG environment variable is not set and HOME directory could not be determined.\n\n"+
+					"Set KUBECONFIG environment variable:\n"+
+					"  export KUBECONFIG=~/.kube/config\n"+
+					"  terraform import k8sconnect_object.example \"prod/default/Pod/nginx\"",
+			)
+			return
+		}
+		kubeconfigPath = filepath.Join(homeDir, ".kube", "config")
+	}
+
+	tflog.Info(ctx, "Using kubeconfig", map[string]interface{}{
+		"path": kubeconfigPath,
+	})
+
+	// Check if kubeconfig file exists
+	if _, err := os.Stat(kubeconfigPath); os.IsNotExist(err) {
+		resp.Diagnostics.AddError(
+			"Import Failed: Kubeconfig File Not Found",
+			fmt.Sprintf("Kubeconfig file not found at: %s\n\n"+
+				"Ensure your kubeconfig file exists or set KUBECONFIG environment variable:\n"+
+				"  export KUBECONFIG=/path/to/your/kubeconfig\n"+
+				"  terraform import k8sconnect_object.example \"prod/default/Pod/nginx\"", kubeconfigPath),
+		)
+		return
+	}
+
+	// Read the kubeconfig file contents
+	kubeconfigData, err := os.ReadFile(kubeconfigPath)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Import Failed: Cannot Read Kubeconfig",
+			fmt.Sprintf("Failed to read kubeconfig file at %s: %s", kubeconfigPath, err.Error()),
+		)
+		return
+	}
+
+	tflog.Info(ctx, "import using kubeconfig", map[string]interface{}{
+		"path":      kubeconfigPath,
+		"context":   kubeContext,
+		"kind":      kind,
+		"name":      name,
+		"namespace": namespace,
+	})
+
+	// Create temporary connection model for import
+	tempConn := auth.ClusterConnectionModel{
+		Kubeconfig: types.StringValue(string(kubeconfigData)),
+		Context:    types.StringValue(kubeContext),
+	}
+
+	// Create REST config from connection model
+	restConfig, err := auth.CreateRESTConfig(ctx, tempConn)
+	if err != nil {
+		// Provide context-specific error messages
+		if strings.Contains(err.Error(), "context") && strings.Contains(err.Error(), "not found") {
+			resp.Diagnostics.AddError(
+				"Import Failed: Context Not Found",
+				fmt.Sprintf("Context \"%s\" not found in kubeconfig.\n\n"+
+					"Available contexts:\n"+
+					"  kubectl config get-contexts\n\n"+
+					"Details: %s", kubeContext, err.Error()),
+			)
+		} else if strings.Contains(err.Error(), "kubeconfig") {
+			resp.Diagnostics.AddError(
+				"Import Failed: Invalid Kubeconfig",
+				fmt.Sprintf("Failed to parse kubeconfig file at %s.\n\n"+
+					"Ensure your kubeconfig is valid:\n"+
+					"  kubectl config view\n\n"+
+					"Details: %s", kubeconfigPath, err.Error()),
+			)
+		} else {
+			resp.Diagnostics.AddError(
+				"Import Failed: Connection Error",
+				fmt.Sprintf("Failed to create Kubernetes client from kubeconfig.\n\n"+
+					"This usually means:\n"+
+					"1. Invalid kubeconfig file\n"+
+					"2. Cluster is unreachable\n"+
+					"3. Context credentials have expired\n\n"+
+					"Details: %s", err.Error()),
+			)
+		}
+		return
+	}
+
+	// Create K8s client
+	client, err := k8sclient.NewDynamicK8sClient(restConfig)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Import Failed: Client Creation Error",
+			fmt.Sprintf("Failed to create Kubernetes client: %s", err.Error()),
+		)
+		return
+	}
+
+	// Discover GVR from kind and fetch the resource
+	_, liveObj, err := client.GetGVRFromKind(ctx, kind, namespace, name)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			resp.Diagnostics.AddError(
+				"Import Failed: Resource not found",
+				fmt.Sprintf("Resource %s/%s (kind: %s) not found in context %q.\n\n"+
+					"Verify that:\n"+
+					"- The resource exists: kubectl get %s %s -n %s --context=%s\n"+
+					"- You have permission to read this resource",
+					namespace, name, kind, kubeContext,
+					strings.ToLower(kind), name, namespace, kubeContext),
+			)
+		} else {
+			resp.Diagnostics.AddError(
+				"Import Failed",
+				fmt.Sprintf("Failed to fetch resource: %s", err.Error()),
+			)
+		}
+		return
+	}
+
+	// Check for existing ownership and generate ID accordingly
+	existingID := r.getOwnershipID(liveObj)
+
+	var resourceID string
+
+	if existingID != "" {
+		// Resource already managed - use existing ID and warn
+		resourceID = existingID
+
+		resp.Diagnostics.AddWarning(
+			"Importing Already-Managed Resource",
+			fmt.Sprintf("This resource is already managed by k8sconnect (ID: %s).\n"+
+				"The existing ownership will be maintained.\n"+
+				"If this resource is managed by another Terraform state, you may experience conflicts.\n"+
+				"To transfer ownership cleanly, remove the annotation first:\n"+
+				"kubectl annotate %s %s k8sconnect.terraform.io/terraform-id-",
+				existingID, strings.ToLower(kind), name),
+		)
+
+		tflog.Warn(ctx, "importing already-managed resource", map[string]interface{}{
+			"existing_id": existingID,
+			"kind":        kind,
+			"name":        name,
+			"namespace":   namespace,
+		})
+	} else {
+		// Resource not yet managed - generate new ID
+		resourceID = r.generateID()
+	}
+
+	// Convert to YAML for state
+	yamlBytes, err := r.objectToYAML(liveObj)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Import Failed: YAML conversion error",
+			fmt.Sprintf("Failed to convert resource to YAML: %s", err.Error()),
+		)
+		return
+	}
+
+	// Extract field paths from the imported object
+	paths := extractAllFieldsFromYAML(liveObj.Object, "")
+
+	// Project the current state for managed fields
+	projection, err := projectFields(liveObj.Object, paths)
+	if err != nil {
+		resp.Diagnostics.AddError("Projection Failed",
+			fmt.Sprintf("Failed to project managed fields during import: %s", err))
+		return
+	}
+
+	// Convert projection to flat map for clean diff display
+	projectionMap := flattenProjectionToMap(projection, paths)
+
+	// Convert projection to types.Map
+	projectionMapValue, projDiags := types.MapValueFrom(ctx, types.StringType, projectionMap)
+	if projDiags.HasError() {
+		tflog.Warn(ctx, "Failed to convert projection to map during import", map[string]interface{}{
+			"diagnostics": projDiags,
+		})
+		// Set empty map on error
+		projectionMapValue, _ = types.MapValueFrom(ctx, types.StringType, map[string]string{})
+	}
+
+	// Extract field ownership from the imported object
+	ownership := extractFieldOwnership(liveObj)
+	ownershipMap := make(map[string]string, len(ownership))
+	for path, owner := range ownership {
+		ownershipMap[path] = owner.Manager
+	}
+	fieldOwnershipMap, ownershipDiags := types.MapValueFrom(ctx, types.StringType, ownershipMap)
+	if ownershipDiags.HasError() {
+		tflog.Warn(ctx, "Failed to convert field ownership during import", map[string]interface{}{
+			"diagnostics": ownershipDiags,
+		})
+		// Set empty map on error
+		fieldOwnershipMap, _ = types.MapValueFrom(ctx, types.StringType, map[string]string{})
+	}
+
+	// Create connection model for import - use the file contents, not the path
+	conn := auth.ClusterConnectionModel{
+		Host:                 types.StringNull(),
+		ClusterCACertificate: types.StringNull(),
+		Kubeconfig:           types.StringValue(string(kubeconfigData)), // Use contents, not path!
+		Context:              types.StringValue(kubeContext),
+		Exec:                 nil,
+	}
+
+	// Convert to types.Object
+	connectionObj, err := r.convertConnectionToObject(ctx, conn)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Import Failed: Connection Conversion Error",
+			fmt.Sprintf("Failed to convert connection model: %s", err.Error()),
+		)
+		return
+	}
+
+	// Populate object_ref from imported resource
+	objRef := objectRefModel{
+		APIVersion: types.StringValue(liveObj.GetAPIVersion()),
+		Kind:       types.StringValue(liveObj.GetKind()),
+		Name:       types.StringValue(liveObj.GetName()),
+	}
+
+	// Namespace is optional (null for cluster-scoped resources)
+	if ns := liveObj.GetNamespace(); ns != "" {
+		objRef.Namespace = types.StringValue(ns)
+	} else {
+		objRef.Namespace = types.StringNull()
+	}
+
+	// Convert object_ref to types.Object
+	objRefValue, objRefDiags := types.ObjectValueFrom(ctx, map[string]attr.Type{
+		"api_version": types.StringType,
+		"kind":        types.StringType,
+		"name":        types.StringType,
+		"namespace":   types.StringType,
+	}, objRef)
+
+	if objRefDiags.HasError() {
+		resp.Diagnostics.AddError(
+			"Import Failed: ObjectRef Conversion Error",
+			fmt.Sprintf("Failed to convert object_ref: %v", objRefDiags),
+		)
+		return
+	}
+
+	// Create imported data with managed state projection
+	importedData := objectResourceModel{
+		ID:                     types.StringValue(resourceID),
+		YAMLBody:               types.StringValue(string(yamlBytes)),
+		ClusterConnection:      connectionObj,
+		DeleteProtection:       types.BoolValue(false),
+		IgnoreFields:           types.ListNull(types.StringType),
+		ManagedStateProjection: projectionMapValue,
+		FieldOwnership:         fieldOwnershipMap,
+		ObjectRef:              objRefValue,
+	}
+
+	diags := resp.State.Set(ctx, &importedData)
+	resp.Diagnostics.Append(diags...)
+
+	// Store imported_without_annotations in private state
+	diags = resp.Private.SetKey(ctx, "imported_without_annotations", []byte("true"))
+	resp.Diagnostics.Append(diags...)
+
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	tflog.Info(ctx, "import completed with managed fields tracking", map[string]interface{}{
+		"id":            resourceID,
+		"kind":          kind,
+		"name":          name,
+		"namespace":     namespace,
+		"kubeconfig":    kubeconfigPath,
+		"context":       kubeContext,
+		"managed_paths": len(paths),
+		"map_size":      len(projectionMap),
+	})
+
+}
+
+func (r *objectResource) parseImportID(importID string) (context, namespace, kind, name string, err error) {
+	parts := strings.Split(importID, "/")
+
+	switch len(parts) {
+	case 3:
+		// Cluster-scoped: "context/kind/name"
+		return parts[0], "", parts[1], parts[2], nil
+	case 4:
+		// Namespaced: "context/namespace/kind/name"
+		return parts[0], parts[1], parts[2], parts[3], nil
+	default:
+		return "", "", "", "", fmt.Errorf("expected 3 or 4 parts separated by '/', got %d parts", len(parts))
+	}
+}

@@ -2,7 +2,7 @@
 
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "namespace" {
+resource "k8sconnect_object" "namespace" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: Namespace
@@ -13,7 +13,7 @@ resource "k8sconnect_manifest" "namespace" {
   cluster_connection = var.cluster_connection
 }
 
-resource "k8sconnect_manifest" "deployment" {
+resource "k8sconnect_object" "deployment" {
   yaml_body = <<-YAML
     apiVersion: apps/v1
     kind: Deployment
@@ -36,5 +36,5 @@ resource "k8sconnect_manifest" "deployment" {
   YAML
 
   cluster_connection = var.cluster_connection
-  depends_on         = [k8sconnect_manifest.namespace]
+  depends_on         = [k8sconnect_object.namespace]
 }

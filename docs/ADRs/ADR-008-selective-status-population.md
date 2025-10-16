@@ -35,14 +35,14 @@ When waiting for `status.loadBalancer.ingress`, store ONLY `{"loadBalancer": {"i
 
 **Example**:
 ```hcl
-resource "k8sconnect_manifest" "service" {
+resource "k8sconnect_object" "service" {
   yaml_body = "..."
   # No wait_for - status will be null
 }
 
 resource "aws_route53_record" "lb" {
   # This proceeds immediately with null - may fail or create incorrect record
-  records = [k8sconnect_manifest.service.status.loadBalancer.ingress[0].ip]
+  records = [k8sconnect_object.service.status.loadBalancer.ingress[0].ip]
 }
 ```
 
@@ -60,7 +60,7 @@ resource "aws_route53_record" "lb" {
 
 **Example**:
 ```hcl
-resource "k8sconnect_manifest" "service" {
+resource "k8sconnect_object" "service" {
   yaml_body = "..."
   wait_for = {
     field = "status.loadBalancer.ingress"
@@ -72,7 +72,7 @@ resource "k8sconnect_manifest" "service" {
 resource "aws_route53_record" "lb" {
   # BLOCKED - won't try to create until service status is known
   # On next "terraform apply", wait_for runs again and may succeed
-  records = [k8sconnect_manifest.service.status.loadBalancer.ingress[0].ip]
+  records = [k8sconnect_object.service.status.loadBalancer.ingress[0].ip]
 }
 ```
 

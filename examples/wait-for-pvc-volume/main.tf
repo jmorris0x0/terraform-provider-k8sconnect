@@ -2,7 +2,7 @@
 
 provider "k8sconnect" {}
 
-resource "k8sconnect_manifest" "namespace" {
+resource "k8sconnect_object" "namespace" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: Namespace
@@ -14,7 +14,7 @@ resource "k8sconnect_manifest" "namespace" {
 }
 
 # Create PersistentVolume
-resource "k8sconnect_manifest" "pv" {
+resource "k8sconnect_object" "pv" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: PersistentVolume
@@ -35,7 +35,7 @@ resource "k8sconnect_manifest" "pv" {
 }
 
 # Create PVC
-resource "k8sconnect_manifest" "pvc" {
+resource "k8sconnect_object" "pvc" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: PersistentVolumeClaim
@@ -52,12 +52,12 @@ resource "k8sconnect_manifest" "pvc" {
   YAML
 
   cluster_connection = var.cluster_connection
-  depends_on         = [k8sconnect_manifest.namespace, k8sconnect_manifest.pv]
+  depends_on         = [k8sconnect_object.namespace, k8sconnect_object.pv]
 }
 
 # Wait for PVC to be bound before proceeding with dependent resources
 resource "k8sconnect_wait" "pvc" {
-  object_ref = k8sconnect_manifest.pvc.object_ref
+  object_ref = k8sconnect_object.pvc.object_ref
 
   cluster_connection = var.cluster_connection
 
@@ -69,7 +69,7 @@ resource "k8sconnect_wait" "pvc" {
 
 # Dependent resource that requires PVC to be bound
 # Uses explicit depends_on since wait ensures binding is complete
-resource "k8sconnect_manifest" "volume_metadata" {
+resource "k8sconnect_object" "volume_metadata" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: ConfigMap

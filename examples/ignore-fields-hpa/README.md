@@ -15,7 +15,7 @@ When using a Horizontal Pod Autoscaler (HPA), the HPA controller modifies the `s
 Use `ignore_fields` to exclude controller-managed fields from drift detection:
 
 ```hcl
-resource "k8sconnect_manifest" "app" {
+resource "k8sconnect_object" "app" {
   yaml_body = <<YAML
 apiVersion: apps/v1
 kind: Deployment

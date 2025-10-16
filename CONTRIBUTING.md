@@ -168,7 +168,7 @@ Integration tests against a real k3d Kubernetes cluster. These verify the provid
 make testacc
 
 # Run a specific test
-TEST=TestAccManifestResource_Basic make testacc
+TEST=TestAccObjectResource_Basic make testacc
 
 # Reduce output noise
 make testacc 2>&1 | grep FAIL

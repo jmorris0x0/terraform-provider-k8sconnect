@@ -209,8 +209,8 @@ func (r *patchResource) executeDryRunPatch(ctx context.Context, req resource.Mod
 						"The target resource has immutable fields that cannot be changed after creation.\n\n"+
 						"Options:\n"+
 						"1. Remove the immutable field from your patch\n"+
-						"2. If the field MUST change, recreate the target resource manually or use k8sconnect_manifest\n"+
-						"3. k8sconnect_manifest manages full resource lifecycle and can trigger automatic replacement",
+						"2. If the field MUST change, recreate the target resource manually or use k8sconnect_object\n"+
+						"3. k8sconnect_object manages full resource lifecycle and can trigger automatic replacement",
 						immutableFields, formatTarget(target)),
 				)
 				return false
@@ -568,7 +568,7 @@ func (r *patchResource) addConflictWarning(resp *resource.ModifyPlanResponse, co
 			"This is expected behavior for patches (force=true is always used), but be aware that:\n"+
 			"• External controllers may revert your changes\n"+
 			"• You may need to disable or reconfigure those controllers\n"+
-			"• Consider if k8sconnect_manifest with ignore_fields would be better for full lifecycle management",
+			"• Consider if k8sconnect_object with ignore_fields would be better for full lifecycle management",
 			strings.Join(conflictDetails, "\n")),
 	)
 }

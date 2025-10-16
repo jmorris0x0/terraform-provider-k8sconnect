@@ -264,7 +264,7 @@ func ensureNamespaceExists(content string) string {
 		// Use namespace name in resource name to avoid conflicts in parallel tests
 		// Replace hyphens with underscores for valid Terraform identifiers
 		resourceName := strings.ReplaceAll(foundNamespace, "-", "_")
-		namespaceResource := fmt.Sprintf(`resource "k8sconnect_manifest" "ns_%s" {
+		namespaceResource := fmt.Sprintf(`resource "k8sconnect_object" "ns_%s" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: Namespace
