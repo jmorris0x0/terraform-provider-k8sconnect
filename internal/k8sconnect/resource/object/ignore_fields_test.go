@@ -757,3 +757,290 @@ YAML
 }
 `, kubeconfig, yamlBody)
 }
+
+// TestAccObjectResource_IgnoreFieldsUnknown tests that ignore_fields works correctly
+// when the value is unknown at plan time (computed from another resource).
+// This validates ADR-011 smart projection logic handles unknown ignore_fields gracefully.
+func TestAccObjectResource_IgnoreFieldsUnknown(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("ignore-unknown-ns-%d", time.Now().UnixNano()%1000000)
+	sourceName := fmt.Sprintf("source-cm-%d", time.Now().UnixNano()%1000000)
+	deployName := fmt.Sprintf("test-deploy-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testAccManifestConfigIgnoreFieldsUnknown(ns, sourceName, deployName),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					// Both resources should be created successfully
+					resource.TestCheckResourceAttrSet("k8sconnect_object.source", "id"),
+					resource.TestCheckResourceAttrSet("k8sconnect_object.dependent", "id"),
+
+					testhelpers.CheckConfigMapExists(k8sClient, ns, sourceName),
+					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
+
+					// Verify ignore_fields was populated correctly after apply
+					// (during plan it was unknown because source.id was unknown)
+					resource.TestCheckResourceAttr("k8sconnect_object.dependent", "ignore_fields.#", "1"),
+					resource.TestCheckResourceAttr("k8sconnect_object.dependent", "ignore_fields.0", "spec.replicas"),
+				),
+			},
+			// Step 2: Re-apply to verify no drift
+			{
+				Config: testAccManifestConfigIgnoreFieldsUnknown(ns, sourceName, deployName),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+			},
+		},
+		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+	})
+}
+
+func testAccManifestConfigIgnoreFieldsUnknown(namespace, sourceName, deployName string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+
+resource "k8sconnect_object" "namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+# Source resource - its ID will be unknown at plan time during CREATE
+resource "k8sconnect_object" "source" {
+  depends_on = [k8sconnect_object.namespace]
+
+  yaml_body = <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: %s
+  namespace: %s
+data:
+  config: "replicas"
+YAML
+
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+# Dependent resource with ignore_fields referencing source's data
+# At plan time during CREATE, source.managed_state_projection is unknown
+# so the ignore_fields value is unknown, testing ADR-011 bootstrap handling
+locals {
+  # This local uses a computed value (source's projection), making it unknown at plan time
+  field_to_ignore = try(jsondecode(k8sconnect_object.source.managed_state_projection["data.config"]), "spec.replicas")
+}
+
+resource "k8sconnect_object" "dependent" {
+  depends_on = [k8sconnect_object.source]
+
+  yaml_body = <<YAML
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.21
+YAML
+
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+
+  # ignore_fields uses a local that references source's managed_state_projection
+  # During initial plan, source doesn't exist yet, so this is unknown
+  ignore_fields = [local.field_to_ignore]
+}
+`, namespace, sourceName, namespace, deployName, namespace)
+}
+
+// TestAccObjectResource_UpdateWithIgnoreFieldsChange tests the complex scenario of:
+// 1. Updating a resource (changing image)
+// 2. While also removing a field from ignore_fields
+// 3. When external controller has modified that field
+// This validates ownership transition works correctly during updates (ADR-009)
+func TestAccObjectResource_UpdateWithIgnoreFieldsChange(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("ignore-update-ns-%d", time.Now().UnixNano()%1000000)
+	deployName := fmt.Sprintf("ignore-update-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+	ssaClient := testhelpers.NewSSATestClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create deployment with ignore_fields
+			{
+				Config: testAccManifestConfigUpdateWithIgnoreFieldsChange(ns, deployName, "nginx:1.21", 3, true),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_object.test", "id"),
+					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
+					resource.TestCheckResourceAttr("k8sconnect_object.test", "ignore_fields.#", "1"),
+					resource.TestCheckResourceAttr("k8sconnect_object.test", "ignore_fields.0", "spec.replicas"),
+				),
+			},
+			// Step 2: Simulate HPA modifying replicas externally
+			{
+				PreConfig: func() {
+					ctx := context.Background()
+					err := ssaClient.ForceApplyDeploymentReplicasSSA(ctx, ns, deployName, 5, "hpa-controller")
+					if err != nil {
+						t.Fatalf("Failed to simulate HPA taking ownership: %v", err)
+					}
+					t.Logf("✓ Simulated hpa-controller scaling replicas to 5")
+				},
+				Config: testAccManifestConfigUpdateWithIgnoreFieldsChange(ns, deployName, "nginx:1.21", 3, true),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					// Verify HPA owns replicas
+					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.spec.replicas", "hpa-controller"),
+					// Verify replicas is 5 (HPA's value)
+					testhelpers.CheckDeploymentReplicaCount(k8sClient.(*kubernetes.Clientset), ns, deployName, 5),
+				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+			},
+			// Step 3: In SAME update, change image AND remove replicas from ignore_fields
+			// This is the critical test: ownership reclamation during an update
+			{
+				Config: testAccManifestConfigUpdateWithIgnoreFieldsChange(ns, deployName, "nginx:1.22", 3, false),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					// Verify image was updated
+					testhelpers.CheckDeploymentImage(k8sClient.(*kubernetes.Clientset), ns, deployName, "nginx:1.22"),
+					// Verify replicas was reclaimed and reset to 3
+					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.spec.replicas", "k8sconnect"),
+					testhelpers.CheckDeploymentReplicaCount(k8sClient.(*kubernetes.Clientset), ns, deployName, 3),
+					// Verify ignore_fields is now empty
+					resource.TestCheckResourceAttr("k8sconnect_object.test", "ignore_fields.#", "0"),
+				),
+			},
+			// Step 4: Verify no drift on next plan
+			{
+				Config: testAccManifestConfigUpdateWithIgnoreFieldsChange(ns, deployName, "nginx:1.22", 3, false),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+			},
+		},
+		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+	})
+}
+
+func testAccManifestConfigUpdateWithIgnoreFieldsChange(namespace, name, image string, replicas int, withIgnoreFields bool) string {
+	ignoreFieldsLine := ""
+	if withIgnoreFields {
+		ignoreFieldsLine = `ignore_fields = ["spec.replicas"]`
+	}
+
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+
+resource "k8sconnect_object" "namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_object" "test" {
+  depends_on = [k8sconnect_object.namespace]
+
+  yaml_body = <<YAML
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  replicas: %d
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+
+  %s
+}
+`, namespace, name, namespace, replicas, image, ignoreFieldsLine)
+}

@@ -1,14 +1,14 @@
 # Acceptance Test Gaps
 
-**Date**: 2025-10-15
+**Date**: 2025-10-17 (verified and updated)
 **Status**: Actionable test gaps that can be filled with normal acceptance tests
-**Source**: Derived from PRE_LAUNCH_REVIEW.md verification
+**Source**: Derived from PRE_LAUNCH_REVIEW.md verification, verified against actual tests
 
 ---
 
 ## Overview
 
-This document lists **21 acceptance test gaps** that can be filled with standard `TestAcc*` tests running in parallel with existing tests. All tests listed here are:
+This document lists **14 acceptance test gaps** that can be filled with standard `TestAcc*` tests running in parallel with existing tests. All tests listed here are:
 
 ✅ **Pure provider logic** - Not testing Terraform core or K8s API behavior
 ✅ **Runnable in parallel** - Use `t.Parallel()` for efficient execution
@@ -26,10 +26,10 @@ This document lists **21 acceptance test gaps** that can be filled with standard
 
 | Priority | Count | Estimated Effort | Impact |
 |----------|-------|------------------|--------|
-| 🔴 High (Pre-launch) | 4 | 1 day | Critical for ADR validation |
-| 🟡 Medium | 10 | 2-3 days | Important coverage gaps |
-| 🟢 Lower | 7 | 2 days | Nice-to-have completeness |
-| **TOTAL** | **21** | **5-6 days** | **Significant coverage improvement** |
+| 🔴 High (Pre-launch) | 1 | ~0.5 day | Critical for ADR validation |
+| 🟡 Medium | 9 | ~2 days | Important coverage gaps |
+| 🟢 Lower | 4 | ~1.5 days | Nice-to-have completeness |
+| **TOTAL** | **14** | **~4 days** | **Completes pre-launch validation** |
 
 ---
 
@@ -37,31 +37,11 @@ This document lists **21 acceptance test gaps** that can be filled with standard
 
 These tests fill critical gaps in ADR validation and bootstrap scenarios.
 
-### 1. apiVersion Identity Change
-
-**ADR**: ADR-010 (Prevent Orphan Resources - Identity Changes)
-**Current Status**: Only 3 of 4 identity fields tested (Kind, Name, Namespace)
-**Gap**: apiVersion changes not tested
-
-**Test Description**:
-- Create a CRD with version v1
-- Create a custom resource using v1
-- Update CRD to add v1beta1, deprecate v1
-- Change CR to use v1beta1 (apiVersion change)
-- Verify old resource deleted, new resource created (replacement)
-
-**Location**: `internal/k8sconnect/resource/object/lifecycle_test.go`
-**Function**: `TestAccObjectResource_IdentityChange_ApiVersion`
-
-**Why Critical**: Completes ADR-010 validation (currently 75%, should be 100%)
-
----
-
-### 2. Unknown Connection Host (Bootstrap)
+### 1. Unknown Connection Host (Bootstrap)
 
 **ADR**: ADR-011 (Bootstrap-Aware Projection)
-**Current Status**: Only deferred auth tested, not unknown host
-**Gap**: Cluster doesn't exist scenario
+**Current Status**: Not tested (existing `TestAccObjectResource_ConnectionWithVariable` only tests known values)
+**Gap**: Cluster doesn't exist scenario with unknown host
 
 **Test Description**:
 - Set `cluster_connection.host = var.eks_endpoint` where EKS cluster is created in same apply
@@ -77,27 +57,7 @@ These tests fill critical gaps in ADR validation and bootstrap scenarios.
 
 ---
 
-### 3. Unparseable YAML with Interpolations
-
-**ADR**: ADR-011 (Bootstrap-Aware Projection)
-**Current Status**: Not tested
-**Gap**: YAML with `${...}` that can't be parsed at plan time
-
-**Test Description**:
-- Create YAML body with `name: ${random_uuid.id.result}` where random is computed
-- At plan time, YAML is unparseable (contains literal `${...}`)
-- Verify projection = unknown (graceful degradation)
-- Verify no parse errors
-- Apply succeeds with computed value
-
-**Location**: `internal/k8sconnect/resource/object/interpolation_test.go`
-**Function**: `TestAccObjectResource_UnparseableYAMLInterpolation`
-
-**Why Critical**: Common pattern in bootstrap scenarios, ADR-011 mentions but not tested
-
----
-
-### 4. Unknown ignore_fields During Plan
+### 2. Unknown ignore_fields During Plan
 
 **ADR**: ADR-011 (Bootstrap-Aware Projection)
 **Current Status**: All ignore_fields tests use known values
@@ -120,7 +80,7 @@ These tests fill critical gaps in ADR validation and bootstrap scenarios.
 
 Important coverage gaps that improve robustness.
 
-### 5. Service clusterIP Immutability
+### 3. Service clusterIP Immutability
 
 **ADR**: ADR-002 (Immutable Resources and Complex Deletions)
 **Current Status**: PVC storage immutability tested, other immutable fields not tested
@@ -139,7 +99,7 @@ Important coverage gaps that improve robustness.
 
 ---
 
-### 6. Job spec Immutability
+### 4. Job spec Immutability
 
 **ADR**: ADR-002 (Immutable Resources and Complex Deletions)
 **Current Status**: Only PVC tested
@@ -158,7 +118,7 @@ Important coverage gaps that improve robustness.
 
 ---
 
-### 7. Update with ignore_fields Changes
+### 5. Update with ignore_fields Changes
 
 **ADR**: ADR-009 (User-Controlled Drift Exemption)
 **Current Status**: ignore_fields add/remove tested, not during UPDATE
@@ -178,7 +138,7 @@ Important coverage gaps that improve robustness.
 
 ---
 
-### 8. Update Triggering Immutable Field Recreation
+### 6. Update Triggering Immutable Field Recreation
 
 **ADR**: ADR-002 (Immutable Resources)
 **Current Status**: Immutable field changes tested, not during UPDATE
@@ -197,7 +157,7 @@ Important coverage gaps that improve robustness.
 
 ---
 
-### 9. Non-CRD Errors Fail Immediately
+### 7. Non-CRD Errors Fail Immediately
 
 **ADR**: ADR-007 (CRD Dependency Resolution)
 **Current Status**: CRD retry tested, but not non-CRD error path
@@ -216,26 +176,7 @@ Important coverage gaps that improve robustness.
 
 ---
 
-### 10. Kubeconfig File Path
-
-**ADR**: N/A (Auth configuration)
-**Current Status**: Kubeconfig raw tested, file path not tested
-**Gap**: `cluster_connection.kubeconfig_path` attribute
-
-**Test Description**:
-- Write kubeconfig to temp file
-- Use `cluster_connection = { kubeconfig_path = "/path/to/kubeconfig" }`
-- Verify connection succeeds
-- Create resource, verify it exists
-
-**Location**: `internal/k8sconnect/resource/object/auth_test.go`
-**Function**: `TestAccObjectResource_KubeconfigFilePath`
-
-**Why Important**: Common configuration method, should be tested
-
----
-
-### 11. Context Switching
+### 8. Context Switching
 
 **ADR**: N/A (Auth configuration)
 **Current Status**: Single context tested
@@ -254,26 +195,7 @@ Important coverage gaps that improve robustness.
 
 ---
 
-### 12. Import Cluster-Scoped Resources
-
-**ADR**: ADR-003 (Resource IDs)
-**Current Status**: Namespace-scoped import tested
-**Gap**: Cluster-scoped resource import
-
-**Test Description**:
-- Create ClusterRole manually with kubectl
-- Import with `terraform import k8sconnect_object.cr "ClusterRole//my-role"`
-- Verify namespace is empty in state
-- Verify resource imported correctly
-
-**Location**: `internal/k8sconnect/resource/object/import_test.go`
-**Function**: `TestAccObjectResource_ImportClusterScoped`
-
-**Why Important**: Cluster-scoped resources are common (Roles, PVs, etc.)
-
----
-
-### 13. Import with Ownership Conflicts
+### 9. Import with Ownership Conflicts
 
 **ADR**: ADR-004 (Cross-State Conflicts), ADR-005 (Field Ownership)
 **Current Status**: Clean import tested
@@ -292,7 +214,7 @@ Important coverage gaps that improve robustness.
 
 ---
 
-### 14. Import with Custom Field Managers
+### 10. Import with Custom Field Managers
 
 **ADR**: ADR-014 (Patch Resource - previous_owners)
 **Current Status**: Standard import tested
@@ -315,7 +237,7 @@ Important coverage gaps that improve robustness.
 
 Nice-to-have tests for completeness.
 
-### 15. Zero Timeout Behavior
+### 11. Zero Timeout Behavior
 
 **ADR**: ADR-008 (Selective Status Population)
 **Current Status**: Normal timeouts tested
@@ -326,65 +248,34 @@ Nice-to-have tests for completeness.
 - Verify behavior (immediate check or sensible error)
 - Document actual behavior
 
-**Location**: `internal/k8sconnect/resource/object/wait_test.go`
-**Function**: `TestAccObjectResource_WaitForZeroTimeout`
+**Location**: `internal/k8sconnect/resource/wait/wait_test.go`
+**Function**: `TestAccWaitResource_ZeroTimeout`
 
 **Why Low Priority**: Edge case, but good to document
 
 ---
 
-### 16. Resource Already Exists
-
-**ADR**: ADR-015 (Actionable Error Messages)
-**Current Status**: Not explicitly tested
-**Gap**: Error UX when resource exists
-
-**Test Description**:
-- Create ConfigMap manually with kubectl
-- Try to create same ConfigMap with Terraform (no import)
-- Verify clear error message mentioning import
-- Verify error is actionable
-
-**Location**: `internal/k8sconnect/resource/object/basic_test.go`
-**Function**: `TestAccObjectResource_ResourceAlreadyExists`
-
-**Why Low Priority**: Error case, but good UX validation
-
----
-
-### 17. Cluster-Scoped with Invalid Namespace (Verify Existing)
-
-**ADR**: N/A
-**Current Status**: Test exists at lifecycle_test.go:221
-**Gap**: Verify comprehensive coverage
-
-**Action**: Review existing `TestAccObjectResource_ClusterScopedWithInvalidNamespace` test
-**Location**: `internal/k8sconnect/resource/object/lifecycle_test.go`
-
-**Why Low Priority**: Already exists, just verify coverage
-
----
-
-### 18. wait_for Chaining
+### 12. Wait Resource Chaining
 
 **ADR**: ADR-008 (Selective Status Population)
-**Current Status**: Single wait_for tested
-**Gap**: Multiple resources with wait_for dependencies
+**Current Status**: Single wait resource tested
+**Gap**: Multiple wait resources with dependencies and status chaining
 
 **Test Description**:
-- Create Deployment A with `wait_for.field = "status.readyReplicas"`
-- Create Service B that `depends_on = [A]` and references A's status
-- Verify ordering: A must complete wait before B starts
-- Verify status available for reference
+- Create object A with k8sconnect_object
+- Create wait resource B with `wait_for.field = "status.loadBalancer.ingress"` for object A
+- Create object C that references wait B's status output (e.g., `k8sconnect_wait.b.status.loadBalancer.ingress[0].ip`)
+- Verify ordering: A → wait B completes → C references B's status
+- Verify status available for reference in dependent resources
 
-**Location**: `internal/k8sconnect/resource/object/wait_test.go`
-**Function**: `TestAccObjectResource_WaitForChaining`
+**Location**: `internal/k8sconnect/resource/wait/wait_test.go`
+**Function**: `TestAccWaitResource_Chaining`
 
-**Why Low Priority**: Complex scenario, but wait_for blocking is already tested
+**Why Low Priority**: Complex scenario, but wait blocking and status output are already tested separately
 
 ---
 
-### 19. Context Hash Stability
+### 13. Context Hash Stability
 
 **ADR**: ADR-003 (Resource IDs)
 **Current Status**: Not explicitly tested
@@ -404,20 +295,7 @@ Nice-to-have tests for completeness.
 
 ---
 
-### 20. Invalid Field Path (Verify Existing)
-
-**ADR**: ADR-008 (Selective Status Population)
-**Current Status**: Test exists
-**Gap**: Verify comprehensive coverage
-
-**Action**: Review existing wait_for validation tests
-**Location**: `internal/k8sconnect/resource/object/wait_test.go`
-
-**Why Low Priority**: Already tested, just verify
-
----
-
-### 21. Partial Merge Key Matching
+### 14. Partial Merge Key Matching
 
 **ADR**: ADR-005 (Field Ownership Strategy)
 **Current Status**: Full merge keys tested
@@ -435,94 +313,3 @@ Nice-to-have tests for completeness.
 
 **Why Low Priority**: Advanced edge case in strategic merge patch
 
----
-
-## Implementation Guide
-
-### Running Tests
-
-```bash
-# Run individual test
-TEST=TestAccObjectResource_IdentityChange_ApiVersion make testacc
-
-# Run all new high-priority tests (once implemented)
-TEST="TestAccObjectResource_IdentityChange_ApiVersion|UnknownConnectionHost|UnparseableYAML|IgnoreFieldsUnknown" make testacc
-
-# Run all tests in category
-TEST=TestAccObjectResource_IdentityChange make testacc  # Runs all identity tests
-```
-
-### Test Pattern
-
-All tests should follow this pattern:
-
-```go
-func TestAccObjectResource_NewTest(t *testing.T) {
-    t.Parallel()  // Always run in parallel
-
-    raw := os.Getenv("TF_ACC_KUBECONFIG")
-    if raw == "" {
-        t.Fatal("TF_ACC_KUBECONFIG must be set")
-    }
-
-    ns := fmt.Sprintf("new-test-ns-%d", time.Now().UnixNano()%1000000)
-    k8sClient := testhelpers.CreateK8sClient(t, raw)
-
-    resource.Test(t, resource.TestCase{
-        ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
-            "k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
-        },
-        Steps: []resource.TestStep{
-            // Test steps here
-        },
-        CheckDestroy: // Cleanup check
-    })
-}
-```
-
-### Tracking Progress
-
-Update this document as tests are added:
-- Change ⬜ to ✅ when test implemented
-- Note any findings or deviations from expected behavior
-- Update effort estimates if different than predicted
-
----
-
-## Benefits of Completing These Tests
-
-**Coverage improvements**:
-- ADR-010: 75% → 100% (identity changes)
-- ADR-011: 60% → 90% (bootstrap scenarios)
-- ADR-002: 70% → 85% (immutable fields)
-- ADR-009: 95% → 98% (ignore_fields edge cases)
-- Overall acceptance test count: 65 → 86 (+32%)
-
-**Risk reduction**:
-- Bootstrap scenarios fully validated
-- Identity change detection complete
-- Import edge cases covered
-- Update operation coverage improved
-
-**Time investment vs. value**:
-- 5-6 days effort
-- No special infrastructure needed
-- High confidence increase for launch
-- Documentation of edge case behavior
-
----
-
-## Notes
-
-- All tests use isolated namespaces (no conflicts between parallel runs)
-- k3d cluster in CI is sufficient (no cloud resources needed)
-- Tests document provider behavior in edge cases
-- Some "lower priority" items are verifying existing tests - quick wins
-
----
-
-## Related Documents
-
-- **PRE_LAUNCH_REVIEW.md**: Full pre-launch review with all gaps (including chaos/scale)
-- **ADRs**: See individual ADRs for architectural context on each test
-- **CLAUDE.md**: Build and test commands

@@ -335,6 +335,27 @@ func CheckDeploymentReplicaCount(client *kubernetes.Clientset, namespace, name s
 	}
 }
 
+// Helper function to check deployment container image
+func CheckDeploymentImage(client *kubernetes.Clientset, namespace, name, expectedImage string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		deployment, err := client.AppsV1().Deployments(namespace).Get(context.Background(), name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to get deployment: %v", err)
+		}
+
+		if len(deployment.Spec.Template.Spec.Containers) == 0 {
+			return fmt.Errorf("deployment %s/%s has no containers", namespace, name)
+		}
+
+		actualImage := deployment.Spec.Template.Spec.Containers[0].Image
+		if actualImage != expectedImage {
+			return fmt.Errorf("expected image %q, got %q", expectedImage, actualImage)
+		}
+
+		return nil
+	}
+}
+
 func CheckStatefulSetExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()

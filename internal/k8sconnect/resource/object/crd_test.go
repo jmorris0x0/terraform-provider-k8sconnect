@@ -4,6 +4,7 @@ package object_test
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"testing"
 	"time"
 
@@ -134,3 +135,81 @@ resource "k8sconnect_object" "test_cr" {
 }
 `, crdName, plural, crName, namespace)
 }
+
+// TestAccObjectResource_NonCRDErrorFailsImmediately verifies that non-CRD errors
+// (like validation errors, invalid fields, etc.) fail immediately without triggering
+// the 30-second CRD retry logic. This ensures good UX by not making users wait
+// 30s for simple mistakes.
+func TestAccObjectResource_NonCRDErrorFailsImmediately(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("non-crd-err-ns-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testAccManifestConfigNonCRDError(ns),
+				ConfigVariables: config.Variables{
+					"kubeconfig": config.StringVariable(raw),
+				},
+				// This should fail with a validation error (not CRD not found)
+				// The error message should indicate field not declared in schema
+				// Use (?s) to allow . to match newlines, in case error is wrapped
+				ExpectError: regexp.MustCompile(`(?s)field.*not declared in schema|unknown field`),
+			},
+		},
+		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+	})
+}
+
+func testAccManifestConfigNonCRDError(namespace string) string {
+	return fmt.Sprintf(`
+variable "kubeconfig" {
+  type = string
+}
+
+resource "k8sconnect_object" "test_namespace" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: %s
+  YAML
+
+  cluster_connection = {
+    kubeconfig = var.kubeconfig
+  }
+}
+
+# This ConfigMap has an invalid field that should be rejected immediately
+# (not a CRD-not-found error, so no 30s retry)
+resource "k8sconnect_object" "test_invalid" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: invalid-cm
+      namespace: %s
+    spec:
+      # ConfigMaps don't have a spec field - this should fail validation
+      invalidField: invalid
+  YAML
+
+  cluster_connection = {
+    kubeconfig = var.kubeconfig
+  }
+
+  depends_on = [k8sconnect_object.test_namespace]
+}
+`, namespace, namespace)
+}
+

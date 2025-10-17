@@ -30,13 +30,6 @@ add ", helper datasource" to CRD row in readme.
 
 wait_for row is out of date. Need to update to wait resource. Add to FAQ: Why is wait a resource instead of a datasource? Why separate resrouce.
 
-Put a local between the cluster and the resource in the first example in the readme. It would make the object cleaner.
-
-dd
 Should i call it wait_status? Or status_wait? wait just seems like a time wait.
-
-Alert emoji with errors? Might look nice. 
-
-ignore_changes part of terraform core?
 
 object_ref inconsistency vs the object datasource? What did I decide about this?

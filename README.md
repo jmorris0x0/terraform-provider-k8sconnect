@@ -47,10 +47,8 @@ resource "aws_eks_cluster" "main" {
   # ... (cluster configuration)
 }
 
-# Deploy workloads immediately - no waiting for provider configuration!
-resource "k8sconnect_object" "cert_manager" {
-  yaml_body = file("cert-manager.yaml")
-
+# Connection can be reused across resources
+locals {
   cluster_connection = {
     host                   = aws_eks_cluster.main.endpoint
     cluster_ca_certificate = aws_eks_cluster.main.certificate_authority[0].data
@@ -61,9 +59,15 @@ resource "k8sconnect_object" "cert_manager" {
     }
   }
 }
+
+# Deploy workloads immediately - no waiting for provider configuration!
+resource "k8sconnect_object" "cert_manager" {
+  yaml_body          = file("cert-manager.yaml")
+  cluster_connection = local.cluster_connection
+}
 ```
 
-That's it. The connection is inline—Terraform can resolve the outputs, and everything applies in one run.
+That's it. The connection is defined once and reused—Terraform can resolve the outputs, and everything applies in one run.
 
 ---
 
@@ -327,7 +331,7 @@ All `cluster_connection` fields are marked sensitive and won't appear in logs or
 - `k8sconnect_yaml_scoped` - Filter resources by category ([docs](docs/data-sources/yaml_scoped.md))
 - `k8sconnect_object` - Read existing cluster resources ([docs](docs/data-sources/resource.md))
 
-**→ [Browse all 16 runnable examples](examples/)** with test coverage
+**→ [Browse all 16 runnable examples](examples/README.md)** with test coverage
 
 ---
 
