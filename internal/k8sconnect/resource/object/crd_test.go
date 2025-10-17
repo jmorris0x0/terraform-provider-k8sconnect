@@ -212,4 +212,3 @@ resource "k8sconnect_object" "test_invalid" {
 }
 `, namespace, namespace)
 }
-
