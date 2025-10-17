@@ -208,8 +208,46 @@ func (r *patchResource) executeDryRunPatch(ctx context.Context, req resource.Mod
 		return false
 	}
 
-	// Generate field manager name
+	// CRITICAL VALIDATION: Prevent multiple patches on the same fields
+	// Extract field paths from this patch
+	patchedFieldPaths, err := r.extractPatchFieldPaths(ctx, patchContent, patchType)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to Parse Patch", err.Error())
+		return false
+	}
+
+	// Get current field ownership
+	currentOwnership := extractFieldOwnershipMap(currentObj)
+
+	// Generate our field manager name
 	fieldManager := r.generateFieldManager(*plannedData)
+
+	// Check for conflicts with other k8sconnect_patch resources
+	var conflicts []string
+	for _, path := range patchedFieldPaths {
+		if owner, exists := currentOwnership[path]; exists {
+			// Check if owned by another k8sconnect-patch-* manager (not us)
+			if strings.HasPrefix(owner, "k8sconnect-patch-") && owner != fieldManager {
+				conflicts = append(conflicts, fmt.Sprintf("  - %s (currently owned by %s)", path, owner))
+			}
+		}
+	}
+
+	if len(conflicts) > 0 {
+		resp.Diagnostics.AddError(
+			"Patch Conflicts with Existing Patch",
+			fmt.Sprintf("This patch attempts to modify fields already managed by another k8sconnect_patch resource:\n%s\n\n"+
+				"Multiple patches cannot manage the same fields - they will fight for control and cause drift.\n\n"+
+				"Options:\n"+
+				"1. Remove the conflicting fields from one of the patches\n"+
+				"2. Consolidate both patches into a single k8sconnect_patch resource\n"+
+				"3. Use different fields that don't overlap\n\n"+
+				"Target: %s",
+				strings.Join(conflicts, "\n"),
+				formatTarget(target)),
+		)
+		return false
+	}
 
 	// Perform dry-run based on patch type
 	var patchedObj *unstructured.Unstructured

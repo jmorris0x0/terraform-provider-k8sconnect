@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"testing"
 	"time"
 
@@ -944,4 +945,231 @@ resource "k8sconnect_patch" "test" {
   depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, deployName, namespace)
+}
+
+// TestAccPatchResource_MultiplePatches tests that multiple patches can coexist
+// when they target different fields, but conflict detection prevents overlapping fields
+func TestAccPatchResource_MultiplePatches(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("multi-patch-ns-%d", time.Now().UnixNano()%1000000)
+	cmName := fmt.Sprintf("multi-patch-cm-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 0: Create namespace and ConfigMap
+			{
+				Config: testAccPatchConfigEmptyWithNamespace(ns),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					createConfigMapWithFieldManager(t, k8sClient, ns, cmName, "kubectl", map[string]string{
+						"original": "value",
+					}),
+					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
+				),
+			},
+			// Step 1: Apply first patch to field1
+			{
+				Config: testAccPatchConfigMultiplePatchesFirst(ns, cmName),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_patch.patch1", "id"),
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field1", "patched-by-patch1"),
+				),
+			},
+			// Step 2: Apply both patches - non-overlapping fields should succeed
+			{
+				Config: testAccPatchConfigMultiplePatchesBothNonOverlapping(ns, cmName),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_patch.patch1", "id"),
+					resource.TestCheckResourceAttrSet("k8sconnect_patch.patch2", "id"),
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field1", "patched-by-patch1"),
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field2", "patched-by-patch2"),
+				),
+			},
+			// Step 3: Try to add overlapping patch - should error during plan
+			{
+				Config: testAccPatchConfigMultiplePatchesOverlapping(ns, cmName),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				ExpectError: regexp.MustCompile("Patch Conflicts with Existing Patch"),
+			},
+		},
+		CheckDestroy: resource.ComposeTestCheckFunc(
+			testhelpers.CheckConfigMapDestroy(k8sClient, ns, cmName),
+			testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+		),
+	})
+}
+
+// Config helpers for multi-patch test
+
+func testAccPatchConfigMultiplePatchesFirst(namespace, cmName string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "test_ns" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = { kubeconfig = var.raw }
+}
+
+resource "k8sconnect_patch" "patch1" {
+  target = {
+    api_version = "v1"
+    kind        = "ConfigMap"
+    name        = "%s"
+    namespace   = "%s"
+  }
+
+  patch = <<YAML
+data:
+  field1: patched-by-patch1
+YAML
+
+  cluster_connection = { kubeconfig = var.raw }
+  depends_on = [k8sconnect_object.test_ns]
+}
+`, namespace, cmName, namespace)
+}
+
+func testAccPatchConfigMultiplePatchesBothNonOverlapping(namespace, cmName string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "test_ns" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = { kubeconfig = var.raw }
+}
+
+resource "k8sconnect_patch" "patch1" {
+  target = {
+    api_version = "v1"
+    kind        = "ConfigMap"
+    name        = "%s"
+    namespace   = "%s"
+  }
+
+  patch = <<YAML
+data:
+  field1: patched-by-patch1
+YAML
+
+  cluster_connection = { kubeconfig = var.raw }
+  depends_on = [k8sconnect_object.test_ns]
+}
+
+resource "k8sconnect_patch" "patch2" {
+  target = {
+    api_version = "v1"
+    kind        = "ConfigMap"
+    name        = "%s"
+    namespace   = "%s"
+  }
+
+  patch = <<YAML
+data:
+  field2: patched-by-patch2
+YAML
+
+  cluster_connection = { kubeconfig = var.raw }
+  depends_on = [k8sconnect_object.test_ns]
+}
+`, namespace, cmName, namespace, cmName, namespace)
+}
+
+func testAccPatchConfigMultiplePatchesOverlapping(namespace, cmName string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "test_ns" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = { kubeconfig = var.raw }
+}
+
+resource "k8sconnect_patch" "patch1" {
+  target = {
+    api_version = "v1"
+    kind        = "ConfigMap"
+    name        = "%s"
+    namespace   = "%s"
+  }
+
+  patch = <<YAML
+data:
+  field1: patched-by-patch1
+YAML
+
+  cluster_connection = { kubeconfig = var.raw }
+  depends_on = [k8sconnect_object.test_ns]
+}
+
+resource "k8sconnect_patch" "patch2" {
+  target = {
+    api_version = "v1"
+    kind        = "ConfigMap"
+    name        = "%s"
+    namespace   = "%s"
+  }
+
+  patch = <<YAML
+data:
+  field2: patched-by-patch2
+YAML
+
+  cluster_connection = { kubeconfig = var.raw }
+  depends_on = [k8sconnect_object.test_ns]
+}
+
+resource "k8sconnect_patch" "patch3_conflicting" {
+  target = {
+    api_version = "v1"
+    kind        = "ConfigMap"
+    name        = "%s"
+    namespace   = "%s"
+  }
+
+  patch = <<YAML
+data:
+  field1: conflicting-patch  # This conflicts with patch1
+YAML
+
+  cluster_connection = { kubeconfig = var.raw }
+  depends_on = [k8sconnect_object.test_ns]
+}
+`, namespace, cmName, namespace, cmName, namespace, cmName, namespace)
 }
