@@ -187,6 +187,22 @@ func (r *patchResource) executeDryRunPatch(ctx context.Context, req resource.Mod
 	// Surface any warnings from Get operation
 	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
 
+	// CRITICAL VALIDATION: Prevent self-patching
+	// Check if the target resource is already managed by k8sconnect_object
+	if r.isManagedByThisState(ctx, currentObj) {
+		resp.Diagnostics.AddError(
+			"Cannot Patch Own Resource",
+			fmt.Sprintf("This resource is already managed by k8sconnect_object "+
+				"in this Terraform state.\n\n"+
+				"You cannot patch resources you already own. Instead:\n"+
+				"1. Modify the k8sconnect_object directly, or\n"+
+				"2. Use ignore_fields to allow external controllers to manage specific fields\n\n"+
+				"Target: %s",
+				formatTarget(target)),
+		)
+		return false
+	}
+
 	// Generate field manager name
 	fieldManager := r.generateFieldManager(*plannedData)
 

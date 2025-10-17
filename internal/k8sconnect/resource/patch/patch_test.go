@@ -55,6 +55,59 @@ func TestAccPatchResource_SelfPatchingPrevention(t *testing.T) {
 	})
 }
 
+// TestAccPatchResource_SelfPatchingPreventionDuringPlan tests that ownership validation
+// happens during PLAN phase, not APPLY phase. This is critical for the provider's
+// "accurate plan via dry-run" design principle.
+func TestAccPatchResource_SelfPatchingPreventionDuringPlan(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("self-patch-plan-ns-%d", time.Now().UnixNano()%1000000)
+	cmName := fmt.Sprintf("self-patch-plan-cm-%d", time.Now().UnixNano()%1000000)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create k8sconnect_object resource
+			{
+				Config: testAccPatchConfigSelfPatchingSetup(ns, cmName),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_object.test_cm", "id"),
+				),
+			},
+			// Step 2: Try to add patch on the same resource - should fail during PLAN
+			// The key insight: if this fails during plan, ExpectError catches it and the test passes
+			// If it were to fail during apply (the bug), the plan would succeed first,
+			// which would be wrong for our "accurate plan" principle
+			{
+				Config: testAccPatchConfigSelfPatchingAttempt(ns, cmName),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				// This error MUST occur during plan phase (not apply)
+				// The fix moved the validation from Create() to ModifyPlan()
+				ExpectError: regexp.MustCompile("Cannot Patch Own Resource"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						// This plancheck should never run because plan should error out
+						// If it runs, it means the error happened during apply (bug!)
+						plancheck.ExpectEmptyPlan(), // Should never get here
+					},
+				},
+			},
+		},
+	})
+}
+
 // TestAccPatchResource_BasicPatch tests basic patch creation and application
 // (EDGE_CASES.md 3.1, 4.4, 10.1-10.5)
 func TestAccPatchResource_BasicPatch(t *testing.T) {
@@ -983,4 +1036,83 @@ resource "k8sconnect_patch" "test" {
   depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
+}
+
+func testAccPatchConfigSelfPatchingSetup(namespace, cmName string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "test_ns" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = { kubeconfig = var.raw }
+}
+
+resource "k8sconnect_object" "test_cm" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: %s
+  namespace: %s
+data:
+  original: value
+YAML
+  cluster_connection = { kubeconfig = var.raw }
+  depends_on = [k8sconnect_object.test_ns]
+}
+`, namespace, cmName, namespace)
+}
+
+func testAccPatchConfigSelfPatchingAttempt(namespace, cmName string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "test_ns" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = { kubeconfig = var.raw }
+}
+
+resource "k8sconnect_object" "test_cm" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: %s
+  namespace: %s
+data:
+  original: value
+YAML
+  cluster_connection = { kubeconfig = var.raw }
+  depends_on = [k8sconnect_object.test_ns]
+}
+
+resource "k8sconnect_patch" "test" {
+  target = {
+    api_version = "v1"
+    kind        = "ConfigMap"
+    name        = "%s"
+    namespace   = "%s"
+  }
+
+  patch = <<YAML
+data:
+  patched: should-fail-in-plan
+YAML
+
+  cluster_connection = { kubeconfig = var.raw }
+  depends_on = [k8sconnect_object.test_cm]
+}
+`, namespace, cmName, namespace, cmName, namespace)
 }
