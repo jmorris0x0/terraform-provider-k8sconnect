@@ -35,6 +35,8 @@ Test section 15-18 in EDGE_CASES.md for the patch after I dogfood it a bit.
 
 Should the resource datasource and patch be restricted from looking at resources we own? I thought it was already but I guess not. How would this work for plans where the cluster can't be reached? Maybe just warn? Do I already do this?
 
+Answer: We are definitely restricting patching our own resources but currently allowing reads. (pretty sure)
+
 Can you wait for stuff that isn't status? Is wait_for really sold in the registry docs? We kinda forgot about it for a minute.
 
 Mention that that two kinds of patches aren't SSA therefore UX difference.
@@ -54,3 +56,9 @@ wait_for row is out of date. Need to update to wait resource. Add to FAQ: Why is
 Put a local between the cluster and the resource in the first example in the readme. It would make the object cleaner.
 
 Shit. What happens if we change a patch or patch target??? 
+
+What about a multiple patches patcing the same resource?
+
+Make some kind of resrouce that can use kubeconfig?
+
+Should i call it wait_status? wait just seems like a time wait.

@@ -133,6 +133,40 @@ resource "k8sconnect_object" "test_pvc" {
   depends_on         = [k8sconnect_object.namespace]
 }
 
+# Create a pod that uses the PVC (required for WaitForFirstConsumer binding)
+resource "k8sconnect_object" "pvc_consumer_pod" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: Pod
+    metadata:
+      name: pvc-consumer
+      namespace: dogfood
+      labels:
+        app: pvc-test
+    spec:
+      containers:
+      - name: consumer
+        image: busybox:1.28
+        command: ["sh", "-c", "echo 'PVC mounted' && sleep 3600"]
+        resources:
+          requests:
+            memory: "16Mi"
+            cpu: "25m"
+          limits:
+            memory: "32Mi"
+            cpu: "50m"
+        volumeMounts:
+        - name: storage
+          mountPath: /data
+      volumes:
+      - name: storage
+        persistentVolumeClaim:
+          claimName: test-pvc
+  YAML
+  cluster_connection = local.cluster_connection
+  depends_on         = [k8sconnect_object.test_pvc]
+}
+
 # Wait for PVC to be bound and extract volume name
 resource "k8sconnect_wait" "pvc_bound" {
   object_ref = k8sconnect_object.test_pvc.object_ref
@@ -824,81 +858,206 @@ resource "k8sconnect_object" "external_service" {
 }
 
 #############################################
+# EXTERNAL RESOURCES FOR PATCH TESTING
+#############################################
+
+# Create external resources via kubectl that we can patch with k8sconnect_patch
+# This demonstrates patching resources NOT managed by k8sconnect_object
+
+# External ConfigMap for JSON Patch testing
+resource "null_resource" "external_configmap" {
+  depends_on = [k8sconnect_object.namespace]
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      kubectl --kubeconfig ${kind_cluster.dogfood.kubeconfig_path} apply -f - <<EOF
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: external-config
+        namespace: dogfood
+        labels:
+          managed-by: kubectl
+      data:
+        app.name: "external-app"
+        app.version: "1.0.0"
+      EOF
+    EOT
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = "kubectl --kubeconfig ${self.triggers.kubeconfig_path} delete configmap external-config -n dogfood --ignore-not-found=true"
+  }
+
+  triggers = {
+    kubeconfig_path = kind_cluster.dogfood.kubeconfig_path
+  }
+}
+
+# External Service for Merge Patch testing
+resource "null_resource" "external_service" {
+  depends_on = [k8sconnect_object.namespace]
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      kubectl --kubeconfig ${kind_cluster.dogfood.kubeconfig_path} apply -f - <<EOF
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: external-service-patch-test
+        namespace: dogfood
+        labels:
+          managed-by: kubectl
+      spec:
+        type: ClusterIP
+        selector:
+          app: external
+        ports:
+        - port: 8080
+          targetPort: 8080
+          protocol: TCP
+      EOF
+    EOT
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = "kubectl --kubeconfig ${self.triggers.kubeconfig_path} delete service external-service-patch-test -n dogfood --ignore-not-found=true"
+  }
+
+  triggers = {
+    kubeconfig_path = kind_cluster.dogfood.kubeconfig_path
+  }
+}
+
+# External Deployment for Strategic Merge Patch testing
+resource "null_resource" "external_deployment_strategic" {
+  depends_on = [k8sconnect_object.namespace]
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      kubectl --kubeconfig ${kind_cluster.dogfood.kubeconfig_path} apply -f - <<EOF
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: external-deployment-strategic
+        namespace: dogfood
+        labels:
+          app: external-strategic
+          managed-by: kubectl
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: external-strategic
+        template:
+          metadata:
+            labels:
+              app: external-strategic
+          spec:
+            containers:
+            - name: app
+              image: busybox:1.28
+              command: ["sh", "-c", "sleep 3600"]
+              resources:
+                requests:
+                  memory: "32Mi"
+                  cpu: "50m"
+                limits:
+                  memory: "64Mi"
+                  cpu: "100m"
+      EOF
+    EOT
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = "kubectl --kubeconfig ${self.triggers.kubeconfig_path} delete deployment external-deployment-strategic -n dogfood --ignore-not-found=true"
+  }
+
+  triggers = {
+    kubeconfig_path = kind_cluster.dogfood.kubeconfig_path
+  }
+}
+
+#############################################
 # PATCH RESOURCE TESTS
 #############################################
 
-# Test 1: Strategic Merge Patch on Deployment WE OWN (DISABLED - cannot patch own resources)
-# The provider correctly prevents patching resources we already manage with k8sconnect_object
-# resource "k8sconnect_patch" "deployment_strategic" {
-#   target = {
-#     api_version = "apps/v1"
-#     kind        = "Deployment"
-#     name        = "web-deployment"
-#     namespace   = "dogfood"
-#   }
-#   patch = jsonencode({
-#     metadata = {
-#       annotations = {
-#         "patched-by"    = "k8sconnect"
-#         "patch-type"    = "strategic-merge"
-#         "patch-version" = "1"
-#       }
-#     }
-#     spec = {
-#       replicas = 3 # Scale up from 2 to 3
-#     }
-#   })
-#   cluster_connection = local.cluster_connection
-#   depends_on         = [k8sconnect_wait.web_rollout]
-# }
+# All patches target EXTERNAL resources (created via kubectl, not k8sconnect_object)
+# This is the correct use case for k8sconnect_patch
 
-# Test 2: JSON Patch on ConfigMap WE OWN (DISABLED - cannot patch own resources)
-# The provider correctly prevents patching resources we already manage with k8sconnect_object
-# resource "k8sconnect_patch" "configmap_json" {
-#   target = {
-#     api_version = "v1"
-#     kind        = "ConfigMap"
-#     name        = "app-config"
-#     namespace   = "dogfood"
-#   }
-#   json_patch = jsonencode([
-#     {
-#       op    = "add"
-#       path  = "/data/cache.enabled"
-#       value = "true"
-#     },
-#     {
-#       op    = "add"
-#       path  = "/data/cache.ttl"
-#       value = "3600"
-#     }
-#   ])
-#   cluster_connection = local.cluster_connection
-#   depends_on         = [k8sconnect_object.split_resources]
-# }
+# Test 1: Strategic Merge Patch on External Deployment
+resource "k8sconnect_patch" "deployment_strategic" {
+  target = {
+    api_version = "apps/v1"
+    kind        = "Deployment"
+    name        = "external-deployment-strategic"
+    namespace   = "dogfood"
+  }
+  patch = jsonencode({
+    metadata = {
+      annotations = {
+        "patched-by"    = "k8sconnect"
+        "patch-type"    = "strategic-merge"
+        "patch-version" = "1"
+      }
+    }
+    spec = {
+      replicas = 2 # Scale up from 1 to 2
+    }
+  })
+  cluster_connection = local.cluster_connection
+  depends_on         = [null_resource.external_deployment_strategic]
+}
 
-# Test 3: Merge Patch on Service WE OWN (DISABLED - cannot patch own resources)
-# The provider correctly prevents patching resources we already manage with k8sconnect_object
-# resource "k8sconnect_patch" "service_merge" {
-#   target = {
-#     api_version = "v1"
-#     kind        = "Service"
-#     name        = "web-service"
-#     namespace   = "dogfood"
-#   }
-#   merge_patch = jsonencode({
-#     metadata = {
-#       labels = {
-#         "patched"     = "true"
-#         "patch-type"  = "merge"
-#         "environment" = "dogfood"
-#       }
-#     }
-#   })
-#   cluster_connection = local.cluster_connection
-# }
+# Test 2: JSON Patch on External ConfigMap
+resource "k8sconnect_patch" "configmap_json" {
+  target = {
+    api_version = "v1"
+    kind        = "ConfigMap"
+    name        = "external-config"
+    namespace   = "dogfood"
+  }
+  json_patch = jsonencode([
+    {
+      op    = "add"
+      path  = "/data/cache.enabled"
+      value = "true"
+    },
+    {
+      op    = "add"
+      path  = "/data/cache.ttl"
+      value = "3600"
+    }
+  ])
+  cluster_connection = local.cluster_connection
+  depends_on         = [null_resource.external_configmap]
+}
 
-# Test 4: Patch EXTERNAL resource (created by kubectl, not k8sconnect_object)
+# Test 3: Merge Patch on External Service
+resource "k8sconnect_patch" "service_merge" {
+  target = {
+    api_version = "v1"
+    kind        = "Service"
+    name        = "external-service-patch-test"
+    namespace   = "dogfood"
+  }
+  merge_patch = jsonencode({
+    metadata = {
+      labels = {
+        "patched"     = "true"
+        "patch-type"  = "merge"
+        "environment" = "dogfood"
+      }
+    }
+  })
+  cluster_connection = local.cluster_connection
+  depends_on         = [null_resource.external_service]
+}
+
+# Test 4: Patch on external-app Deployment (already existed)
 resource "k8sconnect_patch" "external_deployment_patch" {
   target = {
     api_version = "apps/v1"
@@ -1002,7 +1161,7 @@ data "k8sconnect_object" "namespace_info" {
   depends_on         = [k8sconnect_object.namespace]
 }
 
-# Read the ConfigMap to verify it exists
+# Read the ConfigMap we manage to verify it exists
 data "k8sconnect_object" "app_config" {
   api_version        = "v1"
   kind               = "ConfigMap"
@@ -1010,6 +1169,34 @@ data "k8sconnect_object" "app_config" {
   namespace          = "dogfood"
   cluster_connection = local.cluster_connection
   depends_on         = [k8sconnect_object.split_resources]
+}
+
+# Read back patched external resources to verify patches were applied
+data "k8sconnect_object" "external_config_patched" {
+  api_version        = "v1"
+  kind               = "ConfigMap"
+  name               = "external-config"
+  namespace          = "dogfood"
+  cluster_connection = local.cluster_connection
+  depends_on         = [k8sconnect_patch.configmap_json]
+}
+
+data "k8sconnect_object" "external_service_patched" {
+  api_version        = "v1"
+  kind               = "Service"
+  name               = "external-service-patch-test"
+  namespace          = "dogfood"
+  cluster_connection = local.cluster_connection
+  depends_on         = [k8sconnect_patch.service_merge]
+}
+
+data "k8sconnect_object" "external_deployment_patched" {
+  api_version        = "apps/v1"
+  kind               = "Deployment"
+  name               = "external-deployment-strategic"
+  namespace          = "dogfood"
+  cluster_connection = local.cluster_connection
+  depends_on         = [k8sconnect_patch.deployment_strategic]
 }
 
 #############################################
@@ -1027,13 +1214,13 @@ output "namespace_uid" {
 }
 
 output "pvc_volume_name" {
-  description = "Volume name assigned to PVC (from field wait)"
-  value       = k8sconnect_wait.pvc_volume_name.status.spec.volumeName
+  description = "PVC volume name wait completed successfully"
+  value       = k8sconnect_wait.pvc_volume_name.id
 }
 
 output "pvc_phase" {
-  description = "PVC phase (from field_value wait)"
-  value       = k8sconnect_wait.pvc_bound.status.status.phase
+  description = "PVC bound wait completed successfully"
+  value       = k8sconnect_wait.pvc_bound.id
 }
 
 output "configmap_data" {
@@ -1054,4 +1241,19 @@ output "yaml_scoped_cluster_count" {
 output "yaml_scoped_namespaced_count" {
   description = "Number of namespace-scoped resources from yaml_scoped"
   value       = length(data.k8sconnect_yaml_scoped.mixed_scope.namespaced)
+}
+
+output "external_config_data" {
+  description = "External ConfigMap data after JSON patch (should include cache fields)"
+  value       = yamldecode(data.k8sconnect_object.external_config_patched.yaml_body).data
+}
+
+output "external_service_labels" {
+  description = "External Service labels after merge patch (should include patched=true)"
+  value       = yamldecode(data.k8sconnect_object.external_service_patched.yaml_body).metadata.labels
+}
+
+output "external_deployment_replicas" {
+  description = "External Deployment replicas after strategic merge patch (should be 2)"
+  value       = yamldecode(data.k8sconnect_object.external_deployment_patched.yaml_body).spec.replicas
 }
