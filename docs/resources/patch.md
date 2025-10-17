@@ -175,7 +175,7 @@ resource "k8sconnect_patch" "aws_node_env" {
 
 ### Optional
 
-- `json_patch` (String) JSON Patch (RFC 6902) operations as JSON array. Use for precise operations like adding/removing specific array elements. Example: `[{"op":"add","path":"/metadata/labels/foo","value":"bar"}]`
+- `json_patch` (String) JSON Patch (RFC 6902) operations as JSON array. Use for precise operations like adding/removing specific array elements. Example: `[{"op":"add","path":"/metadata/labels/foo","value":"bar"}]`.
 - `merge_patch` (String) JSON Merge Patch (RFC 7386) content. Simple key-value merges, replaces entire arrays. Least powerful but simplest patch type.
 - `patch` (String) Strategic merge patch content (YAML or JSON). This is the recommended patch type for most use cases. Uses Kubernetes strategic merge semantics with merge keys for arrays.
 
