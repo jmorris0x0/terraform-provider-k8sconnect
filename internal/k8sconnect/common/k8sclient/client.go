@@ -499,6 +499,92 @@ func (d *DynamicK8sClient) GetGVRFromKind(ctx context.Context, kind, namespace, 
 		namespace, name, kind, candidateStrings)
 }
 
+// GetGVRFromAPIVersionKind discovers the GVR and fetches the resource when apiVersion and kind are known
+// This is used for import operations where the user provided the full apiVersion/kind
+// Returns the GVR, the live object, and any error
+func (d *DynamicK8sClient) GetGVRFromAPIVersionKind(ctx context.Context, apiVersion, kind, namespace, name string) (schema.GroupVersionResource, *unstructured.Unstructured, error) {
+	tflog.Debug(ctx, "Discovering GVR from apiVersion and kind", map[string]interface{}{
+		"apiVersion": apiVersion,
+		"kind":       kind,
+		"namespace":  namespace,
+		"name":       name,
+	})
+
+	// Parse the apiVersion to get group and version
+	gv, err := schema.ParseGroupVersion(apiVersion)
+	if err != nil {
+		return schema.GroupVersionResource{}, nil, fmt.Errorf("invalid apiVersion %q: %w", apiVersion, err)
+	}
+
+	// Get API resources for this group/version
+	var resourceList *metav1.APIResourceList
+	err = withRetry(ctx, DefaultRetryConfig, func() error {
+		var err error
+		resourceList, err = d.discovery.ServerResourcesForGroupVersion(apiVersion)
+		return err
+	})
+
+	if err != nil {
+		return schema.GroupVersionResource{}, nil, fmt.Errorf(
+			"failed to discover resources for %s: %w\n\n"+
+				"This usually means:\n"+
+				"1. The API group/version doesn't exist in the cluster\n"+
+				"2. A CRD needs to be installed\n"+
+				"3. The apiVersion is misspelled",
+			apiVersion, err)
+	}
+
+	// Find the resource name for this kind
+	var resourceName string
+	var isNamespaced bool
+	for _, apiResource := range resourceList.APIResources {
+		if apiResource.Kind == kind {
+			resourceName = apiResource.Name
+			isNamespaced = apiResource.Namespaced
+			break
+		}
+	}
+
+	if resourceName == "" {
+		// Build list of available kinds to help user
+		availableKinds := make([]string, 0, len(resourceList.APIResources))
+		for _, apiResource := range resourceList.APIResources {
+			if apiResource.Kind != "" {
+				availableKinds = append(availableKinds, apiResource.Kind)
+			}
+		}
+
+		return schema.GroupVersionResource{}, nil, fmt.Errorf(
+			"kind %q not found in apiVersion %q\n\n"+
+				"Available kinds: %s\n\n"+
+				"Check spelling or try: kubectl api-resources --api-group=%s",
+			kind, apiVersion, strings.Join(availableKinds, ", "), gv.Group)
+	}
+
+	// Construct the GVR
+	gvr := schema.GroupVersionResource{
+		Group:    gv.Group,
+		Version:  gv.Version,
+		Resource: resourceName,
+	}
+
+	tflog.Debug(ctx, "Discovered GVR from apiVersion/kind", map[string]interface{}{
+		"gvr":        gvr.String(),
+		"apiVersion": apiVersion,
+		"kind":       kind,
+	})
+
+	// Try to fetch the resource
+	obj, err := d.tryGetResource(ctx, gvr, isNamespaced, namespace, name)
+	if err != nil {
+		return schema.GroupVersionResource{}, nil, fmt.Errorf(
+			"resource %s/%s (kind: %s, apiVersion: %s) not found: %w",
+			namespace, name, kind, apiVersion, err)
+	}
+
+	return gvr, obj, nil
+}
+
 type candidateResource struct {
 	GVR        schema.GroupVersionResource
 	Namespaced bool

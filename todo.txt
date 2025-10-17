@@ -1,33 +1,16 @@
-CRITICAL BUGS & FIXES
-
-* Solve import syntax issue for api version
-GB does this:
-   # Import the my-namespace Namespace
-   terraform import kubectl_manifest.my-namespace v1//Namespace//my-namespace
-
-   # Import the certmanager Issuer CRD named cluster-selfsigned-issuer-root-ca from the my-namespace namespace
-   $ terraform import -provider kubectl module.kubernetes.kubectl_manifest.crd-example certmanager.k8s.io/v1alpha1//Issuer//cluster-selfsigned-issuer-root-ca//my-namespace
-
 Import blocks: Verify they work correctly
-
 
 Nested Schema for wait_for: Needs love
 
-
-Ownership edge cases: Create transition matrix and acceptance tests for all ownership scenarios
-Delayed plan application: Handle out of date plans
+Delayed plan application: Handle out of date plansI
 Autodetect the most recent terraform version for testing locally and in CI. Otherwise this is monthly toil.
 
 Does ignore_fields let you ignore status? Does wait_for allow you to wait_for things that aren't status?
-
-FEATURE ADDITIONS
 
 Custom ownership annotations: Solve cross-state conflicts
 Status field guardrails: Warn if field doesn't start with "status". Do I have an error? Is it useful?
 
 Terraform wants to be declarative and stateful, Kubernetes wants to be self-healing and continuously reconciling, and developers just want to ship code without becoming infrastructure experts.
-
-Add a deep compare yaml helper function for the tests. string comparisons are brittle and have wasted a lot of time for me.
 
 Add CI job to check/update cluster scoped resources list?
 
@@ -55,10 +38,11 @@ wait_for row is out of date. Need to update to wait resource. Add to FAQ: Why is
 
 Put a local between the cluster and the resource in the first example in the readme. It would make the object cleaner.
 
-Shit. What happens if we change a patch or patch target??? 
+dd
+Should i call it wait_status? Or status_wait? wait just seems like a time wait.
 
-What about a multiple patches patcing the same resource?
+Alert emoji with errors? Might look nice. 
 
-Make some kind of resrouce that can use kubeconfig?
+ignore_changes part of terraform core?
 
-Should i call it wait_status? wait just seems like a time wait.
+object_ref inconsistency? What did I decide about this?

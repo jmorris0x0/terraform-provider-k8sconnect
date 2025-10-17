@@ -302,27 +302,6 @@ This provider combines Server-Side Apply field ownership tracking with dry-run p
 
 ---
 
-## Importing Resources
-
-Import existing Kubernetes resources into Terraform management:
-
-```bash
-# Set your kubeconfig
-export KUBECONFIG=~/.kube/config
-
-# Namespaced resources: context/namespace/Kind/name
-terraform import k8sconnect_object.nginx "prod/default/Pod/nginx-abc123"
-
-# Cluster-scoped resources: context/Kind/name
-terraform import k8sconnect_object.namespace "prod/Namespace/my-namespace"
-```
-
-After import, add the `cluster_connection` block to your configuration to match how you want to connect during normal operations.
-
-> **Note:** Import is only available for `k8sconnect_object`. Patches are non-destructive modifications and don't support import.
-
----
-
 ## Security Considerations 🔐
 
 Connection credentials are stored in Terraform state. Mitigate by:

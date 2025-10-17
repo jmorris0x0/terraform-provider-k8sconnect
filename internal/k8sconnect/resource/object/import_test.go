@@ -54,7 +54,7 @@ func TestAccObjectResource_Import(t *testing.T) {
 				},
 				ResourceName:      "k8sconnect_object.test_import",
 				ImportState:       true,
-				ImportStateId:     fmt.Sprintf("k3d-k8sconnect-test/%s/%s", "Namespace", namespaceName),
+				ImportStateId:     fmt.Sprintf("k3d-k8sconnect-test:v1/Namespace:%s", namespaceName),
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
 					"cluster_connection",
@@ -141,7 +141,7 @@ func TestAccObjectResource_ImportWithManagedFields(t *testing.T) {
 				},
 				ResourceName:      resourceName,
 				ImportState:       true,
-				ImportStateId:     fmt.Sprintf("k3d-k8sconnect-test/%s/ConfigMap/%s", ns, configMapName),
+				ImportStateId:     fmt.Sprintf("k3d-k8sconnect-test:%s:v1/ConfigMap:%s", ns, configMapName),
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
 					"cluster_connection",       // Import uses file, config uses raw
