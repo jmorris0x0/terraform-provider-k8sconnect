@@ -162,6 +162,7 @@ testacc: create-cluster
 	fi; \
 	export \
 	  TF_ACC=1 \
+	  TF_ACC_TERRAFORM_PATH="$$(which terraform)" \
 	  TF_ACC_K8S_HOST="$$(cat $(TESTBUILD_DIR)/cluster-endpoint.txt)" \
 	  TF_ACC_K8S_CA="$$(base64 < $(TESTBUILD_DIR)/mock-ca.crt | tr -d '\n')" \
 	  TF_ACC_K8S_CMD="$(OIDC_DIR)/get-token.sh" \
@@ -169,6 +170,7 @@ testacc: create-cluster
 	  TF_ACC_K8S_TOKEN="$$(cat $(TESTBUILD_DIR)/sa-token.txt)" \
 	  TF_ACC_K8S_CLIENT_CERT="$$(base64 < $(TESTBUILD_DIR)/client.crt | tr -d '\n')" \
 	  TF_ACC_K8S_CLIENT_KEY="$$(base64 < $(TESTBUILD_DIR)/client.key | tr -d '\n')"; \
+	echo "TF_ACC_TERRAFORM_PATH=$$TF_ACC_TERRAFORM_PATH"; \
 	echo "TF_ACC_K8S_HOST=$$TF_ACC_K8S_HOST"; \
 	echo "TF_ACC_K8S_CA=$$(echo $$TF_ACC_K8S_CA | cut -c1-20)..."; \
 	echo "TF_ACC_K8S_CMD=$$TF_ACC_K8S_CMD"; \
@@ -176,7 +178,15 @@ testacc: create-cluster
 	echo "TF_ACC_K8S_TOKEN=$$(echo $$TF_ACC_K8S_TOKEN | cut -c1-20)..."; \
 	echo "TF_ACC_K8S_CLIENT_CERT=$$(echo $$TF_ACC_K8S_CLIENT_CERT | cut -c1-20)..."; \
 	echo "TF_ACC_K8S_CLIENT_KEY=$$(echo $$TF_ACC_K8S_CLIENT_KEY | cut -c1-20)..."; \
-	echo "Terraform version: $$(terraform version -json | jq -r .terraform_version)"; \
+	ACTUAL_TF_VERSION=$$(terraform version -json | jq -r .terraform_version); \
+	echo "Terraform version: $$ACTUAL_TF_VERSION"; \
+	if [ "$$ACTUAL_TF_VERSION" != "$$TF_VERSION" ]; then \
+		echo "❌ ERROR: Terraform version mismatch!"; \
+		echo "   Expected: $$TF_VERSION"; \
+		echo "   Actual:   $$ACTUAL_TF_VERSION"; \
+		echo "   Path:     $$TF_ACC_TERRAFORM_PATH"; \
+		exit 1; \
+	fi; \
 	go test -cover -v ./internal/k8sconnect/... -timeout 30m -run "$$TEST_FILTER" $$PARALLEL_FLAG
 
 .PHONY: test-examples
@@ -275,7 +285,14 @@ release-check:
 coverage: create-cluster
 	@echo "📊 Building unified coverage report"
 	@PROFILE=coverage.out ; \
+	TF_VERSION="$${TF_ACC_TERRAFORM_VERSION:-$(TERRAFORM_VERSION)}"; \
+	if [ "$$TF_VERSION" != "$$(tfenv version-name)" ]; then \
+		echo "Installing Terraform $$TF_VERSION via tfenv..."; \
+		tfenv install $$TF_VERSION || true; \
+		tfenv use $$TF_VERSION || true; \
+	fi; \
 	TF_ACC=1 \
+	  TF_ACC_TERRAFORM_PATH="$$(which terraform)" \
 	  TF_ACC_K8S_HOST="$$(cat $(TESTBUILD_DIR)/cluster-endpoint.txt)" \
 	  TF_ACC_K8S_CA="$$(base64 < $(TESTBUILD_DIR)/mock-ca.crt | tr -d '\n')" \
 	  TF_ACC_K8S_CMD="$(OIDC_DIR)/get-token.sh" \
@@ -284,6 +301,13 @@ coverage: create-cluster
 	  TF_ACC_K8S_CLIENT_CERT="$$(base64 < $(TESTBUILD_DIR)/client.crt | tr -d '\n')" \
 	  TF_ACC_K8S_CLIENT_KEY="$$(base64 < $(TESTBUILD_DIR)/client.key | tr -d '\n')" \
 	  go test ./... -coverpkg=./... -covermode=atomic -coverprofile=$$PROFILE -count=1 ; \
+	ACTUAL_TF_VERSION=$$(terraform version -json | jq -r .terraform_version); \
+	if [ "$$ACTUAL_TF_VERSION" != "$$TF_VERSION" ]; then \
+		echo "❌ ERROR: Terraform version mismatch in coverage!"; \
+		echo "   Expected: $$TF_VERSION"; \
+		echo "   Actual:   $$ACTUAL_TF_VERSION"; \
+		exit 1; \
+	fi; \
 	go tool cover -func=$$PROFILE ; \
 	go tool cover -html=$$PROFILE -o coverage.html ; \
 	echo "HTML report written to ./coverage.html"
