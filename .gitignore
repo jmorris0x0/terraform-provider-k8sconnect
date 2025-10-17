@@ -43,6 +43,7 @@ Thumbs.db
 test/oidc-setup/ssl/
 .testbuild/
 bin/
+terraform/*/*-config
 
 # AI
 .claude/
