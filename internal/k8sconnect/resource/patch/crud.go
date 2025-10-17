@@ -3,6 +3,7 @@ package patch
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -316,8 +317,93 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	// Surface any API warnings from get operation
 	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
 
-	// 7. Re-apply updated patch
+	// 7. CRITICAL: Detect removed fields and transfer ownership back
 	fieldManager := fmt.Sprintf("k8sconnect-patch-%s", plan.ID.ValueString())
+
+	// Extract current fields from state's managed_fields
+	var currentFieldPaths []string
+	if !state.ManagedFields.IsNull() && state.ManagedFields.ValueString() != "" && state.ManagedFields.ValueString() != "{}" {
+		var err error
+		currentFieldPaths, err = extractFieldPathsFromManagedFields(state.ManagedFields.ValueString())
+		if err != nil {
+			tflog.Warn(ctx, "Failed to extract current field paths from managed_fields", map[string]interface{}{
+				"error": err.Error(),
+			})
+		}
+	}
+
+	// Extract new fields from plan's patch content
+	newPatchContent := r.getPatchContent(plan)
+	newPatchType := r.determinePatchType(plan)
+	newFieldPaths, err := r.extractPatchFieldPaths(ctx, newPatchContent, newPatchType)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to Parse New Patch Content", err.Error())
+		return
+	}
+
+	// Calculate removed fields (fields in current but not in new)
+	removedFields := findRemovedFields(currentFieldPaths, newFieldPaths)
+
+	// If fields were removed, transfer ownership back to previous owners
+	if len(removedFields) > 0 {
+		tflog.Info(ctx, "Detected removed fields, transferring ownership back", map[string]interface{}{
+			"target":        formatTarget(target),
+			"removed_count": len(removedFields),
+		})
+
+		// Get previous owners map
+		var previousOwnersMap map[string]string
+		if !state.PreviousOwners.IsNull() {
+			diags = state.PreviousOwners.ElementsAs(ctx, &previousOwnersMap, false)
+			if diags.HasError() {
+				tflog.Warn(ctx, "Failed to parse previous owners for removed fields", map[string]interface{}{
+					"error": diags.Errors(),
+				})
+			}
+		}
+
+		// Transfer removed fields back to their previous owners
+		if len(previousOwnersMap) > 0 {
+			err = r.transferRemovedFieldsBack(ctx, client, currentObj, gvr, removedFields, previousOwnersMap, fieldManager)
+			if err != nil {
+				resp.Diagnostics.AddWarning(
+					"Failed to Transfer Removed Fields",
+					fmt.Sprintf("Some fields were removed from the patch but could not be transferred back to their previous owners: %v\n\n"+
+						"These fields may become unmanaged.", err),
+				)
+			} else {
+				tflog.Info(ctx, "Successfully transferred removed fields back", map[string]interface{}{
+					"target": formatTarget(target),
+				})
+			}
+
+			// Surface any API warnings from transfer operation
+			surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
+
+			// CRITICAL: Refetch the resource to get updated managedFields after ownership transfer
+			// Without this, SSA will use stale ownership info and may delete transferred fields
+			_, currentObj, err = r.getTargetResource(ctx, client, target)
+			if err != nil {
+				resp.Diagnostics.AddError(
+					"Failed to Refetch Resource After Ownership Transfer",
+					fmt.Sprintf("Ownership was transferred but failed to refetch resource state: %v", err),
+				)
+				return
+			}
+
+			surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
+
+			tflog.Debug(ctx, "Refetched resource after ownership transfer", map[string]interface{}{
+				"target": formatTarget(target),
+			})
+		} else {
+			tflog.Warn(ctx, "No previous owners found for removed fields - they will become unmanaged", map[string]interface{}{
+				"removed_count": len(removedFields),
+			})
+		}
+	}
+
+	// 8. Re-apply updated patch
 	patchedObj, err := r.applyPatch(ctx, client, currentObj, plan, fieldManager, gvr)
 	if err != nil {
 		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Update Patch", formatTarget(target))
@@ -687,4 +773,126 @@ func surfaceK8sWarnings(ctx context.Context, client k8sclient.K8sClient, diagnos
 			"warning": warning,
 		})
 	}
+}
+
+// extractFieldPathsFromManagedFields extracts field paths from managed_fields JSON
+// The managed_fields JSON is the same format we store (nested structure showing ownership)
+func extractFieldPathsFromManagedFields(managedFieldsJSON string) ([]string, error) {
+	// Parse the managed_fields JSON which is in the same format as the object itself
+	// We need to flatten it to get field paths
+	var managedFieldsObj map[string]interface{}
+	if err := json.Unmarshal([]byte(managedFieldsJSON), &managedFieldsObj); err != nil {
+		return nil, fmt.Errorf("failed to parse managed_fields JSON: %w", err)
+	}
+
+	// Flatten to get field paths
+	return flattenFieldPaths(managedFieldsObj, ""), nil
+}
+
+// flattenFieldPaths recursively flattens a nested map to field paths
+// Handles Kubernetes FieldsV1 format where:
+// - Keys have "f:" prefixes (e.g. "f:data", "f:field1")
+// - Empty objects {} are leaf markers, not nested maps
+// Example: {"f:data": {"f:key1": {}, "f:key2": {}}} -> ["data.key1", "data.key2"]
+func flattenFieldPaths(obj map[string]interface{}, prefix string) []string {
+	var paths []string
+
+	for key, value := range obj {
+		// Strip "f:" prefix from FieldsV1 format
+		cleanKey := strings.TrimPrefix(key, "f:")
+
+		path := cleanKey
+		if prefix != "" {
+			path = prefix + "." + cleanKey
+		}
+
+		switch v := value.(type) {
+		case map[string]interface{}:
+			// Empty map {} is a leaf marker in FieldsV1 format
+			if len(v) == 0 {
+				paths = append(paths, path)
+			} else {
+				// Non-empty map - recurse
+				paths = append(paths, flattenFieldPaths(v, path)...)
+			}
+		case []interface{}:
+			// For arrays, add the array path itself
+			paths = append(paths, path)
+			// Also recurse into array elements if they're maps
+			for i, elem := range v {
+				if elemMap, ok := elem.(map[string]interface{}); ok {
+					elemPath := fmt.Sprintf("%s[%d]", path, i)
+					paths = append(paths, flattenFieldPaths(elemMap, elemPath)...)
+				}
+			}
+		default:
+			// Leaf value - add the path
+			paths = append(paths, path)
+		}
+	}
+
+	return paths
+}
+
+// findRemovedFields finds fields that are in currentFields but not in newFields
+func findRemovedFields(currentFields, newFields []string) []string {
+	newFieldsSet := make(map[string]bool)
+	for _, field := range newFields {
+		newFieldsSet[field] = true
+	}
+
+	var removed []string
+	for _, field := range currentFields {
+		if !newFieldsSet[field] {
+			removed = append(removed, field)
+		}
+	}
+
+	return removed
+}
+
+// transferRemovedFieldsBack transfers ownership of removed fields back to their previous owners
+// This ensures that when fields are removed from a patch, they don't become unmanaged
+func (r *patchResource) transferRemovedFieldsBack(ctx context.Context, client k8sclient.K8sClient, currentObj *unstructured.Unstructured, gvr schema.GroupVersionResource, removedFields []string, previousOwnersMap map[string]string, currentFieldManager string) error {
+	// Filter to only fields we actually own
+	fieldsWeOwn := r.filterFieldsOwnedByManager(currentObj, removedFields, currentFieldManager)
+
+	if len(fieldsWeOwn) == 0 {
+		tflog.Debug(ctx, "No removed fields are currently owned by this patch", map[string]interface{}{
+			"removed_count": len(removedFields),
+		})
+		return nil
+	}
+
+	// Group removed fields by their previous owner
+	fieldsByOwner := make(map[string][]string)
+	for _, field := range fieldsWeOwn {
+		if previousOwner, exists := previousOwnersMap[field]; exists {
+			fieldsByOwner[previousOwner] = append(fieldsByOwner[previousOwner], field)
+		} else {
+			// No previous owner found - this field will become unmanaged
+			tflog.Warn(ctx, "No previous owner found for removed field", map[string]interface{}{
+				"field": field,
+			})
+		}
+	}
+
+	// Transfer each group back to its previous owner
+	for owner, fields := range fieldsByOwner {
+		err := r.transferOwnershipForFields(ctx, client, currentObj, gvr, fields, owner)
+		if err != nil {
+			tflog.Warn(ctx, "Failed to transfer ownership for removed fields", map[string]interface{}{
+				"owner": owner,
+				"error": err.Error(),
+			})
+			// Continue with other owners
+		} else {
+			tflog.Info(ctx, "Transferred ownership for removed fields", map[string]interface{}{
+				"owner":       owner,
+				"field_count": len(fields),
+			})
+		}
+	}
+
+	return nil
 }

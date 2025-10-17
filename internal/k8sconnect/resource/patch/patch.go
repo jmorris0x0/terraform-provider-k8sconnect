@@ -184,7 +184,7 @@ When you destroy a patch resource, ownership is released but patched values rema
 				Optional: true,
 				MarkdownDescription: "JSON Patch (RFC 6902) operations as JSON array. " +
 					"Use for precise operations like adding/removing specific array elements. " +
-					"Example: `[{\"op\":\"add\",\"path\":\"/metadata/labels/foo\",\"value\":\"bar\"}]`",
+					"Example: `[{\"op\":\"add\",\"path\":\"/metadata/labels/foo\",\"value\":\"bar\"}]`.",
 				Validators: []validator.String{
 					stringvalidator.ConflictsWith(
 						path.MatchRoot("patch"),
