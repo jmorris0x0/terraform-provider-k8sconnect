@@ -3,7 +3,6 @@ package patch
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -17,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/fieldmanagement"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8serrors"
 )
@@ -91,7 +91,7 @@ func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, 
 		resp.Diagnostics.AddError("Failed to Parse Patch", err.Error())
 		return
 	}
-	previousOwners := extractFieldOwnershipForPaths(targetObj, patchedFieldPaths)
+	previousOwners := fieldmanagement.ExtractFieldOwnershipForPaths(targetObj, patchedFieldPaths)
 
 	// 8. Apply patch using Server-Side Apply
 	fieldManager := fmt.Sprintf("k8sconnect-patch-%s", data.ID.ValueString())
@@ -110,7 +110,7 @@ func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, 
 	})
 
 	// 9. Store ONLY patched fields
-	managedFields, err := extractManagedFieldsForManager(patchedObj, fieldManager)
+	managedFields, err := fieldmanagement.ExtractManagedFieldsForManager(patchedObj, fieldManager)
 	if err != nil {
 		resp.Diagnostics.AddWarning("Failed to Extract Managed Fields", err.Error())
 		managedFields = "{}"
@@ -241,7 +241,7 @@ func (r *patchResource) Read(ctx context.Context, req resource.ReadRequest, resp
 	}
 
 	// 7. Extract ONLY fields we patched (using our field manager)
-	currentManagedFields, err := extractManagedFieldsForManager(currentObj, fieldManager)
+	currentManagedFields, err := fieldmanagement.ExtractManagedFieldsForManager(currentObj, fieldManager)
 	if err != nil {
 		tflog.Warn(ctx, "Failed to extract managed fields during read", map[string]interface{}{
 			"error": err.Error(),
@@ -324,7 +324,7 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	var currentFieldPaths []string
 	if !state.ManagedFields.IsNull() && state.ManagedFields.ValueString() != "" && state.ManagedFields.ValueString() != "{}" {
 		var err error
-		currentFieldPaths, err = extractFieldPathsFromManagedFields(state.ManagedFields.ValueString())
+		currentFieldPaths, err = fieldmanagement.ExtractFieldPathsFromManagedFieldsJSON(state.ManagedFields.ValueString())
 		if err != nil {
 			tflog.Warn(ctx, "Failed to extract current field paths from managed_fields", map[string]interface{}{
 				"error": err.Error(),
@@ -419,7 +419,7 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	})
 
 	// 8. Update managed fields
-	managedFields, err := extractManagedFieldsForManager(patchedObj, fieldManager)
+	managedFields, err := fieldmanagement.ExtractManagedFieldsForManager(patchedObj, fieldManager)
 	if err != nil {
 		resp.Diagnostics.AddWarning("Failed to Extract Managed Fields", err.Error())
 		managedFields = "{}"
@@ -627,7 +627,7 @@ func groupFieldsByPreviousOwner(previousOwners map[string]string) map[string][]s
 // filterFieldsOwnedByManager filters a list of fields to only those currently owned by the specified field manager
 // This ensures idempotent destroy - if a field was already transferred, we skip it
 func (r *patchResource) filterFieldsOwnedByManager(obj *unstructured.Unstructured, fields []string, fieldManager string) []string {
-	currentOwnership := extractFieldOwnershipMap(obj)
+	currentOwnership := fieldmanagement.ExtractFieldOwnershipMap(obj)
 
 	var ownedFields []string
 	for _, field := range fields {
@@ -773,65 +773,6 @@ func surfaceK8sWarnings(ctx context.Context, client k8sclient.K8sClient, diagnos
 			"warning": warning,
 		})
 	}
-}
-
-// extractFieldPathsFromManagedFields extracts field paths from managed_fields JSON
-// The managed_fields JSON is the same format we store (nested structure showing ownership)
-func extractFieldPathsFromManagedFields(managedFieldsJSON string) ([]string, error) {
-	// Parse the managed_fields JSON which is in the same format as the object itself
-	// We need to flatten it to get field paths
-	var managedFieldsObj map[string]interface{}
-	if err := json.Unmarshal([]byte(managedFieldsJSON), &managedFieldsObj); err != nil {
-		return nil, fmt.Errorf("failed to parse managed_fields JSON: %w", err)
-	}
-
-	// Flatten to get field paths
-	return flattenFieldPaths(managedFieldsObj, ""), nil
-}
-
-// flattenFieldPaths recursively flattens a nested map to field paths
-// Handles Kubernetes FieldsV1 format where:
-// - Keys have "f:" prefixes (e.g. "f:data", "f:field1")
-// - Empty objects {} are leaf markers, not nested maps
-// Example: {"f:data": {"f:key1": {}, "f:key2": {}}} -> ["data.key1", "data.key2"]
-func flattenFieldPaths(obj map[string]interface{}, prefix string) []string {
-	var paths []string
-
-	for key, value := range obj {
-		// Strip "f:" prefix from FieldsV1 format
-		cleanKey := strings.TrimPrefix(key, "f:")
-
-		path := cleanKey
-		if prefix != "" {
-			path = prefix + "." + cleanKey
-		}
-
-		switch v := value.(type) {
-		case map[string]interface{}:
-			// Empty map {} is a leaf marker in FieldsV1 format
-			if len(v) == 0 {
-				paths = append(paths, path)
-			} else {
-				// Non-empty map - recurse
-				paths = append(paths, flattenFieldPaths(v, path)...)
-			}
-		case []interface{}:
-			// For arrays, add the array path itself
-			paths = append(paths, path)
-			// Also recurse into array elements if they're maps
-			for i, elem := range v {
-				if elemMap, ok := elem.(map[string]interface{}); ok {
-					elemPath := fmt.Sprintf("%s[%d]", path, i)
-					paths = append(paths, flattenFieldPaths(elemMap, elemPath)...)
-				}
-			}
-		default:
-			// Leaf value - add the path
-			paths = append(paths, path)
-		}
-	}
-
-	return paths
 }
 
 // findRemovedFields finds fields that are in currentFields but not in newFields

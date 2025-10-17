@@ -158,16 +158,6 @@ func extractFieldPathsFromMap(data map[string]interface{}, prefix string) []stri
 	return paths
 }
 
-// extractFieldOwnershipForPaths extracts ownership info for specific field paths
-func extractFieldOwnershipForPaths(obj *unstructured.Unstructured, paths []string) map[string]string {
-	return fieldmanagement.ExtractFieldOwnershipForPaths(obj, paths)
-}
-
-// extractFieldOwnershipMap extracts field ownership as a simple map[path]manager
-func extractFieldOwnershipMap(obj *unstructured.Unstructured) map[string]string {
-	return fieldmanagement.ExtractFieldOwnershipMap(obj)
-}
-
 // extractFieldOwnershipForManager extracts field ownership for a specific field manager
 func extractFieldOwnershipForManager(obj *unstructured.Unstructured, fieldManager string) map[string]string {
 	allOwnership := fieldmanagement.ExtractFieldOwnershipMap(obj)
@@ -302,11 +292,6 @@ func mergeMaps(dst, src map[string]interface{}) {
 		// Override with src value
 		dst[key] = srcVal
 	}
-}
-
-// extractManagedFieldsForManager extracts the managed fields JSON for a specific field manager
-func extractManagedFieldsForManager(obj *unstructured.Unstructured, fieldManager string) (string, error) {
-	return fieldmanagement.ExtractManagedFieldsForManager(obj, fieldManager)
 }
 
 // detectValueDrift compares the desired patch values with actual current values

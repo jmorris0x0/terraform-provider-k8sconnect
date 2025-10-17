@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/fieldmanagement"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8serrors"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/validation"
@@ -217,7 +218,7 @@ func (r *patchResource) executeDryRunPatch(ctx context.Context, req resource.Mod
 	}
 
 	// Get current field ownership
-	currentOwnership := extractFieldOwnershipMap(currentObj)
+	currentOwnership := fieldmanagement.ExtractFieldOwnershipMap(currentObj)
 
 	// Generate our field manager name
 	fieldManager := r.generateFieldManager(*plannedData)

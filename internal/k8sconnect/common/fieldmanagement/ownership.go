@@ -223,3 +223,18 @@ func ExtractManagedFieldsForManager(obj *unstructured.Unstructured, fieldManager
 	// No fields managed by this manager
 	return "{}", nil
 }
+
+// ExtractFieldPathsFromManagedFieldsJSON extracts field paths from a managed fields JSON string
+// This is used when managed fields have been stored as a JSON string in Terraform state
+// The JSON format is FieldsV1 format: {"f:data":{"f:field1":{},"f:field2":{}}}
+func ExtractFieldPathsFromManagedFieldsJSON(managedFieldsJSON string) ([]string, error) {
+	// Parse the JSON string
+	var fields map[string]interface{}
+	if err := json.Unmarshal([]byte(managedFieldsJSON), &fields); err != nil {
+		return nil, fmt.Errorf("failed to parse managed fields JSON: %w", err)
+	}
+
+	// Extract field paths using the common logic
+	paths := extractPathsFromFieldsV1Simple(fields, "")
+	return paths, nil
+}
