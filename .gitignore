@@ -36,6 +36,9 @@ coverage.html
 # Log files
 *.log
 
+# Secrets
+*.asc
+
 # OS files
 Thumbs.db
 
