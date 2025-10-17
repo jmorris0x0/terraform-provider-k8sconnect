@@ -1621,3 +1621,113 @@ YAML
 }
 `, namespace, cmName, namespace)
 }
+
+// ADR-002: Test update triggering immutable field recreation
+// This test verifies that when both mutable (labels) and immutable (storage) fields change
+// in the same apply, the resource is properly recreated with both changes applied
+func TestAccObjectResource_UpdateTriggeringImmutableRecreation(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("immutable-update-ns-%d", time.Now().UnixNano()%1000000)
+	pvcName := fmt.Sprintf("update-pvc-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create PVC with 1Gi storage and env=dev label
+			{
+				Config: testAccManifestConfigImmutableUpdate(ns, pvcName, "1Gi", "dev"),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"pvc_name":  config.StringVariable(pvcName),
+					"storage":   config.StringVariable("1Gi"),
+					"env_label": config.StringVariable("dev"),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_object.test_pvc", "id"),
+					testhelpers.CheckPVCExists(k8sClient, ns, pvcName),
+					testhelpers.CheckPVCHasLabel(k8sClient, ns, pvcName, "env", "dev"),
+				),
+			},
+			// Step 2: Update storage to 2Gi AND change label to env=prod in same apply
+			// Should trigger replacement due to immutable storage field
+			// AND apply the mutable label change to the new resource
+			{
+				Config: testAccManifestConfigImmutableUpdate(ns, pvcName, "2Gi", "prod"),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"pvc_name":  config.StringVariable(pvcName),
+					"storage":   config.StringVariable("2Gi"),
+					"env_label": config.StringVariable("prod"),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_object.test_pvc", "id"),
+					testhelpers.CheckPVCExists(k8sClient, ns, pvcName),
+					// Verify new PVC has updated label (mutable change applied to recreated resource)
+					testhelpers.CheckPVCHasLabel(k8sClient, ns, pvcName, "env", "prod"),
+					// Verify storage is 2Gi (immutable change triggered recreation)
+					testhelpers.CheckPVCStorage(k8sClient, ns, pvcName, "2Gi"),
+				),
+			},
+		},
+		CheckDestroy: resource.ComposeTestCheckFunc(
+			testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+			testhelpers.CheckPVCDestroy(k8sClient, ns, pvcName),
+		),
+	})
+}
+
+func testAccManifestConfigImmutableUpdate(namespace, pvcName, storage, envLabel string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+variable "namespace" { type = string }
+variable "pvc_name" { type = string }
+variable "storage" { type = string }
+variable "env_label" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_object" "test_pvc" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: %s
+  namespace: %s
+  labels:
+    env: %s
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: %s
+YAML
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+  depends_on = [k8sconnect_object.namespace]
+}
+`, namespace, pvcName, namespace, envLabel, storage)
+}

@@ -208,3 +208,139 @@ resource "k8sconnect_object" "test_import" {
 }
 `, namespace, name, namespace)
 }
+
+// TestAccObjectResource_ImportWithOwnershipConflict creates a resource with kubectl first,
+// then applies with k8sconnect to verify ownership takeover via SSA force=true
+func TestAccObjectResource_ImportWithOwnershipConflict(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+	ns := fmt.Sprintf("import-ownership-ns-%d", time.Now().UnixNano()%1000000)
+	configMapName := fmt.Sprintf("kubectl-created-cm-%d", time.Now().UnixNano()%1000000)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create namespace with Terraform
+			{
+				Config: testAccManifestConfigImportOwnershipConflictPrep(ns),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckNamespaceExists(k8sClient, ns),
+				),
+			},
+			// Step 2: Create ConfigMap with kubectl (different field manager)
+			{
+				PreConfig: func() {
+					testhelpers.CreateConfigMapWithKubectl(t, ns, configMapName, map[string]string{
+						"created-by": "kubectl",
+						"test":       "ownership-conflict",
+					})
+				},
+				Config: testAccManifestConfigImportOwnershipConflictPrep(ns),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckConfigMapExists(k8sClient, ns, configMapName),
+					// Verify kubectl created it (kubectl apply uses client-side-apply by default)
+					testhelpers.CheckFieldManager(k8sClient, ns, "ConfigMap", configMapName, "kubectl-client-side-apply"),
+				),
+			},
+			// Step 3: Apply with k8sconnect - this triggers SSA force=true ownership takeover
+			{
+				Config: testAccManifestConfigImportOwnershipConflict(ns, configMapName),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"name":      config.StringVariable(configMapName),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckConfigMapExists(k8sClient, ns, configMapName),
+					resource.TestCheckResourceAttrSet("k8sconnect_object.test_import", "field_ownership.%"),
+					// Verify k8sconnect now owns the fields
+					testhelpers.CheckFieldManager(k8sClient, ns, "ConfigMap", configMapName, "k8sconnect"),
+				),
+			},
+		},
+		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+	})
+}
+
+func testAccManifestConfigImportOwnershipConflictPrep(namespace string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+variable "namespace" { type = string }
+
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "import_namespace" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: %s
+  YAML
+
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+`, namespace)
+}
+
+func testAccManifestConfigImportOwnershipConflict(namespace, name string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+variable "namespace" { type = string }
+variable "name" { type = string }
+
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "import_namespace" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: %s
+  YAML
+
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_object" "test_import" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: %s
+      namespace: %s
+      labels:
+        created-by: kubectl
+        test: ownership-conflict
+    data:
+      key1: value1
+      key2: value2
+  YAML
+
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+
+  depends_on = [k8sconnect_object.import_namespace]
+}
+`, namespace, name, namespace)
+}

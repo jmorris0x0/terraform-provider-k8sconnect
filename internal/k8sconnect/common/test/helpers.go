@@ -4,6 +4,8 @@ package test
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -198,6 +200,50 @@ func CheckPVCDestroy(client kubernetes.Interface, namespace, name string) resour
 			time.Sleep(2 * time.Second)
 		}
 		return fmt.Errorf("PVC %s/%s still exists after deletion", namespace, name)
+	}
+}
+
+func CheckPVCHasLabel(client kubernetes.Interface, namespace, name, labelKey, expectedValue string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		pvc, err := client.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to get pvc %s/%s: %v", namespace, name, err)
+		}
+
+		actualValue, exists := pvc.Labels[labelKey]
+		if !exists {
+			return fmt.Errorf("pvc %s/%s missing expected label %q", namespace, name, labelKey)
+		}
+		if actualValue != expectedValue {
+			return fmt.Errorf("pvc %s/%s label %q: expected %q, got %q", namespace, name, labelKey, expectedValue, actualValue)
+		}
+
+		fmt.Printf("✅ Verified PVC %s/%s has label %s=%s\n", namespace, name, labelKey, expectedValue)
+		return nil
+	}
+}
+
+func CheckPVCStorage(client kubernetes.Interface, namespace, name, expectedStorage string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		pvc, err := client.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to get pvc %s/%s: %v", namespace, name, err)
+		}
+
+		storageRequest, exists := pvc.Spec.Resources.Requests["storage"]
+		if !exists {
+			return fmt.Errorf("pvc %s/%s has no storage request", namespace, name)
+		}
+
+		actualStorage := storageRequest.String()
+		if actualStorage != expectedStorage {
+			return fmt.Errorf("pvc %s/%s storage: expected %q, got %q", namespace, name, expectedStorage, actualStorage)
+		}
+
+		fmt.Printf("✅ Verified PVC %s/%s has storage %s\n", namespace, name, expectedStorage)
+		return nil
 	}
 }
 
@@ -511,6 +557,25 @@ func CheckClusterRoleBindingDestroy(client kubernetes.Interface, name string) re
 	}
 }
 
+// CreateNamespaceDirectly creates a Namespace directly using the K8s client (bypassing Terraform)
+// This is useful for testing scenarios where a namespace needs to exist before running tests
+func CreateNamespaceDirectly(t *testing.T, client kubernetes.Interface, name string) {
+	ctx := context.Background()
+
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+		},
+	}
+
+	_, err := client.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create namespace directly: %v", err)
+	}
+
+	fmt.Printf("✅ Pre-created namespace %s directly in cluster\n", name)
+}
+
 // CreateConfigMapDirectly creates a ConfigMap directly using the K8s client (bypassing Terraform)
 // This is useful for testing scenarios where a resource already exists in the cluster
 func CreateConfigMapDirectly(t *testing.T, client kubernetes.Interface, namespace, name string, data map[string]string) {
@@ -588,4 +653,90 @@ func CleanupNamespace(t *testing.T, client kubernetes.Interface, namespace strin
 		time.Sleep(1 * time.Second)
 	}
 	t.Logf("Warning: Namespace %s still exists after cleanup attempt", namespace)
+}
+
+// CreateConfigMapWithKubectl creates a ConfigMap using kubectl apply command
+// This simulates an external tool creating a resource, which will have a different field manager
+func CreateConfigMapWithKubectl(t *testing.T, namespace, name string, labels map[string]string) {
+	// Create YAML for the ConfigMap
+	yaml := fmt.Sprintf(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: %s
+  namespace: %s
+`, name, namespace)
+
+	// Add labels if provided
+	if len(labels) > 0 {
+		yaml += "  labels:\n"
+		for k, v := range labels {
+			yaml += fmt.Sprintf("    %s: %s\n", k, v)
+		}
+	}
+
+	// Add some data
+	yaml += "data:\n  key1: value1\n  key2: value2\n"
+
+	// Write to temp file
+	tmpfile := fmt.Sprintf("/tmp/kubectl-cm-%s.yaml", name)
+	if err := os.WriteFile(tmpfile, []byte(yaml), 0644); err != nil {
+		t.Fatalf("Failed to write temp file for kubectl: %v", err)
+	}
+	defer os.Remove(tmpfile)
+
+	// Apply with kubectl
+	cmd := exec.Command("kubectl", "apply", "-f", tmpfile)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("kubectl apply failed: %v\nOutput: %s", err, output)
+	}
+
+	fmt.Printf("✅ Created ConfigMap %s/%s with kubectl (field manager: kubectl)\n", namespace, name)
+}
+
+// CheckFieldManager verifies that a resource has the expected field manager
+func CheckFieldManager(client kubernetes.Interface, namespace, kind, name, expectedManager string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+
+		// Get the resource based on kind
+		var managedFields []metav1.ManagedFieldsEntry
+		var err error
+
+		switch kind {
+		case "ConfigMap":
+			var cm *corev1.ConfigMap
+			cm, err = client.CoreV1().ConfigMaps(namespace).Get(ctx, name, metav1.GetOptions{})
+			if err == nil {
+				managedFields = cm.ManagedFields
+			}
+		default:
+			return fmt.Errorf("unsupported kind for field manager check: %s", kind)
+		}
+
+		if err != nil {
+			return fmt.Errorf("failed to get %s %s/%s: %v", kind, namespace, name, err)
+		}
+
+		// Check if the expected manager owns any fields
+		found := false
+		for _, mf := range managedFields {
+			if mf.Manager == expectedManager {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			var managers []string
+			for _, mf := range managedFields {
+				managers = append(managers, mf.Manager)
+			}
+			return fmt.Errorf("%s %s/%s does not have field manager %q. Found managers: %v",
+				kind, namespace, name, expectedManager, managers)
+		}
+
+		fmt.Printf("✅ Verified %s %s/%s has field manager %q\n", kind, namespace, name, expectedManager)
+		return nil
+	}
 }
