@@ -25,15 +25,6 @@ FEATURE ADDITIONS
 Custom ownership annotations: Solve cross-state conflicts
 Status field guardrails: Warn if field doesn't start with "status". Do I have an error? Is it useful?
 
-MARKETING & GROWTH
-
-Launch content: Medium article, r/kubernetes, r/terraform, HackerNews posts, SweetOps Slack, Kubernetes Slack
-
-Migration tooling!
-"Stuck with thousands of lines of Kubernetes HCL? We'll help you escape."
-hcl2yaml main.tf > manifests.yaml
-Could probably knock out an MVP using the Terraform provider schema definitions to reverse the translation.
-
 Terraform wants to be declarative and stateful, Kubernetes wants to be self-healing and continuously reconciling, and developers just want to ship code without becoming infrastructure experts.
 
 Add a deep compare yaml helper function for the tests. string comparisons are brittle and have wasted a lot of time for me.
@@ -52,120 +43,12 @@ Should I make field_ownership sensitive? It's very noisy during destroy.
 
 Last minute decision: Should I change the name of managed_state_projection?
 
-Rename manifest resource to k8sconnect_object. Better? Maybe.
-
-Stop docs tests from renaming resources. No reason to do that.
-
 Create a little FAQ for things like, why have a separate wait resource? There are probably other decisons in the ADRs that people might be curious about.
-
-Don't pass auth out of the object resource. There is no point. Either pass it inside of object_ref or not at all.
 
 Update comparison table in README.
 
-Look at openAPIv2 issue in hashicorp issues. Does it apply here?
+add ", helper datasource" to CRD row in readme.
 
-Flaky test:
+wait_for row is out of date. Need to update to wait resource. Add to FAQ: Why is wait a resource instead of a datasource? Why separate resrouce.
 
-=== NAME  TestExamples/wait-for-condition
-    examples_test.go:181: Command: terraform apply tfplan
-    examples_test.go:182: Output:
-        k8sconnect_manifest.namespace: Creating...
-        k8sconnect_manifest.namespace: Creation complete after 0s [id=bf27b0271877]
-        k8sconnect_manifest.pv: Creating...
-        k8sconnect_manifest.pv: Creation complete after 0s [id=41e01125035e]
-        k8sconnect_manifest.pvc: Creating...
-        k8sconnect_manifest.pvc: Creation complete after 0s [id=044d771757f2]
-        k8sconnect_wait.pvc: Creating...
-        k8sconnect_wait.pvc: Creation complete after 1s [id=466fc312-bc14-479e-b694-cc3ac7df9b85]
-        k8sconnect_manifest.app: Creating...
-        k8sconnect_manifest.app: Creation complete after 0s [id=b32cd3dbb852]
-        k8sconnect_wait.app: Creating...
-        k8sconnect_wait.app: Still creating... [00m10s elapsed]
-        k8sconnect_wait.app: Still creating... [00m20s elapsed]
-        k8sconnect_wait.app: Still creating... [00m30s elapsed]
-        k8sconnect_wait.app: Still creating... [00m40s elapsed]
-        k8sconnect_wait.app: Still creating... [00m50s elapsed]
-        k8sconnect_wait.app: Still creating... [01m00s elapsed]
-        k8sconnect_wait.app: Still creating... [01m10s elapsed]
-        k8sconnect_wait.app: Still creating... [01m20s elapsed]
-        k8sconnect_wait.app: Still creating... [01m30s elapsed]
-        k8sconnect_wait.app: Still creating... [01m40s elapsed]
-        k8sconnect_wait.app: Still creating... [01m50s elapsed]
-        k8sconnect_wait.app: Still creating... [02m00s elapsed]
-        k8sconnect_wait.app: Still creating... [02m10s elapsed]
-        k8sconnect_wait.app: Still creating... [02m20s elapsed]
-        k8sconnect_wait.app: Still creating... [02m30s elapsed]
-        k8sconnect_wait.app: Still creating... [02m40s elapsed]
-        k8sconnect_wait.app: Still creating... [02m50s elapsed]
-        k8sconnect_wait.app: Still creating... [03m00s elapsed]
-        ╷
-        │ Error: Wait Operation Failed
-        │ 
-        │   with k8sconnect_wait.app,
-        │   on main.tf line 118, in resource "k8sconnect_wait" "app":
-        │  118: resource "k8sconnect_wait" "app" {
-        │ 
-        │ Failed to wait for resource: timeout after 3m0s waiting for condition
-        │ "Available"
-        ╵
-    examples_test.go:186: Command: terraform apply tfplan
-    examples_test.go:187: Output:
-        k8sconnect_manifest.namespace: Creating...
-        k8sconnect_manifest.namespace: Creation complete after 0s [id=bf27b0271877]
-        k8sconnect_manifest.pv: Creating...
-        k8sconnect_manifest.pv: Creation complete after 0s [id=41e01125035e]
-        k8sconnect_manifest.pvc: Creating...
-        k8sconnect_manifest.pvc: Creation complete after 0s [id=044d771757f2]
-        k8sconnect_wait.pvc: Creating...
-        k8sconnect_wait.pvc: Creation complete after 1s [id=466fc312-bc14-479e-b694-cc3ac7df9b85]
-        k8sconnect_manifest.app: Creating...
-        k8sconnect_manifest.app: Creation complete after 0s [id=b32cd3dbb852]
-        k8sconnect_wait.app: Creating...
-        k8sconnect_wait.app: Still creating... [00m10s elapsed]
-        k8sconnect_wait.app: Still creating... [00m20s elapsed]
-        k8sconnect_wait.app: Still creating... [00m30s elapsed]
-        k8sconnect_wait.app: Still creating... [00m40s elapsed]
-        k8sconnect_wait.app: Still creating... [00m50s elapsed]
-        k8sconnect_wait.app: Still creating... [01m00s elapsed]
-        k8sconnect_wait.app: Still creating... [01m10s elapsed]
-        k8sconnect_wait.app: Still creating... [01m20s elapsed]
-        k8sconnect_wait.app: Still creating... [01m30s elapsed]
-        k8sconnect_wait.app: Still creating... [01m40s elapsed]
-        k8sconnect_wait.app: Still creating... [01m50s elapsed]
-        k8sconnect_wait.app: Still creating... [02m00s elapsed]
-        k8sconnect_wait.app: Still creating... [02m10s elapsed]
-        k8sconnect_wait.app: Still creating... [02m20s elapsed]
-        k8sconnect_wait.app: Still creating... [02m30s elapsed]
-        k8sconnect_wait.app: Still creating... [02m40s elapsed]
-        k8sconnect_wait.app: Still creating... [02m50s elapsed]
-        k8sconnect_wait.app: Still creating... [03m00s elapsed]
-        ╷
-        │ Error: Wait Operation Failed
-        │ 
-        │   with k8sconnect_wait.app,
-        │   on main.tf line 118, in resource "k8sconnect_wait" "app":
-        │  118: resource "k8sconnect_wait" "app" {
-        │ 
-        │ Failed to wait for resource: timeout after 3m0s waiting for condition
-        │ "Available"
-        ╵
-    examples_test.go:188: terraform apply tfplan failed: exit status 1
-make: *** [Makefile:184: test-examples] Error 1
---- FAIL: TestExamples (0.00s)
-    --- PASS: TestExamples/patch-merge-patch (1.54s)
-    --- PASS: TestExamples/patch-json-patch (1.21s)
-    --- PASS: TestExamples/basic-deployment (9.79s)
-    --- PASS: TestExamples/manifest-datasource-kubernetes-service (9.81s)
-    --- PASS: TestExamples/wait-for-ingress (16.00s)
-    --- PASS: TestExamples/yaml-scoped-dependency-ordering (18.39s)
-    --- PASS: TestExamples/ignore-fields-hpa (11.78s)
-    --- PASS: TestExamples/wait-for-loadbalancer (12.30s)
-    --- PASS: TestExamples/wait-for-pvc-volume (13.09s)
-    --- PASS: TestExamples/yaml-split-inline (7.57s)
-    --- PASS: TestExamples/yaml-split-templated (7.29s)
-    --- PASS: TestExamples/yaml-split-files (7.63s)
-    --- PASS: TestExamples/patch-strategic-merge (1.18s)
-    --- PASS: TestExamples/wait-for-job-completion (20.46s)
-    --- PASS: TestExamples/wait-for-deployment-rollout (12.64s)
-    --- FAIL: TestExamples/wait-for-condition (182.88s)
-
+Put a local between the cluster and the resource in the first example in the readme. It would make the object cleaner.
