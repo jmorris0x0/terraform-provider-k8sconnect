@@ -613,3 +613,148 @@ YAML
 }
 `, namespace, cmName, namespace)
 }
+
+// TestAccObjectResource_UnknownConnectionHost tests the bootstrap scenario where
+// cluster_connection.host is unknown at plan time (e.g., EKS cluster being created).
+// This validates ADR-011 bootstrap handling - projection should fall back gracefully.
+func TestAccObjectResource_UnknownConnectionHost(t *testing.T) {
+	t.Parallel()
+
+	host := os.Getenv("TF_ACC_K8S_HOST")
+	ca := os.Getenv("TF_ACC_K8S_CA")
+	token := os.Getenv("TF_ACC_K8S_TOKEN")
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+
+	if host == "" || ca == "" || token == "" || raw == "" {
+		t.Fatal("TF_ACC_K8S_HOST, TF_ACC_K8S_CA, TF_ACC_K8S_TOKEN, and TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("unknown-host-ns-%d", time.Now().UnixNano()%1000000)
+	hostConfigName := fmt.Sprintf("cluster-config-%d", time.Now().UnixNano()%1000000)
+	cmName := fmt.Sprintf("test-cm-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create everything in one apply
+			// The host ConfigMap is created first, but dependent resources
+			// have host = unknown during plan
+			{
+				Config: testAccManifestConfigUnknownHost(ns, hostConfigName, cmName),
+				ConfigVariables: config.Variables{
+					"raw":   config.StringVariable(raw),
+					"host":  config.StringVariable(host),
+					"ca":    config.StringVariable(ca),
+					"token": config.StringVariable(token),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					// Verify namespace was created using kubeconfig (known connection)
+					testhelpers.CheckNamespaceExists(k8sClient, ns),
+					// Verify host config was created
+					testhelpers.CheckConfigMapExists(k8sClient, ns, hostConfigName),
+					// Verify dependent ConfigMap was created (with unknown host during plan)
+					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
+					// Verify the dependent resource has populated projection
+					resource.TestCheckResourceAttrSet("k8sconnect_object.test_dependent", "managed_state_projection.%"),
+				),
+			},
+			// Step 2: Verify no drift on second plan
+			{
+				Config: testAccManifestConfigUnknownHost(ns, hostConfigName, cmName),
+				ConfigVariables: config.Variables{
+					"raw":   config.StringVariable(raw),
+					"host":  config.StringVariable(host),
+					"ca":    config.StringVariable(ca),
+					"token": config.StringVariable(token),
+				},
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+			},
+		},
+		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+	})
+}
+
+func testAccManifestConfigUnknownHost(namespace, hostConfigName, cmName string) string {
+	return fmt.Sprintf(`
+variable "raw" {
+  type = string
+}
+variable "host" {
+  type = string
+}
+variable "ca" {
+  type = string
+}
+variable "token" {
+  type = string
+}
+
+provider "k8sconnect" {}
+
+# Create namespace using kubeconfig (known connection)
+resource "k8sconnect_object" "test_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+# Simulate cluster info being stored (like EKS endpoint)
+resource "k8sconnect_object" "cluster_info" {
+  depends_on = [k8sconnect_object.test_namespace]
+
+  yaml_body = <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: %s
+  namespace: %s
+data:
+  endpoint: "${var.host}"
+  ca: "${var.ca}"
+YAML
+
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+# Resource that uses the cluster info (host is unknown during initial plan)
+# This simulates: cluster_connection.host = aws_eks_cluster.main.endpoint
+resource "k8sconnect_object" "test_dependent" {
+  depends_on = [k8sconnect_object.cluster_info]
+
+  yaml_body = <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: %s
+  namespace: %s
+data:
+  app: "bootstrap-test"
+  message: "created with unknown host"
+YAML
+
+  # During initial plan, cluster_info doesn't exist yet, so its projection is unknown
+  # This makes the host unknown, testing ADR-011 bootstrap fallback
+  cluster_connection = {
+    host                   = k8sconnect_object.cluster_info.managed_state_projection["data.endpoint"]
+    cluster_ca_certificate = var.ca
+    token                  = var.token
+  }
+}
+`, namespace, hostConfigName, namespace, cmName, namespace)
+}
