@@ -124,34 +124,20 @@ func (r *objectResource) explainNamespaceDeletionFailure(ctx context.Context, cl
 ```
 Error: Namespace Deletion Timeout
 
-Namespace "oracle" did not delete within 10m0s
+Namespace "oracle" did not delete within 10m0s. Kubernetes is cascading deletion through 47 resources.
 
-Namespace still contains 47 resources:
+Namespace still contains:
   - 12 Pods
   - 8 ConfigMaps
   - 5 Deployments
-  - 3 PersistentVolumeClaims
-  - 19 other resources
+  - 3 PersistentVolumeClaims (2 with finalizers)
 
-Resources with finalizers (may be blocking):
-  - PersistentVolumeClaim/data-postgres-0 (finalizers: [kubernetes.io/pvc-protection])
-  - Pod/stuck-pod (finalizers: [custom.io/cleanup])
+This is normal for namespaces with many resources, but can take time depending on finalizers.
 
-WHY: Kubernetes is cascading deletion through these resources. This is normal
-for namespaces with many resources, but can take time depending on finalizers
-and dependent resources.
-
-WHAT TO DO:
-• To wait longer:
-    delete_timeout = "20m"
-
-• To force immediate removal (WARNING: may orphan resources):
-    force_destroy = true
-
-• To manually investigate:
-    kubectl get all -n oracle
-    kubectl get pvc -n oracle
-    kubectl api-resources --verbs=list --namespaced -o name | xargs -n 1 kubectl get -n oracle
+To resolve:
+• Increase timeout: delete_timeout = "20m"
+• Force removal (may orphan resources): force_destroy = true
+• Investigate: kubectl get all -n oracle
 ```
 
 **Cost Analysis:**
@@ -331,21 +317,28 @@ func classifyK8sError(err error, operation string) (severity, title, detail stri
 All errors should follow this structure:
 
 ```
-Error: [DESCRIPTIVE TITLE]
+Error: [Descriptive Title]
 
-[WHAT HAPPENED - 1-2 sentences]
+[Brief description of what happened - 1-2 sentences]
 
-[CURRENT STATE - key facts about the resource]
+[Optional: One sentence explanation if not obvious]
 
-WHY: [ROOT CAUSE EXPLANATION]
+[Actionable steps as bulleted list or numbered options]
+• Action 1 with example if helpful
+• Action 2
+• Investigation command: kubectl ...
 
-WHAT TO DO:
-• [PRIMARY ACTION with example command]
-• [SECONDARY ACTION with example command]
-• [INVESTIGATION STEPS with kubectl commands]
-
-[Optional: RELATED DOCS link]
+[Optional: Details: %v for raw error]
 ```
+
+**Style Guidelines:**
+- No ALL CAPS section headers (WHY, WHAT TO DO, etc.)
+- Keep total message under ~10 lines when possible
+- Lead with what happened, not why
+- **Be specific**: Include actual field names, resource counts, or specific values when available (e.g., "Fields modified: data.key1, spec.replicas" not "Some fields were modified")
+- Assume users are technical and don't need verbose explanations
+- Focus on actionable next steps
+- Include kubectl commands only when directly helpful
 
 ### When to Perform Diagnostic API Calls
 
@@ -510,20 +503,17 @@ Error: PersistentVolumeClaim Deletion Blocked
 
 PVC "data-postgres-0" cannot be deleted due to finalizer:
   • kubernetes.io/pvc-protection: Volume is still attached to a pod
-    (See: https://kubernetes.io/docs/concepts/storage/persistent-volumes/#storage-object-in-use-protection)
 
-WHY: Kubernetes prevents deleting volumes while they're in use to avoid data loss.
+Kubernetes prevents deleting volumes while they're in use to avoid data loss.
 
-WHAT TO DO:
+To resolve:
 • Find pods using this volume:
-    kubectl get pods -n default -o json | \
-      jq '.items[] | select(.spec.volumes[]?.persistentVolumeClaim.claimName=="data-postgres-0") | .metadata.name'
+    kubectl get pods -o json | jq '.items[] | select(.spec.volumes[]?.persistentVolumeClaim.claimName=="data-postgres-0")'
 
 • Delete the pod first, then the PVC will delete automatically
 
-• If pod is already gone but finalizer stuck (check pod list first!):
+• If finalizer is stuck after pod deletion:
     kubectl patch pvc data-postgres-0 -p '{"metadata":{"finalizers":null}}'
-    (WARNING: Only do this if you've verified no pods are using it)
 ```
 
 ## Alternatives Considered

@@ -305,3 +305,171 @@ func mergeMaps(dst, src map[string]interface{}) {
 func extractManagedFieldsForManager(obj *unstructured.Unstructured, fieldManager string) (string, error) {
 	return fieldmanagement.ExtractManagedFieldsForManager(obj, fieldManager)
 }
+
+// detectValueDrift compares the desired patch values with actual current values
+// Returns (hasDrift bool, driftedFields []string, error)
+func (r *patchResource) detectValueDrift(ctx context.Context, currentObj *unstructured.Unstructured, data patchResourceModel) (bool, []string, error) {
+	patchContent := r.getPatchContent(data)
+	if patchContent == "" {
+		return false, nil, nil
+	}
+
+	patchType := r.determinePatchType(data)
+
+	switch patchType {
+	case "application/strategic-merge-patch+json":
+		return r.detectStrategicMergeDrift(currentObj, patchContent)
+	case "application/json-patch+json":
+		return r.detectJSONPatchDrift(currentObj, patchContent)
+	case "application/merge-patch+json":
+		return r.detectMergePatchDrift(currentObj, patchContent)
+	default:
+		return false, nil, fmt.Errorf("unsupported patch type: %s", patchType)
+	}
+}
+
+// detectStrategicMergeDrift checks if strategic merge patch values have drifted
+func (r *patchResource) detectStrategicMergeDrift(currentObj *unstructured.Unstructured, patchContent string) (bool, []string, error) {
+	// Parse the patch to get desired values
+	var patchData map[string]interface{}
+	if err := yaml.Unmarshal([]byte(patchContent), &patchData); err != nil {
+		return false, nil, fmt.Errorf("failed to parse patch: %w", err)
+	}
+
+	// Recursively compare desired values with current values and collect drifted paths
+	driftedPaths := collectValueDrift(currentObj.Object, patchData, "")
+	return len(driftedPaths) > 0, driftedPaths, nil
+}
+
+// detectMergePatchDrift checks if merge patch values have drifted
+func (r *patchResource) detectMergePatchDrift(currentObj *unstructured.Unstructured, patchContent string) (bool, []string, error) {
+	// Merge patch has same semantics as strategic merge for value comparison
+	return r.detectStrategicMergeDrift(currentObj, patchContent)
+}
+
+// detectJSONPatchDrift checks if JSON patch values have drifted
+func (r *patchResource) detectJSONPatchDrift(currentObj *unstructured.Unstructured, patchContent string) (bool, []string, error) {
+	// Parse JSON patch operations
+	var operations []map[string]interface{}
+	if err := json.Unmarshal([]byte(patchContent), &operations); err != nil {
+		return false, nil, fmt.Errorf("failed to parse JSON patch: %w", err)
+	}
+
+	var driftedPaths []string
+
+	// Check each operation
+	for _, op := range operations {
+		opType, _ := op["op"].(string)
+		pathStr, _ := op["path"].(string)
+		expectedValue := op["value"]
+
+		// Only check "add" and "replace" operations that set values
+		if opType != "add" && opType != "replace" {
+			continue
+		}
+
+		// Convert JSON Patch path to nested map lookup
+		// "/data/key" -> ["data", "key"]
+		path := strings.TrimPrefix(pathStr, "/")
+		pathParts := strings.Split(path, "/")
+
+		// Get current value at this path
+		currentValue := getValueAtPath(currentObj.Object, pathParts)
+
+		// Compare values
+		if !valuesEqual(currentValue, expectedValue) {
+			// Use the original path format from JSON Patch
+			driftedPaths = append(driftedPaths, strings.ReplaceAll(path, "/", "."))
+		}
+	}
+
+	return len(driftedPaths) > 0, driftedPaths, nil
+}
+
+// collectValueDrift recursively checks if any values in patchData differ from currentData
+// Returns a list of paths that have drifted
+func collectValueDrift(currentData, patchData map[string]interface{}, prefix string) []string {
+	var driftedPaths []string
+
+	for key, patchValue := range patchData {
+		// Build the full path
+		var fullPath string
+		if prefix == "" {
+			fullPath = key
+		} else {
+			fullPath = prefix + "." + key
+		}
+
+		currentValue, exists := currentData[key]
+
+		if !exists {
+			// Field missing in current object
+			driftedPaths = append(driftedPaths, fullPath)
+			continue
+		}
+
+		// Recursively compare if both are maps
+		if patchMap, ok := patchValue.(map[string]interface{}); ok {
+			if currentMap, ok := currentValue.(map[string]interface{}); ok {
+				nestedDrift := collectValueDrift(currentMap, patchMap, fullPath)
+				driftedPaths = append(driftedPaths, nestedDrift...)
+				continue
+			}
+		}
+
+		// Direct value comparison
+		if !valuesEqual(currentValue, patchValue) {
+			driftedPaths = append(driftedPaths, fullPath)
+		}
+	}
+
+	return driftedPaths
+}
+
+// getValueAtPath retrieves a value at a given path in a nested map
+func getValueAtPath(obj map[string]interface{}, pathParts []string) interface{} {
+	if len(pathParts) == 0 {
+		return obj
+	}
+
+	current := interface{}(obj)
+	for _, part := range pathParts {
+		switch v := current.(type) {
+		case map[string]interface{}:
+			current = v[part]
+		case []interface{}:
+			// Handle array index
+			var idx int
+			if _, err := fmt.Sscanf(part, "%d", &idx); err == nil {
+				if idx >= 0 && idx < len(v) {
+					current = v[idx]
+				} else {
+					return nil
+				}
+			} else {
+				return nil
+			}
+		default:
+			return nil
+		}
+	}
+
+	return current
+}
+
+// valuesEqual compares two values for equality, handling type conversions
+func valuesEqual(a, b interface{}) bool {
+	// Handle nil cases
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+
+	// Convert to comparable types
+	aJSON, _ := json.Marshal(a)
+	bJSON, _ := json.Marshal(b)
+
+	return string(aJSON) == string(bJSON)
+}

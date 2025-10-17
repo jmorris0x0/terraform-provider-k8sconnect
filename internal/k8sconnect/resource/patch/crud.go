@@ -175,8 +175,71 @@ func (r *patchResource) Read(ctx context.Context, req resource.ReadRequest, resp
 	// Surface any API warnings from get operation
 	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
 
-	// 5. Extract ONLY fields we patched (using our field manager)
+	// 5. Detect value drift (compare desired patch values with actual current values)
 	fieldManager := fmt.Sprintf("k8sconnect-patch-%s", data.ID.ValueString())
+	valueDriftDetected, driftedFields, err := r.detectValueDrift(ctx, currentObj, data)
+	if err != nil {
+		tflog.Warn(ctx, "Failed to check for value drift", map[string]interface{}{
+			"error": err.Error(),
+		})
+	}
+
+	// 6. If value drift detected, warn and re-apply patch to correct it
+	if valueDriftDetected {
+		// Format drifted fields for display (limit to first 5 for readability)
+		fieldsList := driftedFields
+		if len(fieldsList) > 5 {
+			fieldsList = append(driftedFields[:5], fmt.Sprintf("... and %d more", len(driftedFields)-5))
+		}
+		fieldsStr := strings.Join(fieldsList, ", ")
+
+		// Build kubectl command (with or without namespace)
+		kubectlCmd := fmt.Sprintf("kubectl get %s %s",
+			strings.ToLower(target.Kind.ValueString()),
+			target.Name.ValueString())
+		if !target.Namespace.IsNull() && target.Namespace.ValueString() != "" {
+			kubectlCmd += fmt.Sprintf(" -n %s", target.Namespace.ValueString())
+		}
+		kubectlCmd += " -o yaml"
+
+		resp.Diagnostics.AddWarning(
+			"Patched Field Values Changed Externally",
+			fmt.Sprintf("Fields modified externally and automatically corrected: %s\n\n"+
+				"The patch has been re-applied to restore your desired values. If another controller keeps modifying these fields, consider:\n"+
+				"• Removing this patch to allow the other controller to manage these fields\n"+
+				"• Reconfiguring the other controller to avoid conflicts\n\n"+
+				"To investigate: %s",
+				fieldsStr,
+				kubectlCmd),
+		)
+
+		tflog.Info(ctx, "Value drift detected, re-applying patch to correct drift", map[string]interface{}{
+			"target":        formatTarget(target),
+			"field_manager": fieldManager,
+		})
+
+		// Re-apply the patch to correct drift
+		patchedObj, err := r.applyPatch(ctx, client, currentObj, data, fieldManager, gvr)
+		if err != nil {
+			resp.Diagnostics.AddWarning(
+				"Failed to Correct Drift",
+				fmt.Sprintf("Detected drift in patched values but failed to re-apply patch: %v\n\n"+
+					"Manual intervention may be required to restore desired state.", err),
+			)
+			// Continue with read even if re-apply failed
+		} else {
+			// Update currentObj to the corrected state
+			currentObj = patchedObj
+			tflog.Info(ctx, "Drift corrected successfully", map[string]interface{}{
+				"target": formatTarget(target),
+			})
+		}
+
+		// Surface any API warnings from patch operation
+		surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
+	}
+
+	// 7. Extract ONLY fields we patched (using our field manager)
 	currentManagedFields, err := extractManagedFieldsForManager(currentObj, fieldManager)
 	if err != nil {
 		tflog.Warn(ctx, "Failed to extract managed fields during read", map[string]interface{}{
@@ -185,13 +248,13 @@ func (r *patchResource) Read(ctx context.Context, req resource.ReadRequest, resp
 		currentManagedFields = "{}"
 	}
 
-	// 6. Detect drift in our patched fields
+	// 8. Update managed fields in state
 	if currentManagedFields != data.ManagedFields.ValueString() {
-		tflog.Debug(ctx, "Drift detected in patched fields")
+		tflog.Debug(ctx, "Managed fields changed (ownership or structure drift)")
 		data.ManagedFields = types.StringValue(currentManagedFields)
 	}
 
-	// 7. Update field ownership tracking (only for our manager)
+	// 9. Update field ownership tracking (only for our manager)
 	fieldOwnership := extractFieldOwnershipForManager(currentObj, fieldManager)
 	ownershipMap, diags := types.MapValueFrom(ctx, types.StringType, fieldOwnership)
 	resp.Diagnostics.Append(diags...)
@@ -199,7 +262,7 @@ func (r *patchResource) Read(ctx context.Context, req resource.ReadRequest, resp
 		data.FieldOwnership = ownershipMap
 	}
 
-	// 8. Save refreshed state
+	// 10. Save refreshed state
 	diags = resp.State.Set(ctx, &data)
 	resp.Diagnostics.Append(diags...)
 
