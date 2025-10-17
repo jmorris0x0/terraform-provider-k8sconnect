@@ -102,7 +102,26 @@ func (r *waitResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 		return
 	}
 
-	// Resource still exists, keep state as-is
+	// For field waits, refresh status from current state (drift detection)
+	// Condition/rollout waits have null status per ADR-008
+	// Only refresh if connection is ready (all values known, not during bootstrap)
+	if !wc.WaitConfig.Field.IsNull() && wc.WaitConfig.Field.ValueString() != "" {
+		if r.isConnectionReady(data.ClusterConnection) {
+			if err := r.updateStatus(ctx, wc); err != nil {
+				tflog.Warn(ctx, "Failed to update status during Read", map[string]interface{}{
+					"error": err.Error(),
+				})
+				// Don't fail - keep existing status on transient errors
+			}
+			tflog.Debug(ctx, "Refreshed status for field wait", map[string]interface{}{
+				"field": wc.WaitConfig.Field.ValueString(),
+			})
+		} else {
+			tflog.Debug(ctx, "Skipping status refresh - connection has unknown values (bootstrap)")
+		}
+	}
+
+	// Save potentially updated state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
@@ -267,3 +286,64 @@ func (r *waitResource) performWait(ctx context.Context, wc *waitContext) error {
 }
 
 // waitForResource is implemented in wait_logic.go
+
+// isConnectionReady checks if the connection has all values known (not unknown)
+// This determines if we can attempt to contact the cluster for status refresh.
+// Null values are OK (means not using that auth method), but unknown values
+// (like "known after apply" during bootstrap) mean we cannot connect yet.
+func (r *waitResource) isConnectionReady(obj types.Object) bool {
+	// First check if the object itself is null/unknown
+	if obj.IsNull() || obj.IsUnknown() {
+		return false
+	}
+
+	// Convert to connection model to check individual fields
+	conn, err := auth.ObjectToConnectionModel(context.Background(), obj)
+	if err != nil {
+		return false
+	}
+
+	// Check all string fields - null is OK, unknown is not
+	if conn.Host.IsUnknown() ||
+		conn.ClusterCACertificate.IsUnknown() ||
+		conn.Kubeconfig.IsUnknown() ||
+		conn.Context.IsUnknown() ||
+		conn.Token.IsUnknown() ||
+		conn.ClientCertificate.IsUnknown() ||
+		conn.ClientKey.IsUnknown() ||
+		conn.ProxyURL.IsUnknown() {
+		return false
+	}
+
+	// Check bool field
+	if conn.Insecure.IsUnknown() {
+		return false
+	}
+
+	// Check exec auth if present
+	if conn.Exec != nil {
+		if conn.Exec.APIVersion.IsUnknown() ||
+			conn.Exec.Command.IsUnknown() {
+			return false
+		}
+
+		// Check args array
+		for _, arg := range conn.Exec.Args {
+			if arg.IsUnknown() {
+				return false
+			}
+		}
+
+		// Check env vars map
+		if conn.Exec.Env != nil {
+			for _, value := range conn.Exec.Env {
+				if value.IsUnknown() {
+					return false
+				}
+			}
+		}
+	}
+
+	// All fields are known (or null) - connection is ready
+	return true
+}
