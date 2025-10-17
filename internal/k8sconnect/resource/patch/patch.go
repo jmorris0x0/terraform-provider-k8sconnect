@@ -43,9 +43,11 @@ type patchResourceModel struct {
 	ClusterConnection types.Object `tfsdk:"cluster_connection"`
 
 	// Computed fields
-	ManagedFields  types.String `tfsdk:"managed_fields"`
-	FieldOwnership types.Map    `tfsdk:"field_ownership"`
-	PreviousOwners types.Map    `tfsdk:"previous_owners"`
+
+	ManagedStateProjection types.Map    `tfsdk:"managed_state_projection"`
+	ManagedFields          types.String `tfsdk:"managed_fields"`
+	FieldOwnership         types.Map    `tfsdk:"field_ownership"`
+	PreviousOwners         types.Map    `tfsdk:"previous_owners"`
 }
 
 type patchTargetModel struct {
@@ -224,6 +226,14 @@ When you destroy a patch resource, ownership is released but patched values rema
 			},
 
 			// Computed fields
+			"managed_state_projection": schema.MapAttribute{
+				Computed:    true,
+				ElementType: types.StringType,
+				Description: "Flattened projection of fields that will be patched. Shows the predicted state after patch " +
+					"application, including any Kubernetes defaults. Only available for strategic merge patches (SSA). " +
+					"Non-SSA patches (json_patch, merge_patch) do not provide projection.",
+			},
+
 			"managed_fields": schema.StringAttribute{
 				Computed:    true,
 				Description: "JSON representation of only the fields managed by this patch. Used for drift detection.",

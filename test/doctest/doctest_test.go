@@ -113,12 +113,26 @@ func isolateExample(content string, testName string, hash string) string {
 		"kube-node-lease": true,
 	}
 
-	// Find all unique namespace references
+	// Find all unique namespace references (only from "namespace:" fields, not resource names)
 	namespaces := make(map[string]bool)
 	lines := strings.Split(content, "\n")
-	for _, line := range lines {
-		// Look for "namespace: xyz" patterns
-		if strings.Contains(line, "namespace:") {
+
+	// Track if we're in a Namespace resource to capture its metadata.name
+	inNamespaceResource := false
+
+	for i, line := range lines {
+		// Detect if we're starting a Namespace resource
+		if strings.Contains(line, "kind: Namespace") || strings.Contains(line, `kind        = "Namespace"`) {
+			inNamespaceResource = true
+		}
+
+		// Reset when we hit a new resource
+		if strings.Contains(line, "---") || (strings.HasPrefix(strings.TrimSpace(line), "apiVersion:") && i > 0) {
+			inNamespaceResource = false
+		}
+
+		// Look for "namespace: xyz" patterns (namespace references in resources)
+		if strings.Contains(line, "namespace:") && !strings.Contains(line, "namespace   =") {
 			parts := strings.Split(line, "namespace:")
 			if len(parts) > 1 {
 				ns := strings.TrimSpace(parts[1])
@@ -128,15 +142,14 @@ func isolateExample(content string, testName string, hash string) string {
 				}
 			}
 		}
-		// Look for 'name: xyz' in Namespace kind resources
-		if strings.Contains(line, "name:") {
+
+		// Look for 'name: xyz' ONLY in Namespace kind resources
+		if inNamespaceResource && strings.Contains(line, "name:") {
 			parts := strings.Split(line, "name:")
 			if len(parts) > 1 {
 				ns := strings.TrimSpace(parts[1])
 				ns = strings.Trim(ns, `"`)
 				if ns != "" && !systemNamespaces[ns] {
-					// Only add if this looks like a namespace name context
-					// (we'll be conservative and replace it anyway)
 					namespaces[ns] = true
 				}
 			}
@@ -149,10 +162,14 @@ func isolateExample(content string, testName string, hash string) string {
 		// Create namespace suffix with test name and hash: prod-readme-wait-for-loadbalancer-a1b2c3d4
 		isolatedNs := fmt.Sprintf("%s-%s-%s", ns, sanitizedTestName, hash)
 
-		// Replace all occurrences
-		result = strings.ReplaceAll(result, fmt.Sprintf("name: %s", ns), fmt.Sprintf("name: %s", isolatedNs))
+		// Replace namespace references and Namespace resource names
+		// Only replace in namespace context, not arbitrary resource names
 		result = strings.ReplaceAll(result, fmt.Sprintf("namespace: %s", ns), fmt.Sprintf("namespace: %s", isolatedNs))
-		result = strings.ReplaceAll(result, fmt.Sprintf(`"%s"`, ns), fmt.Sprintf(`"%s"`, isolatedNs))
+		result = strings.ReplaceAll(result, fmt.Sprintf("namespace: \"%s\"", ns), fmt.Sprintf("namespace: \"%s\"", isolatedNs))
+
+		// Replace in Namespace resources (metadata.name)
+		// This requires context-aware replacement to avoid renaming other resources
+		result = replaceNamespaceResourceName(result, ns, isolatedNs)
 	}
 
 	// Randomize LoadBalancer service ports to avoid host port conflicts in k3d
@@ -160,6 +177,31 @@ func isolateExample(content string, testName string, hash string) string {
 	result = randomizeLoadBalancerPorts(result, hash)
 
 	return result
+}
+
+// replaceNamespaceResourceName replaces metadata.name in Namespace resources only
+func replaceNamespaceResourceName(content string, oldName string, newName string) string {
+	lines := strings.Split(content, "\n")
+	inNamespaceResource := false
+
+	for i, line := range lines {
+		// Detect if we're starting a Namespace resource
+		if strings.Contains(line, "kind: Namespace") || strings.Contains(line, `kind        = "Namespace"`) {
+			inNamespaceResource = true
+		}
+
+		// Reset when we hit a new resource
+		if strings.Contains(line, "---") || (strings.HasPrefix(strings.TrimSpace(line), "apiVersion:") && i > 0) {
+			inNamespaceResource = false
+		}
+
+		// Replace name only in Namespace resources
+		if inNamespaceResource && strings.Contains(line, "name:") {
+			lines[i] = strings.ReplaceAll(line, fmt.Sprintf("name: %s", oldName), fmt.Sprintf("name: %s", newName))
+		}
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 // randomizeLoadBalancerPorts finds LoadBalancer services and randomizes their ports
@@ -261,10 +303,8 @@ func ensureNamespaceExists(content string) string {
 
 	// If we found a namespace that needs to be created, prepend it
 	if foundNamespace != "" {
-		// Use namespace name in resource name to avoid conflicts in parallel tests
-		// Replace hyphens with underscores for valid Terraform identifiers
-		resourceName := strings.ReplaceAll(foundNamespace, "-", "_")
-		namespaceResource := fmt.Sprintf(`resource "k8sconnect_object" "ns_%s" {
+		// Use a simple "namespace" resource name - the namespace itself is already unique
+		namespaceResource := fmt.Sprintf(`resource "k8sconnect_object" "namespace" {
   yaml_body = <<-YAML
     apiVersion: v1
     kind: Namespace
@@ -275,7 +315,7 @@ func ensureNamespaceExists(content string) string {
   cluster_connection = var.cluster_connection
 }
 
-`, resourceName, foundNamespace)
+`, foundNamespace)
 
 		return namespaceResource + content
 	}

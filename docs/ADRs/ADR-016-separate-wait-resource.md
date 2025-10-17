@@ -1,7 +1,7 @@
 # ADR-016: Separate Wait Resource to Avoid Tainting
 
 ## Status
-Proposed
+Implemented
 
 **Builds on:** ADR-008 (Selective Status Field Population Strategy)
 
@@ -446,6 +446,97 @@ Following ADR-008 "You only get what you wait for", status should only be popula
 
 **Recommendation:** Option 1 - wait resource has its own status field. Cleanest separation, follows ADR-008 principle, no cross-resource state updates needed.
 
+### Drift Detection and Status Refresh
+
+The wait resource has two distinct use cases with different drift handling requirements:
+
+**Use Case 1: Value Extraction (Dynamic Values)**
+
+Wait for a field to exist and extract its value for use in other resources:
+
+```hcl
+resource "k8sconnect_wait" "ingress" {
+  resource_ref = k8sconnect_object.ingress.resource_ref
+  wait_for = {
+    field = "status.loadBalancer.ingress[0].hostname"
+  }
+}
+
+resource "cloudflare_record" "firewall" {
+  value = k8sconnect_wait.ingress.status.loadBalancer.ingress[0].hostname
+  # If hostname changes → firewall updates (DESIRED)
+}
+```
+
+**Expected behavior:**
+- Status refreshed on every `terraform plan/refresh`
+- Detects when LoadBalancer IP/hostname changes
+- Drift propagates to dependent resources (firewall record updates)
+
+**Implementation:** Read() operation refreshes status from K8s for field waits.
+
+**Use Case 2: Dependency Ordering (Synchronization Gates)**
+
+Wait for a condition to block dependent resource creation:
+
+```hcl
+resource "k8sconnect_wait" "migration" {
+  resource_ref = k8sconnect_object.migration_job.resource_ref
+  wait_for = {
+    condition = "Complete"
+  }
+}
+
+resource "aws_db_instance" "aurora" {
+  depends_on = [k8sconnect_wait.migration]
+  # Only create after migration completes
+}
+```
+
+**Expected behavior:**
+- If Job is recreated → Wait resource re-executes → Aurora DB **NOT destroyed**
+- Using `depends_on` alone (without attribute references) creates ordering dependency without lifecycle coupling
+- Per [Terraform GitHub Issue #2895](https://github.com/hashicorp/terraform/issues/2895): "If resource A depends_on resource B, A will be created after B, but if B gets tainted then nothing will happen to A (assuming no other reference to B)"
+
+**Implementation:** Condition/rollout waits don't populate status per ADR-008. Downstream resources use `depends_on` only (no attribute references).
+
+**Critical Design Decision:**
+
+The two use cases require different patterns:
+
+| Pattern | Use Case | Status Populated | Dependency Type | Drift Propagation |
+|---------|----------|------------------|-----------------|-------------------|
+| Field wait | Value extraction | Yes (pruned to field) | Attribute reference | Yes |
+| Condition wait | Ordering gate | No (null) | depends_on only | No |
+
+**Recommended Patterns:**
+
+```hcl
+# Pattern 1: Value Extraction (status refresh enabled)
+resource "k8sconnect_wait" "ingress" {
+  wait_for = { field = "status.loadBalancer.ingress[0].hostname" }
+  # Populates status per ADR-008
+}
+
+resource "cloudflare_record" "firewall" {
+  value = k8sconnect_wait.ingress.status.loadBalancer.ingress[0].hostname
+  # If hostname changes → firewall updates (DESIRED)
+}
+
+# Pattern 2: Dependency Ordering (no drift propagation)
+resource "k8sconnect_wait" "migration" {
+  wait_for = { condition = "Complete" }
+  # Status = null per ADR-008
+}
+
+resource "aws_db_instance" "aurora" {
+  depends_on = [k8sconnect_wait.migration]
+  # NO attribute references → Aurora NOT destroyed if wait is tainted
+}
+```
+
+**Read() Implementation:** Refreshes status from K8s for field waits only. Does NOT re-execute wait conditions (too expensive).
+
 ### Migration Path
 
 1. **Phase 1**: Ship both patterns (wait_for attribute + separate wait resource)
@@ -472,3 +563,7 @@ Each wait resource blocks its dependent resources, creating explicit dependency 
 ### Internal ADRs
 - ADR-006: State Safety and Projection Recovery - similar use of private state flags for recovery
 - ADR-008: Selective Status Field Population Strategy - "You only get what you wait for" principle
+
+### Research Documents
+- `docs/wait-drift-analysis.md` - Analysis of drift detection requirements for wait resources
+- `docs/wait-drift-research-findings.md` - Confirmed Terraform behavior with depends_on and ignore_changes

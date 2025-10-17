@@ -127,7 +127,7 @@ func (r *waitResource) waitForField(ctx context.Context, client k8sclient.K8sCli
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-timeoutCh:
-				return fmt.Errorf("timeout after %v waiting for field %q to be populated", timeout, fieldPath)
+				return r.buildFieldTimeoutError(obj, fieldPath, timeout)
 			case event, ok := <-watcher.ResultChan():
 				if !ok {
 					return fmt.Errorf("watch ended unexpectedly")
@@ -178,7 +178,7 @@ func (r *waitResource) pollForField(ctx context.Context, client k8sclient.K8sCli
 			return ctx.Err()
 		case <-ticker.C:
 			if time.Now().After(deadline) {
-				return fmt.Errorf("timeout after %v waiting for field %q", timeout, fieldPath)
+				return r.buildFieldTimeoutError(obj, fieldPath, timeout)
 			}
 
 			current, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
@@ -266,7 +266,7 @@ func (r *waitResource) waitForFieldValues(ctx context.Context, client k8sclient.
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-timeoutCh:
-			return fmt.Errorf("timeout after %v waiting for field values %v", timeout, fieldValues)
+			return r.buildFieldValuesTimeoutError(obj, fieldValues, timeout)
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
 				return fmt.Errorf("watch ended unexpectedly")
@@ -305,7 +305,7 @@ func (r *waitResource) pollForFieldValues(ctx context.Context, client k8sclient.
 			return ctx.Err()
 		case <-ticker.C:
 			if time.Now().After(deadline) {
-				return fmt.Errorf("timeout after %v waiting for field values %v", timeout, fieldValues)
+				return r.buildFieldValuesTimeoutError(obj, fieldValues, timeout)
 			}
 
 			current, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
@@ -961,4 +961,88 @@ func isEmptyValue(v interface{}) bool {
 		// For unknown types, check if it's nil
 		return val == nil
 	}
+}
+
+// buildFieldTimeoutError creates a helpful timeout error for field existence waits
+// Following ADR-015: Actionable Error Messages and Diagnostic Context
+func (r *waitResource) buildFieldTimeoutError(obj *unstructured.Unstructured, fieldPath string, timeout time.Duration) error {
+	kind := obj.GetKind()
+	name := obj.GetName()
+	namespace := obj.GetNamespace()
+
+	resourceRef := fmt.Sprintf("%s %q", kind, name)
+	if namespace != "" {
+		resourceRef += fmt.Sprintf(" in namespace %q", namespace)
+	}
+
+	errMsg := fmt.Sprintf("Wait Timeout\n\n")
+	errMsg += fmt.Sprintf("%s field %q was not populated within %v\n\n", resourceRef, fieldPath, timeout)
+
+	errMsg += "Common causes:\n"
+	errMsg += "• Resource controller may be slow or not running\n"
+	errMsg += "• Field may require external dependencies or actions\n"
+	errMsg += "• Resource may not have reached the state where this field is populated\n\n"
+
+	errMsg += "Troubleshooting:\n"
+	errMsg += fmt.Sprintf("• Increase timeout if the operation is legitimately slow:\n")
+	errMsg += fmt.Sprintf("    wait_for = { field = %q, timeout = \"300s\" }\n", fieldPath)
+
+	if namespace != "" {
+		errMsg += fmt.Sprintf("• Inspect the resource for errors or pending conditions:\n")
+		errMsg += fmt.Sprintf("    kubectl describe %s %s -n %s\n", kind, name, namespace)
+		errMsg += fmt.Sprintf("• Check full resource status:\n")
+		errMsg += fmt.Sprintf("    kubectl get %s %s -n %s -o yaml\n", kind, name, namespace)
+	} else {
+		errMsg += fmt.Sprintf("• Inspect the resource for errors or pending conditions:\n")
+		errMsg += fmt.Sprintf("    kubectl describe %s %s\n", kind, name)
+		errMsg += fmt.Sprintf("• Check full resource status:\n")
+		errMsg += fmt.Sprintf("    kubectl get %s %s -o yaml\n", kind, name)
+	}
+
+	return fmt.Errorf("%s", errMsg)
+}
+
+// buildFieldValuesTimeoutError creates a helpful timeout error for field value waits
+// Following ADR-015: Actionable Error Messages and Diagnostic Context
+func (r *waitResource) buildFieldValuesTimeoutError(obj *unstructured.Unstructured, fieldValues map[string]string, timeout time.Duration) error {
+	kind := obj.GetKind()
+	name := obj.GetName()
+	namespace := obj.GetNamespace()
+
+	resourceRef := fmt.Sprintf("%s %q", kind, name)
+	if namespace != "" {
+		resourceRef += fmt.Sprintf(" in namespace %q", namespace)
+	}
+
+	errMsg := fmt.Sprintf("Wait Timeout\n\n")
+	errMsg += fmt.Sprintf("%s did not reach the expected field values within %v\n\n", resourceRef, timeout)
+
+	errMsg += "Waiting for:\n"
+	for field, value := range fieldValues {
+		errMsg += fmt.Sprintf("• %s = %q\n", field, value)
+	}
+	errMsg += "\n"
+
+	errMsg += "Common causes:\n"
+	errMsg += "• Resource may not be progressing (check status and events)\n"
+	errMsg += "• Resource controller may be slow or encountering errors\n"
+	errMsg += "• Expected values may be incorrect\n\n"
+
+	errMsg += "Troubleshooting:\n"
+	errMsg += "• Increase timeout if the operation is legitimately slow:\n"
+	errMsg += fmt.Sprintf("    wait_for = { field_value = {...}, timeout = \"300s\" }\n")
+
+	if namespace != "" {
+		errMsg += fmt.Sprintf("• Inspect the resource for errors:\n")
+		errMsg += fmt.Sprintf("    kubectl describe %s %s -n %s\n", kind, name, namespace)
+		errMsg += fmt.Sprintf("• Check current field values:\n")
+		errMsg += fmt.Sprintf("    kubectl get %s %s -n %s -o yaml\n", kind, name, namespace)
+	} else {
+		errMsg += fmt.Sprintf("• Inspect the resource for errors:\n")
+		errMsg += fmt.Sprintf("    kubectl describe %s %s\n", kind, name)
+		errMsg += fmt.Sprintf("• Check current field values:\n")
+		errMsg += fmt.Sprintf("    kubectl get %s %s -o yaml\n", kind, name)
+	}
+
+	return fmt.Errorf("%s", errMsg)
 }

@@ -1,0 +1,52 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: scoped-test
+  labels:
+    test: yaml-scoped
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-config
+data:
+  cluster.name: "dogfood-cluster"
+  region: "us-west-2"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: namespace-config
+  namespace: scoped-test
+data:
+  app.name: "scoped-app"
+  environment: "test"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: resource-limits
+  namespace: scoped-test
+spec:
+  limits:
+  - max:
+      cpu: "1"
+      memory: "1Gi"
+    min:
+      cpu: "10m"
+      memory: "10Mi"
+    type: Container
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: compute-quota
+  namespace: scoped-test
+spec:
+  hard:
+    requests.cpu: "2"
+    requests.memory: "2Gi"
+    limits.cpu: "4"
+    limits.memory: "4Gi"
+    pods: "10"

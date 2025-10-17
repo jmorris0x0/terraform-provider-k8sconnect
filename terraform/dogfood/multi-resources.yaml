@@ -1,0 +1,50 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: dogfood
+data:
+  database.host: "postgres.dogfood.svc.cluster.local"
+  database.port: "5432"
+  log.level: "info"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secrets
+  namespace: dogfood
+type: Opaque
+stringData:
+  database.password: "secretpassword123"
+  api.token: "token-abc-xyz"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: app-service-account
+  namespace: dogfood
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: app-role
+  namespace: dogfood
+rules:
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: app-role-binding
+  namespace: dogfood
+subjects:
+- kind: ServiceAccount
+  name: app-service-account
+  namespace: dogfood
+roleRef:
+  kind: Role
+  name: app-role
+  apiGroup: rbac.authorization.k8s.io

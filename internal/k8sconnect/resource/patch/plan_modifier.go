@@ -50,6 +50,7 @@ func (r *patchResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanR
 	patchContent := r.getPatchContent(plannedData)
 	if patchContent == "" {
 		// No patch content, set computed fields to unknown
+		plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
 		plannedData.ManagedFields = types.StringUnknown()
 		plannedData.FieldOwnership = types.MapUnknown(types.StringType)
 		plannedData.PreviousOwners = types.MapUnknown(types.StringType)
@@ -61,6 +62,7 @@ func (r *patchResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanR
 	if validation.ContainsInterpolation(patchContent) {
 		tflog.Debug(ctx, "Patch contains interpolations, skipping dry-run",
 			map[string]interface{}{"patch_preview": patchContent[:min(100, len(patchContent))]})
+		plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
 		plannedData.ManagedFields = types.StringUnknown()
 		plannedData.FieldOwnership = types.MapUnknown(types.StringType)
 		plannedData.PreviousOwners = types.MapUnknown(types.StringType)
@@ -71,6 +73,7 @@ func (r *patchResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanR
 	// Validate connection is ready for operations
 	if !r.isConnectionReady(plannedData.ClusterConnection) {
 		tflog.Debug(ctx, "Connection has unknown values, skipping dry-run")
+		plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
 		plannedData.ManagedFields = types.StringUnknown()
 		plannedData.FieldOwnership = types.MapUnknown(types.StringType)
 		plannedData.PreviousOwners = types.MapUnknown(types.StringType)
@@ -161,6 +164,7 @@ func (r *patchResource) executeDryRunPatch(ctx context.Context, req resource.Mod
 		// Check if this is a CRD-not-found error
 		if k8serrors.IsCRDNotFoundError(err) {
 			tflog.Debug(ctx, "CRD not found during plan, will be available during apply")
+			plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
 			plannedData.ManagedFields = types.StringUnknown()
 			plannedData.FieldOwnership = types.MapUnknown(types.StringType)
 			plannedData.PreviousOwners = types.MapUnknown(types.StringType)
@@ -171,6 +175,7 @@ func (r *patchResource) executeDryRunPatch(ctx context.Context, req resource.Mod
 		// Check if target doesn't exist yet
 		if errors.IsNotFound(err) {
 			tflog.Debug(ctx, "Target resource not found during plan, will be created before patch applies")
+			plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
 			plannedData.ManagedFields = types.StringUnknown()
 			plannedData.FieldOwnership = types.MapUnknown(types.StringType)
 			plannedData.PreviousOwners = types.MapUnknown(types.StringType)
@@ -187,8 +192,62 @@ func (r *patchResource) executeDryRunPatch(ctx context.Context, req resource.Mod
 	// Surface any warnings from Get operation
 	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
 
-	// Generate field manager name
+	// CRITICAL VALIDATION: Prevent self-patching
+	// Check if the target resource is already managed by k8sconnect_object
+	if r.isManagedByThisState(ctx, currentObj) {
+		resp.Diagnostics.AddError(
+			"Cannot Patch Own Resource",
+			fmt.Sprintf("This resource is already managed by k8sconnect_object "+
+				"in this Terraform state.\n\n"+
+				"You cannot patch resources you already own. Instead:\n"+
+				"1. Modify the k8sconnect_object directly, or\n"+
+				"2. Use ignore_fields to allow external controllers to manage specific fields\n\n"+
+				"Target: %s",
+				formatTarget(target)),
+		)
+		return false
+	}
+
+	// CRITICAL VALIDATION: Prevent multiple patches on the same fields
+	// Extract field paths from this patch
+	patchedFieldPaths, err := r.extractPatchFieldPaths(ctx, patchContent, patchType)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to Parse Patch", err.Error())
+		return false
+	}
+
+	// Get current field ownership
+	currentOwnership := extractFieldOwnershipMap(currentObj)
+
+	// Generate our field manager name
 	fieldManager := r.generateFieldManager(*plannedData)
+
+	// Check for conflicts with other k8sconnect_patch resources
+	var conflicts []string
+	for _, path := range patchedFieldPaths {
+		if owner, exists := currentOwnership[path]; exists {
+			// Check if owned by another k8sconnect-patch-* manager (not us)
+			if strings.HasPrefix(owner, "k8sconnect-patch-") && owner != fieldManager {
+				conflicts = append(conflicts, fmt.Sprintf("  - %s (currently owned by %s)", path, owner))
+			}
+		}
+	}
+
+	if len(conflicts) > 0 {
+		resp.Diagnostics.AddError(
+			"Patch Conflicts with Existing Patch",
+			fmt.Sprintf("This patch attempts to modify fields already managed by another k8sconnect_patch resource:\n%s\n\n"+
+				"Multiple patches cannot manage the same fields - they will fight for control and cause drift.\n\n"+
+				"Options:\n"+
+				"1. Remove the conflicting fields from one of the patches\n"+
+				"2. Consolidate both patches into a single k8sconnect_patch resource\n"+
+				"3. Use different fields that don't overlap\n\n"+
+				"Target: %s",
+				strings.Join(conflicts, "\n"),
+				formatTarget(target)),
+		)
+		return false
+	}
 
 	// Perform dry-run based on patch type
 	var patchedObj *unstructured.Unstructured
@@ -223,19 +282,45 @@ func (r *patchResource) executeDryRunPatch(ctx context.Context, req resource.Mod
 
 		tflog.Debug(ctx, "Dry-run patch successful")
 
-		// For CREATE operations, we can't accurately predict field ownership because
-		// the ID (and thus field manager name) doesn't exist yet during plan.
-		// Set computed fields to unknown so they'll be populated during apply.
+		// For CREATE operations, calculate projection to show what will be patched
 		if req.State.Raw.IsNull() {
-			tflog.Debug(ctx, "CREATE operation detected, setting computed fields to unknown")
+			tflog.Debug(ctx, "CREATE operation - calculating projection from dry-run result")
+
+			// Extract paths owned by this patch from the dry-run result
+			paths := extractPatchedPaths(ctx, patchedObj.GetManagedFields(), fieldManager)
+
+			// Project the patched fields
+			projection, err := projectPatchedFields(patchedObj.Object, paths)
+			if err != nil {
+				tflog.Warn(ctx, "Failed to project patched fields", map[string]interface{}{"error": err.Error()})
+				// Fall back to unknown
+				plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
+			} else {
+				// Flatten to map for Terraform display
+				projectionMap := flattenPatchProjectionToMap(projection, paths)
+
+				// Set managed_state_projection
+				mapValue, diags := types.MapValueFrom(ctx, types.StringType, projectionMap)
+				resp.Diagnostics.Append(diags...)
+				if resp.Diagnostics.HasError() {
+					return false
+				}
+				plannedData.ManagedStateProjection = mapValue
+
+				tflog.Debug(ctx, "Projection calculated for CREATE", map[string]interface{}{
+					"field_count": len(projectionMap),
+				})
+			}
+
+			// Field ownership can't be accurately predicted yet (ID doesn't exist)
+			// Will be populated during apply with the actual ID
 			plannedData.ManagedFields = types.StringUnknown()
 			plannedData.FieldOwnership = types.MapUnknown(types.StringType)
 			plannedData.PreviousOwners = types.MapUnknown(types.StringType)
 			return true
 		}
 
-		// For UPDATE operations with changed content, also set to unknown
-		// to avoid inconsistencies between dry-run and actual apply
+		// For UPDATE operations with changed content, calculate projection
 		if !req.State.Raw.IsNull() {
 			var stateData patchResourceModel
 			if diags := req.State.Get(ctx, &stateData); !diags.HasError() {
@@ -243,8 +328,35 @@ func (r *patchResource) executeDryRunPatch(ctx context.Context, req resource.Mod
 				planPatchContent := r.getPatchContent(*plannedData)
 
 				if statePatchContent != planPatchContent {
-					// Content changed, set to unknown (will be populated during apply)
-					tflog.Debug(ctx, "Strategic merge patch content changed, setting computed fields to unknown")
+					// Content changed, calculate new projection
+					tflog.Debug(ctx, "Strategic merge patch content changed, calculating new projection")
+
+					// Extract paths owned by this patch from the dry-run result
+					paths := extractPatchedPaths(ctx, patchedObj.GetManagedFields(), fieldManager)
+
+					// Project the patched fields
+					projection, err := projectPatchedFields(patchedObj.Object, paths)
+					if err != nil {
+						tflog.Warn(ctx, "Failed to project patched fields", map[string]interface{}{"error": err.Error()})
+						plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
+					} else {
+						// Flatten to map for Terraform display
+						projectionMap := flattenPatchProjectionToMap(projection, paths)
+
+						// Set managed_state_projection
+						mapValue, diags := types.MapValueFrom(ctx, types.StringType, projectionMap)
+						resp.Diagnostics.Append(diags...)
+						if resp.Diagnostics.HasError() {
+							return false
+						}
+						plannedData.ManagedStateProjection = mapValue
+
+						tflog.Debug(ctx, "Projection calculated for UPDATE", map[string]interface{}{
+							"field_count": len(projectionMap),
+						})
+					}
+
+					// Field ownership will be populated during apply
 					plannedData.ManagedFields = types.StringUnknown()
 					plannedData.FieldOwnership = types.MapUnknown(types.StringType)
 					plannedData.PreviousOwners = types.MapUnknown(types.StringType)
@@ -254,7 +366,7 @@ func (r *patchResource) executeDryRunPatch(ctx context.Context, req resource.Mod
 		}
 	} else {
 		// JSON Patch and Merge Patch don't use SSA field management,
-		// so we can't predict field ownership during plan.
+		// so we can't predict field ownership or projection during plan.
 		tflog.Debug(ctx, "JSON/Merge patch detected, skipping dry-run (no SSA field management)")
 
 		if !req.State.Raw.IsNull() {
@@ -265,8 +377,9 @@ func (r *patchResource) executeDryRunPatch(ctx context.Context, req resource.Mod
 				planPatchContent := r.getPatchContent(*plannedData)
 
 				if statePatchContent == planPatchContent {
-					// Patch content unchanged, preserve existing field ownership from state
-					tflog.Debug(ctx, "JSON/Merge patch content unchanged, preserving state field ownership")
+					// Patch content unchanged, preserve existing state
+					tflog.Debug(ctx, "JSON/Merge patch content unchanged, preserving state")
+					plannedData.ManagedStateProjection = stateData.ManagedStateProjection
 					plannedData.ManagedFields = stateData.ManagedFields
 					plannedData.FieldOwnership = stateData.FieldOwnership
 					plannedData.PreviousOwners = stateData.PreviousOwners
@@ -276,6 +389,8 @@ func (r *patchResource) executeDryRunPatch(ctx context.Context, req resource.Mod
 		}
 
 		// CREATE or UPDATE with changed content: set to unknown (will be populated during apply)
+		// Non-SSA patches don't support projection
+		plannedData.ManagedStateProjection = types.MapNull(types.StringType)
 		plannedData.ManagedFields = types.StringUnknown()
 		plannedData.FieldOwnership = types.MapUnknown(types.StringType)
 		plannedData.PreviousOwners = types.MapUnknown(types.StringType)
@@ -283,7 +398,7 @@ func (r *patchResource) executeDryRunPatch(ctx context.Context, req resource.Mod
 	}
 
 	// For UPDATE operations, check if patch content has changed
-	// If nothing changed, skip field ownership extraction to avoid unnecessary updates
+	// If nothing changed, preserve state to avoid unnecessary updates
 	if !req.State.Raw.IsNull() {
 		var stateData patchResourceModel
 		if diags := req.State.Get(ctx, &stateData); !diags.HasError() {
@@ -292,8 +407,9 @@ func (r *patchResource) executeDryRunPatch(ctx context.Context, req resource.Mod
 			planPatchContent := r.getPatchContent(*plannedData)
 
 			if statePatchContent == planPatchContent {
-				// Patch content hasn't changed, preserve existing field ownership from state
-				tflog.Debug(ctx, "Patch content unchanged, preserving state field ownership")
+				// Patch content hasn't changed, preserve existing state
+				tflog.Debug(ctx, "Strategic merge patch content unchanged, preserving state")
+				plannedData.ManagedStateProjection = stateData.ManagedStateProjection
 				plannedData.FieldOwnership = stateData.FieldOwnership
 				plannedData.ManagedFields = stateData.ManagedFields
 				plannedData.PreviousOwners = stateData.PreviousOwners
@@ -312,6 +428,7 @@ func (r *patchResource) setupDryRunClient(ctx context.Context, plannedData *patc
 	conn, err := auth.ObjectToConnectionModel(ctx, plannedData.ClusterConnection)
 	if err != nil {
 		tflog.Debug(ctx, "Skipping dry-run due to connection conversion error", map[string]interface{}{"error": err.Error()})
+		plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
 		plannedData.ManagedFields = types.StringUnknown()
 		plannedData.FieldOwnership = types.MapUnknown(types.StringType)
 		plannedData.PreviousOwners = types.MapUnknown(types.StringType)
@@ -322,6 +439,7 @@ func (r *patchResource) setupDryRunClient(ctx context.Context, plannedData *patc
 	client, err := r.clientGetter(conn)
 	if err != nil {
 		tflog.Debug(ctx, "Skipping dry-run due to client creation error", map[string]interface{}{"error": err.Error()})
+		plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
 		plannedData.ManagedFields = types.StringUnknown()
 		plannedData.FieldOwnership = types.MapUnknown(types.StringType)
 		plannedData.PreviousOwners = types.MapUnknown(types.StringType)
@@ -332,11 +450,14 @@ func (r *patchResource) setupDryRunClient(ctx context.Context, plannedData *patc
 }
 
 // extractPatchedFieldOwnership extracts field ownership for fields modified by this patch
+// Note: This function is currently unreachable for strategic merge patches with changed content
+// since that case is now handled inline with projection calculation. Keeping it for edge cases.
 func (r *patchResource) extractPatchedFieldOwnership(ctx context.Context, plannedData *patchResourceModel, patchedObj, currentObj *unstructured.Unstructured, resp *resource.ModifyPlanResponse) bool {
 	// Extract managed fields from the patched object
 	managedFields := patchedObj.GetManagedFields()
 	if len(managedFields) == 0 {
 		tflog.Warn(ctx, "No managed fields in dry-run result")
+		plannedData.ManagedStateProjection = types.MapNull(types.StringType)
 		plannedData.ManagedFields = types.StringNull()
 		plannedData.FieldOwnership = types.MapNull(types.StringType)
 		plannedData.PreviousOwners = types.MapNull(types.StringType)

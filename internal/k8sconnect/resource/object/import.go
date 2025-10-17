@@ -168,14 +168,25 @@ func (r *objectResource) ImportState(ctx context.Context, req resource.ImportSta
 	_, liveObj, err := client.GetGVRFromKind(ctx, kind, namespace, name)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
+			// Build kubectl command (with or without namespace)
+			kubectlCmd := fmt.Sprintf("kubectl get %s %s", strings.ToLower(kind), name)
+			if namespace != "" {
+				kubectlCmd += fmt.Sprintf(" -n %s", namespace)
+			}
+			kubectlCmd += fmt.Sprintf(" --context=%s", kubeContext)
+
+			resourceDesc := name
+			if namespace != "" {
+				resourceDesc = fmt.Sprintf("%s/%s", namespace, name)
+			}
+
 			resp.Diagnostics.AddError(
 				"Import Failed: Resource not found",
-				fmt.Sprintf("Resource %s/%s (kind: %s) not found in context %q.\n\n"+
+				fmt.Sprintf("Resource %s (kind: %s) not found in context %q.\n\n"+
 					"Verify that:\n"+
-					"- The resource exists: kubectl get %s %s -n %s --context=%s\n"+
+					"- The resource exists: %s\n"+
 					"- You have permission to read this resource",
-					namespace, name, kind, kubeContext,
-					strings.ToLower(kind), name, namespace, kubeContext),
+					resourceDesc, kind, kubeContext, kubectlCmd),
 			)
 		} else {
 			resp.Diagnostics.AddError(
