@@ -375,6 +375,63 @@ resource "k8sconnect_object" "app" {
 ```
 <!-- /runnable-test -->
 
+## Example Usage - Wait for External Resources (standalone)
+
+Use `k8sconnect_wait` to wait for resources you **don't manage with Terraform** - no `k8sconnect_object` needed.
+
+<!-- runnable-test: wait-external-resources -->
+```terraform
+# Wait for metrics-server (installed via Helm, kubeadm, etc.)
+resource "k8sconnect_wait" "metrics_server" {
+  object_ref = {
+    api_version = "apps/v1"
+    kind        = "Deployment"
+    namespace   = "kube-system"
+    name        = "metrics-server"
+  }
+
+  wait_for = {
+    condition = "Available"
+    timeout   = "5m"
+  }
+
+  cluster_connection = var.cluster_connection
+}
+
+# Wait for CoreDNS (installed by cluster bootstrap)
+resource "k8sconnect_wait" "coredns" {
+  object_ref = {
+    api_version = "apps/v1"
+    kind        = "Deployment"
+    namespace   = "kube-system"
+    name        = "coredns"
+  }
+
+  wait_for = {
+    condition = "Available"
+    timeout   = "5m"
+  }
+
+  cluster_connection = var.cluster_connection
+}
+
+output "cluster_ready" {
+  value = "Cluster infrastructure is ready"
+  depends_on = [
+    k8sconnect_wait.metrics_server,
+    k8sconnect_wait.coredns
+  ]
+}
+```
+<!-- /runnable-test -->
+
+**Use cases:**
+- Wait for Helm-installed charts (cert-manager, ingress controllers, etc.)
+- Wait for operator-managed resources
+- Wait for resources created by kubectl or other tools
+- Wait for infrastructure from other Terraform states
+- Sequence your resources against existing cluster infrastructure
+
 {{ .SchemaMarkdown | trimspace }}
 
 ## Status Output

@@ -1,5 +1,3 @@
-Import blocks: Verify they work correctly
-
 Nested Schema for wait_for: Needs love
 
 Delayed plan application: Handle out of date plansI
@@ -24,11 +22,7 @@ Can you wait for stuff that isn't status? Is wait_for really sold in the registr
 
 Mention that that two kinds of patches aren't SSA therefore UX difference.
 
-Should I make field_ownership sensitive? It's very noisy during destroy.
-
-Last minute decision: Should I change the name of managed_state_projection?
-
-Create a little FAQ for things like, why have a separate wait resource? There are probably other decisons in the ADRs that people might be curious about.
+Work on the FAQ. It need some love.
 
 Update comparison table in README.
 
@@ -45,4 +39,4 @@ Alert emoji with errors? Might look nice.
 
 ignore_changes part of terraform core?
 
-object_ref inconsistency? What did I decide about this?
+object_ref inconsistency vs the object datasource? What did I decide about this?
