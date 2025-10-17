@@ -21,17 +21,26 @@ import (
 func (r *objectResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	tflog.Info(ctx, "ImportState called", map[string]interface{}{"import_id": req.ID})
 
-	// Parse import ID: "context/namespace/kind/name" or "context/kind/name" for cluster-scoped
-	kubeContext, namespace, kind, name, err := r.parseImportID(req.ID)
+	// Parse import ID: "context:namespace:kind:name" or "context:kind:name" for cluster-scoped
+	kubeContext, namespace, apiVersion, kind, name, err := r.parseImportID(req.ID)
 
 	if err != nil {
 		resp.Diagnostics.AddError(
-			"Invalid Import ID",
-			fmt.Sprintf("Expected format: <context>/<namespace>/<kind>/<n> or <context>/<kind>/<n>\n\nExamples:\n"+
-				"  prod/default/Pod/nginx\n"+
-				"  staging/kube-system/Service/coredns\n"+
-				"  prod/Namespace/my-namespace\n"+
-				"  dev/ClusterRole/admin\n\nError: %s", err.Error()),
+			"Invalid Import ID Format",
+			fmt.Sprintf("%s\n\n"+
+				"Import ID format:\n"+
+				"  Namespaced: context:namespace:kind:name\n"+
+				"  Cluster-scoped: context:kind:name\n\n"+
+				"Examples:\n"+
+				"  prod:default:Deployment:nginx\n"+
+				"  prod:kube-system:Service:coredns\n"+
+				"  prod:Namespace:my-namespace\n"+
+				"  prod:ClusterRole:admin\n\n"+
+				"For disambiguation, include apiVersion:\n"+
+				"  prod:default:apps/v1/Deployment:nginx\n"+
+				"  prod:networking.k8s.io/v1/Ingress:my-ingress\n"+
+				"  prod:stable.example.com/v1/MyCustomResource:instance-1",
+				err.Error()),
 		)
 		return
 	}
@@ -41,22 +50,26 @@ func (r *objectResource) ImportState(ctx context.Context, req resource.ImportSta
 		resp.Diagnostics.AddError(
 			"Import Failed: Missing Context",
 			"The import ID must include a kubeconfig context as the first part.\n\n"+
-				"Format: <context>/<namespace>/<kind>/<n> or <context>/<kind>/<n>\n\n"+
-				"Available contexts can be found with: kubectl config get-contexts",
+				"Format:\n"+
+				"  Namespaced: context:namespace:kind:name\n"+
+				"  Cluster-scoped: context:kind:name\n\n"+
+				"Available contexts: kubectl config get-contexts",
 		)
 		return
 	}
 	if kind == "" {
 		resp.Diagnostics.AddError(
 			"Import Failed: Missing Kind",
-			"The resource kind cannot be empty in the import ID.",
+			"The resource kind cannot be empty in the import ID.\n\n"+
+				"Example: prod:default:Deployment:nginx",
 		)
 		return
 	}
 	if name == "" {
 		resp.Diagnostics.AddError(
 			"Import Failed: Missing Name",
-			"The resource name cannot be empty in the import ID.",
+			"The resource name cannot be empty in the import ID.\n\n"+
+				"Example: prod:default:Deployment:nginx",
 		)
 		return
 	}
@@ -164,8 +177,15 @@ func (r *objectResource) ImportState(ctx context.Context, req resource.ImportSta
 		return
 	}
 
-	// Discover GVR from kind and fetch the resource
-	_, liveObj, err := client.GetGVRFromKind(ctx, kind, namespace, name)
+	// Discover GVR using apiVersion and kind (both required)
+	tflog.Info(ctx, "Discovering GVR for import", map[string]interface{}{
+		"apiVersion": apiVersion,
+		"kind":       kind,
+		"namespace":  namespace,
+		"name":       name,
+	})
+
+	_, liveObj, err := client.GetGVRFromAPIVersionKind(ctx, apiVersion, kind, namespace, name)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			// Build kubectl command (with or without namespace)
@@ -361,17 +381,88 @@ func (r *objectResource) ImportState(ctx context.Context, req resource.ImportSta
 
 }
 
-func (r *objectResource) parseImportID(importID string) (context, namespace, kind, name string, err error) {
-	parts := strings.Split(importID, "/")
+// parseImportID parses the import ID and extracts components
+// Format: context:namespace:kind:name (namespaced) or context:kind:name (cluster-scoped)
+// The kind field may optionally include apiVersion: apiVersion/kind
+func (r *objectResource) parseImportID(importID string) (context, namespace, apiVersion, kind, name string, err error) {
+	// First check for old slash-delimited format and provide migration guidance
+	if strings.Contains(importID, "/") && !strings.Contains(importID, ":") {
+		return "", "", "", "", "", fmt.Errorf(
+			"detected old slash-delimited format\n\n" +
+				"The import syntax has changed to use colons (:) as delimiters.\n" +
+				"Old format: context/namespace/kind/name\n" +
+				"New format: context:namespace:kind:name\n\n" +
+				"Please update your import command")
+	}
+
+	parts := strings.Split(importID, ":")
+
+	if len(parts) < 3 || len(parts) > 4 {
+		return "", "", "", "", "", fmt.Errorf(
+			"expected 3 or 4 colon-separated parts, got %d\n\n"+
+				"Valid formats:\n"+
+				"  Namespaced: context:namespace:kind:name\n"+
+				"  Cluster-scoped: context:kind:name",
+			len(parts))
+	}
+
+	var kindPart string
 
 	switch len(parts) {
 	case 3:
-		// Cluster-scoped: "context/kind/name"
-		return parts[0], "", parts[1], parts[2], nil
+		// Cluster-scoped: "context:kind:name"
+		context = parts[0]
+		kindPart = parts[1]
+		name = parts[2]
+		namespace = ""
+
 	case 4:
-		// Namespaced: "context/namespace/kind/name"
-		return parts[0], parts[1], parts[2], parts[3], nil
+		// Namespaced: "context:namespace:kind:name"
+		context = parts[0]
+		namespace = parts[1]
+		kindPart = parts[2]
+		name = parts[3]
+
 	default:
-		return "", "", "", "", fmt.Errorf("expected 3 or 4 parts separated by '/', got %d parts", len(parts))
+		return "", "", "", "", "", fmt.Errorf("invalid number of parts: %d", len(parts))
 	}
+
+	// Validate that none of the parts are empty
+	if context == "" {
+		return "", "", "", "", "", fmt.Errorf("context cannot be empty")
+	}
+	if kindPart == "" {
+		return "", "", "", "", "", fmt.Errorf("kind cannot be empty")
+	}
+	if name == "" {
+		return "", "", "", "", "", fmt.Errorf("name cannot be empty")
+	}
+
+	// Parse the kind field - it MUST contain apiVersion: "apiVersion/kind"
+	slashIndex := strings.LastIndex(kindPart, "/")
+	if slashIndex == -1 {
+		return "", "", "", "", "", fmt.Errorf(
+			"kind field must include apiVersion: apiVersion/kind\n\n"+
+				"Examples:\n"+
+				"  v1/Pod (core resources)\n"+
+				"  apps/v1/Deployment\n"+
+				"  networking.k8s.io/v1/Ingress\n"+
+				"  stable.example.com/v1/MyCustomResource\n\n"+
+				"To find the apiVersion:\n"+
+				"  kubectl get %s %s -o jsonpath='{.apiVersion}'",
+			kindPart, name)
+	}
+
+	// Split on the LAST slash to handle cases like "networking.k8s.io/v1/Ingress"
+	apiVersion = kindPart[:slashIndex]
+	kind = kindPart[slashIndex+1:]
+
+	if apiVersion == "" {
+		return "", "", "", "", "", fmt.Errorf("apiVersion cannot be empty")
+	}
+	if kind == "" {
+		return "", "", "", "", "", fmt.Errorf("kind cannot be empty")
+	}
+
+	return context, namespace, apiVersion, kind, name, nil
 }

@@ -9,6 +9,10 @@ Working examples showing k8sconnect provider usage patterns.
 
 The `wait_for` block supports four strategies. **Only `field` waits populate `.status` for resource chaining.**
 
+### Standalone Wait (no k8sconnect_object needed)
+
+- [`wait-for-external-resources/`](wait-for-external-resources/) - **Wait for resources you don't manage** - Use k8sconnect_wait standalone to wait for Helm charts, operators, kubectl-applied resources, etc.
+
 ### Field Waits (with status output)
 
 Infrastructure resources that need status values for DNS, outputs, or chaining:
@@ -41,7 +45,7 @@ Workload resources that just need readiness confirmation for sequencing:
 - [`yaml-scoped-dependency-ordering/`](yaml-scoped-dependency-ordering/) - Automatic dependency ordering by scope (CRDs → cluster-scoped → namespaced)
 
 ## Resource Data Source
-- [`manifest-datasource-kubernetes-service/`](manifest-datasource-kubernetes-service/) - Read existing cluster resources and use their data
+- [`object-datasource-kubernetes-service/`](object-datasource-kubernetes-service/) - Read existing cluster resources and use their data
 
 ## Patch Resource
 - [`patch-strategic-merge/`](patch-strategic-merge/) - Strategic Merge Patch with Server-Side Apply (SSA) field ownership

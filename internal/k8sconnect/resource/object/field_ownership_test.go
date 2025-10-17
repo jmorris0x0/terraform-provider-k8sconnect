@@ -299,7 +299,7 @@ func TestAccObjectResource_OwnershipImport(t *testing.T) {
 				},
 				ResourceName:      "k8sconnect_object.import_test",
 				ImportState:       true,
-				ImportStateId:     fmt.Sprintf("k3d-k8sconnect-test/%s/ConfigMap/%s", ns, cmName),
+				ImportStateId:     fmt.Sprintf("k3d-k8sconnect-test:%s:v1/ConfigMap:%s", ns, cmName),
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
 					"cluster_connection",
