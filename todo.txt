@@ -52,3 +52,5 @@ add ", helper datasource" to CRD row in readme.
 wait_for row is out of date. Need to update to wait resource. Add to FAQ: Why is wait a resource instead of a datasource? Why separate resrouce.
 
 Put a local between the cluster and the resource in the first example in the readme. It would make the object cleaner.
+
+Shit. What happens if we change a patch or patch target??? 
