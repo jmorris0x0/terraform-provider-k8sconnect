@@ -124,6 +124,7 @@ func extractFieldPathsFromJSONPatch(patchContent string) ([]string, error) {
 }
 
 // extractFieldPathsFromMap recursively extracts field paths from a map
+// Only leaf paths (final values) are returned, not intermediate map keys
 func extractFieldPathsFromMap(data map[string]interface{}, prefix string) []string {
 	var paths []string
 
@@ -133,15 +134,14 @@ func extractFieldPathsFromMap(data map[string]interface{}, prefix string) []stri
 			currentPath = prefix + "." + key
 		}
 
-		// Add this path
-		paths = append(paths, currentPath)
-
-		// If value is a map, recurse
+		// If value is a map, recurse (don't add the intermediate path)
 		if valueMap, ok := value.(map[string]interface{}); ok {
 			nestedPaths := extractFieldPathsFromMap(valueMap, currentPath)
 			paths = append(paths, nestedPaths...)
 		} else if valueArray, ok := value.([]interface{}); ok {
-			// Handle arrays
+			// Handle arrays - add the array path itself as a leaf
+			paths = append(paths, currentPath)
+			// Also recurse into array elements if they're maps
 			for i, item := range valueArray {
 				if itemMap, ok := item.(map[string]interface{}); ok {
 					arrayPath := fmt.Sprintf("%s[%d]", currentPath, i)
@@ -149,20 +149,13 @@ func extractFieldPathsFromMap(data map[string]interface{}, prefix string) []stri
 					paths = append(paths, nestedPaths...)
 				}
 			}
+		} else {
+			// Leaf value - add the path
+			paths = append(paths, currentPath)
 		}
 	}
 
 	return paths
-}
-
-// extractFieldOwnershipForPaths extracts ownership info for specific field paths
-func extractFieldOwnershipForPaths(obj *unstructured.Unstructured, paths []string) map[string]string {
-	return fieldmanagement.ExtractFieldOwnershipForPaths(obj, paths)
-}
-
-// extractFieldOwnershipMap extracts field ownership as a simple map[path]manager
-func extractFieldOwnershipMap(obj *unstructured.Unstructured) map[string]string {
-	return fieldmanagement.ExtractFieldOwnershipMap(obj)
 }
 
 // extractFieldOwnershipForManager extracts field ownership for a specific field manager
@@ -299,11 +292,6 @@ func mergeMaps(dst, src map[string]interface{}) {
 		// Override with src value
 		dst[key] = srcVal
 	}
-}
-
-// extractManagedFieldsForManager extracts the managed fields JSON for a specific field manager
-func extractManagedFieldsForManager(obj *unstructured.Unstructured, fieldManager string) (string, error) {
-	return fieldmanagement.ExtractManagedFieldsForManager(obj, fieldManager)
 }
 
 // detectValueDrift compares the desired patch values with actual current values

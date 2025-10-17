@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/fieldmanagement"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8serrors"
 )
@@ -90,7 +91,7 @@ func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, 
 		resp.Diagnostics.AddError("Failed to Parse Patch", err.Error())
 		return
 	}
-	previousOwners := extractFieldOwnershipForPaths(targetObj, patchedFieldPaths)
+	previousOwners := fieldmanagement.ExtractFieldOwnershipForPaths(targetObj, patchedFieldPaths)
 
 	// 8. Apply patch using Server-Side Apply
 	fieldManager := fmt.Sprintf("k8sconnect-patch-%s", data.ID.ValueString())
@@ -109,7 +110,7 @@ func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, 
 	})
 
 	// 9. Store ONLY patched fields
-	managedFields, err := extractManagedFieldsForManager(patchedObj, fieldManager)
+	managedFields, err := fieldmanagement.ExtractManagedFieldsForManager(patchedObj, fieldManager)
 	if err != nil {
 		resp.Diagnostics.AddWarning("Failed to Extract Managed Fields", err.Error())
 		managedFields = "{}"
@@ -240,7 +241,7 @@ func (r *patchResource) Read(ctx context.Context, req resource.ReadRequest, resp
 	}
 
 	// 7. Extract ONLY fields we patched (using our field manager)
-	currentManagedFields, err := extractManagedFieldsForManager(currentObj, fieldManager)
+	currentManagedFields, err := fieldmanagement.ExtractManagedFieldsForManager(currentObj, fieldManager)
 	if err != nil {
 		tflog.Warn(ctx, "Failed to extract managed fields during read", map[string]interface{}{
 			"error": err.Error(),
@@ -316,8 +317,93 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	// Surface any API warnings from get operation
 	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
 
-	// 7. Re-apply updated patch
+	// 7. CRITICAL: Detect removed fields and transfer ownership back
 	fieldManager := fmt.Sprintf("k8sconnect-patch-%s", plan.ID.ValueString())
+
+	// Extract current fields from state's managed_fields
+	var currentFieldPaths []string
+	if !state.ManagedFields.IsNull() && state.ManagedFields.ValueString() != "" && state.ManagedFields.ValueString() != "{}" {
+		var err error
+		currentFieldPaths, err = fieldmanagement.ExtractFieldPathsFromManagedFieldsJSON(state.ManagedFields.ValueString())
+		if err != nil {
+			tflog.Warn(ctx, "Failed to extract current field paths from managed_fields", map[string]interface{}{
+				"error": err.Error(),
+			})
+		}
+	}
+
+	// Extract new fields from plan's patch content
+	newPatchContent := r.getPatchContent(plan)
+	newPatchType := r.determinePatchType(plan)
+	newFieldPaths, err := r.extractPatchFieldPaths(ctx, newPatchContent, newPatchType)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to Parse New Patch Content", err.Error())
+		return
+	}
+
+	// Calculate removed fields (fields in current but not in new)
+	removedFields := findRemovedFields(currentFieldPaths, newFieldPaths)
+
+	// If fields were removed, transfer ownership back to previous owners
+	if len(removedFields) > 0 {
+		tflog.Info(ctx, "Detected removed fields, transferring ownership back", map[string]interface{}{
+			"target":        formatTarget(target),
+			"removed_count": len(removedFields),
+		})
+
+		// Get previous owners map
+		var previousOwnersMap map[string]string
+		if !state.PreviousOwners.IsNull() {
+			diags = state.PreviousOwners.ElementsAs(ctx, &previousOwnersMap, false)
+			if diags.HasError() {
+				tflog.Warn(ctx, "Failed to parse previous owners for removed fields", map[string]interface{}{
+					"error": diags.Errors(),
+				})
+			}
+		}
+
+		// Transfer removed fields back to their previous owners
+		if len(previousOwnersMap) > 0 {
+			err = r.transferRemovedFieldsBack(ctx, client, currentObj, gvr, removedFields, previousOwnersMap, fieldManager)
+			if err != nil {
+				resp.Diagnostics.AddWarning(
+					"Failed to Transfer Removed Fields",
+					fmt.Sprintf("Some fields were removed from the patch but could not be transferred back to their previous owners: %v\n\n"+
+						"These fields may become unmanaged.", err),
+				)
+			} else {
+				tflog.Info(ctx, "Successfully transferred removed fields back", map[string]interface{}{
+					"target": formatTarget(target),
+				})
+			}
+
+			// Surface any API warnings from transfer operation
+			surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
+
+			// CRITICAL: Refetch the resource to get updated managedFields after ownership transfer
+			// Without this, SSA will use stale ownership info and may delete transferred fields
+			_, currentObj, err = r.getTargetResource(ctx, client, target)
+			if err != nil {
+				resp.Diagnostics.AddError(
+					"Failed to Refetch Resource After Ownership Transfer",
+					fmt.Sprintf("Ownership was transferred but failed to refetch resource state: %v", err),
+				)
+				return
+			}
+
+			surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
+
+			tflog.Debug(ctx, "Refetched resource after ownership transfer", map[string]interface{}{
+				"target": formatTarget(target),
+			})
+		} else {
+			tflog.Warn(ctx, "No previous owners found for removed fields - they will become unmanaged", map[string]interface{}{
+				"removed_count": len(removedFields),
+			})
+		}
+	}
+
+	// 8. Re-apply updated patch
 	patchedObj, err := r.applyPatch(ctx, client, currentObj, plan, fieldManager, gvr)
 	if err != nil {
 		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Update Patch", formatTarget(target))
@@ -333,7 +419,7 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	})
 
 	// 8. Update managed fields
-	managedFields, err := extractManagedFieldsForManager(patchedObj, fieldManager)
+	managedFields, err := fieldmanagement.ExtractManagedFieldsForManager(patchedObj, fieldManager)
 	if err != nil {
 		resp.Diagnostics.AddWarning("Failed to Extract Managed Fields", err.Error())
 		managedFields = "{}"
@@ -541,7 +627,7 @@ func groupFieldsByPreviousOwner(previousOwners map[string]string) map[string][]s
 // filterFieldsOwnedByManager filters a list of fields to only those currently owned by the specified field manager
 // This ensures idempotent destroy - if a field was already transferred, we skip it
 func (r *patchResource) filterFieldsOwnedByManager(obj *unstructured.Unstructured, fields []string, fieldManager string) []string {
-	currentOwnership := extractFieldOwnershipMap(obj)
+	currentOwnership := fieldmanagement.ExtractFieldOwnershipMap(obj)
 
 	var ownedFields []string
 	for _, field := range fields {
@@ -687,4 +773,67 @@ func surfaceK8sWarnings(ctx context.Context, client k8sclient.K8sClient, diagnos
 			"warning": warning,
 		})
 	}
+}
+
+// findRemovedFields finds fields that are in currentFields but not in newFields
+func findRemovedFields(currentFields, newFields []string) []string {
+	newFieldsSet := make(map[string]bool)
+	for _, field := range newFields {
+		newFieldsSet[field] = true
+	}
+
+	var removed []string
+	for _, field := range currentFields {
+		if !newFieldsSet[field] {
+			removed = append(removed, field)
+		}
+	}
+
+	return removed
+}
+
+// transferRemovedFieldsBack transfers ownership of removed fields back to their previous owners
+// This ensures that when fields are removed from a patch, they don't become unmanaged
+func (r *patchResource) transferRemovedFieldsBack(ctx context.Context, client k8sclient.K8sClient, currentObj *unstructured.Unstructured, gvr schema.GroupVersionResource, removedFields []string, previousOwnersMap map[string]string, currentFieldManager string) error {
+	// Filter to only fields we actually own
+	fieldsWeOwn := r.filterFieldsOwnedByManager(currentObj, removedFields, currentFieldManager)
+
+	if len(fieldsWeOwn) == 0 {
+		tflog.Debug(ctx, "No removed fields are currently owned by this patch", map[string]interface{}{
+			"removed_count": len(removedFields),
+		})
+		return nil
+	}
+
+	// Group removed fields by their previous owner
+	fieldsByOwner := make(map[string][]string)
+	for _, field := range fieldsWeOwn {
+		if previousOwner, exists := previousOwnersMap[field]; exists {
+			fieldsByOwner[previousOwner] = append(fieldsByOwner[previousOwner], field)
+		} else {
+			// No previous owner found - this field will become unmanaged
+			tflog.Warn(ctx, "No previous owner found for removed field", map[string]interface{}{
+				"field": field,
+			})
+		}
+	}
+
+	// Transfer each group back to its previous owner
+	for owner, fields := range fieldsByOwner {
+		err := r.transferOwnershipForFields(ctx, client, currentObj, gvr, fields, owner)
+		if err != nil {
+			tflog.Warn(ctx, "Failed to transfer ownership for removed fields", map[string]interface{}{
+				"owner": owner,
+				"error": err.Error(),
+			})
+			// Continue with other owners
+		} else {
+			tflog.Info(ctx, "Transferred ownership for removed fields", map[string]interface{}{
+				"owner":       owner,
+				"field_count": len(fields),
+			})
+		}
+	}
+
+	return nil
 }

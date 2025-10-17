@@ -1173,3 +1173,596 @@ YAML
 }
 `, namespace, cmName, namespace, cmName, namespace, cmName, namespace)
 }
+
+// TestAccPatchResource_FieldRemoval_StrategicMerge_SingleField tests that removing
+// a single field from a strategic merge patch transfers ownership back to the previous owner
+func TestAccPatchResource_FieldRemoval_StrategicMerge_SingleField(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("field-removal-sm-single-ns-%d", time.Now().UnixNano()%1000000)
+	cmName := fmt.Sprintf("field-removal-sm-single-cm-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 0: Create namespace and ConfigMap with kubectl managing three fields
+			{
+				Config: testAccPatchConfigEmptyWithNamespace(ns),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					createConfigMapWithFieldManager(t, k8sClient, ns, cmName, "kubectl", map[string]string{
+						"field1": "kubectl-value1",
+						"field2": "kubectl-value2",
+						"field3": "kubectl-value3",
+					}),
+					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
+				),
+			},
+			// Step 1: Apply patch taking ownership of all three fields
+			{
+				Config: testAccPatchConfigFieldRemovalSMThreeFields(ns, cmName),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_patch.test", "id"),
+					// Verify previous owners were captured
+					resource.TestCheckResourceAttr("k8sconnect_patch.test", "previous_owners.data.field1", "kubectl"),
+					resource.TestCheckResourceAttr("k8sconnect_patch.test", "previous_owners.data.field2", "kubectl"),
+					resource.TestCheckResourceAttr("k8sconnect_patch.test", "previous_owners.data.field3", "kubectl"),
+					// Verify patched values
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field1", "patched1"),
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field2", "patched2"),
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field3", "patched3"),
+				),
+			},
+			// Step 2: Remove field3 from patch - ownership should transfer back to kubectl
+			{
+				Config: testAccPatchConfigFieldRemovalSMTwoFields(ns, cmName),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					// Verify field3 value remains (not reverted)
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field3", "patched3"),
+					// Verify field3 ownership transferred back to kubectl
+					checkConfigMapFieldOwner(k8sClient, ns, cmName, "data.field3", "kubectl"),
+					// Verify other fields still patched
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field1", "patched1"),
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field2", "patched2"),
+				),
+			},
+		},
+		CheckDestroy: resource.ComposeTestCheckFunc(
+			testhelpers.CheckConfigMapDestroy(k8sClient, ns, cmName),
+			testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+		),
+	})
+}
+
+// TestAccPatchResource_FieldRemoval_StrategicMerge_MultipleFields tests that removing
+// multiple fields from a strategic merge patch transfers ownership back correctly
+func TestAccPatchResource_FieldRemoval_StrategicMerge_MultipleFields(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("field-removal-sm-multi-ns-%d", time.Now().UnixNano()%1000000)
+	cmName := fmt.Sprintf("field-removal-sm-multi-cm-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 0: Create namespace and ConfigMap with two different field managers
+			{
+				Config: testAccPatchConfigEmptyWithNamespace(ns),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					// kubectl manages field1 and field2
+					createConfigMapWithFieldManager(t, k8sClient, ns, cmName, "kubectl", map[string]string{
+						"field1": "kubectl-value1",
+						"field2": "kubectl-value2",
+					}),
+					// hpa-controller manages field3 and field4
+					createConfigMapWithFieldManager(t, k8sClient, ns, cmName, "hpa-controller", map[string]string{
+						"field3": "hpa-value3",
+						"field4": "hpa-value4",
+					}),
+					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
+				),
+			},
+			// Step 1: Apply patch taking ownership of all four fields
+			{
+				Config: testAccPatchConfigFieldRemovalSMFourFields(ns, cmName),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_patch.test", "id"),
+					// Verify previous owners were captured
+					resource.TestCheckResourceAttr("k8sconnect_patch.test", "previous_owners.data.field1", "kubectl"),
+					resource.TestCheckResourceAttr("k8sconnect_patch.test", "previous_owners.data.field2", "kubectl"),
+					resource.TestCheckResourceAttr("k8sconnect_patch.test", "previous_owners.data.field3", "hpa-controller"),
+					resource.TestCheckResourceAttr("k8sconnect_patch.test", "previous_owners.data.field4", "hpa-controller"),
+					// Verify patched values
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field1", "patched1"),
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field2", "patched2"),
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field3", "patched3"),
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field4", "patched4"),
+				),
+			},
+			// Step 2: Remove field2 and field3 - each should go back to its original owner
+			{
+				Config: testAccPatchConfigFieldRemovalSMTwoFieldsRemaining(ns, cmName),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					// Verify removed field values remain (not reverted)
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field2", "patched2"),
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field3", "patched3"),
+					// Verify field2 ownership transferred back to kubectl
+					checkConfigMapFieldOwner(k8sClient, ns, cmName, "data.field2", "kubectl"),
+					// Verify field3 ownership transferred back to hpa-controller
+					checkConfigMapFieldOwner(k8sClient, ns, cmName, "data.field3", "hpa-controller"),
+					// Verify remaining fields still patched
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field1", "patched1"),
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field4", "patched4"),
+				),
+			},
+		},
+		CheckDestroy: resource.ComposeTestCheckFunc(
+			testhelpers.CheckConfigMapDestroy(k8sClient, ns, cmName),
+			testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+		),
+	})
+}
+
+// TestAccPatchResource_FieldRemoval_JSONPatch tests that field removal works
+// with JSON patches (though tracking is less precise than strategic merge)
+func TestAccPatchResource_FieldRemoval_JSONPatch(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("field-removal-json-ns-%d", time.Now().UnixNano()%1000000)
+	cmName := fmt.Sprintf("field-removal-json-cm-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 0: Create namespace and ConfigMap with kubectl managing fields
+			{
+				Config: testAccPatchConfigEmptyWithNamespace(ns),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					createConfigMapWithFieldManager(t, k8sClient, ns, cmName, "kubectl", map[string]string{
+						"field1": "kubectl-value1",
+						"field2": "kubectl-value2",
+					}),
+					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
+				),
+			},
+			// Step 1: Apply JSON patch to both fields
+			{
+				Config: testAccPatchConfigFieldRemovalJSONTwoFields(ns, cmName),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_patch.test", "id"),
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field1", "json-patched1"),
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field2", "json-patched2"),
+				),
+			},
+			// Step 2: Remove field2 from JSON patch - should transfer back
+			{
+				Config: testAccPatchConfigFieldRemovalJSONOneField(ns, cmName),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					// Verify field2 value remains
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field2", "json-patched2"),
+					// Verify field2 ownership transferred back to kubectl
+					checkConfigMapFieldOwner(k8sClient, ns, cmName, "data.field2", "kubectl"),
+					// Verify field1 still patched
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field1", "json-patched1"),
+				),
+			},
+		},
+		CheckDestroy: resource.ComposeTestCheckFunc(
+			testhelpers.CheckConfigMapDestroy(k8sClient, ns, cmName),
+			testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+		),
+	})
+}
+
+// TestAccPatchResource_FieldRemoval_MergePatch tests that field removal works
+// with merge patches
+func TestAccPatchResource_FieldRemoval_MergePatch(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("field-removal-merge-ns-%d", time.Now().UnixNano()%1000000)
+	cmName := fmt.Sprintf("field-removal-merge-cm-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 0: Create namespace and ConfigMap with kubectl managing fields
+			{
+				Config: testAccPatchConfigEmptyWithNamespace(ns),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					createConfigMapWithFieldManager(t, k8sClient, ns, cmName, "kubectl", map[string]string{
+						"field1": "kubectl-value1",
+						"field2": "kubectl-value2",
+					}),
+					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
+				),
+			},
+			// Step 1: Apply merge patch to both fields
+			{
+				Config: testAccPatchConfigFieldRemovalMergeTwoFields(ns, cmName),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_patch.test", "id"),
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field1", "merge-patched1"),
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field2", "merge-patched2"),
+				),
+			},
+			// Step 2: Remove field2 from merge patch - should transfer back
+			{
+				Config: testAccPatchConfigFieldRemovalMergeOneField(ns, cmName),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					// Verify field2 value remains
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field2", "merge-patched2"),
+					// Verify field2 ownership transferred back to kubectl
+					checkConfigMapFieldOwner(k8sClient, ns, cmName, "data.field2", "kubectl"),
+					// Verify field1 still patched
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field1", "merge-patched1"),
+				),
+			},
+		},
+		CheckDestroy: resource.ComposeTestCheckFunc(
+			testhelpers.CheckConfigMapDestroy(k8sClient, ns, cmName),
+			testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+		),
+	})
+}
+
+// Config helpers for field removal tests
+
+func testAccPatchConfigFieldRemovalSMThreeFields(namespace, cmName string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "test_ns" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = { kubeconfig = var.raw }
+}
+
+resource "k8sconnect_patch" "test" {
+  target = {
+    api_version = "v1"
+    kind        = "ConfigMap"
+    name        = "%s"
+    namespace   = "%s"
+  }
+
+  patch = <<YAML
+data:
+  field1: patched1
+  field2: patched2
+  field3: patched3
+YAML
+
+  cluster_connection = { kubeconfig = var.raw }
+  depends_on = [k8sconnect_object.test_ns]
+}
+`, namespace, cmName, namespace)
+}
+
+func testAccPatchConfigFieldRemovalSMTwoFields(namespace, cmName string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "test_ns" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = { kubeconfig = var.raw }
+}
+
+resource "k8sconnect_patch" "test" {
+  target = {
+    api_version = "v1"
+    kind        = "ConfigMap"
+    name        = "%s"
+    namespace   = "%s"
+  }
+
+  patch = <<YAML
+data:
+  field1: patched1
+  field2: patched2
+YAML
+
+  cluster_connection = { kubeconfig = var.raw }
+  depends_on = [k8sconnect_object.test_ns]
+}
+`, namespace, cmName, namespace)
+}
+
+func testAccPatchConfigFieldRemovalSMFourFields(namespace, cmName string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "test_ns" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = { kubeconfig = var.raw }
+}
+
+resource "k8sconnect_patch" "test" {
+  target = {
+    api_version = "v1"
+    kind        = "ConfigMap"
+    name        = "%s"
+    namespace   = "%s"
+  }
+
+  patch = <<YAML
+data:
+  field1: patched1
+  field2: patched2
+  field3: patched3
+  field4: patched4
+YAML
+
+  cluster_connection = { kubeconfig = var.raw }
+  depends_on = [k8sconnect_object.test_ns]
+}
+`, namespace, cmName, namespace)
+}
+
+func testAccPatchConfigFieldRemovalSMTwoFieldsRemaining(namespace, cmName string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "test_ns" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = { kubeconfig = var.raw }
+}
+
+resource "k8sconnect_patch" "test" {
+  target = {
+    api_version = "v1"
+    kind        = "ConfigMap"
+    name        = "%s"
+    namespace   = "%s"
+  }
+
+  patch = <<YAML
+data:
+  field1: patched1
+  field4: patched4
+YAML
+
+  cluster_connection = { kubeconfig = var.raw }
+  depends_on = [k8sconnect_object.test_ns]
+}
+`, namespace, cmName, namespace)
+}
+
+func testAccPatchConfigFieldRemovalJSONTwoFields(namespace, cmName string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "test_ns" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = { kubeconfig = var.raw }
+}
+
+resource "k8sconnect_patch" "test" {
+  target = {
+    api_version = "v1"
+    kind        = "ConfigMap"
+    name        = "%s"
+    namespace   = "%s"
+  }
+
+  json_patch = jsonencode([
+    {
+      op    = "replace"
+      path  = "/data/field1"
+      value = "json-patched1"
+    },
+    {
+      op    = "replace"
+      path  = "/data/field2"
+      value = "json-patched2"
+    }
+  ])
+
+  cluster_connection = { kubeconfig = var.raw }
+  depends_on = [k8sconnect_object.test_ns]
+}
+`, namespace, cmName, namespace)
+}
+
+func testAccPatchConfigFieldRemovalJSONOneField(namespace, cmName string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "test_ns" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = { kubeconfig = var.raw }
+}
+
+resource "k8sconnect_patch" "test" {
+  target = {
+    api_version = "v1"
+    kind        = "ConfigMap"
+    name        = "%s"
+    namespace   = "%s"
+  }
+
+  json_patch = jsonencode([
+    {
+      op    = "replace"
+      path  = "/data/field1"
+      value = "json-patched1"
+    }
+  ])
+
+  cluster_connection = { kubeconfig = var.raw }
+  depends_on = [k8sconnect_object.test_ns]
+}
+`, namespace, cmName, namespace)
+}
+
+func testAccPatchConfigFieldRemovalMergeTwoFields(namespace, cmName string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "test_ns" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = { kubeconfig = var.raw }
+}
+
+resource "k8sconnect_patch" "test" {
+  target = {
+    api_version = "v1"
+    kind        = "ConfigMap"
+    name        = "%s"
+    namespace   = "%s"
+  }
+
+  merge_patch = jsonencode({
+    data = {
+      field1 = "merge-patched1"
+      field2 = "merge-patched2"
+    }
+  })
+
+  cluster_connection = { kubeconfig = var.raw }
+  depends_on = [k8sconnect_object.test_ns]
+}
+`, namespace, cmName, namespace)
+}
+
+func testAccPatchConfigFieldRemovalMergeOneField(namespace, cmName string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "test_ns" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = { kubeconfig = var.raw }
+}
+
+resource "k8sconnect_patch" "test" {
+  target = {
+    api_version = "v1"
+    kind        = "ConfigMap"
+    name        = "%s"
+    namespace   = "%s"
+  }
+
+  merge_patch = jsonencode({
+    data = {
+      field1 = "merge-patched1"
+    }
+  })
+
+  cluster_connection = { kubeconfig = var.raw }
+  depends_on = [k8sconnect_object.test_ns]
+}
+`, namespace, cmName, namespace)
+}

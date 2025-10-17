@@ -406,7 +406,7 @@ func TestAccPatchResource_UpdatePatchContent(t *testing.T) {
 					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "patched", "value1"),
 				),
 			},
-			// Step 2: Update patch content
+			// Step 2: Change patch content - should update in place
 			{
 				Config: testAccPatchConfigUpdate2(ns, cmName),
 				ConfigVariables: config.Variables{
@@ -416,7 +416,7 @@ func TestAccPatchResource_UpdatePatchContent(t *testing.T) {
 					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "patched", "value2"),
 				),
 			},
-			// Step 3: Add new field to patch
+			// Step 3: Add new field to patch - should also update in place
 			{
 				Config: testAccPatchConfigUpdate3(ns, cmName),
 				ConfigVariables: config.Variables{
