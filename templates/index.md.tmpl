@@ -2,7 +2,7 @@
 page_title: "k8sconnect Provider"
 subcategory: ""
 description: |-
-  The k8sconnect provider enables single-apply cluster bootstrapping with inline per-resource authentication.
+  Bootstrap Kubernetes clusters in a single apply. Supports inline connections, Server-Side Apply, multi-cluster deployments, and surgical patching of any Kubernetes resource.
 ---
 
 # k8sconnect Provider

@@ -51,11 +51,8 @@ func (p *k8sconnectProvider) Metadata(ctx context.Context, req provider.Metadata
 
 func (p *k8sconnectProvider) Schema(ctx context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "The k8sconnect provider enables single-apply cluster bootstrapping with inline per-resource authentication. " +
-			"Deploy clusters and workloads in one terraform apply without provider dependency cycles. " +
-			"Features Server-Side Apply with accurate dry-run projections, field ownership tracking for multi-controller environments, " +
-			"and surgical patching of existing resources. Works seamlessly in modules and supports multi-cluster deployments.",
-		Attributes: map[string]schema.Attribute{},
+		Description: "Bootstrap Kubernetes clusters in a single apply. Supports inline connections, Server-Side Apply, multi-cluster deployments, and surgical patching of any Kubernetes resource.",
+		Attributes:  map[string]schema.Attribute{},
 	}
 }
 
