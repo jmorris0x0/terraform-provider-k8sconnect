@@ -1,6 +1,7 @@
 # K8sconnect Kubernetes Terraform Provider
 
 ![Tests](https://github.com/jmorris0x0/terraform-provider-k8sconnect/actions/workflows/test.yml/badge.svg)
+[![codecov](https://codecov.io/github/jmorris0x0/terraform-provider-k8sconnect/graph/badge.svg?token=8B1UTHRK71)](https://codecov.io/github/jmorris0x0/terraform-provider-k8sconnect)
 ![Security](https://github.com/jmorris0x0/terraform-provider-k8sconnect/actions/workflows/security.yml/badge.svg)
 ![Release](https://github.com/jmorris0x0/terraform-provider-k8sconnect/actions/workflows/release.yml/badge.svg)
 
@@ -351,7 +352,7 @@ terraform {
   required_providers {
     k8sconnect = {
       source  = "jmorris0x0/k8sconnect"
-      version = ">= 0.1.0"
+      version = ">= 0.1.1"
     }
   }
 }
