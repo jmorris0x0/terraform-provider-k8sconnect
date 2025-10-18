@@ -21,12 +21,6 @@ jobs:
           cache: true
       - name: Run unit tests
         run: make test
-      - name: Upload coverage
-        uses: codecov/codecov-action@v5
-        if: always()
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: coverage.out
 
   build:
     runs-on: ${{ matrix.os }}
@@ -133,4 +127,45 @@ jobs:
         with:
           version: latest
           args: --timeout=5m
+
+  coverage:
+    runs-on: ubuntu-latest
+    needs: [unit-test, build, lint]
+    if: |
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.13.3'
+          terraform_wrapper: false
+
+      - name: Install kubectl & k3d
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+          curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+
+      - name: Run coverage
+        run: make coverage
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        if: always()
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: coverage.out
+          fail_ci_if_error: false
+
+      - name: Clean up
+        if: always()
+        run: make clean
 
