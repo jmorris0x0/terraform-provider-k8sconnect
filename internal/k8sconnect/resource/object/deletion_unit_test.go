@@ -14,46 +14,46 @@ import (
 
 func TestExplainFinalizer(t *testing.T) {
 	tests := []struct {
-		name             string
-		finalizer        string
-		expectKnown      bool
+		name              string
+		finalizer         string
+		expectKnown       bool
 		expectExplanation string
-		expectSource     bool // Does it have a source URL?
+		expectSource      bool // Does it have a source URL?
 	}{
 		{
-			name:             "PVC protection finalizer",
-			finalizer:        "kubernetes.io/pvc-protection",
-			expectKnown:      true,
+			name:              "PVC protection finalizer",
+			finalizer:         "kubernetes.io/pvc-protection",
+			expectKnown:       true,
 			expectExplanation: "Volume is still attached to a pod",
-			expectSource:     true,
+			expectSource:      true,
 		},
 		{
-			name:             "PV protection finalizer",
-			finalizer:        "kubernetes.io/pv-protection",
-			expectKnown:      true,
+			name:              "PV protection finalizer",
+			finalizer:         "kubernetes.io/pv-protection",
+			expectKnown:       true,
 			expectExplanation: "PersistentVolume is still bound to a claim",
-			expectSource:     true,
+			expectSource:      true,
 		},
 		{
-			name:             "Kubernetes namespace finalizer",
-			finalizer:        "kubernetes",
-			expectKnown:      true,
+			name:              "Kubernetes namespace finalizer",
+			finalizer:         "kubernetes",
+			expectKnown:       true,
 			expectExplanation: "Namespace is deleting all contained resources",
-			expectSource:     true,
+			expectSource:      true,
 		},
 		{
-			name:             "Foreground deletion finalizer",
-			finalizer:        "foregroundDeletion",
-			expectKnown:      true,
+			name:              "Foreground deletion finalizer",
+			finalizer:         "foregroundDeletion",
+			expectKnown:       true,
 			expectExplanation: "Waiting for owned resources to delete first",
-			expectSource:     true,
+			expectSource:      true,
 		},
 		{
-			name:             "Orphan finalizer",
-			finalizer:        "orphan",
-			expectKnown:      true,
+			name:              "Orphan finalizer",
+			finalizer:         "orphan",
+			expectKnown:       true,
 			expectExplanation: "Dependents will be orphaned (not deleted)",
-			expectSource:     true,
+			expectSource:      true,
 		},
 		{
 			name:        "Custom unknown finalizer",
@@ -136,14 +136,14 @@ func TestFormatNamespaceDeletionDiagnostics(t *testing.T) {
 		{
 			name: "more than 5 types shows truncation",
 			resourceCounts: map[string]int{
-				"Pod":                  10,
-				"Service":              8,
-				"ConfigMap":            6,
-				"Deployment":           4,
-				"ReplicaSet":           3,
-				"StatefulSet":          2,
-				"DaemonSet":            1,
-				"Job":                  1,
+				"Pod":         10,
+				"Service":     8,
+				"ConfigMap":   6,
+				"Deployment":  4,
+				"ReplicaSet":  3,
+				"StatefulSet": 2,
+				"DaemonSet":   1,
+				"Job":         1,
 			},
 			resourcesWithFinalizers: []string{},
 			totalResources:          35,

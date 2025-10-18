@@ -385,10 +385,10 @@ func TestRebuildExactStructure(t *testing.T) {
 
 func TestPruneStatusToField(t *testing.T) {
 	tests := []struct {
-		name      string
+		name       string
 		fullStatus map[string]interface{}
-		fieldPath string
-		expected  map[string]interface{}
+		fieldPath  string
+		expected   map[string]interface{}
 	}{
 		{
 			name: "simple field extraction",
