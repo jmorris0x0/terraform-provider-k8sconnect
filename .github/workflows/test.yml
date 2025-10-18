@@ -155,6 +155,8 @@ jobs:
           curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
 
       - name: Run coverage
+        env:
+          TF_ACC_TERRAFORM_VERSION: '1.13.3'
         run: make coverage
 
       - name: Upload coverage to Codecov
