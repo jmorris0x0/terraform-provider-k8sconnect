@@ -3,6 +3,7 @@ package object
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -95,21 +96,22 @@ func TestDeleteProtectionConflict(t *testing.T) {
 
 func TestConfigValidatorsSlice(t *testing.T) {
 	r := &objectResource{}
-	validators := r.ConfigValidators(nil)
-	if len(validators) != 4 {
-		t.Fatalf("expected 4 validators, got %d", len(validators))
+	validatorList := r.ConfigValidators(nil)
+	if len(validatorList) != 4 {
+		t.Fatalf("expected 4 validators, got %d", len(validatorList))
 	}
 
 	typeNames := map[string]bool{}
-	for _, v := range validators {
-		switch v.(type) {
-		case *clusterConnectionValidator:
+	for _, v := range validatorList {
+		typeName := reflect.TypeOf(v).String()
+		switch {
+		case typeName == "*validators.ClusterConnection":
 			typeNames["cluster"] = true
-		case *execAuthValidator:
+		case typeName == "*validators.ExecAuth":
 			typeNames["exec"] = true
-		case *conflictingAttributesValidator:
+		case typeName == "*object.conflictingAttributesValidator":
 			typeNames["conflict"] = true
-		case *requiredFieldsValidator:
+		case typeName == "*object.requiredFieldsValidator":
 			typeNames["required"] = true
 		}
 	}

@@ -14,150 +14,17 @@ import (
 	"k8s.io/client-go/util/jsonpath"
 	sigsyaml "sigs.k8s.io/yaml"
 
-	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/validation"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/validators"
 )
 
 // ConfigValidators implements resource-level validation for the object resource
 func (r *objectResource) ConfigValidators(ctx context.Context) []resource.ConfigValidator {
 	return []resource.ConfigValidator{
-		&clusterConnectionValidator{},
-		&execAuthValidator{},
+		&validators.ClusterConnection{},
+		&validators.ExecAuth{},
 		&conflictingAttributesValidator{},
 		&requiredFieldsValidator{},
-	}
-}
-
-// =============================================================================
-// clusterConnectionValidator ensures exactly one connection mode is specified
-// =============================================================================
-
-type clusterConnectionValidator struct{}
-
-func (v *clusterConnectionValidator) Description(ctx context.Context) string {
-	return "Ensures exactly one cluster connection mode is specified: inline (host + cluster_ca_certificate or insecure) or kubeconfig"
-}
-
-func (v *clusterConnectionValidator) MarkdownDescription(ctx context.Context) string {
-	return "Ensures exactly one cluster connection mode is specified: inline (`host` + `cluster_ca_certificate` or `insecure`), `kubeconfig`"
-}
-
-// ValidateResource ensures exactly one connection mode is specified
-func (v *clusterConnectionValidator) ValidateResource(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
-	// Load and validate data
-	data, ok := v.loadResourceData(ctx, req, resp)
-	if !ok {
-		return
-	}
-
-	// Skip validation for unknown connections (during planning)
-	if data.ClusterConnection.IsUnknown() {
-		return
-	}
-
-	// Check connection exists
-	if !v.validateConnectionExists(data.ClusterConnection, resp) {
-		return
-	}
-
-	// Convert to connection model
-	connModel, ok := v.getConnectionModel(ctx, data.ClusterConnection)
-	if !ok {
-		return // Unknown values during planning
-	}
-
-	// Use common validation logic
-	err := auth.ValidateConnectionWithUnknowns(ctx, connModel)
-	if err != nil {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("cluster_connection"),
-			"Invalid Cluster Connection Configuration",
-			err.Error(),
-		)
-	}
-}
-
-// loadResourceData loads the object resource data from config
-func (v *clusterConnectionValidator) loadResourceData(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) (objectResourceModel, bool) {
-	var data objectResourceModel
-	diags := req.Config.Get(ctx, &data)
-	resp.Diagnostics.Append(diags...)
-	return data, !resp.Diagnostics.HasError()
-}
-
-// validateConnectionExists checks if connection block is present
-func (v *clusterConnectionValidator) validateConnectionExists(conn types.Object, resp *resource.ValidateConfigResponse) bool {
-	if conn.IsNull() {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("cluster_connection"),
-			"Missing Cluster Connection Configuration",
-			"cluster_connection block is required.",
-		)
-		return false
-	}
-	return true
-}
-
-// getConnectionModel safely converts connection object to model
-func (v *clusterConnectionValidator) getConnectionModel(ctx context.Context, conn types.Object) (auth.ClusterConnectionModel, bool) {
-	r := &objectResource{}
-	connModel, err := r.convertObjectToConnectionModel(ctx, conn)
-	if err != nil {
-		// Unknown values during planning - skip validation
-		return connModel, false
-	}
-	return connModel, true
-}
-
-// =============================================================================
-// execAuthValidator ensures complete exec configuration when present
-// =============================================================================
-
-type execAuthValidator struct{}
-
-func (v *execAuthValidator) Description(ctx context.Context) string {
-	return "Ensures that if exec auth is specified, all required fields (api_version, command, args) are provided"
-}
-
-func (v *execAuthValidator) MarkdownDescription(ctx context.Context) string {
-	return "Ensures that if exec auth is specified, all required fields (`api_version`, `command`) are provided"
-}
-
-func (v *execAuthValidator) ValidateResource(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
-	var data objectResourceModel
-
-	diags := req.Config.Get(ctx, &data)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	conn := data.ClusterConnection
-
-	// If connection is unknown or null, skip validation
-	if conn.IsUnknown() || conn.IsNull() {
-		return
-	}
-
-	// Convert to connection model to access exec field
-	r := &objectResource{} // Create a temporary resource instance for the helper method
-	connModel, err := r.convertObjectToConnectionModel(ctx, conn)
-	if err != nil {
-		// If conversion fails, it might be due to unknown values during planning
-		return
-	}
-
-	// Use common validation logic (which includes exec validation)
-	err = auth.ValidateConnectionWithUnknowns(ctx, connModel)
-	if err != nil {
-		// Only report if it's an exec-related error
-		if strings.Contains(err.Error(), "exec authentication") {
-			resp.Diagnostics.AddAttributeError(
-				path.Root("cluster_connection").AtName("exec"),
-				"Invalid Exec Authentication Configuration",
-				err.Error(),
-			)
-		}
 	}
 }
 

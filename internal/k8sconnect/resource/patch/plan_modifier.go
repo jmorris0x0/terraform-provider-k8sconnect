@@ -13,7 +13,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	k8stypes "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/yaml"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
@@ -202,150 +201,6 @@ func (r *patchResource) setupDryRunClient(ctx context.Context, plannedData *patc
 	return client, nil
 }
 
-// extractPatchedFieldOwnership extracts field ownership for fields modified by this patch
-// Note: This function is currently unreachable for strategic merge patches with changed content
-// since that case is now handled inline with projection calculation. Keeping it for edge cases.
-func (r *patchResource) extractPatchedFieldOwnership(ctx context.Context, plannedData *patchResourceModel, patchedObj, currentObj *unstructured.Unstructured, resp *resource.ModifyPlanResponse) bool {
-	// Extract managed fields from the patched object
-	managedFields := patchedObj.GetManagedFields()
-	if len(managedFields) == 0 {
-		tflog.Warn(ctx, "No managed fields in dry-run result")
-		plannedData.ManagedStateProjection = types.MapNull(types.StringType)
-		plannedData.ManagedFields = types.StringNull()
-		plannedData.FieldOwnership = types.MapNull(types.StringType)
-		plannedData.PreviousOwners = types.MapNull(types.StringType)
-		return true
-	}
-
-	// Extract field ownership map (field path -> manager name)
-	// Only extract fields owned by OUR field manager
-	fieldOwnership := make(map[string]string)
-	fieldManagerName := r.generateFieldManager(*plannedData)
-	var ourFieldsV1 []byte
-
-	// Parse managed fields to find our manager's fields
-	for _, mf := range managedFields {
-		manager := mf.Manager
-		if mf.FieldsV1 == nil {
-			continue
-		}
-
-		// Only process fields owned by our field manager
-		if manager != fieldManagerName {
-			continue
-		}
-
-		// Store our manager's FieldsV1 for managed_fields attribute
-		ourFieldsV1 = mf.FieldsV1.Raw
-
-		// Parse FieldsV1 to extract field paths
-		var fieldsV1 map[string]interface{}
-		if err := json.Unmarshal(mf.FieldsV1.Raw, &fieldsV1); err != nil {
-			tflog.Warn(ctx, "Failed to parse FieldsV1", map[string]interface{}{"manager": manager, "error": err.Error()})
-			continue
-		}
-
-		// Extract paths from FieldsV1 structure
-		paths := extractFieldPaths(fieldsV1, "")
-		for _, path := range paths {
-			fieldOwnership[path] = manager
-		}
-	}
-
-	// Store only our manager's FieldsV1 in managed_fields
-	if ourFieldsV1 != nil {
-		plannedData.ManagedFields = types.StringValue(string(ourFieldsV1))
-	} else {
-		plannedData.ManagedFields = types.StringNull()
-	}
-
-	// Store field ownership
-	ownershipMap, diags := types.MapValueFrom(ctx, types.StringType, fieldOwnership)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return false
-	}
-	plannedData.FieldOwnership = ownershipMap
-
-	// For CREATE operations, also track previous owners
-	if currentObj != nil && len(currentObj.GetManagedFields()) > 0 {
-		previousOwners := make(map[string]string)
-
-		for _, mf := range currentObj.GetManagedFields() {
-			manager := mf.Manager
-			if mf.FieldsV1 == nil {
-				continue
-			}
-
-			var fieldsV1 map[string]interface{}
-			if err := json.Unmarshal(mf.FieldsV1.Raw, &fieldsV1); err != nil {
-				continue
-			}
-
-			paths := extractFieldPaths(fieldsV1, "")
-			for _, path := range paths {
-				// Only track if this path will be taken over
-				if newOwner, willBePatched := fieldOwnership[path]; willBePatched {
-					if newOwner != manager {
-						previousOwners[path] = manager
-					}
-				}
-			}
-		}
-
-		if len(previousOwners) > 0 {
-			prevOwnersMap, diags := types.MapValueFrom(ctx, types.StringType, previousOwners)
-			resp.Diagnostics.Append(diags...)
-			if resp.Diagnostics.HasError() {
-				return false
-			}
-			plannedData.PreviousOwners = prevOwnersMap
-		} else {
-			plannedData.PreviousOwners = types.MapNull(types.StringType)
-		}
-	} else {
-		plannedData.PreviousOwners = types.MapNull(types.StringType)
-	}
-
-	tflog.Debug(ctx, "Extracted field ownership from dry-run",
-		map[string]interface{}{
-			"owned_fields": len(fieldOwnership),
-		})
-
-	return true
-}
-
-// extractFieldPaths recursively extracts field paths from FieldsV1 structure
-// This is adapted from manifest's field ownership parsing
-func extractFieldPaths(obj map[string]interface{}, prefix string) []string {
-	var paths []string
-
-	for key, value := range obj {
-		// Strip the "f:" prefix that Kubernetes uses in FieldsV1
-		fieldName := strings.TrimPrefix(key, "f:")
-
-		// Build the full path
-		var fullPath string
-		if prefix == "" {
-			fullPath = fieldName
-		} else {
-			fullPath = prefix + "." + fieldName
-		}
-
-		// Check if this is a nested object
-		if valueMap, ok := value.(map[string]interface{}); ok {
-			// Recursively extract paths from nested object
-			nestedPaths := extractFieldPaths(valueMap, fullPath)
-			paths = append(paths, nestedPaths...)
-		} else {
-			// This is a leaf field
-			paths = append(paths, fullPath)
-		}
-	}
-
-	return paths
-}
-
 // checkPatchOwnershipConflicts detects when fields managed by other controllers are being taken over
 // Adapted from manifest's ownership conflict detection
 func (r *patchResource) checkPatchOwnershipConflicts(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
@@ -497,20 +352,6 @@ func (r *patchResource) mergeMaps(dst, src map[string]interface{}) {
 		// Either key doesn't exist in dst, or one of the values isn't a map
 		// Override with src value
 		dst[key] = srcVal
-	}
-}
-
-// convertPatchType converts string patch type to k8s PatchType
-func (r *patchResource) convertPatchType(patchType string) k8stypes.PatchType {
-	switch patchType {
-	case "strategic":
-		return k8stypes.StrategicMergePatchType
-	case "json":
-		return k8stypes.JSONPatchType
-	case "merge":
-		return k8stypes.MergePatchType
-	default:
-		return k8stypes.StrategicMergePatchType
 	}
 }
 
