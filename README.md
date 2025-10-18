@@ -345,7 +345,7 @@ All `cluster_connection` fields are marked sensitive and won't appear in logs or
 
 ## Installation
 
-### Coming to Registry Soon
+### From Terraform Registry
 ```hcl
 terraform {
   required_providers {
