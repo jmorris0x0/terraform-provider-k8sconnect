@@ -117,32 +117,61 @@ func IsImmutableFieldError(err error) bool {
 	return false
 }
 
-// IsCRDNotFoundError detects when a Custom Resource Definition doesn't exist yet
-func IsCRDNotFoundError(err error) bool {
+// checkErrorContains checks if error message contains given substrings
+// Checks both StatusError.Message and plain error string
+func checkErrorContains(err error, substrings ...string) bool {
 	if statusErr, ok := err.(*errors.StatusError); ok {
 		msg := strings.ToLower(statusErr.ErrStatus.Message)
-		// Kubernetes returns these messages when the CRD doesn't exist
-		return strings.Contains(msg, "no matches for kind") ||
-			strings.Contains(msg, "could not find the requested resource")
+		for _, substr := range substrings {
+			if !strings.Contains(msg, substr) {
+				return false
+			}
+		}
+		return true
 	}
 	// Also check plain error messages (for wrapped errors)
 	errMsg := strings.ToLower(err.Error())
-	return strings.Contains(errMsg, "no matches for kind") ||
-		strings.Contains(errMsg, "could not find the requested resource")
+	for _, substr := range substrings {
+		if !strings.Contains(errMsg, substr) {
+			return false
+		}
+	}
+	return true
+}
+
+// checkErrorContainsAny checks if error message contains any of given substrings
+func checkErrorContainsAny(err error, substrings ...string) bool {
+	if statusErr, ok := err.(*errors.StatusError); ok {
+		msg := strings.ToLower(statusErr.ErrStatus.Message)
+		for _, substr := range substrings {
+			if strings.Contains(msg, substr) {
+				return true
+			}
+		}
+		return false
+	}
+	// Also check plain error messages
+	errMsg := strings.ToLower(err.Error())
+	for _, substr := range substrings {
+		if strings.Contains(errMsg, substr) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsCRDNotFoundError detects when a Custom Resource Definition doesn't exist yet
+func IsCRDNotFoundError(err error) bool {
+	// Kubernetes returns these messages when the CRD doesn't exist
+	return checkErrorContainsAny(err, "no matches for kind", "could not find the requested resource")
 }
 
 // IsNamespaceNotFoundError detects when a namespace doesn't exist yet
 // This can happen when namespace and namespaced resources are created in parallel
 func IsNamespaceNotFoundError(err error) bool {
-	if statusErr, ok := err.(*errors.StatusError); ok {
-		msg := strings.ToLower(statusErr.ErrStatus.Message)
-		// Kubernetes returns "namespaces 'xyz' not found" when namespace doesn't exist
-		// Use "namespaces" (plural, the K8s resource type) to be specific
-		return strings.Contains(msg, "namespaces") && strings.Contains(msg, "not found")
-	}
-	// Also check plain error messages
-	errMsg := strings.ToLower(err.Error())
-	return strings.Contains(errMsg, "namespaces") && strings.Contains(errMsg, "not found")
+	// Kubernetes returns "namespaces 'xyz' not found" when namespace doesn't exist
+	// Use "namespaces" (plural, the K8s resource type) to be specific
+	return checkErrorContains(err, "namespaces", "not found")
 }
 
 // IsDependencyNotReadyError detects temporary errors due to dependencies not being ready yet
