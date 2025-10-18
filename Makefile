@@ -291,6 +291,7 @@ coverage: create-cluster
 		tfenv install $$TF_VERSION || true; \
 		tfenv use $$TF_VERSION || true; \
 	fi; \
+	PKGS=$$(go list ./... | grep -v -E "(test/examples|test/doctest)"); \
 	TF_ACC=1 \
 	  TF_ACC_TERRAFORM_PATH="$$(which terraform)" \
 	  TF_ACC_K8S_HOST="$$(cat $(TESTBUILD_DIR)/cluster-endpoint.txt)" \
@@ -300,7 +301,7 @@ coverage: create-cluster
 	  TF_ACC_K8S_TOKEN="$$(cat $(TESTBUILD_DIR)/sa-token.txt)" \
 	  TF_ACC_K8S_CLIENT_CERT="$$(base64 < $(TESTBUILD_DIR)/client.crt | tr -d '\n')" \
 	  TF_ACC_K8S_CLIENT_KEY="$$(base64 < $(TESTBUILD_DIR)/client.key | tr -d '\n')" \
-	  go test ./... -coverpkg=./... -covermode=atomic -coverprofile=$$PROFILE -count=1 ; \
+	  go test $$PKGS -coverpkg=./... -covermode=atomic -coverprofile=$$PROFILE -count=1 ; \
 	ACTUAL_TF_VERSION=$$(terraform version -json | jq -r .terraform_version); \
 	if [ "$$ACTUAL_TF_VERSION" != "$$TF_VERSION" ]; then \
 		echo "❌ ERROR: Terraform version mismatch in coverage!"; \

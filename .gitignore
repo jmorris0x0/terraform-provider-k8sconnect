@@ -48,6 +48,9 @@ test/oidc-setup/ssl/
 bin/
 terraform/*/*-config
 
+# Build
+dist/
+
 # AI
 .claude/
 CLAUDE.md
