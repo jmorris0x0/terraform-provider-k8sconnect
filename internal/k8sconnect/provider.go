@@ -52,7 +52,7 @@ func (p *k8sconnectProvider) Metadata(ctx context.Context, req provider.Metadata
 func (p *k8sconnectProvider) Schema(ctx context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Bootstrap Kubernetes clusters in a single apply. Supports inline connections, Server-Side Apply, multi-cluster deployments, and surgical patching of any Kubernetes resource.",
-		Attributes: map[string]schema.Attribute{},
+		Attributes:  map[string]schema.Attribute{},
 	}
 }
 
