@@ -180,3 +180,48 @@ func HashString(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])
 }
+
+// LoadDocuments loads YAML documents from either inline content or file pattern.
+// Returns the parsed documents, a sourceID for caching, and any error.
+// If hasContent is true, loads from content string. Otherwise, loads from pattern.
+func LoadDocuments(hasContent bool, content, pattern string) ([]DocumentInfo, string, error) {
+	var documents []DocumentInfo
+	var sourceID string
+
+	if hasContent {
+		// Parse inline content
+		docs, err := ParseDocuments(content, "<inline>")
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to parse inline YAML content: %w", err)
+		}
+		documents = docs
+		sourceID = fmt.Sprintf("content-%s", HashString(content)[:8])
+	} else {
+		// Handle pattern-based loading
+		files, err := ExpandPattern(pattern)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to resolve pattern %q: %w", pattern, err)
+		}
+
+		if len(files) == 0 {
+			return nil, "", fmt.Errorf("No files matched pattern %q. Check that the path exists and contains YAML files.", pattern)
+		}
+
+		// Process all matching files
+		for _, file := range files {
+			fileContent, err := ReadFile(file)
+			if err != nil {
+				return nil, "", fmt.Errorf("failed to read file %q: %w", file, err)
+			}
+
+			docs, err := ParseDocuments(fileContent, file)
+			if err != nil {
+				return nil, "", fmt.Errorf("failed to parse YAML in file %q: %w", file, err)
+			}
+			documents = append(documents, docs...)
+		}
+		sourceID = fmt.Sprintf("pattern-%s", HashString(pattern)[:8])
+	}
+
+	return documents, sourceID, nil
+}

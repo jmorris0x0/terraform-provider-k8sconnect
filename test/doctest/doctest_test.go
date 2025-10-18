@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -209,17 +210,16 @@ func replaceNamespaceResourceName(content string, oldName string, newName string
 func randomizeLoadBalancerPorts(content string, hash string) string {
 	// Use hash to generate a deterministic but unique port offset
 	// Convert first 4 chars of hash to a number for port offset
-	hashNum := 0
-	for i := 0; i < 4 && i < len(hash); i++ {
-		hashNum = hashNum*16 + int(hash[i])
-		if hash[i] >= '0' && hash[i] <= '9' {
-			hashNum = hashNum - int('0')
-		} else if hash[i] >= 'a' && hash[i] <= 'f' {
-			hashNum = hashNum - int('a') + 10
-		}
+	hashPrefix := hash
+	if len(hash) > 4 {
+		hashPrefix = hash[:4]
+	}
+	hashNum, err := strconv.ParseInt(hashPrefix, 16, 64)
+	if err != nil {
+		hashNum = 0
 	}
 	// Map hash to port range 30000-32000 to avoid common ports
-	portOffset := 30000 + (hashNum % 2000)
+	portOffset := 30000 + (int(hashNum) % 2000)
 
 	lines := strings.Split(content, "\n")
 	inLoadBalancerService := false

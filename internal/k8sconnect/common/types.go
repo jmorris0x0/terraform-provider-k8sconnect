@@ -3,6 +3,7 @@ package common
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -94,5 +95,29 @@ func ConvertToAttrValue(ctx context.Context, data interface{}) (attr.Value, erro
 	default:
 		// Fallback: convert to string
 		return types.StringValue(fmt.Sprintf("%v", v)), nil
+	}
+}
+
+// FormatValueForDisplay converts a value to string for display in flat maps.
+// Used by projection systems to represent complex values as strings for Terraform state.
+func FormatValueForDisplay(v interface{}) string {
+	if v == nil {
+		return "<nil>"
+	}
+
+	switch val := v.(type) {
+	case string:
+		return val
+	case int, int32, int64, float32, float64, bool:
+		return fmt.Sprintf("%v", val)
+	case map[string]interface{}, []interface{}:
+		// Complex types - use compact JSON
+		bytes, err := json.Marshal(val)
+		if err != nil {
+			return fmt.Sprintf("<error: %v>", err)
+		}
+		return string(bytes)
+	default:
+		return fmt.Sprintf("%v", val)
 	}
 }

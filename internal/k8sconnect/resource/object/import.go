@@ -12,68 +12,15 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 )
 
-// ImportState method implementing kubeconfig strategy with managed fields tracking
-func (r *objectResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	tflog.Info(ctx, "ImportState called", map[string]interface{}{"import_id": req.ID})
-
-	// Parse import ID: "context:namespace:kind:name" or "context:kind:name" for cluster-scoped
-	kubeContext, namespace, apiVersion, kind, name, err := r.parseImportID(req.ID)
-
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Invalid Import ID Format",
-			fmt.Sprintf("%s\n\n"+
-				"Import ID format:\n"+
-				"  Namespaced: context:namespace:kind:name\n"+
-				"  Cluster-scoped: context:kind:name\n\n"+
-				"Examples:\n"+
-				"  prod:default:Deployment:nginx\n"+
-				"  prod:kube-system:Service:coredns\n"+
-				"  prod:Namespace:my-namespace\n"+
-				"  prod:ClusterRole:admin\n\n"+
-				"For disambiguation, include apiVersion:\n"+
-				"  prod:default:apps/v1/Deployment:nginx\n"+
-				"  prod:networking.k8s.io/v1/Ingress:my-ingress\n"+
-				"  prod:stable.example.com/v1/MyCustomResource:instance-1",
-				err.Error()),
-		)
-		return
-	}
-
-	// Validate required parts
-	if kubeContext == "" {
-		resp.Diagnostics.AddError(
-			"Import Failed: Missing Context",
-			"The import ID must include a kubeconfig context as the first part.\n\n"+
-				"Format:\n"+
-				"  Namespaced: context:namespace:kind:name\n"+
-				"  Cluster-scoped: context:kind:name\n\n"+
-				"Available contexts: kubectl config get-contexts",
-		)
-		return
-	}
-	if kind == "" {
-		resp.Diagnostics.AddError(
-			"Import Failed: Missing Kind",
-			"The resource kind cannot be empty in the import ID.\n\n"+
-				"Example: prod:default:Deployment:nginx",
-		)
-		return
-	}
-	if name == "" {
-		resp.Diagnostics.AddError(
-			"Import Failed: Missing Name",
-			"The resource name cannot be empty in the import ID.\n\n"+
-				"Example: prod:default:Deployment:nginx",
-		)
-		return
-	}
-
+// loadKubeconfig finds and loads the kubeconfig file
+// Returns the path, file contents, and true on success; empty values and false on error
+func (r *objectResource) loadKubeconfig(ctx context.Context, resp *resource.ImportStateResponse) (string, []byte, bool) {
 	// Read kubeconfig from KUBECONFIG env var or default location
 	kubeconfigPath := os.Getenv("KUBECONFIG")
 
@@ -88,7 +35,7 @@ func (r *objectResource) ImportState(ctx context.Context, req resource.ImportSta
 					"  export KUBECONFIG=~/.kube/config\n"+
 					"  terraform import k8sconnect_object.example \"prod/default/Pod/nginx\"",
 			)
-			return
+			return "", nil, false
 		}
 		kubeconfigPath = filepath.Join(homeDir, ".kube", "config")
 	}
@@ -106,7 +53,7 @@ func (r *objectResource) ImportState(ctx context.Context, req resource.ImportSta
 				"  export KUBECONFIG=/path/to/your/kubeconfig\n"+
 				"  terraform import k8sconnect_object.example \"prod/default/Pod/nginx\"", kubeconfigPath),
 		)
-		return
+		return "", nil, false
 	}
 
 	// Read the kubeconfig file contents
@@ -116,17 +63,15 @@ func (r *objectResource) ImportState(ctx context.Context, req resource.ImportSta
 			"Import Failed: Cannot Read Kubeconfig",
 			fmt.Sprintf("Failed to read kubeconfig file at %s: %s", kubeconfigPath, err.Error()),
 		)
-		return
+		return "", nil, false
 	}
 
-	tflog.Info(ctx, "import using kubeconfig", map[string]interface{}{
-		"path":      kubeconfigPath,
-		"context":   kubeContext,
-		"kind":      kind,
-		"name":      name,
-		"namespace": namespace,
-	})
+	return kubeconfigPath, kubeconfigData, true
+}
 
+// createImportClient creates a Kubernetes client for import operations
+// Returns the client and true on success; nil and false on error
+func (r *objectResource) createImportClient(ctx context.Context, kubeconfigData []byte, kubeconfigPath, kubeContext string, resp *resource.ImportStateResponse) (*k8sclient.DynamicK8sClient, bool) {
 	// Create temporary connection model for import
 	tempConn := auth.ClusterConnectionModel{
 		Kubeconfig: types.StringValue(string(kubeconfigData)),
@@ -164,7 +109,7 @@ func (r *objectResource) ImportState(ctx context.Context, req resource.ImportSta
 					"Details: %s", err.Error()),
 			)
 		}
-		return
+		return nil, false
 	}
 
 	// Create K8s client
@@ -174,9 +119,15 @@ func (r *objectResource) ImportState(ctx context.Context, req resource.ImportSta
 			"Import Failed: Client Creation Error",
 			fmt.Sprintf("Failed to create Kubernetes client: %s", err.Error()),
 		)
-		return
+		return nil, false
 	}
 
+	return client, true
+}
+
+// fetchImportResource fetches the resource from Kubernetes for import
+// Returns the resource and true on success; nil and false on error
+func (r *objectResource) fetchImportResource(ctx context.Context, client *k8sclient.DynamicK8sClient, apiVersion, kind, namespace, name, kubeContext string, resp *resource.ImportStateResponse) (*unstructured.Unstructured, bool) {
 	// Discover GVR using apiVersion and kind (both required)
 	tflog.Info(ctx, "Discovering GVR for import", map[string]interface{}{
 		"apiVersion": apiVersion,
@@ -214,6 +165,244 @@ func (r *objectResource) ImportState(ctx context.Context, req resource.ImportSta
 				fmt.Sprintf("Failed to fetch resource: %s", err.Error()),
 			)
 		}
+		return nil, false
+	}
+
+	return liveObj, true
+}
+
+// extractProjectionAndOwnership extracts YAML, projection, and ownership from imported resource
+// Returns yamlBytes, projectionMap, fieldOwnershipMap, paths, and true on success; empty values and false on error
+func (r *objectResource) extractProjectionAndOwnership(ctx context.Context, liveObj *unstructured.Unstructured, resp *resource.ImportStateResponse) ([]byte, types.Map, types.Map, []string, bool) {
+	// Convert to YAML for state
+	yamlBytes, err := r.objectToYAML(liveObj)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Import Failed: YAML conversion error",
+			fmt.Sprintf("Failed to convert resource to YAML: %s", err.Error()),
+		)
+		return nil, types.MapNull(types.StringType), types.MapNull(types.StringType), nil, false
+	}
+
+	// Extract field paths from the imported object
+	paths := extractAllFieldsFromYAML(liveObj.Object, "")
+
+	// Project the current state for managed fields
+	projection, err := projectFields(liveObj.Object, paths)
+	if err != nil {
+		resp.Diagnostics.AddError("Projection Failed",
+			fmt.Sprintf("Failed to project managed fields during import: %s", err))
+		return nil, types.MapNull(types.StringType), types.MapNull(types.StringType), nil, false
+	}
+
+	// Convert projection to flat map for clean diff display
+	projectionMap := flattenProjectionToMap(projection, paths)
+
+	// Convert projection to types.Map
+	projectionMapValue, projDiags := types.MapValueFrom(ctx, types.StringType, projectionMap)
+	if projDiags.HasError() {
+		tflog.Warn(ctx, "Failed to convert projection to map during import", map[string]interface{}{
+			"diagnostics": projDiags,
+		})
+		// Set empty map on error
+		projectionMapValue, _ = types.MapValueFrom(ctx, types.StringType, map[string]string{})
+	}
+
+	// Extract field ownership from the imported object
+	ownership := extractFieldOwnership(liveObj)
+	ownershipMap := make(map[string]string, len(ownership))
+	for path, owner := range ownership {
+		ownershipMap[path] = owner.Manager
+	}
+	fieldOwnershipMap, ownershipDiags := types.MapValueFrom(ctx, types.StringType, ownershipMap)
+	if ownershipDiags.HasError() {
+		tflog.Warn(ctx, "Failed to convert field ownership during import", map[string]interface{}{
+			"diagnostics": ownershipDiags,
+		})
+		// Set empty map on error
+		fieldOwnershipMap, _ = types.MapValueFrom(ctx, types.StringType, map[string]string{})
+	}
+
+	return yamlBytes, projectionMapValue, fieldOwnershipMap, paths, true
+}
+
+// buildImportState builds the final import state and sets it on the response
+// Returns true on success; false on error
+func (r *objectResource) buildImportState(ctx context.Context, resourceID string, yamlBytes []byte, kubeconfigData []byte, kubeContext string, liveObj *unstructured.Unstructured, projectionMapValue, fieldOwnershipMap types.Map, kubeconfigPath string, namespace, name, kind string, paths []string, resp *resource.ImportStateResponse) bool {
+	// Create connection model for import - use the file contents, not the path
+	conn := auth.ClusterConnectionModel{
+		Host:                 types.StringNull(),
+		ClusterCACertificate: types.StringNull(),
+		Kubeconfig:           types.StringValue(string(kubeconfigData)), // Use contents, not path!
+		Context:              types.StringValue(kubeContext),
+		Exec:                 nil,
+	}
+
+	// Convert to types.Object
+	connectionObj, err := r.convertConnectionToObject(ctx, conn)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Import Failed: Connection Conversion Error",
+			fmt.Sprintf("Failed to convert connection model: %s", err.Error()),
+		)
+		return false
+	}
+
+	// Populate object_ref from imported resource
+	objRef := objectRefModel{
+		APIVersion: types.StringValue(liveObj.GetAPIVersion()),
+		Kind:       types.StringValue(liveObj.GetKind()),
+		Name:       types.StringValue(liveObj.GetName()),
+	}
+
+	// Namespace is optional (null for cluster-scoped resources)
+	if ns := liveObj.GetNamespace(); ns != "" {
+		objRef.Namespace = types.StringValue(ns)
+	} else {
+		objRef.Namespace = types.StringNull()
+	}
+
+	// Convert object_ref to types.Object
+	objRefValue, objRefDiags := types.ObjectValueFrom(ctx, map[string]attr.Type{
+		"api_version": types.StringType,
+		"kind":        types.StringType,
+		"name":        types.StringType,
+		"namespace":   types.StringType,
+	}, objRef)
+
+	if objRefDiags.HasError() {
+		resp.Diagnostics.AddError(
+			"Import Failed: ObjectRef Conversion Error",
+			fmt.Sprintf("Failed to convert object_ref: %v", objRefDiags),
+		)
+		return false
+	}
+
+	// Create imported data with managed state projection
+	importedData := objectResourceModel{
+		ID:                     types.StringValue(resourceID),
+		YAMLBody:               types.StringValue(string(yamlBytes)),
+		ClusterConnection:      connectionObj,
+		DeleteProtection:       types.BoolValue(false),
+		IgnoreFields:           types.ListNull(types.StringType),
+		ManagedStateProjection: projectionMapValue,
+		FieldOwnership:         fieldOwnershipMap,
+		ObjectRef:              objRefValue,
+	}
+
+	diags := resp.State.Set(ctx, &importedData)
+	resp.Diagnostics.Append(diags...)
+
+	// Store imported_without_annotations in private state
+	diags = resp.Private.SetKey(ctx, "imported_without_annotations", []byte("true"))
+	resp.Diagnostics.Append(diags...)
+
+	if resp.Diagnostics.HasError() {
+		return false
+	}
+
+	tflog.Info(ctx, "import completed with managed fields tracking", map[string]interface{}{
+		"id":            resourceID,
+		"kind":          kind,
+		"name":          name,
+		"namespace":     namespace,
+		"kubeconfig":    kubeconfigPath,
+		"context":       kubeContext,
+		"managed_paths": len(paths),
+	})
+
+	return true
+}
+
+// validateImportIDParts validates the parsed import ID components
+// Returns true if validation succeeds, false if any errors were added to resp.Diagnostics
+func (r *objectResource) validateImportIDParts(kubeContext, kind, name string, resp *resource.ImportStateResponse) bool {
+	if kubeContext == "" {
+		resp.Diagnostics.AddError(
+			"Import Failed: Missing Context",
+			"The import ID must include a kubeconfig context as the first part.\n\n"+
+				"Format:\n"+
+				"  Namespaced: context:namespace:kind:name\n"+
+				"  Cluster-scoped: context:kind:name\n\n"+
+				"Available contexts: kubectl config get-contexts",
+		)
+		return false
+	}
+	if kind == "" {
+		resp.Diagnostics.AddError(
+			"Import Failed: Missing Kind",
+			"The resource kind cannot be empty in the import ID.\n\n"+
+				"Example: prod:default:Deployment:nginx",
+		)
+		return false
+	}
+	if name == "" {
+		resp.Diagnostics.AddError(
+			"Import Failed: Missing Name",
+			"The resource name cannot be empty in the import ID.\n\n"+
+				"Example: prod:default:Deployment:nginx",
+		)
+		return false
+	}
+	return true
+}
+
+// ImportState method implementing kubeconfig strategy with managed fields tracking
+func (r *objectResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	tflog.Info(ctx, "ImportState called", map[string]interface{}{"import_id": req.ID})
+
+	// Parse import ID: "context:namespace:kind:name" or "context:kind:name" for cluster-scoped
+	kubeContext, namespace, apiVersion, kind, name, err := r.parseImportID(req.ID)
+
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Invalid Import ID Format",
+			fmt.Sprintf("%s\n\n"+
+				"Import ID format:\n"+
+				"  Namespaced: context:namespace:kind:name\n"+
+				"  Cluster-scoped: context:kind:name\n\n"+
+				"Examples:\n"+
+				"  prod:default:Deployment:nginx\n"+
+				"  prod:kube-system:Service:coredns\n"+
+				"  prod:Namespace:my-namespace\n"+
+				"  prod:ClusterRole:admin\n\n"+
+				"For disambiguation, include apiVersion:\n"+
+				"  prod:default:apps/v1/Deployment:nginx\n"+
+				"  prod:networking.k8s.io/v1/Ingress:my-ingress\n"+
+				"  prod:stable.example.com/v1/MyCustomResource:instance-1",
+				err.Error()),
+		)
+		return
+	}
+
+	// Validate required parts
+	if !r.validateImportIDParts(kubeContext, kind, name, resp) {
+		return
+	}
+
+	// Load kubeconfig file
+	kubeconfigPath, kubeconfigData, ok := r.loadKubeconfig(ctx, resp)
+	if !ok {
+		return
+	}
+
+	tflog.Info(ctx, "import using kubeconfig", map[string]interface{}{
+		"path":      kubeconfigPath,
+		"context":   kubeContext,
+		"kind":      kind,
+		"name":      name,
+		"namespace": namespace,
+	})
+
+	// Create Kubernetes client for import
+	client, ok := r.createImportClient(ctx, kubeconfigData, kubeconfigPath, kubeContext, resp)
+	if !ok {
+		return
+	}
+
+	// Fetch the resource from Kubernetes
+	liveObj, ok := r.fetchImportResource(ctx, client, apiVersion, kind, namespace, name, kubeContext, resp)
+	if !ok {
 		return
 	}
 
@@ -247,138 +436,16 @@ func (r *objectResource) ImportState(ctx context.Context, req resource.ImportSta
 		resourceID = r.generateID()
 	}
 
-	// Convert to YAML for state
-	yamlBytes, err := r.objectToYAML(liveObj)
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Import Failed: YAML conversion error",
-			fmt.Sprintf("Failed to convert resource to YAML: %s", err.Error()),
-		)
+	// Extract YAML, projection, and ownership
+	yamlBytes, projectionMapValue, fieldOwnershipMap, paths, ok := r.extractProjectionAndOwnership(ctx, liveObj, resp)
+	if !ok {
 		return
 	}
 
-	// Extract field paths from the imported object
-	paths := extractAllFieldsFromYAML(liveObj.Object, "")
-
-	// Project the current state for managed fields
-	projection, err := projectFields(liveObj.Object, paths)
-	if err != nil {
-		resp.Diagnostics.AddError("Projection Failed",
-			fmt.Sprintf("Failed to project managed fields during import: %s", err))
+	// Build and set final import state
+	if !r.buildImportState(ctx, resourceID, yamlBytes, kubeconfigData, kubeContext, liveObj, projectionMapValue, fieldOwnershipMap, kubeconfigPath, namespace, name, kind, paths, resp) {
 		return
 	}
-
-	// Convert projection to flat map for clean diff display
-	projectionMap := flattenProjectionToMap(projection, paths)
-
-	// Convert projection to types.Map
-	projectionMapValue, projDiags := types.MapValueFrom(ctx, types.StringType, projectionMap)
-	if projDiags.HasError() {
-		tflog.Warn(ctx, "Failed to convert projection to map during import", map[string]interface{}{
-			"diagnostics": projDiags,
-		})
-		// Set empty map on error
-		projectionMapValue, _ = types.MapValueFrom(ctx, types.StringType, map[string]string{})
-	}
-
-	// Extract field ownership from the imported object
-	ownership := extractFieldOwnership(liveObj)
-	ownershipMap := make(map[string]string, len(ownership))
-	for path, owner := range ownership {
-		ownershipMap[path] = owner.Manager
-	}
-	fieldOwnershipMap, ownershipDiags := types.MapValueFrom(ctx, types.StringType, ownershipMap)
-	if ownershipDiags.HasError() {
-		tflog.Warn(ctx, "Failed to convert field ownership during import", map[string]interface{}{
-			"diagnostics": ownershipDiags,
-		})
-		// Set empty map on error
-		fieldOwnershipMap, _ = types.MapValueFrom(ctx, types.StringType, map[string]string{})
-	}
-
-	// Create connection model for import - use the file contents, not the path
-	conn := auth.ClusterConnectionModel{
-		Host:                 types.StringNull(),
-		ClusterCACertificate: types.StringNull(),
-		Kubeconfig:           types.StringValue(string(kubeconfigData)), // Use contents, not path!
-		Context:              types.StringValue(kubeContext),
-		Exec:                 nil,
-	}
-
-	// Convert to types.Object
-	connectionObj, err := r.convertConnectionToObject(ctx, conn)
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Import Failed: Connection Conversion Error",
-			fmt.Sprintf("Failed to convert connection model: %s", err.Error()),
-		)
-		return
-	}
-
-	// Populate object_ref from imported resource
-	objRef := objectRefModel{
-		APIVersion: types.StringValue(liveObj.GetAPIVersion()),
-		Kind:       types.StringValue(liveObj.GetKind()),
-		Name:       types.StringValue(liveObj.GetName()),
-	}
-
-	// Namespace is optional (null for cluster-scoped resources)
-	if ns := liveObj.GetNamespace(); ns != "" {
-		objRef.Namespace = types.StringValue(ns)
-	} else {
-		objRef.Namespace = types.StringNull()
-	}
-
-	// Convert object_ref to types.Object
-	objRefValue, objRefDiags := types.ObjectValueFrom(ctx, map[string]attr.Type{
-		"api_version": types.StringType,
-		"kind":        types.StringType,
-		"name":        types.StringType,
-		"namespace":   types.StringType,
-	}, objRef)
-
-	if objRefDiags.HasError() {
-		resp.Diagnostics.AddError(
-			"Import Failed: ObjectRef Conversion Error",
-			fmt.Sprintf("Failed to convert object_ref: %v", objRefDiags),
-		)
-		return
-	}
-
-	// Create imported data with managed state projection
-	importedData := objectResourceModel{
-		ID:                     types.StringValue(resourceID),
-		YAMLBody:               types.StringValue(string(yamlBytes)),
-		ClusterConnection:      connectionObj,
-		DeleteProtection:       types.BoolValue(false),
-		IgnoreFields:           types.ListNull(types.StringType),
-		ManagedStateProjection: projectionMapValue,
-		FieldOwnership:         fieldOwnershipMap,
-		ObjectRef:              objRefValue,
-	}
-
-	diags := resp.State.Set(ctx, &importedData)
-	resp.Diagnostics.Append(diags...)
-
-	// Store imported_without_annotations in private state
-	diags = resp.Private.SetKey(ctx, "imported_without_annotations", []byte("true"))
-	resp.Diagnostics.Append(diags...)
-
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	tflog.Info(ctx, "import completed with managed fields tracking", map[string]interface{}{
-		"id":            resourceID,
-		"kind":          kind,
-		"name":          name,
-		"namespace":     namespace,
-		"kubeconfig":    kubeconfigPath,
-		"context":       kubeContext,
-		"managed_paths": len(paths),
-		"map_size":      len(projectionMap),
-	})
-
 }
 
 // parseImportID parses the import ID and extracts components

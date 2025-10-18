@@ -159,268 +159,26 @@ func (r *patchResource) executeDryRunPatch(ctx context.Context, req resource.Mod
 			"patch_type":  patchType,
 		})
 
-	// Get GVR and current target resource using the existing helper
-	_, currentObj, err := r.getTargetResource(ctx, client, target)
-	if err != nil {
-		// Check if this is a CRD-not-found error
-		if k8serrors.IsCRDNotFoundError(err) {
-			tflog.Debug(ctx, "CRD not found during plan, will be available during apply")
-			plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
-			plannedData.ManagedFields = types.StringUnknown()
-			plannedData.FieldOwnership = types.MapUnknown(types.StringType)
-			plannedData.PreviousOwners = types.MapUnknown(types.StringType)
-			resp.Plan.Set(ctx, plannedData)
-			return true
-		}
-
-		// Check if target doesn't exist yet
-		if errors.IsNotFound(err) {
-			tflog.Debug(ctx, "Target resource not found during plan, will be created before patch applies")
-			plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
-			plannedData.ManagedFields = types.StringUnknown()
-			plannedData.FieldOwnership = types.MapUnknown(types.StringType)
-			plannedData.PreviousOwners = types.MapUnknown(types.StringType)
-			resp.Plan.Set(ctx, plannedData)
-			return true
-		}
-
-		// Other errors
-		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Get Target Resource",
-			formatTarget(target))
-		return false
+	// Validate target resource and check for conflicts
+	currentObj, ok := r.validatePatchTarget(ctx, client, target, plannedData, patchContent, resp)
+	if !ok {
+		// validatePatchTarget sets resp.Plan if needed and adds diagnostics
+		// Return true if it was a "soft" failure (CRD not found, target doesn't exist)
+		// where we set projection to unknown and want plan to succeed
+		return !resp.Diagnostics.HasError()
 	}
-
-	// Surface any warnings from Get operation
-	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
-
-	// CRITICAL VALIDATION: Prevent self-patching
-	// Check if the target resource is already managed by k8sconnect_object
-	if r.isManagedByThisState(ctx, currentObj) {
-		resp.Diagnostics.AddError(
-			"Cannot Patch Own Resource",
-			fmt.Sprintf("This resource is already managed by k8sconnect_object "+
-				"in this Terraform state.\n\n"+
-				"You cannot patch resources you already own. Instead:\n"+
-				"1. Modify the k8sconnect_object directly, or\n"+
-				"2. Use ignore_fields to allow external controllers to manage specific fields\n\n"+
-				"Target: %s",
-				formatTarget(target)),
-		)
-		return false
-	}
-
-	// CRITICAL VALIDATION: Prevent multiple patches on the same fields
-	// Extract field paths from this patch
-	patchedFieldPaths, err := r.extractPatchFieldPaths(ctx, patchContent, patchType)
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to Parse Patch", err.Error())
-		return false
-	}
-
-	// Get current field ownership
-	currentOwnership := fieldmanagement.ExtractFieldOwnershipMap(currentObj)
 
 	// Generate our field manager name
 	fieldManager := r.generateFieldManager(*plannedData)
 
-	// Check for conflicts with other k8sconnect_patch resources
-	var conflicts []string
-	for _, path := range patchedFieldPaths {
-		if owner, exists := currentOwnership[path]; exists {
-			// Check if owned by another k8sconnect-patch-* manager (not us)
-			if strings.HasPrefix(owner, "k8sconnect-patch-") && owner != fieldManager {
-				conflicts = append(conflicts, fmt.Sprintf("  - %s (currently owned by %s)", path, owner))
-			}
-		}
-	}
-
-	if len(conflicts) > 0 {
-		resp.Diagnostics.AddError(
-			"Patch Conflicts with Existing Patch",
-			fmt.Sprintf("This patch attempts to modify fields already managed by another k8sconnect_patch resource:\n%s\n\n"+
-				"Multiple patches cannot manage the same fields - they will fight for control and cause drift.\n\n"+
-				"Options:\n"+
-				"1. Remove the conflicting fields from one of the patches\n"+
-				"2. Consolidate both patches into a single k8sconnect_patch resource\n"+
-				"3. Use different fields that don't overlap\n\n"+
-				"Target: %s",
-				strings.Join(conflicts, "\n"),
-				formatTarget(target)),
-		)
+	// Execute dry-run patch
+	patchedObj, ok := r.executePatchDryRun(ctx, client, currentObj, plannedData, target, patchContent, fieldManager, resp)
+	if !ok {
 		return false
 	}
 
-	// Perform dry-run based on patch type
-	var patchedObj *unstructured.Unstructured
-	if patchType == "application/strategic-merge-patch+json" {
-		// Strategic merge patch uses SSA - can do dry-run to predict field ownership
-		patchedObj, err = r.dryRunStrategicMergePatch(ctx, client, currentObj, patchContent, fieldManager)
-
-		// Surface any warnings from Patch operation
-		surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
-
-		if err != nil {
-			// Check for immutable field errors
-			if k8serrors.IsImmutableFieldError(err) {
-				immutableFields := k8serrors.ExtractImmutableFields(err)
-				resp.Diagnostics.AddError(
-					"Immutable Field in Patch",
-					fmt.Sprintf("Cannot patch immutable field(s): %v on %s\n\n"+
-						"The target resource has immutable fields that cannot be changed after creation.\n\n"+
-						"Options:\n"+
-						"1. Remove the immutable field from your patch\n"+
-						"2. If the field MUST change, recreate the target resource manually or use k8sconnect_object\n"+
-						"3. k8sconnect_object manages full resource lifecycle and can trigger automatic replacement",
-						immutableFields, formatTarget(target)),
-				)
-				return false
-			}
-
-			// Other errors
-			k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Dry-run Patch", formatTarget(target))
-			return false
-		}
-
-		tflog.Debug(ctx, "Dry-run patch successful")
-
-		// For CREATE operations, calculate projection to show what will be patched
-		if req.State.Raw.IsNull() {
-			tflog.Debug(ctx, "CREATE operation - calculating projection from dry-run result")
-
-			// Extract paths owned by this patch from the dry-run result
-			paths := extractPatchedPaths(ctx, patchedObj.GetManagedFields(), fieldManager)
-
-			// Project the patched fields
-			projection, err := projectPatchedFields(patchedObj.Object, paths)
-			if err != nil {
-				tflog.Warn(ctx, "Failed to project patched fields", map[string]interface{}{"error": err.Error()})
-				// Fall back to unknown
-				plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
-			} else {
-				// Flatten to map for Terraform display
-				projectionMap := flattenPatchProjectionToMap(projection, paths)
-
-				// Set managed_state_projection
-				mapValue, diags := types.MapValueFrom(ctx, types.StringType, projectionMap)
-				resp.Diagnostics.Append(diags...)
-				if resp.Diagnostics.HasError() {
-					return false
-				}
-				plannedData.ManagedStateProjection = mapValue
-
-				tflog.Debug(ctx, "Projection calculated for CREATE", map[string]interface{}{
-					"field_count": len(projectionMap),
-				})
-			}
-
-			// Field ownership can't be accurately predicted yet (ID doesn't exist)
-			// Will be populated during apply with the actual ID
-			plannedData.ManagedFields = types.StringUnknown()
-			plannedData.FieldOwnership = types.MapUnknown(types.StringType)
-			plannedData.PreviousOwners = types.MapUnknown(types.StringType)
-			return true
-		}
-
-		// For UPDATE operations with changed content, calculate projection
-		if !req.State.Raw.IsNull() {
-			var stateData patchResourceModel
-			if diags := req.State.Get(ctx, &stateData); !diags.HasError() {
-				statePatchContent := r.getPatchContent(stateData)
-				planPatchContent := r.getPatchContent(*plannedData)
-
-				if statePatchContent != planPatchContent {
-					// Content changed, calculate new projection
-					tflog.Debug(ctx, "Strategic merge patch content changed, calculating new projection")
-
-					// Extract paths owned by this patch from the dry-run result
-					paths := extractPatchedPaths(ctx, patchedObj.GetManagedFields(), fieldManager)
-
-					// Project the patched fields
-					projection, err := projectPatchedFields(patchedObj.Object, paths)
-					if err != nil {
-						tflog.Warn(ctx, "Failed to project patched fields", map[string]interface{}{"error": err.Error()})
-						plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
-					} else {
-						// Flatten to map for Terraform display
-						projectionMap := flattenPatchProjectionToMap(projection, paths)
-
-						// Set managed_state_projection
-						mapValue, diags := types.MapValueFrom(ctx, types.StringType, projectionMap)
-						resp.Diagnostics.Append(diags...)
-						if resp.Diagnostics.HasError() {
-							return false
-						}
-						plannedData.ManagedStateProjection = mapValue
-
-						tflog.Debug(ctx, "Projection calculated for UPDATE", map[string]interface{}{
-							"field_count": len(projectionMap),
-						})
-					}
-
-					// Field ownership will be populated during apply
-					plannedData.ManagedFields = types.StringUnknown()
-					plannedData.FieldOwnership = types.MapUnknown(types.StringType)
-					plannedData.PreviousOwners = types.MapUnknown(types.StringType)
-					return true
-				}
-			}
-		}
-	} else {
-		// JSON Patch and Merge Patch don't use SSA field management,
-		// so we can't predict field ownership or projection during plan.
-		tflog.Debug(ctx, "JSON/Merge patch detected, skipping dry-run (no SSA field management)")
-
-		if !req.State.Raw.IsNull() {
-			// UPDATE: Check if patch content has changed
-			var stateData patchResourceModel
-			if diags := req.State.Get(ctx, &stateData); !diags.HasError() {
-				statePatchContent := r.getPatchContent(stateData)
-				planPatchContent := r.getPatchContent(*plannedData)
-
-				if statePatchContent == planPatchContent {
-					// Patch content unchanged, preserve existing state
-					tflog.Debug(ctx, "JSON/Merge patch content unchanged, preserving state")
-					plannedData.ManagedStateProjection = stateData.ManagedStateProjection
-					plannedData.ManagedFields = stateData.ManagedFields
-					plannedData.FieldOwnership = stateData.FieldOwnership
-					plannedData.PreviousOwners = stateData.PreviousOwners
-					return true
-				}
-			}
-		}
-
-		// CREATE or UPDATE with changed content: set to unknown (will be populated during apply)
-		// Non-SSA patches don't support projection
-		plannedData.ManagedStateProjection = types.MapNull(types.StringType)
-		plannedData.ManagedFields = types.StringUnknown()
-		plannedData.FieldOwnership = types.MapUnknown(types.StringType)
-		plannedData.PreviousOwners = types.MapUnknown(types.StringType)
-		return true
-	}
-
-	// For UPDATE operations, check if patch content has changed
-	// If nothing changed, preserve state to avoid unnecessary updates
-	if !req.State.Raw.IsNull() {
-		var stateData patchResourceModel
-		if diags := req.State.Get(ctx, &stateData); !diags.HasError() {
-			// Check if patch content is the same
-			statePatchContent := r.getPatchContent(stateData)
-			planPatchContent := r.getPatchContent(*plannedData)
-
-			if statePatchContent == planPatchContent {
-				// Patch content hasn't changed, preserve existing state
-				tflog.Debug(ctx, "Strategic merge patch content unchanged, preserving state")
-				plannedData.ManagedStateProjection = stateData.ManagedStateProjection
-				plannedData.FieldOwnership = stateData.FieldOwnership
-				plannedData.ManagedFields = stateData.ManagedFields
-				plannedData.PreviousOwners = stateData.PreviousOwners
-				return true
-			}
-		}
-	}
-
-	// For UPDATE operations with changed content, extract field ownership from patched result
-	return r.extractPatchedFieldOwnership(ctx, plannedData, patchedObj, currentObj, resp)
+	// Calculate projection and manage state based on patch type and operation
+	return r.calculatePatchProjection(ctx, req, plannedData, patchedObj, currentObj, fieldManager, resp)
 }
 
 // setupDryRunClient creates the k8s client for dry-run (reused from manifest pattern)
@@ -429,10 +187,7 @@ func (r *patchResource) setupDryRunClient(ctx context.Context, plannedData *patc
 	conn, err := auth.ObjectToConnectionModel(ctx, plannedData.ClusterConnection)
 	if err != nil {
 		tflog.Debug(ctx, "Skipping dry-run due to connection conversion error", map[string]interface{}{"error": err.Error()})
-		plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
-		plannedData.ManagedFields = types.StringUnknown()
-		plannedData.FieldOwnership = types.MapUnknown(types.StringType)
-		plannedData.PreviousOwners = types.MapUnknown(types.StringType)
+		setProjectionUnknown(plannedData)
 		return nil, err
 	}
 
@@ -440,10 +195,7 @@ func (r *patchResource) setupDryRunClient(ctx context.Context, plannedData *patc
 	client, err := r.clientGetter(conn)
 	if err != nil {
 		tflog.Debug(ctx, "Skipping dry-run due to client creation error", map[string]interface{}{"error": err.Error()})
-		plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
-		plannedData.ManagedFields = types.StringUnknown()
-		plannedData.FieldOwnership = types.MapUnknown(types.StringType)
-		plannedData.PreviousOwners = types.MapUnknown(types.StringType)
+		setProjectionUnknown(plannedData)
 		return nil, err
 	}
 
@@ -786,4 +538,331 @@ func (r *patchResource) generateFieldManager(data patchResourceModel) string {
 	}
 	// UPDATE or after CREATE - use actual ID
 	return fmt.Sprintf("k8sconnect-patch-%s", data.ID.ValueString())
+}
+
+// =============================================================================
+// Helper Functions for executeDryRunPatch refactoring
+// =============================================================================
+
+// setProjectionUnknown sets all projection-related fields to unknown
+func setProjectionUnknown(data *patchResourceModel) {
+	data.ManagedStateProjection = types.MapUnknown(types.StringType)
+	data.ManagedFields = types.StringUnknown()
+	data.FieldOwnership = types.MapUnknown(types.StringType)
+	data.PreviousOwners = types.MapUnknown(types.StringType)
+}
+
+// hasPatchContentChanged checks if patch content has changed between state and plan
+func (r *patchResource) hasPatchContentChanged(ctx context.Context, req resource.ModifyPlanRequest, plannedData patchResourceModel) bool {
+	if req.State.Raw.IsNull() {
+		// CREATE operation - no state to compare
+		return true
+	}
+
+	var stateData patchResourceModel
+	if diags := req.State.Get(ctx, &stateData); diags.HasError() {
+		// Can't compare, assume changed
+		return true
+	}
+
+	statePatchContent := r.getPatchContent(stateData)
+	planPatchContent := r.getPatchContent(plannedData)
+
+	return statePatchContent != planPatchContent
+}
+
+// validatePatchTarget gets and validates the target resource for patching
+// Returns currentObj and true if valid, or nil and false if invalid (errors added to resp)
+func (r *patchResource) validatePatchTarget(
+	ctx context.Context,
+	client k8sclient.K8sClient,
+	target patchTargetModel,
+	plannedData *patchResourceModel,
+	patchContent string,
+	resp *resource.ModifyPlanResponse,
+) (*unstructured.Unstructured, bool) {
+	// Get GVR and current target resource
+	_, currentObj, err := r.getTargetResource(ctx, client, target)
+	if err != nil {
+		// Check if this is a CRD-not-found error
+		if k8serrors.IsCRDNotFoundError(err) {
+			tflog.Debug(ctx, "CRD not found during plan, will be available during apply")
+			setProjectionUnknown(plannedData)
+			resp.Plan.Set(ctx, plannedData)
+			return nil, false
+		}
+
+		// Check if target doesn't exist yet
+		if errors.IsNotFound(err) {
+			tflog.Debug(ctx, "Target resource not found during plan, will be created before patch applies")
+			setProjectionUnknown(plannedData)
+			resp.Plan.Set(ctx, plannedData)
+			return nil, false
+		}
+
+		// Other errors
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Get Target Resource",
+			formatTarget(target))
+		return nil, false
+	}
+
+	// Surface any warnings from Get operation
+	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
+
+	// CRITICAL VALIDATION: Prevent self-patching
+	if r.isManagedByThisState(ctx, currentObj) {
+		resp.Diagnostics.AddError(
+			"Cannot Patch Own Resource",
+			fmt.Sprintf("This resource is already managed by k8sconnect_object "+
+				"in this Terraform state.\n\n"+
+				"You cannot patch resources you already own. Instead:\n"+
+				"1. Modify the k8sconnect_object directly, or\n"+
+				"2. Use ignore_fields to allow external controllers to manage specific fields\n\n"+
+				"Target: %s",
+				formatTarget(target)),
+		)
+		return nil, false
+	}
+
+	// CRITICAL VALIDATION: Prevent multiple patches on the same fields
+	patchType := r.determinePatchType(*plannedData)
+	patchedFieldPaths, err := r.extractPatchFieldPaths(ctx, patchContent, patchType)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to Parse Patch", err.Error())
+		return nil, false
+	}
+
+	// Get current field ownership
+	currentOwnership := fieldmanagement.ExtractFieldOwnershipMap(currentObj)
+
+	// Generate our field manager name
+	fieldManager := r.generateFieldManager(*plannedData)
+
+	// Check for conflicts with other k8sconnect_patch resources
+	var conflicts []string
+	for _, path := range patchedFieldPaths {
+		if owner, exists := currentOwnership[path]; exists {
+			// Check if owned by another k8sconnect-patch-* manager (not us)
+			if strings.HasPrefix(owner, "k8sconnect-patch-") && owner != fieldManager {
+				conflicts = append(conflicts, fmt.Sprintf("  - %s (currently owned by %s)", path, owner))
+			}
+		}
+	}
+
+	if len(conflicts) > 0 {
+		resp.Diagnostics.AddError(
+			"Patch Conflicts with Existing Patch",
+			fmt.Sprintf("This patch attempts to modify fields already managed by another k8sconnect_patch resource:\n%s\n\n"+
+				"Multiple patches cannot manage the same fields - they will fight for control and cause drift.\n\n"+
+				"Options:\n"+
+				"1. Remove the conflicting fields from one of the patches\n"+
+				"2. Consolidate both patches into a single k8sconnect_patch resource\n"+
+				"3. Use different fields that don't overlap\n\n"+
+				"Target: %s",
+				strings.Join(conflicts, "\n"),
+				formatTarget(target)),
+		)
+		return nil, false
+	}
+
+	return currentObj, true
+}
+
+// executePatchDryRun executes a dry-run patch for strategic merge patches
+// Returns patchedObj and true if successful, or nil and false on error
+// For non-SSA patches (JSON/Merge), returns nil and true (no dry-run available)
+func (r *patchResource) executePatchDryRun(
+	ctx context.Context,
+	client k8sclient.K8sClient,
+	currentObj *unstructured.Unstructured,
+	plannedData *patchResourceModel,
+	target patchTargetModel,
+	patchContent string,
+	fieldManager string,
+	resp *resource.ModifyPlanResponse,
+) (*unstructured.Unstructured, bool) {
+	patchType := r.determinePatchType(*plannedData)
+
+	// JSON Patch and Merge Patch don't use SSA field management
+	if patchType != "application/strategic-merge-patch+json" {
+		tflog.Debug(ctx, "JSON/Merge patch detected, skipping dry-run (no SSA field management)")
+		return nil, true // No patchedObj, but not an error
+	}
+
+	// Strategic merge patch uses SSA - can do dry-run to predict field ownership
+	patchedObj, err := r.dryRunStrategicMergePatch(ctx, client, currentObj, patchContent, fieldManager)
+
+	// Surface any warnings from Patch operation
+	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
+
+	if err != nil {
+		// Check for immutable field errors
+		if k8serrors.IsImmutableFieldError(err) {
+			immutableFields := k8serrors.ExtractImmutableFields(err)
+			resp.Diagnostics.AddError(
+				"Immutable Field in Patch",
+				fmt.Sprintf("Cannot patch immutable field(s): %v on %s\n\n"+
+					"The target resource has immutable fields that cannot be changed after creation.\n\n"+
+					"Options:\n"+
+					"1. Remove the immutable field from your patch\n"+
+					"2. If the field MUST change, recreate the target resource manually or use k8sconnect_object\n"+
+					"3. k8sconnect_object manages full resource lifecycle and can trigger automatic replacement",
+					immutableFields, formatTarget(target)),
+			)
+			return nil, false
+		}
+
+		// Other errors
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Dry-run Patch", formatTarget(target))
+		return nil, false
+	}
+
+	tflog.Debug(ctx, "Dry-run patch successful")
+	return patchedObj, true
+}
+
+// calculatePatchProjection handles projection calculation and state management
+// based on whether it's a strategic merge patch or JSON/Merge patch
+func (r *patchResource) calculatePatchProjection(
+	ctx context.Context,
+	req resource.ModifyPlanRequest,
+	plannedData *patchResourceModel,
+	patchedObj *unstructured.Unstructured,
+	currentObj *unstructured.Unstructured,
+	fieldManager string,
+	resp *resource.ModifyPlanResponse,
+) bool {
+	// Strategic merge patch with dry-run result
+	if patchedObj != nil {
+		return r.handleStrategicMergeProjection(ctx, req, plannedData, patchedObj, currentObj, fieldManager, resp)
+	}
+
+	// JSON/Merge patch - no dry-run available
+	return r.handleNonSSAPatchState(ctx, req, plannedData, resp)
+}
+
+// handleStrategicMergeProjection calculates projection for strategic merge patches
+func (r *patchResource) handleStrategicMergeProjection(
+	ctx context.Context,
+	req resource.ModifyPlanRequest,
+	plannedData *patchResourceModel,
+	patchedObj *unstructured.Unstructured,
+	currentObj *unstructured.Unstructured,
+	fieldManager string,
+	resp *resource.ModifyPlanResponse,
+) bool {
+	// For CREATE operations, calculate projection
+	if req.State.Raw.IsNull() {
+		return r.calculateCreateProjection(ctx, plannedData, patchedObj, fieldManager, resp)
+	}
+
+	// For UPDATE: check if content changed
+	if r.hasPatchContentChanged(ctx, req, *plannedData) {
+		// Content changed, calculate new projection
+		return r.calculateUpdateProjection(ctx, plannedData, patchedObj, fieldManager, resp)
+	}
+
+	// Content unchanged, preserve state
+	return r.preserveState(ctx, req, plannedData)
+}
+
+// handleNonSSAPatchState manages state for JSON/Merge patches (no SSA)
+func (r *patchResource) handleNonSSAPatchState(
+	ctx context.Context,
+	req resource.ModifyPlanRequest,
+	plannedData *patchResourceModel,
+	resp *resource.ModifyPlanResponse,
+) bool {
+	// For UPDATE, check if content unchanged
+	if !req.State.Raw.IsNull() && !r.hasPatchContentChanged(ctx, req, *plannedData) {
+		// Content unchanged, preserve state
+		return r.preserveState(ctx, req, plannedData)
+	}
+
+	// CREATE or UPDATE with changed content
+	// Non-SSA patches don't support projection
+	plannedData.ManagedStateProjection = types.MapNull(types.StringType) // Null for non-SSA
+	plannedData.ManagedFields = types.StringUnknown()
+	plannedData.FieldOwnership = types.MapUnknown(types.StringType)
+	plannedData.PreviousOwners = types.MapUnknown(types.StringType)
+	return true
+}
+
+// calculateProjectionFromDryRun calculates projection for CREATE or UPDATE operations
+func (r *patchResource) calculateProjectionFromDryRun(
+	ctx context.Context,
+	plannedData *patchResourceModel,
+	patchedObj *unstructured.Unstructured,
+	fieldManager string,
+	operationType string,
+	resp *resource.ModifyPlanResponse,
+) bool {
+	tflog.Debug(ctx, fmt.Sprintf("%s operation - calculating projection from dry-run result", operationType))
+
+	paths := extractPatchedPaths(ctx, patchedObj.GetManagedFields(), fieldManager)
+	projection, err := projectPatchedFields(patchedObj.Object, paths)
+	if err != nil {
+		tflog.Warn(ctx, "Failed to project patched fields", map[string]interface{}{"error": err.Error()})
+		setProjectionUnknown(plannedData)
+		return true
+	}
+
+	projectionMap := flattenPatchProjectionToMap(projection, paths)
+	mapValue, diags := types.MapValueFrom(ctx, types.StringType, projectionMap)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return false
+	}
+
+	plannedData.ManagedStateProjection = mapValue
+	tflog.Debug(ctx, fmt.Sprintf("Projection calculated for %s", operationType), map[string]interface{}{
+		"field_count": len(projectionMap),
+	})
+
+	// Field ownership populated during apply
+	plannedData.ManagedFields = types.StringUnknown()
+	plannedData.FieldOwnership = types.MapUnknown(types.StringType)
+	plannedData.PreviousOwners = types.MapUnknown(types.StringType)
+	return true
+}
+
+// calculateCreateProjection calculates projection for CREATE operations
+func (r *patchResource) calculateCreateProjection(
+	ctx context.Context,
+	plannedData *patchResourceModel,
+	patchedObj *unstructured.Unstructured,
+	fieldManager string,
+	resp *resource.ModifyPlanResponse,
+) bool {
+	return r.calculateProjectionFromDryRun(ctx, plannedData, patchedObj, fieldManager, "CREATE", resp)
+}
+
+// calculateUpdateProjection calculates projection for UPDATE operations with changed content
+func (r *patchResource) calculateUpdateProjection(
+	ctx context.Context,
+	plannedData *patchResourceModel,
+	patchedObj *unstructured.Unstructured,
+	fieldManager string,
+	resp *resource.ModifyPlanResponse,
+) bool {
+	return r.calculateProjectionFromDryRun(ctx, plannedData, patchedObj, fieldManager, "UPDATE", resp)
+}
+
+// preserveState preserves existing state when content hasn't changed
+func (r *patchResource) preserveState(
+	ctx context.Context,
+	req resource.ModifyPlanRequest,
+	plannedData *patchResourceModel,
+) bool {
+	var stateData patchResourceModel
+	if diags := req.State.Get(ctx, &stateData); diags.HasError() {
+		return false
+	}
+
+	tflog.Debug(ctx, "Patch content unchanged, preserving state")
+	plannedData.ManagedStateProjection = stateData.ManagedStateProjection
+	plannedData.ManagedFields = stateData.ManagedFields
+	plannedData.FieldOwnership = stateData.FieldOwnership
+	plannedData.PreviousOwners = stateData.PreviousOwners
+	return true
 }

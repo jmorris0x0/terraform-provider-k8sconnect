@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -486,25 +487,7 @@ func flattenProjectionToMap(projection map[string]interface{}, paths []string) m
 
 // formatValueForDisplay converts a value to string for display in flat map
 func formatValueForDisplay(v interface{}) string {
-	if v == nil {
-		return "<nil>"
-	}
-
-	switch val := v.(type) {
-	case string:
-		return val
-	case int, int32, int64, float32, float64, bool:
-		return fmt.Sprintf("%v", val)
-	case map[string]interface{}, []interface{}:
-		// Complex types - use compact JSON
-		bytes, err := json.Marshal(val)
-		if err != nil {
-			return fmt.Sprintf("<error: %v>", err)
-		}
-		return string(bytes)
-	default:
-		return fmt.Sprintf("%v", val)
-	}
+	return common.FormatValueForDisplay(v)
 }
 
 // filterIgnoredPaths removes paths that match any ignore pattern

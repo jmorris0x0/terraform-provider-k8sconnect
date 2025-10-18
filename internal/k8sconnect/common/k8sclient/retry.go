@@ -153,6 +153,34 @@ func calculateBackoff(attempt int, config RetryConfig) time.Duration {
 	return delay
 }
 
+// retryableErrorPatterns contains error message patterns that indicate a retryable error
+var retryableErrorPatterns = []string{
+	// etcd errors
+	"etcdserver: leader changed",
+
+	// Connection errors
+	"connection refused",
+	"connection reset",
+	"broken pipe",
+	"connection timed out",
+
+	// Temporary failures
+	"temporary failure",
+	"try again",
+
+	// DNS resolution failures
+	"no such host",
+	"name resolution",
+
+	// TLS errors (may be transient during cert rotation)
+	"tls handshake timeout",
+	"tls: bad certificate",
+
+	// Discovery errors - CRD/CR timing issues (API server discovery cache not updated yet)
+	"could not find the requested resource",
+	"no matches for kind",
+}
+
 // isRetryableError determines if an error should trigger a retry
 func isRetryableError(err error) bool {
 	if err == nil {
@@ -190,42 +218,10 @@ func isRetryableError(err error) bool {
 
 	// Check error message for common retryable patterns
 	errMsg := strings.ToLower(err.Error())
-
-	// etcd leader changes are transient
-	if strings.Contains(errMsg, "etcdserver: leader changed") {
-		return true
-	}
-
-	// Connection errors
-	if strings.Contains(errMsg, "connection refused") ||
-		strings.Contains(errMsg, "connection reset") ||
-		strings.Contains(errMsg, "broken pipe") ||
-		strings.Contains(errMsg, "connection timed out") {
-		return true
-	}
-
-	// Temporary failures
-	if strings.Contains(errMsg, "temporary failure") ||
-		strings.Contains(errMsg, "try again") {
-		return true
-	}
-
-	// DNS resolution failures
-	if strings.Contains(errMsg, "no such host") ||
-		strings.Contains(errMsg, "name resolution") {
-		return true
-	}
-
-	// TLS errors (may be transient during cert rotation)
-	if strings.Contains(errMsg, "tls handshake timeout") ||
-		strings.Contains(errMsg, "tls: bad certificate") {
-		return true
-	}
-
-	// Discovery errors - CRD/CR timing issues (API server discovery cache not updated yet)
-	if strings.Contains(errMsg, "could not find the requested resource") ||
-		strings.Contains(errMsg, "no matches for kind") {
-		return true
+	for _, pattern := range retryableErrorPatterns {
+		if strings.Contains(errMsg, pattern) {
+			return true
+		}
 	}
 
 	// Default: don't retry unknown errors
