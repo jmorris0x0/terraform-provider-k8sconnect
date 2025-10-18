@@ -93,64 +93,18 @@ func (d *yamlScopedDataSource) Read(ctx context.Context, req datasource.ReadRequ
 	// Determine which input mode to use (validation handled by ConfigValidators)
 	hasContent := !data.Content.IsNull() && data.Content.ValueString() != ""
 
-	var documents []yaml_common.DocumentInfo
-	var sourceID string
-
-	if hasContent {
-		// Parse inline content
-		content := data.Content.ValueString()
-		docs, err := yaml_common.ParseDocuments(content, "<inline>")
-		if err != nil {
-			resp.Diagnostics.AddError(
-				"Content Parsing Error",
-				fmt.Sprintf("Failed to parse inline YAML content: %s", err),
-			)
-			return
-		}
-		documents = docs
-		sourceID = fmt.Sprintf("content-%s", yaml_common.HashString(content)[:8])
-	} else {
-		// Handle pattern-based loading
-		pattern := data.Pattern.ValueString()
-		files, err := yaml_common.ExpandPattern(pattern)
-		if err != nil {
-			resp.Diagnostics.AddError(
-				"Pattern Error",
-				fmt.Sprintf("Failed to resolve pattern %q: %s", pattern, err),
-			)
-			return
-		}
-
-		if len(files) == 0 {
-			resp.Diagnostics.AddError(
-				"No Files Found",
-				fmt.Sprintf("No files matched pattern %q. Check that the path exists and contains YAML files.", pattern),
-			)
-			return
-		}
-
-		// Process all matching files
-		for _, file := range files {
-			content, err := yaml_common.ReadFile(file)
-			if err != nil {
-				resp.Diagnostics.AddError(
-					"File Read Error",
-					fmt.Sprintf("Failed to read file %q: %s", file, err),
-				)
-				return
-			}
-
-			docs, err := yaml_common.ParseDocuments(content, file)
-			if err != nil {
-				resp.Diagnostics.AddError(
-					"File Parsing Error",
-					fmt.Sprintf("Failed to parse YAML in file %q: %s", file, err),
-				)
-				return
-			}
-			documents = append(documents, docs...)
-		}
-		sourceID = fmt.Sprintf("pattern-%s", yaml_common.HashString(pattern)[:8])
+	// Load documents from either inline content or file pattern
+	documents, sourceID, err := yaml_common.LoadDocuments(
+		hasContent,
+		data.Content.ValueString(),
+		data.Pattern.ValueString(),
+	)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Document Loading Error",
+			err.Error(),
+		)
+		return
 	}
 
 	// Categorize manifests by scope

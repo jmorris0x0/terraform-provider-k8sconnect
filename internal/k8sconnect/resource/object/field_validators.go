@@ -8,7 +8,6 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"gopkg.in/yaml.v3"
-	"k8s.io/client-go/util/jsonpath"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/validation"
 )
@@ -76,34 +75,5 @@ func (v yamlValidator) ValidateString(ctx context.Context, req validator.StringR
 			"Invalid YAML",
 			fmt.Sprintf("The value is not valid YAML: %s", err),
 		)
-	}
-}
-
-// jsonPathMapKeysValidator validates that all keys in a map are valid JSONPath expressions
-type jsonPathMapKeysValidator struct{}
-
-func (v jsonPathMapKeysValidator) Description(ctx context.Context) string {
-	return "validates that all map keys are valid JSONPath expressions"
-}
-
-func (v jsonPathMapKeysValidator) MarkdownDescription(ctx context.Context) string {
-	return "validates that all map keys are valid JSONPath expressions"
-}
-
-func (v jsonPathMapKeysValidator) ValidateMap(ctx context.Context, req validator.MapRequest, resp *validator.MapResponse) {
-	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
-		return // Skip validation for unknown/null values
-	}
-
-	elements := req.ConfigValue.Elements()
-	for key := range elements {
-		jp := jsonpath.New("validator")
-		if err := jp.Parse(fmt.Sprintf("{.%s}", key)); err != nil {
-			resp.Diagnostics.AddAttributeError(
-				req.Path.AtMapKey(key),
-				"Invalid JSONPath",
-				fmt.Sprintf("The key '%s' is not a valid JSONPath: %s", key, err),
-			)
-		}
 	}
 }

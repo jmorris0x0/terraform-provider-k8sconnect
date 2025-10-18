@@ -307,32 +307,6 @@ func isClusterConnectionEmpty(conn types.Object) bool {
 		connModel.Exec == nil
 }
 
-type jsonPathValidator struct{}
-
-func (v jsonPathValidator) Description(ctx context.Context) string {
-	return "validates JSONPath syntax"
-}
-
-func (v jsonPathValidator) MarkdownDescription(ctx context.Context) string {
-	return "validates JSONPath syntax"
-}
-
-func (v jsonPathValidator) ValidateString(ctx context.Context, req validator.StringRequest, resp *validator.StringResponse) {
-	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
-		return
-	}
-
-	fieldPath := req.ConfigValue.ValueString()
-	jp := jsonpath.New("validator")
-	if err := jp.Parse(fmt.Sprintf("{.%s}", fieldPath)); err != nil {
-		resp.Diagnostics.AddAttributeError(
-			req.Path,
-			"Invalid JSONPath Syntax",
-			fmt.Sprintf("The field path '%s' is not valid JSONPath: %s", fieldPath, err),
-		)
-	}
-}
-
 // =============================================================================
 // ignoreFieldsValidator blocks attempts to ignore provider internal annotations
 // =============================================================================

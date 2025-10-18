@@ -788,15 +788,16 @@ func (r *patchResource) handleNonSSAPatchState(
 	return true
 }
 
-// calculateCreateProjection calculates projection for CREATE operations
-func (r *patchResource) calculateCreateProjection(
+// calculateProjectionFromDryRun calculates projection for CREATE or UPDATE operations
+func (r *patchResource) calculateProjectionFromDryRun(
 	ctx context.Context,
 	plannedData *patchResourceModel,
 	patchedObj *unstructured.Unstructured,
 	fieldManager string,
+	operationType string,
 	resp *resource.ModifyPlanResponse,
 ) bool {
-	tflog.Debug(ctx, "CREATE operation - calculating projection from dry-run result")
+	tflog.Debug(ctx, fmt.Sprintf("%s operation - calculating projection from dry-run result", operationType))
 
 	paths := extractPatchedPaths(ctx, patchedObj.GetManagedFields(), fieldManager)
 	projection, err := projectPatchedFields(patchedObj.Object, paths)
@@ -814,7 +815,7 @@ func (r *patchResource) calculateCreateProjection(
 	}
 
 	plannedData.ManagedStateProjection = mapValue
-	tflog.Debug(ctx, "Projection calculated for CREATE", map[string]interface{}{
+	tflog.Debug(ctx, fmt.Sprintf("Projection calculated for %s", operationType), map[string]interface{}{
 		"field_count": len(projectionMap),
 	})
 
@@ -825,6 +826,17 @@ func (r *patchResource) calculateCreateProjection(
 	return true
 }
 
+// calculateCreateProjection calculates projection for CREATE operations
+func (r *patchResource) calculateCreateProjection(
+	ctx context.Context,
+	plannedData *patchResourceModel,
+	patchedObj *unstructured.Unstructured,
+	fieldManager string,
+	resp *resource.ModifyPlanResponse,
+) bool {
+	return r.calculateProjectionFromDryRun(ctx, plannedData, patchedObj, fieldManager, "CREATE", resp)
+}
+
 // calculateUpdateProjection calculates projection for UPDATE operations with changed content
 func (r *patchResource) calculateUpdateProjection(
 	ctx context.Context,
@@ -833,33 +845,7 @@ func (r *patchResource) calculateUpdateProjection(
 	fieldManager string,
 	resp *resource.ModifyPlanResponse,
 ) bool {
-	tflog.Debug(ctx, "Strategic merge patch content changed, calculating new projection")
-
-	paths := extractPatchedPaths(ctx, patchedObj.GetManagedFields(), fieldManager)
-	projection, err := projectPatchedFields(patchedObj.Object, paths)
-	if err != nil {
-		tflog.Warn(ctx, "Failed to project patched fields", map[string]interface{}{"error": err.Error()})
-		setProjectionUnknown(plannedData)
-		return true
-	}
-
-	projectionMap := flattenPatchProjectionToMap(projection, paths)
-	mapValue, diags := types.MapValueFrom(ctx, types.StringType, projectionMap)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return false
-	}
-
-	plannedData.ManagedStateProjection = mapValue
-	tflog.Debug(ctx, "Projection calculated for UPDATE", map[string]interface{}{
-		"field_count": len(projectionMap),
-	})
-
-	// Field ownership populated during apply
-	plannedData.ManagedFields = types.StringUnknown()
-	plannedData.FieldOwnership = types.MapUnknown(types.StringType)
-	plannedData.PreviousOwners = types.MapUnknown(types.StringType)
-	return true
+	return r.calculateProjectionFromDryRun(ctx, plannedData, patchedObj, fieldManager, "UPDATE", resp)
 }
 
 // preserveState preserves existing state when content hasn't changed
