@@ -164,7 +164,7 @@ jobs:
         if: always()
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          file: coverage.out
+          files: ./coverage.out
           fail_ci_if_error: false
 
       - name: Clean up
