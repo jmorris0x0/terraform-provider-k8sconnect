@@ -159,23 +159,14 @@ jobs:
           TF_ACC_TERRAFORM_VERSION: '1.13.3'
         run: make coverage
 
-      - name: Upload unit test coverage to Codecov
+      - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         if: always()
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage-unit.out
-          flags: unit
+          files: ./coverage.out
           fail_ci_if_error: false
-
-      - name: Upload acceptance test coverage to Codecov
-        uses: codecov/codecov-action@v5
-        if: always()
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage-acceptance.out
-          flags: acceptance
-          fail_ci_if_error: false
+          verbose: true
 
       - name: Clean up
         if: always()
