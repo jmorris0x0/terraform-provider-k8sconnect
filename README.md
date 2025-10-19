@@ -20,6 +20,7 @@ Bootstrap Kubernetes clusters and workloads in a **single `terraform apply`**. N
 | Controller coexistence                | ⚠️ SSA optional or no ignore_fields                                         | ✅ Always-on SSA + ignore_fields for HPA, webhooks, operators               |
 | Unpredictable plan diffs              | ❌ Plan shows what you send, not what K8s will do                           | ✅ Dry-run projections show exact changes before apply                      |
 | Surgical patches on managed resources | ❌ Import or take full ownership                                            | ✅ Patch EKS/GKE/Helm/operator resources                                    |
+| Wait timeout behavior                 | ⚠️ Taints resource, forces recreate on retry                                | ✅ Separate wait resource, retry in-place                                   |
 
 
 **Stop fighting [Terraform's provider model](https://news.ycombinator.com/item?id=27434363). Create clusters and bootstrap workloads in one apply.**
