@@ -9,6 +9,38 @@ description: |-
 
 {{ .Description | trimspace }}
 
+## Example Usage - Bootstrap EKS Cluster with Workloads
+
+Single terraform apply to create cluster and deploy workloads:
+
+```terraform
+# Create a new cluster
+resource "aws_eks_cluster" "main" {
+  name     = "my-cluster"
+  role_arn = aws_iam_role.cluster.arn
+  # ... (cluster configuration)
+}
+
+# Connection can be reused across resources
+locals {
+  cluster_connection = {
+    host                   = aws_eks_cluster.main.endpoint
+    cluster_ca_certificate = aws_eks_cluster.main.certificate_authority[0].data
+    exec = {
+      api_version = "client.authentication.k8s.io/v1"
+      command     = "aws"
+      args        = ["eks", "get-token", "--cluster-name", aws_eks_cluster.main.name]
+    }
+  }
+}
+
+# Deploy workloads immediately - no waiting for provider configuration!
+resource "k8sconnect_object" "cert_manager" {
+  yaml_body          = file("cert-manager.yaml")
+  cluster_connection = local.cluster_connection
+}
+```
+
 ## Example Usage - Basic Deployment
 
 <!-- runnable-test: object-basic-deployment -->
@@ -51,32 +83,6 @@ resource "k8sconnect_object" "deployment" {
 }
 ```
 <!-- /runnable-test -->
-
-## Example Usage - Bootstrap EKS Cluster with Workloads
-
-Single terraform apply to create cluster and deploy workloads:
-
-```terraform
-resource "aws_eks_cluster" "main" {
-  name     = "my-cluster"
-  role_arn = aws_iam_role.cluster.arn
-  # ... cluster configuration
-}
-
-resource "k8sconnect_object" "cert_manager" {
-  yaml_body = file("cert-manager.yaml")
-
-  cluster_connection = {
-    host                   = aws_eks_cluster.main.endpoint
-    cluster_ca_certificate = base64decode(aws_eks_cluster.main.certificate_authority[0].data)
-    exec = {
-      api_version = "client.authentication.k8s.io/v1"
-      command     = "aws"
-      args        = ["eks", "get-token", "--cluster-name", aws_eks_cluster.main.name]
-    }
-  }
-}
-```
 
 ## Example Usage - Coexisting with HPA
 
