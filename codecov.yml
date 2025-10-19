@@ -1,0 +1,32 @@
+parsers:
+  go:
+    partials_as_hits: true
+
+coverage:
+  precision: 2
+  round: down
+  range: "70...100"
+
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        target: auto
+        threshold: 1%
+
+ignore:
+  - "**/test/**"
+  - "test/**"
+  - "**/examples/**"
+  - "examples/**"
+  - "**/internal/k8sconnect/common/test/**"
+  - "internal/k8sconnect/common/test/**"
+  - "**/*_test.go"
+
+comment:
+  layout: "reach,diff,flags,tree"
+  behavior: default
+  require_changes: false
