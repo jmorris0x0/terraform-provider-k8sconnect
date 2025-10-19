@@ -17,11 +17,10 @@ coverage:
         threshold: 1%
 
 ignore:
-  - "test/examples/**"
-  - "test/doctest/**"
-  - "test/oidc-setup/**"
-  - "examples/**"
-  - "**/*_test.go"  # Test files should not be counted in coverage
+  - "test/**"                              # Test support code
+  - "examples/**"                          # Example code
+  - "internal/k8sconnect/common/test/**"   # Test helper functions
+  - "**/*_test.go"                         # Test files
 
 comment:
   layout: "reach,diff,flags,tree"
