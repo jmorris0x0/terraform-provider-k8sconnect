@@ -312,8 +312,11 @@ coverage: create-cluster
 		exit 1; \
 	fi; \
 	echo "📊 Merging coverage reports..."; \
-	echo "mode: atomic" > coverage.out; \
-	grep -h -v "^mode:" coverage-unit.out coverage-acceptance.out >> coverage.out 2>/dev/null || true; \
+	if ! command -v gocovmerge >/dev/null 2>&1; then \
+		echo "Installing gocovmerge..."; \
+		go install github.com/wadey/gocovmerge@latest; \
+	fi; \
+	gocovmerge coverage-unit.out coverage-acceptance.out > coverage.out; \
 	go tool cover -func=coverage.out ; \
 	go tool cover -html=coverage.out -o coverage.html ; \
 	echo "HTML report written to ./coverage.html"; \
