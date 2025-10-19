@@ -1,4 +1,4 @@
-// internal/k8sconnect/datasource/object/manifest_test.go
+// internal/k8sconnect/datasource/object/object_test.go
 package object_test
 
 import (

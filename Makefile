@@ -146,11 +146,27 @@ create-cluster:
 testacc: create-cluster
 	@echo "🏃 Running acceptance tests..."; \
 	TF_VERSION="$${TF_ACC_TERRAFORM_VERSION:-$(TERRAFORM_VERSION)}"; \
-	if [ "$$TF_VERSION" != "$$(tfenv version-name)" ]; then \
-		echo "Installing Terraform $$TF_VERSION via tfenv..."; \
-		tfenv install $$TF_VERSION || true; \
-		tfenv use $$TF_VERSION || true; \
+	echo "Required Terraform version: $$TF_VERSION"; \
+	if command -v tfenv >/dev/null 2>&1; then \
+		echo "📦 tfenv detected - switching to Terraform $$TF_VERSION"; \
+		if ! tfenv list 2>/dev/null | grep -q "$$TF_VERSION"; then \
+			echo "   Installing Terraform $$TF_VERSION..."; \
+			tfenv install $$TF_VERSION; \
+		fi; \
+		tfenv use $$TF_VERSION; \
+	else \
+		echo "ℹ️  tfenv not found - using system Terraform"; \
 	fi; \
+	ACTUAL_TF_VERSION=$$(terraform version -json 2>/dev/null | jq -r .terraform_version || terraform version | head -n1 | cut -d' ' -f2 | tr -d 'v'); \
+	echo "Actual Terraform version: $$ACTUAL_TF_VERSION"; \
+	if [ "$$ACTUAL_TF_VERSION" != "$$TF_VERSION" ]; then \
+		echo "❌ ERROR: Terraform version mismatch!"; \
+		echo "   Expected: $$TF_VERSION"; \
+		echo "   Actual:   $$ACTUAL_TF_VERSION"; \
+		echo "   Ensure Terraform $$TF_VERSION is installed"; \
+		exit 1; \
+	fi; \
+	echo "✅ Terraform version verified"; \
 	TEST_FILTER="$${TEST:-TestAcc}"; \
 	echo "Running tests matching: $$TEST_FILTER"; \
 	if [ -n "$$GITHUB_ACTIONS" ]; then \
@@ -178,15 +194,6 @@ testacc: create-cluster
 	echo "TF_ACC_K8S_TOKEN=$$(echo $$TF_ACC_K8S_TOKEN | cut -c1-20)..."; \
 	echo "TF_ACC_K8S_CLIENT_CERT=$$(echo $$TF_ACC_K8S_CLIENT_CERT | cut -c1-20)..."; \
 	echo "TF_ACC_K8S_CLIENT_KEY=$$(echo $$TF_ACC_K8S_CLIENT_KEY | cut -c1-20)..."; \
-	ACTUAL_TF_VERSION=$$(terraform version -json | jq -r .terraform_version); \
-	echo "Terraform version: $$ACTUAL_TF_VERSION"; \
-	if [ "$$ACTUAL_TF_VERSION" != "$$TF_VERSION" ]; then \
-		echo "❌ ERROR: Terraform version mismatch!"; \
-		echo "   Expected: $$TF_VERSION"; \
-		echo "   Actual:   $$ACTUAL_TF_VERSION"; \
-		echo "   Path:     $$TF_ACC_TERRAFORM_PATH"; \
-		exit 1; \
-	fi; \
 	go test -cover -v ./internal/k8sconnect/... -timeout 30m -run "$$TEST_FILTER" $$PARALLEL_FLAG
 
 .PHONY: test-examples
@@ -281,11 +288,27 @@ release-check:
 coverage: create-cluster
 	@echo "📊 Building coverage reports (unit + acceptance)"
 	@TF_VERSION="$${TF_ACC_TERRAFORM_VERSION:-$(TERRAFORM_VERSION)}"; \
-	if [ "$$TF_VERSION" != "$$(tfenv version-name)" ]; then \
-		echo "Installing Terraform $$TF_VERSION via tfenv..."; \
-		tfenv install $$TF_VERSION || true; \
-		tfenv use $$TF_VERSION || true; \
+	echo "Required Terraform version: $$TF_VERSION"; \
+	if command -v tfenv >/dev/null 2>&1; then \
+		echo "📦 tfenv detected - switching to Terraform $$TF_VERSION"; \
+		if ! tfenv list 2>/dev/null | grep -q "$$TF_VERSION"; then \
+			echo "   Installing Terraform $$TF_VERSION..."; \
+			tfenv install $$TF_VERSION; \
+		fi; \
+		tfenv use $$TF_VERSION; \
+	else \
+		echo "ℹ️  tfenv not found - using system Terraform"; \
 	fi; \
+	ACTUAL_TF_VERSION=$$(terraform version -json 2>/dev/null | jq -r .terraform_version || terraform version | head -n1 | cut -d' ' -f2 | tr -d 'v'); \
+	echo "Actual Terraform version: $$ACTUAL_TF_VERSION"; \
+	if [ "$$ACTUAL_TF_VERSION" != "$$TF_VERSION" ]; then \
+		echo "❌ ERROR: Terraform version mismatch!"; \
+		echo "   Expected: $$TF_VERSION"; \
+		echo "   Actual:   $$ACTUAL_TF_VERSION"; \
+		echo "   Ensure Terraform $$TF_VERSION is installed"; \
+		exit 1; \
+	fi; \
+	echo "✅ Terraform version verified"; \
 	PKGS=$$(go list ./... | grep -v -E "(test/examples|test/doctest)"); \
 	echo "🧪 Running unit tests..."; \
 	go test $$PKGS -run "^Test[^A]" -coverpkg=./... -covermode=atomic -coverprofile=coverage-unit.out -count=1 || true; \
@@ -300,13 +323,6 @@ coverage: create-cluster
 	  TF_ACC_K8S_CLIENT_CERT="$$(base64 < $(TESTBUILD_DIR)/client.crt | tr -d '\n')" \
 	  TF_ACC_K8S_CLIENT_KEY="$$(base64 < $(TESTBUILD_DIR)/client.key | tr -d '\n')" \
 	  go test $$PKGS -run "^TestAcc" -coverpkg=./... -covermode=atomic -coverprofile=coverage-acceptance.out -count=1 ; \
-	ACTUAL_TF_VERSION=$$(terraform version -json | jq -r .terraform_version); \
-	if [ "$$ACTUAL_TF_VERSION" != "$$TF_VERSION" ]; then \
-		echo "❌ ERROR: Terraform version mismatch in coverage!"; \
-		echo "   Expected: $$TF_VERSION"; \
-		echo "   Actual:   $$ACTUAL_TF_VERSION"; \
-		exit 1; \
-	fi; \
 	echo "📊 Merging coverage reports..."; \
 	if ! command -v gocovmerge >/dev/null 2>&1; then \
 		echo "Installing gocovmerge..."; \

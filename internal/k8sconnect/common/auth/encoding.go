@@ -61,13 +61,3 @@ func isPEMFormat(input string) bool {
 
 	return false
 }
-
-// AutoDecodePEMWithDefault is like AutoDecodePEM but returns nil error for empty input.
-// This is useful for optional fields.
-func AutoDecodePEMWithDefault(input string, fieldName string) ([]byte, error) {
-	input = strings.TrimSpace(input)
-	if input == "" {
-		return nil, nil
-	}
-	return AutoDecodePEM(input, fieldName)
-}

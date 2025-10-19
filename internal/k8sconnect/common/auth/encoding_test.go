@@ -201,30 +201,3 @@ func TestIsPEMFormat(t *testing.T) {
 		})
 	}
 }
-
-func TestAutoDecodePEMWithDefault(t *testing.T) {
-	t.Run("Empty input returns nil", func(t *testing.T) {
-		result, err := AutoDecodePEMWithDefault("", "optional_field")
-		require.NoError(t, err)
-		assert.Nil(t, result)
-	})
-
-	t.Run("Whitespace only returns nil", func(t *testing.T) {
-		result, err := AutoDecodePEMWithDefault("  \n\t ", "optional_field")
-		require.NoError(t, err)
-		assert.Nil(t, result)
-	})
-
-	t.Run("Valid PEM input", func(t *testing.T) {
-		pem := "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----"
-		result, err := AutoDecodePEMWithDefault(pem, "optional_field")
-		require.NoError(t, err)
-		assert.Equal(t, pem, string(result))
-	})
-
-	t.Run("Invalid input returns error", func(t *testing.T) {
-		_, err := AutoDecodePEMWithDefault("invalid", "optional_field")
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "must be PEM format")
-	})
-}

@@ -5,9 +5,9 @@ Accepted
 
 ## Context
 
-Kubernetes status fields contain volatile data (observedGeneration, resourceVersion, conditions[].lastTransitionTime) that changes without user intervention. Storing entire status in Terraform state causes constant false drift.
+Kubernetes status fields contain volatile data (observedGeneration, resourceVersion, conditions[].lastTransitionTime) that changes without user intervention. Providers typically handle this by making status a computed field (preventing drift detection), but this limits reliable use in cross-resource dependencies.
 
-**Core Tension**: Users need certain status fields (LoadBalancer IPs) for outputs and cross-resource dependencies, but storing status creates drift from volatile fields users don't care about.
+**Core Tension**: Users need certain status fields (LoadBalancer IPs) for outputs and cross-resource dependencies, but traditional approaches either cause drift or make status unreliable for dependencies.
 
 ## Decision
 

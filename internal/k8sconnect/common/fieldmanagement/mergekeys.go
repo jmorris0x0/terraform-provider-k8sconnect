@@ -70,27 +70,3 @@ func (m *MergeKeyMatcher) ItemMatchesMergeKey(item map[string]interface{}, merge
 	// If we could verify at least one field and all verifiable fields matched
 	return verifiableFields > 0 && verifiableFields == matchedFields
 }
-
-// ResolveArrayKey finds which field contains an array with an item matching the merge key
-func (m *MergeKeyMatcher) ResolveArrayKey(key string, parentValue interface{}) (fieldName string, index int) {
-	mergeKey, err := m.ParseMergeKey(key)
-	if err != nil {
-		return "", -1
-	}
-
-	parentMap, ok := parentValue.(map[string]interface{})
-	if !ok {
-		return "", -1
-	}
-
-	// Search each field for an array containing a matching item
-	for fieldName, fieldValue := range parentMap {
-		if array, ok := fieldValue.([]interface{}); ok {
-			if idx := m.FindArrayIndex(array, mergeKey); idx >= 0 {
-				return fieldName, idx
-			}
-		}
-	}
-
-	return "", -1
-}
