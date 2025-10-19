@@ -279,8 +279,8 @@ func IsCELValidationError(err error) bool {
 			// Single error: check it's not a built-in validation error
 			// Built-in errors: "Required value", "Invalid value: must be", "Invalid value: required"
 			if !strings.Contains(msgLower, "required value") &&
-			   !strings.Contains(msgLower, "invalid value: must be") &&
-			   !strings.Contains(msgLower, "invalid value: required") {
+				!strings.Contains(msgLower, "invalid value: must be") &&
+				!strings.Contains(msgLower, "invalid value: required") {
 				return true
 			}
 		}
