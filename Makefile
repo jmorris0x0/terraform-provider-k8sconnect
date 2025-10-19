@@ -283,15 +283,17 @@ release-check:
 
 .PHONY: coverage
 coverage: create-cluster
-	@echo "📊 Building unified coverage report"
-	@PROFILE=coverage.out ; \
-	TF_VERSION="$${TF_ACC_TERRAFORM_VERSION:-$(TERRAFORM_VERSION)}"; \
+	@echo "📊 Building coverage reports (unit + acceptance)"
+	@TF_VERSION="$${TF_ACC_TERRAFORM_VERSION:-$(TERRAFORM_VERSION)}"; \
 	if [ "$$TF_VERSION" != "$$(tfenv version-name)" ]; then \
 		echo "Installing Terraform $$TF_VERSION via tfenv..."; \
 		tfenv install $$TF_VERSION || true; \
 		tfenv use $$TF_VERSION || true; \
 	fi; \
 	PKGS=$$(go list ./... | grep -v -E "(test/examples|test/doctest)"); \
+	echo "🧪 Running unit tests..."; \
+	go test $$PKGS -run "^Test[^A]" -coverpkg=./... -covermode=atomic -coverprofile=coverage-unit.out -count=1 || true; \
+	echo "🎯 Running acceptance tests..."; \
 	TF_ACC=1 \
 	  TF_ACC_TERRAFORM_PATH="$$(which terraform)" \
 	  TF_ACC_K8S_HOST="$$(cat $(TESTBUILD_DIR)/cluster-endpoint.txt)" \
@@ -301,7 +303,7 @@ coverage: create-cluster
 	  TF_ACC_K8S_TOKEN="$$(cat $(TESTBUILD_DIR)/sa-token.txt)" \
 	  TF_ACC_K8S_CLIENT_CERT="$$(base64 < $(TESTBUILD_DIR)/client.crt | tr -d '\n')" \
 	  TF_ACC_K8S_CLIENT_KEY="$$(base64 < $(TESTBUILD_DIR)/client.key | tr -d '\n')" \
-	  go test $$PKGS -coverpkg=./... -covermode=atomic -coverprofile=$$PROFILE -count=1 ; \
+	  go test $$PKGS -run "^TestAcc" -coverpkg=./... -covermode=atomic -coverprofile=coverage-acceptance.out -count=1 ; \
 	ACTUAL_TF_VERSION=$$(terraform version -json | jq -r .terraform_version); \
 	if [ "$$ACTUAL_TF_VERSION" != "$$TF_VERSION" ]; then \
 		echo "❌ ERROR: Terraform version mismatch in coverage!"; \
@@ -309,9 +311,13 @@ coverage: create-cluster
 		echo "   Actual:   $$ACTUAL_TF_VERSION"; \
 		exit 1; \
 	fi; \
-	go tool cover -func=$$PROFILE ; \
-	go tool cover -html=$$PROFILE -o coverage.html ; \
-	echo "HTML report written to ./coverage.html"
+	echo "📊 Merging coverage reports..."; \
+	echo "mode: atomic" > coverage.out; \
+	grep -h -v "^mode:" coverage-unit.out coverage-acceptance.out >> coverage.out 2>/dev/null || true; \
+	go tool cover -func=coverage.out ; \
+	go tool cover -html=coverage.out -o coverage.html ; \
+	echo "HTML report written to ./coverage.html"; \
+	echo "Separate reports: coverage-unit.out, coverage-acceptance.out"
 
 .PHONY: fix-headers
 fix-headers: ## Fix file path header comments in all Go files

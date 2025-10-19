@@ -13,29 +13,10 @@ resource "k8sconnect_object" "namespace" {
   cluster_connection = var.cluster_connection
 }
 
-# Create PersistentVolume for this example
-resource "k8sconnect_object" "pv" {
-  yaml_body = <<-YAML
-    apiVersion: v1
-    kind: PersistentVolume
-    metadata:
-      name: example-pv
-    spec:
-      capacity:
-        storage: 1Gi
-      accessModes:
-        - ReadWriteOnce
-      persistentVolumeReclaimPolicy: Delete
-      storageClassName: manual
-      hostPath:
-        path: /tmp/example-pv
-  YAML
-
-  cluster_connection = var.cluster_connection
-  depends_on         = [k8sconnect_object.namespace]
-}
-
-# Create PVC
+# Create PVC using k3d's local-path storage class (dynamic provisioning)
+# No need to manually create PV - the provisioner creates it automatically
+# Note: local-path uses WaitForFirstConsumer binding mode, so PVC won't bind
+# until a pod references it
 resource "k8sconnect_object" "pvc" {
   yaml_body = <<-YAML
     apiVersion: v1
@@ -46,33 +27,18 @@ resource "k8sconnect_object" "pvc" {
     spec:
       accessModes:
         - ReadWriteOnce
-      storageClassName: manual
+      storageClassName: local-path
       resources:
         requests:
           storage: 1Gi
   YAML
 
   cluster_connection = var.cluster_connection
-  depends_on         = [k8sconnect_object.pv]
-}
-
-# Wait for PVC to be bound
-# Note: PVCs don't have a "Ready" condition - they just have status.phase
-# This example shows waiting for phase via field_value instead
-resource "k8sconnect_wait" "pvc" {
-  object_ref = k8sconnect_object.pvc.object_ref
-
-  cluster_connection = var.cluster_connection
-
-  wait_for = {
-    field_value = {
-      "status.phase" = "Bound"
-    }
-    timeout = "2m"
-  }
+  depends_on         = [k8sconnect_object.namespace]
 }
 
 # Create deployment that uses the PVC
+# The PVC will automatically bind when this deployment's pod starts
 # Deployments have status.conditions including "Available" and "Progressing"
 resource "k8sconnect_object" "app" {
   yaml_body = <<-YAML
@@ -109,7 +75,7 @@ resource "k8sconnect_object" "app" {
   YAML
 
   cluster_connection = var.cluster_connection
-  depends_on         = [k8sconnect_wait.pvc]
+  depends_on         = [k8sconnect_object.pvc]
 }
 
 # Wait for "Available" condition to be True
@@ -122,16 +88,11 @@ resource "k8sconnect_wait" "app" {
 
   wait_for = {
     condition = "Available"
-    timeout   = "3m"
+    timeout   = "5m"
   }
-}
-
-output "pvc_bound" {
-  value       = true
-  description = "PersistentVolumeClaim is bound and ready"
 }
 
 output "deployment_available" {
   value       = true
-  description = "Deployment has Available=True condition (minimum availability reached)"
+  description = "Deployment has Available=True condition (PVC was successfully bound and pod is running)"
 }
