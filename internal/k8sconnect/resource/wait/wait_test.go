@@ -802,6 +802,110 @@ resource "k8sconnect_wait" "test" {
 `, namespace, name, namespace, name, name, name)
 }
 
+// TestAccWaitResource_DaemonSetRollout tests explicit rollout for DaemonSets
+func TestAccWaitResource_DaemonSetRollout(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("ds-rollout-ns-%d", time.Now().UnixNano()%1000000)
+	dsName := fmt.Sprintf("ds-rollout-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testAccWaitConfigDaemonSetRollout(ns, dsName),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckDaemonSetExists(k8sClient, ns, dsName),
+					// Rollout wait doesn't populate status
+					resource.TestCheckNoResourceAttr("k8sconnect_wait.test", "status"),
+				),
+			},
+		},
+		CheckDestroy: testhelpers.CheckDaemonSetDestroy(k8sClient, ns, dsName),
+	})
+}
+
+func testAccWaitConfigDaemonSetRollout(namespace, name string) string {
+	return fmt.Sprintf(`
+variable "raw" {
+  type = string
+}
+variable "namespace" {
+  type = string
+}
+
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "test_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_object" "test" {
+  yaml_body = <<YAML
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  selector:
+    matchLabels:
+      app: %s
+  template:
+    metadata:
+      labels:
+        app: %s
+    spec:
+      containers:
+      - name: nginx
+        image: public.ecr.aws/nginx/nginx:1.21
+        ports:
+        - containerPort: 80
+YAML
+
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+
+  depends_on = [k8sconnect_object.test_namespace]
+}
+
+resource "k8sconnect_wait" "test" {
+  object_ref = k8sconnect_object.test.object_ref
+
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+
+  wait_for = {
+    rollout = true
+    timeout = "2m"
+  }
+}
+`, namespace, name, namespace, name, name)
+}
+
 // TestAccWaitResource_InvalidFieldPath tests error handling for invalid field paths
 func TestAccWaitResource_InvalidFieldPath(t *testing.T) {
 	t.Parallel()

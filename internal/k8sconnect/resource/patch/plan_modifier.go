@@ -355,11 +355,6 @@ func (r *patchResource) mergeMaps(dst, src map[string]interface{}) {
 	}
 }
 
-// boolPtr returns a pointer to a bool value
-func boolPtr(b bool) *bool {
-	return &b
-}
-
 // min returns the minimum of two integers
 func min(a, b int) int {
 	if a < b {

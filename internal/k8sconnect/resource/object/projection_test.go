@@ -2,6 +2,8 @@
 package object
 
 import (
+	"encoding/json"
+	"fmt"
 	"reflect"
 	"sort"
 	"testing"
@@ -1050,4 +1052,13 @@ func TestRemoveFieldsTransition(t *testing.T) {
 			t.Errorf("Expected replicas=3, got %v", replicas)
 		}
 	})
+}
+
+// toJSON converts a map to JSON string (test helper)
+func toJSON(obj map[string]interface{}) (string, error) {
+	bytes, err := json.Marshal(obj)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal projection: %w", err)
+	}
+	return string(bytes), nil
 }

@@ -4,8 +4,6 @@ package k8sclient
 import (
 	"context"
 	"fmt"
-	"regexp"
-	"sort"
 	"strings"
 	"time"
 
@@ -42,18 +40,10 @@ type K8sClient interface {
 	// GetGVR determines the GroupVersionResource for an unstructured object.
 	GetGVR(ctx context.Context, obj *unstructured.Unstructured) (schema.GroupVersionResource, error)
 
-	// GetGVRFromKind discovers the GVR and fetches the object when only the kind is known
-	// This is primarily used for import operations where API version is unknown
-	// Returns the GVR, the live object, and any error
-	GetGVRFromKind(ctx context.Context, kind, namespace, name string) (schema.GroupVersionResource, *unstructured.Unstructured, error)
-
 	Patch(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string, patchType types.PatchType, data []byte, options metav1.PatchOptions) (*unstructured.Unstructured, error)
 
 	// Watch returns a watcher that handles reconnection automatically
 	Watch(ctx context.Context, gvr schema.GroupVersionResource, namespace string, opts metav1.ListOptions) (watch.Interface, error)
-
-	// PatchStatus patches the status subresource of a Kubernetes object
-	PatchStatus(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string, patchType types.PatchType, data []byte, options metav1.PatchOptions) (*unstructured.Unstructured, error)
 
 	// GetWarnings retrieves any Kubernetes API warnings collected since the last call
 	// Returns a slice of warning messages (typically about deprecated APIs)
@@ -412,93 +402,6 @@ func (d *DynamicK8sClient) listAvailableKinds(resources *metav1.APIResourceList)
 	return strings.Join(kinds, ", ")
 }
 
-// GetGVRFromKind discovers the GVR for a resource kind without knowing the API version
-// This is useful for import operations where we only have the kind
-func (d *DynamicK8sClient) GetGVRFromKind(ctx context.Context, kind, namespace, name string) (schema.GroupVersionResource, *unstructured.Unstructured, error) {
-	tflog.Debug(ctx, "Discovering GVR from kind", map[string]interface{}{
-		"kind":      kind,
-		"namespace": namespace,
-		"name":      name,
-	})
-
-	// Get all API resources from the cluster
-	// IMPORTANT: ServerGroupsAndResources can return partial results with a non-nil error
-	// This happens when some API groups are unavailable (like metrics-server during startup)
-	// We should continue with the resources we did get
-	_, apiResources, err := d.discovery.ServerGroupsAndResources()
-	if err != nil {
-		// Check if we got any resources at all
-		if apiResources == nil || len(apiResources) == 0 {
-			// Complete failure - no resources discovered
-			return schema.GroupVersionResource{}, nil, fmt.Errorf("failed to discover server resources: %w", err)
-		}
-		// Partial failure - log warning but continue with what we have
-		tflog.Warn(ctx, "Partial API discovery failure (continuing with available APIs)", map[string]interface{}{
-			"error":           err.Error(),
-			"apis_discovered": len(apiResources),
-		})
-	}
-
-	// Find all possible GVRs for this kind
-	var candidates []candidateResource
-	for _, apiResourceList := range apiResources {
-		if apiResourceList == nil {
-			continue
-		}
-
-		gv, err := schema.ParseGroupVersion(apiResourceList.GroupVersion)
-		if err != nil {
-			continue
-		}
-
-		for _, apiResource := range apiResourceList.APIResources {
-			if apiResource.Kind == kind {
-				gvr := schema.GroupVersionResource{
-					Group:    gv.Group,
-					Version:  gv.Version,
-					Resource: apiResource.Name,
-				}
-				candidates = append(candidates, candidateResource{
-					GVR:        gvr,
-					Namespaced: apiResource.Namespaced,
-				})
-			}
-		}
-	}
-
-	if len(candidates) == 0 {
-		return schema.GroupVersionResource{}, nil, fmt.Errorf("no API resource found for kind %q", kind)
-	}
-
-	// Sort candidates by preference: v1 first, then newer versions, then older
-	sortCandidatesByPreference(candidates)
-
-	// Try candidates in order - most likely first
-	for i, candidate := range candidates {
-		obj, err := d.tryGetResource(ctx, candidate.GVR, candidate.Namespaced, namespace, name)
-		if err == nil && obj != nil {
-			tflog.Debug(ctx, "Found resource using candidate GVR", map[string]interface{}{
-				"candidate_index": i,
-				"gvr":             candidate.GVR.String(),
-				"kind":            kind,
-				"name":            name,
-				"namespace":       namespace,
-			})
-			return candidate.GVR, obj, nil
-		}
-	}
-
-	// None of the candidates worked
-	candidateStrings := make([]string, len(candidates))
-	for i, c := range candidates {
-		candidateStrings[i] = c.GVR.String()
-	}
-
-	return schema.GroupVersionResource{}, nil, fmt.Errorf(
-		"resource %s/%s (kind: %s) not found. Tried API versions: %v",
-		namespace, name, kind, candidateStrings)
-}
-
 // GetGVRFromAPIVersionKind discovers the GVR and fetches the resource when apiVersion and kind are known
 // This is used for import operations where the user provided the full apiVersion/kind
 // Returns the GVR, the live object, and any error
@@ -583,46 +486,6 @@ func (d *DynamicK8sClient) GetGVRFromAPIVersionKind(ctx context.Context, apiVers
 	}
 
 	return gvr, obj, nil
-}
-
-type candidateResource struct {
-	GVR        schema.GroupVersionResource
-	Namespaced bool
-}
-
-// sortCandidatesByPreference orders candidates to try the most likely versions first
-func sortCandidatesByPreference(candidates []candidateResource) {
-	sort.Slice(candidates, func(i, j int) bool {
-		return versionPriority(candidates[i].GVR) > versionPriority(candidates[j].GVR)
-	})
-}
-
-// versionPriority returns priority score for API versions (higher = try first)
-func versionPriority(gvr schema.GroupVersionResource) int {
-	version := gvr.Version
-
-	// v1 gets highest priority (most stable)
-	if version == "v1" {
-		return 1000
-	}
-
-	// v2, v3, etc. get high priority
-	if matched, _ := regexp.MatchString(`^v\d+$`, version); matched {
-		return 900
-	}
-
-	// v1beta1, v2beta1, etc. get medium priority
-	if matched, _ := regexp.MatchString(`^v\d+beta\d+$`, version); matched {
-		return 500
-	}
-
-	// v1alpha1, v2alpha1, etc. get lower priority
-	if matched, _ := regexp.MatchString(`^v\d+alpha\d+$`, version); matched {
-		return 100
-	}
-
-	// Everything else gets lowest priority
-	return 0
 }
 
 // tryGetResource attempts to get a resource using a specific GVR
@@ -726,22 +589,6 @@ func (rw *resilientWatcher) run() {
 			time.Sleep(time.Second) // Brief pause before reconnect
 		}
 	}
-}
-
-func (d *DynamicK8sClient) PatchStatus(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string, patchType types.PatchType, data []byte, options metav1.PatchOptions) (*unstructured.Unstructured, error) {
-	var result *unstructured.Unstructured
-
-	err := withRetry(ctx, DefaultRetryConfig, func() error {
-		var err error
-		if namespace == "" {
-			result, err = d.client.Resource(gvr).Patch(ctx, name, patchType, data, options, "status")
-		} else {
-			result, err = d.client.Resource(gvr).Namespace(namespace).Patch(ctx, name, patchType, data, options, "status")
-		}
-		return err
-	})
-
-	return result, err
 }
 
 func (rw *resilientWatcher) Stop() {

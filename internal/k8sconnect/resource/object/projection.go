@@ -461,15 +461,6 @@ func setFieldByPath(obj map[string]interface{}, path string, value interface{}) 
 	return nil
 }
 
-// toJSON converts a map to JSON string
-func toJSON(obj map[string]interface{}) (string, error) {
-	bytes, err := json.Marshal(obj)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal projection: %w", err)
-	}
-	return string(bytes), nil
-}
-
 // flattenProjectionToMap converts nested projection to flat key-value map with dotted paths
 // This enables clean, concise diffs in Terraform plan output
 func flattenProjectionToMap(projection map[string]interface{}, paths []string) map[string]string {

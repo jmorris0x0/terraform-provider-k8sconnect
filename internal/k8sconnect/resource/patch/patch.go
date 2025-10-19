@@ -57,11 +57,6 @@ type patchTargetModel struct {
 	Namespace  types.String `tfsdk:"namespace"`
 }
 
-// NewPatchResource creates a new patch resource
-func NewPatchResource() resource.Resource {
-	return &patchResource{}
-}
-
 // NewPatchResourceWithClientGetter creates a patch resource with custom client getter
 func NewPatchResourceWithClientGetter(getter ClientGetter) resource.Resource {
 	return &patchResource{
