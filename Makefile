@@ -257,11 +257,7 @@ security-scan:
 .PHONY: deadcode
 deadcode: ## Find unused/dead code
 	@echo "🔍 Checking for unused code. Beware of false positives..."
-	@if ! command -v deadcode >/dev/null 2>&1; then \
-		echo "Installing deadcode..."; \
-		go install golang.org/x/tools/cmd/deadcode@latest; \
-	fi
-	@deadcode ./...
+	@go run golang.org/x/tools/cmd/deadcode@latest ./...
 
 .PHONY: release-dry-run
 release-dry-run:

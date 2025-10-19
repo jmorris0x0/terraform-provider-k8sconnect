@@ -15,8 +15,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8sschema "k8s.io/apimachinery/pkg/runtime/schema"
-	k8stypes "k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/watch"
 )
 
 func TestExplainFinalizer(t *testing.T) {
@@ -439,62 +437,6 @@ func (s *stubWithDiscovery) ServerGroupsAndResources() ([]*metav1.APIGroup, []*m
 	return s.groups, s.resources, nil
 }
 
-// forceDestroyTestClient is a test-only client for testing forceDestroy()
-type forceDestroyTestClient struct {
-	getResponse  *unstructured.Unstructured
-	getError     error
-	deleteError  error
-	applyError   error
-	deleteCalled bool
-	applyCalled  bool
-}
-
-func (c *forceDestroyTestClient) Get(ctx context.Context, gvr k8sschema.GroupVersionResource, namespace, name string) (*unstructured.Unstructured, error) {
-	if c.getError != nil {
-		return nil, c.getError
-	}
-	// After delete or apply is called, simulate object deletion
-	if c.deleteCalled || c.applyCalled {
-		return nil, errors.NewNotFound(gvr.GroupResource(), name)
-	}
-	return c.getResponse, nil
-}
-
-func (c *forceDestroyTestClient) Delete(ctx context.Context, gvr k8sschema.GroupVersionResource, namespace, name string, options k8sclient.DeleteOptions) error {
-	c.deleteCalled = true
-	return c.deleteError
-}
-
-func (c *forceDestroyTestClient) Apply(ctx context.Context, obj *unstructured.Unstructured, options k8sclient.ApplyOptions) error {
-	c.applyCalled = true
-	return c.applyError
-}
-
-// Implement remaining K8sClient methods as no-ops
-func (c *forceDestroyTestClient) DryRunApply(ctx context.Context, obj *unstructured.Unstructured, options k8sclient.ApplyOptions) (*unstructured.Unstructured, error) {
-	return nil, nil
-}
-func (c *forceDestroyTestClient) SetFieldManager(name string) k8sclient.K8sClient { return c }
-func (c *forceDestroyTestClient) GetGVR(ctx context.Context, obj *unstructured.Unstructured) (k8sschema.GroupVersionResource, error) {
-	return k8sschema.GroupVersionResource{}, nil
-}
-func (c *forceDestroyTestClient) GetGVRFromKind(ctx context.Context, kind, namespace, name string) (k8sschema.GroupVersionResource, *unstructured.Unstructured, error) {
-	return k8sschema.GroupVersionResource{}, nil, nil
-}
-func (c *forceDestroyTestClient) Patch(ctx context.Context, gvr k8sschema.GroupVersionResource, namespace, name string, patchType k8stypes.PatchType, data []byte, options metav1.PatchOptions) (*unstructured.Unstructured, error) {
-	return nil, nil
-}
-func (c *forceDestroyTestClient) Watch(ctx context.Context, gvr k8sschema.GroupVersionResource, namespace string, opts metav1.ListOptions) (watch.Interface, error) {
-	return nil, nil
-}
-func (c *forceDestroyTestClient) PatchStatus(ctx context.Context, gvr k8sschema.GroupVersionResource, namespace, name string, patchType k8stypes.PatchType, data []byte, options metav1.PatchOptions) (*unstructured.Unstructured, error) {
-	return nil, nil
-}
-func (c *forceDestroyTestClient) GetWarnings() []string { return nil }
-func (c *forceDestroyTestClient) List(ctx context.Context, gvr k8sschema.GroupVersionResource, namespace string, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
-	return nil, nil
-}
-
 func TestForceDestroy(t *testing.T) {
 	ctx := context.Background()
 	r := &objectResource{}
@@ -527,18 +469,18 @@ func TestForceDestroy(t *testing.T) {
 		{
 			name: "object already deleted - not found",
 			setupClient: func() k8sclient.K8sClient {
-				return &forceDestroyTestClient{
-					getError: errors.NewNotFound(k8sschema.GroupResource{Resource: "persistentvolumeclaims"}, "test-pvc"),
-				}
+				stub := k8sclient.NewStubK8sClient()
+				stub.GetError = errors.NewNotFound(k8sschema.GroupResource{Resource: "persistentvolumeclaims"}, "test-pvc")
+				return stub
 			},
 			expectError: false,
 		},
 		{
 			name: "error getting object",
 			setupClient: func() k8sclient.K8sClient {
-				return &forceDestroyTestClient{
-					getError: fmt.Errorf("connection timeout"),
-				}
+				stub := k8sclient.NewStubK8sClient()
+				stub.GetError = fmt.Errorf("connection timeout")
+				return stub
 			},
 			expectError:   true,
 			errorContains: "failed to get object for force destroy",
@@ -546,41 +488,43 @@ func TestForceDestroy(t *testing.T) {
 		{
 			name: "no finalizers - re-delete and wait",
 			setupClient: func() k8sclient.K8sClient {
-				return &forceDestroyTestClient{
-					getResponse: &unstructured.Unstructured{
-						Object: map[string]interface{}{
-							"apiVersion": "v1",
-							"kind":       "PersistentVolumeClaim",
-							"metadata": map[string]interface{}{
-								"name":       "test-pvc",
-								"namespace":  "default",
-								"finalizers": []interface{}{}, // No finalizers
-							},
+				stub := k8sclient.NewStubK8sClient()
+				stub.GetResponse = &unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"apiVersion": "v1",
+						"kind":       "PersistentVolumeClaim",
+						"metadata": map[string]interface{}{
+							"name":       "test-pvc",
+							"namespace":  "default",
+							"finalizers": []interface{}{}, // No finalizers
 						},
 					},
-					deleteError: errors.NewNotFound(k8sschema.GroupResource{Resource: "persistentvolumeclaims"}, "test-pvc"),
 				}
+				stub.DeleteError = errors.NewNotFound(k8sschema.GroupResource{Resource: "persistentvolumeclaims"}, "test-pvc")
+				stub.SimulateDeletedAfterMutation = true
+				return stub
 			},
 			expectError: false,
 		},
 		{
 			name: "has finalizers - remove and apply",
 			setupClient: func() k8sclient.K8sClient {
-				return &forceDestroyTestClient{
-					getResponse: &unstructured.Unstructured{
-						Object: map[string]interface{}{
-							"apiVersion": "v1",
-							"kind":       "PersistentVolumeClaim",
-							"metadata": map[string]interface{}{
-								"name":      "test-pvc",
-								"namespace": "default",
-								"finalizers": []interface{}{
-									"kubernetes.io/pvc-protection",
-								},
+				stub := k8sclient.NewStubK8sClient()
+				stub.GetResponse = &unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"apiVersion": "v1",
+						"kind":       "PersistentVolumeClaim",
+						"metadata": map[string]interface{}{
+							"name":      "test-pvc",
+							"namespace": "default",
+							"finalizers": []interface{}{
+								"kubernetes.io/pvc-protection",
 							},
 						},
 					},
 				}
+				stub.SimulateDeletedAfterMutation = true
+				return stub
 			},
 			expectError: false,
 			validateResp: func(t *testing.T, resp *resource.DeleteResponse) {
@@ -604,22 +548,22 @@ func TestForceDestroy(t *testing.T) {
 		{
 			name: "error during finalizer removal",
 			setupClient: func() k8sclient.K8sClient {
-				return &forceDestroyTestClient{
-					getResponse: &unstructured.Unstructured{
-						Object: map[string]interface{}{
-							"apiVersion": "v1",
-							"kind":       "PersistentVolumeClaim",
-							"metadata": map[string]interface{}{
-								"name":      "test-pvc",
-								"namespace": "default",
-								"finalizers": []interface{}{
-									"kubernetes.io/pvc-protection",
-								},
+				stub := k8sclient.NewStubK8sClient()
+				stub.GetResponse = &unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"apiVersion": "v1",
+						"kind":       "PersistentVolumeClaim",
+						"metadata": map[string]interface{}{
+							"name":      "test-pvc",
+							"namespace": "default",
+							"finalizers": []interface{}{
+								"kubernetes.io/pvc-protection",
 							},
 						},
 					},
-					applyError: fmt.Errorf("permission denied"),
 				}
+				stub.ApplyError = fmt.Errorf("permission denied")
+				return stub
 			},
 			expectError:   true,
 			errorContains: "failed to remove finalizers",

@@ -277,6 +277,36 @@ func CheckDeploymentDestroy(client kubernetes.Interface, namespace, name string)
 	}
 }
 
+func CheckDaemonSetExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		_, err := client.AppsV1().DaemonSets(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("daemonset %s/%s does not exist: %v", namespace, name, err)
+		}
+		fmt.Printf("✅ Verified daemonset %s/%s exists in Kubernetes\n", namespace, name)
+		return nil
+	}
+}
+
+func CheckDaemonSetDestroy(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		for i := 0; i < 15; i++ {
+			_, err := client.AppsV1().DaemonSets(namespace).Get(ctx, name, metav1.GetOptions{})
+			if err != nil {
+				if strings.Contains(err.Error(), "not found") {
+					fmt.Printf("✅ Verified daemonset %s/%s was deleted\n", namespace, name)
+					return nil
+				}
+				return fmt.Errorf("unexpected error checking daemonset: %v", err)
+			}
+			time.Sleep(1 * time.Second)
+		}
+		return fmt.Errorf("daemonset %s/%s still exists after deletion", namespace, name)
+	}
+}
+
 func CheckServiceExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()
