@@ -159,6 +159,12 @@ jobs:
           TF_ACC_TERRAFORM_VERSION: '1.13.3'
         run: make coverage
 
+      - name: Remove individual coverage files before upload
+        if: always()
+        run: |
+          rm -f coverage-unit.out coverage-acceptance.out
+          echo "Uploading only merged coverage.out to CodeCov"
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         if: always()

@@ -13,8 +13,28 @@ resource "k8sconnect_object" "namespace" {
   cluster_connection = var.cluster_connection
 }
 
-# Create PVC using k3d's local-path storage class (dynamic provisioning)
-# No need to manually create PV - the provisioner creates it automatically
+# Create PersistentVolume
+resource "k8sconnect_object" "pv" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: PersistentVolume
+    metadata:
+      name: data-pv
+    spec:
+      capacity:
+        storage: 5Gi
+      accessModes:
+        - ReadWriteOnce
+      persistentVolumeReclaimPolicy: Delete
+      storageClassName: manual
+      hostPath:
+        path: /tmp/data
+  YAML
+
+  cluster_connection = var.cluster_connection
+}
+
+# Create PVC
 resource "k8sconnect_object" "pvc" {
   yaml_body = <<-YAML
     apiVersion: v1
@@ -25,14 +45,14 @@ resource "k8sconnect_object" "pvc" {
     spec:
       accessModes:
         - ReadWriteOnce
-      storageClassName: local-path
+      storageClassName: manual
       resources:
         requests:
           storage: 5Gi
   YAML
 
   cluster_connection = var.cluster_connection
-  depends_on         = [k8sconnect_object.namespace]
+  depends_on         = [k8sconnect_object.namespace, k8sconnect_object.pv]
 }
 
 # Wait for PVC to be bound before proceeding with dependent resources
