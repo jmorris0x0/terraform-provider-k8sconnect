@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -562,22 +563,39 @@ func createCustomResourceExternally(t *testing.T, client kubernetes.Interface, n
 			Resource: crdPlural,
 		}
 
-		_, err = dynamicClient.Resource(gvr).Namespace(namespace).Patch(
-			ctx,
-			crName,
-			types.ApplyPatchType,
-			crBytes,
-			metav1.PatchOptions{
-				FieldManager: "test-external",
-				Force:        ptr(true),
-			},
-		)
-		if err != nil {
-			return fmt.Errorf("failed to create custom resource externally: %v", err)
+		// Retry with exponential backoff - CRD may not be established yet
+		var lastErr error
+		backoff := []time.Duration{100 * time.Millisecond, 500 * time.Millisecond, 1 * time.Second, 2 * time.Second, 5 * time.Second, 10 * time.Second}
+		for i, wait := range backoff {
+			_, err = dynamicClient.Resource(gvr).Namespace(namespace).Patch(
+				ctx,
+				crName,
+				types.ApplyPatchType,
+				crBytes,
+				metav1.PatchOptions{
+					FieldManager: "test-external",
+					Force:        ptr(true),
+				},
+			)
+			if err == nil {
+				fmt.Printf("✅ Created custom resource %s/%s externally\n", namespace, crName)
+				return nil
+			}
+
+			// Check if it's a CRD not ready error
+			if !strings.Contains(err.Error(), "could not find the requested resource") &&
+				!strings.Contains(err.Error(), "no matches for kind") {
+				// Not a CRD issue, fail immediately
+				return fmt.Errorf("failed to create custom resource externally: %v", err)
+			}
+
+			lastErr = err
+			if i < len(backoff)-1 {
+				time.Sleep(wait)
+			}
 		}
 
-		fmt.Printf("✅ Created custom resource %s/%s externally\n", namespace, crName)
-		return nil
+		return fmt.Errorf("failed to create custom resource externally after retries: %v", lastErr)
 	}
 }
 

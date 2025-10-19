@@ -47,6 +47,18 @@ func ClassifyError(err error, operation, resourceDesc string) (severity, title, 
 				operation, resourceDesc, err)
 
 	case errors.IsInvalid(err):
+		// Check if this is specifically a CEL validation error
+		if IsCELValidationError(err) {
+			celDetails := ExtractCELValidationDetails(err)
+			return "error", fmt.Sprintf("%s: CEL Validation Failed", operation),
+				fmt.Sprintf("CEL validation rule failed for %s.\n\n"+
+					"%s\n\n"+
+					"CEL (Common Expression Language) validation is defined in the CRD schema.\n"+
+					"Fix the field value to satisfy the validation rule or adjust the CRD validation rules.\n\n"+
+					"Details: %v",
+					resourceDesc, celDetails, err)
+		}
+
 		// Check if this is specifically an immutable field error
 		if IsImmutableFieldError(err) {
 			immutableFields := ExtractImmutableFields(err)
@@ -64,7 +76,7 @@ func ClassifyError(err error, operation, resourceDesc string) (severity, title, 
 					immutableFields, resourceDesc)
 		}
 
-		// Generic invalid resource error (for non-immutable field errors)
+		// Generic invalid resource error (for non-immutable and non-CEL field errors)
 		return "error", fmt.Sprintf("%s: Invalid Resource", operation),
 			fmt.Sprintf("The %s contains invalid fields or values. Review the YAML specification and ensure all required fields are present and correctly formatted. Details: %v",
 				resourceDesc, err)
@@ -224,4 +236,145 @@ func ExtractConflictDetails(err error) string {
 	}
 
 	return strings.Join(details, "\n")
+}
+
+// IsCELValidationError checks if error is due to CEL validation rule failure
+func IsCELValidationError(err error) bool {
+	if statusErr, ok := err.(*errors.StatusError); ok {
+		msg := statusErr.ErrStatus.Message
+
+		// CEL validation errors can appear in several formats:
+		// 1. "failed rule: <expression>: <message>" (some K8s versions)
+		// 2. "x-kubernetes-validations" (explicit CEL reference)
+		// 3. "Invalid value: <value>: <custom-cel-message>" (common format)
+		//
+		// To distinguish CEL from other validation errors, we check for:
+		// - Presence of "Invalid value" with specific CRD field patterns
+		// - The error is on a CRD resource (contains ".example.com" or similar)
+		// - Has a custom message after the value (CEL messages are user-defined)
+
+		msgLower := strings.ToLower(msg)
+
+		// Direct CEL indicators
+		if strings.Contains(msgLower, "failed rule:") ||
+			strings.Contains(msgLower, "x-kubernetes-validations") {
+			return true
+		}
+
+		// Check for CRD + Invalid value pattern (likely CEL)
+		// CEL errors on CRDs typically show as: "ResourceName.group.example.com ... Invalid value ..."
+		// Multiple errors shown as: [field: Invalid value: "val": msg1, field: Invalid value: "val": msg2]
+		if strings.Contains(msg, ".") && // Has group/domain in resource name (CRD pattern)
+			strings.Contains(msgLower, "invalid value:") {
+
+			// Try to distinguish CEL from built-in validation
+			// CEL messages are after the value: "field: Invalid value: \"value\": <custom-message>"
+			// Built-in K8s errors typically are: "field: Required value" or "field: Invalid value: must be ..."
+
+			// If message contains a bracketed list of errors, it's likely multiple CEL violations
+			if strings.Contains(msg, "[") && strings.Contains(msg, "]") {
+				return true
+			}
+
+			// Single error: check it's not a built-in validation error
+			// Built-in errors: "Required value", "Invalid value: must be", "Invalid value: required"
+			if !strings.Contains(msgLower, "required value") &&
+			   !strings.Contains(msgLower, "invalid value: must be") &&
+			   !strings.Contains(msgLower, "invalid value: required") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ExtractCELValidationDetails parses CEL validation error for user-friendly display
+// Handles both single and multiple validation errors
+func ExtractCELValidationDetails(err error) string {
+	statusErr, ok := err.(*errors.StatusError)
+	if !ok {
+		return "Unable to parse CEL validation error details"
+	}
+
+	msg := statusErr.ErrStatus.Message
+
+	// CEL errors can have several formats:
+	// 1. "field.path: failed rule: <expression>: <custom message>"
+	// 2. "ResourceName.group.domain ... field: Invalid value: <value>: <custom message>"
+	// Multiple errors may be separated by newlines, semicolons, or "* field:" bullets
+
+	var details []string
+	foundErrors := 0
+
+	// Pattern 1: field.path: ... failed rule: expression: message (may have multiple)
+	celPattern1 := regexp.MustCompile(`(?i)([a-z0-9._\[\]]+).*?failed rule:\s*([^:]+):\s*(.+?)(?:;|\n|$)`)
+	matches1 := celPattern1.FindAllStringSubmatch(msg, -1)
+	if len(matches1) > 0 {
+		for _, match := range matches1 {
+			if len(match) >= 4 {
+				fieldPath := match[1]
+				rule := strings.TrimSpace(match[2])
+				message := strings.TrimSpace(match[3])
+
+				if foundErrors > 0 {
+					details = append(details, "") // Blank line between errors
+				}
+				details = append(details, fmt.Sprintf("Field: %s", fieldPath))
+				details = append(details, fmt.Sprintf("Rule: %s", rule))
+				details = append(details, fmt.Sprintf("Message: %s", message))
+				foundErrors++
+			}
+		}
+		if foundErrors > 0 {
+			if foundErrors > 1 {
+				details = append([]string{fmt.Sprintf("Found %d CEL validation errors:", foundErrors)}, details...)
+			}
+			return strings.Join(details, "\n")
+		}
+	}
+
+	// Pattern 2: field: Invalid value: "value": custom-message (may have multiple)
+	// K8s formats multiple errors as: [error1, error2, ...]
+	// First, check if we have a bracketed list and extract it
+	msgToParse := msg
+	if strings.Contains(msg, "[") && strings.Contains(msg, "]") {
+		// Extract content between brackets
+		start := strings.Index(msg, "[")
+		end := strings.LastIndex(msg, "]")
+		if start >= 0 && end > start {
+			msgToParse = msg[start+1 : end]
+		}
+	}
+
+	// Now parse individual errors (separated by ", " in the bracketed list)
+	celPattern2 := regexp.MustCompile(`([a-z0-9._\[\]]+):\s*Invalid value:\s*"[^"]*":\s*([^,\n]+)`)
+	matches2 := celPattern2.FindAllStringSubmatch(msgToParse, -1)
+	if len(matches2) > 0 {
+		for _, match := range matches2 {
+			if len(match) >= 3 {
+				fieldPath := match[1]
+				message := strings.TrimSpace(match[2])
+
+				if foundErrors > 0 {
+					details = append(details, "") // Blank line between errors
+				}
+				details = append(details, fmt.Sprintf("Field: %s", fieldPath))
+				details = append(details, fmt.Sprintf("Validation message: %s", message))
+				foundErrors++
+			}
+		}
+		if foundErrors > 0 {
+			details = append(details, "")
+			if foundErrors > 1 {
+				details = append(details, "These errors come from CEL validation rules defined in the CustomResourceDefinition.")
+				details = append([]string{fmt.Sprintf("Found %d CEL validation errors:", foundErrors)}, details...)
+			} else {
+				details = append(details, "This error comes from a CEL validation rule defined in the CustomResourceDefinition.")
+			}
+			return strings.Join(details, "\n")
+		}
+	}
+
+	// Fallback: extract any useful information
+	return fmt.Sprintf("CEL validation rule failed.\n\nFull error: %s", msg)
 }

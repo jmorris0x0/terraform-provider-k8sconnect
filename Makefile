@@ -2,7 +2,7 @@ OIDC_DIR          := $(CURDIR)/test/oidc-setup
 DEX_SSL_DIR       := $(OIDC_DIR)/ssl
 TESTBUILD_DIR     := $(CURDIR)/.testbuild
 DEX_IMAGE         := ghcr.io/dexidp/dex:v2.42.1
-TERRAFORM_VERSION := 1.13.0-alpha20250702
+TERRAFORM_VERSION := 1.13.4
 PROVIDER_VERSION  ?= 0.1.0
 
 # Build variables for version injection
