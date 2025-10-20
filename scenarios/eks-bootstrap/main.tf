@@ -5,17 +5,8 @@
 #
 # This validates:
 # - Inline cluster connections work with "known after apply" values
-# - apply_timeout (when implemented) handles cluster startup delays
 # - Provider can connect to cluster as soon as API server is ready
-#
-# Expected timeline:
-# - t=0s: EKS cluster creation starts
-# - t=30s: AWS returns (endpoint available, cluster still provisioning)
-# - t=2-10m: API server becomes ready
-# - t=2-10m+: Workloads deployed
-#
-# IMPORTANT: Set apply_timeout appropriately for EKS clusters!
-# Default 2m may be insufficient - recommend 10m for EKS bootstrap.
+# - Node group dependency ensures workloads can schedule
 
 terraform {
   required_providers {
@@ -283,9 +274,6 @@ resource "k8sconnect_object" "test_deployment" {
   YAML
 
   cluster_connection = local.cluster_connection
-
-  # When apply_timeout is implemented, uncomment:
-  # apply_timeout = "10m"
 
   depends_on = [k8sconnect_object.namespace]
 }

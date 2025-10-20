@@ -16,8 +16,8 @@ terraform {
 # CLUSTER SETUP
 #############################################
 
-resource "kind_cluster" "k3d-validation" {
-  name           = "k3d-validation"
+resource "kind_cluster" "kind-validation" {
+  name           = "kind-validation"
   node_image     = "kindest/node:v1.31.0"
   wait_for_ready = true
   kind_config {
@@ -36,10 +36,10 @@ provider "k8sconnect" {}
 
 locals {
   cluster_connection = {
-    host                   = kind_cluster.k3d_validation.endpoint
-    cluster_ca_certificate = base64encode(kind_cluster.k3d_validation.cluster_ca_certificate)
-    client_certificate     = base64encode(kind_cluster.k3d_validation.client_certificate)
-    client_key             = base64encode(kind_cluster.k3d_validation.client_key)
+    host                   = kind_cluster.kind_validation.endpoint
+    cluster_ca_certificate = base64encode(kind_cluster.kind_validation.cluster_ca_certificate)
+    client_certificate     = base64encode(kind_cluster.kind_validation.client_certificate)
+    client_key             = base64encode(kind_cluster.kind_validation.client_key)
   }
 }
 
@@ -66,7 +66,7 @@ resource "k8sconnect_object" "namespace" {
     apiVersion: v1
     kind: Namespace
     metadata:
-      name: k3d-validation
+      name: kind-validation
       labels:
         purpose: validation
         version: v0.1.0
@@ -120,7 +120,7 @@ resource "k8sconnect_object" "test_pvc" {
     kind: PersistentVolumeClaim
     metadata:
       name: test-pvc
-      namespace: k3d-validation
+      namespace: kind-validation
     spec:
       accessModes:
       - ReadWriteOnce
@@ -140,7 +140,7 @@ resource "k8sconnect_object" "pvc_consumer_pod" {
     kind: Pod
     metadata:
       name: pvc-consumer
-      namespace: k3d-validation
+      namespace: kind-validation
       labels:
         app: pvc-test
     spec:
@@ -199,7 +199,7 @@ resource "k8sconnect_object" "migration_job" {
     kind: Job
     metadata:
       name: migration-job
-      namespace: k3d-validation
+      namespace: kind-validation
       labels:
         purpose: migration
     spec:
@@ -243,7 +243,7 @@ resource "k8sconnect_object" "backup_cronjob" {
     kind: CronJob
     metadata:
       name: backup-cronjob
-      namespace: k3d-validation
+      namespace: kind-validation
       labels:
         purpose: backup
     spec:
@@ -279,7 +279,7 @@ resource "k8sconnect_object" "replicaset" {
     kind: ReplicaSet
     metadata:
       name: frontend-replicaset
-      namespace: k3d-validation
+      namespace: kind-validation
       labels:
         app: frontend
         tier: web
@@ -321,7 +321,7 @@ resource "k8sconnect_object" "standalone_pod" {
     kind: Pod
     metadata:
       name: standalone-pod
-      namespace: k3d-validation
+      namespace: kind-validation
       labels:
         app: standalone
         type: test
@@ -365,7 +365,7 @@ resource "k8sconnect_object" "web_deployment" {
     kind: Deployment
     metadata:
       name: web-deployment
-      namespace: k3d-validation
+      namespace: kind-validation
       labels:
         app: web
     spec:
@@ -423,7 +423,7 @@ resource "k8sconnect_object" "web_service" {
     kind: Service
     metadata:
       name: web-service
-      namespace: k3d-validation
+      namespace: kind-validation
       labels:
         app: web
     spec:
@@ -451,7 +451,7 @@ resource "k8sconnect_object" "network_policy" {
     kind: NetworkPolicy
     metadata:
       name: web-network-policy
-      namespace: k3d-validation
+      namespace: kind-validation
     spec:
       podSelector:
         matchLabels:
@@ -490,7 +490,7 @@ resource "k8sconnect_object" "database_statefulset" {
     kind: StatefulSet
     metadata:
       name: postgres
-      namespace: k3d-validation
+      namespace: kind-validation
     spec:
       serviceName: postgres
       replicas: 1
@@ -557,7 +557,7 @@ resource "k8sconnect_object" "postgres_service" {
     kind: Service
     metadata:
       name: postgres
-      namespace: k3d-validation
+      namespace: kind-validation
     spec:
       clusterIP: None
       selector:
@@ -581,7 +581,7 @@ resource "k8sconnect_object" "log_collector" {
     kind: DaemonSet
     metadata:
       name: log-collector
-      namespace: k3d-validation
+      namespace: kind-validation
     spec:
       selector:
         matchLabels:
@@ -624,13 +624,13 @@ resource "k8sconnect_object" "web_ingress" {
     kind: Ingress
     metadata:
       name: web-ingress
-      namespace: k3d-validation
+      namespace: kind-validation
       annotations:
         nginx.ingress.kubernetes.io/rewrite-target: /
     spec:
       ingressClassName: nginx
       rules:
-      - host: k3d-validation.local
+      - host: kind-validation.local
         http:
           paths:
           - path: /
@@ -655,7 +655,7 @@ resource "k8sconnect_object" "web_pdb" {
     kind: PodDisruptionBudget
     metadata:
       name: web-pdb
-      namespace: k3d-validation
+      namespace: kind-validation
     spec:
       minAvailable: 1
       selector:
@@ -675,7 +675,7 @@ resource "k8sconnect_object" "metrics_reader_role" {
     apiVersion: rbac.authorization.k8s.io/v1
     kind: ClusterRole
     metadata:
-      name: k3d-validation-metrics-reader
+      name: kind-validation-metrics-reader
     rules:
     - apiGroups: ["metrics.k8s.io"]
       resources: ["pods", "nodes"]
@@ -692,14 +692,14 @@ resource "k8sconnect_object" "metrics_reader_binding" {
     apiVersion: rbac.authorization.k8s.io/v1
     kind: ClusterRoleBinding
     metadata:
-      name: k3d-validation-metrics-reader-binding
+      name: kind-validation-metrics-reader-binding
     subjects:
     - kind: ServiceAccount
       name: app-service-account
-      namespace: k3d-validation
+      namespace: kind-validation
     roleRef:
       kind: ClusterRole
-      name: k3d-validation-metrics-reader
+      name: kind-validation-metrics-reader
       apiGroup: rbac.authorization.k8s.io
   YAML
   cluster_connection = local.cluster_connection
@@ -750,7 +750,7 @@ resource "k8sconnect_object" "priority_deployment" {
     kind: Deployment
     metadata:
       name: priority-deployment
-      namespace: k3d-validation
+      namespace: kind-validation
     spec:
       replicas: 1
       selector:
@@ -791,7 +791,7 @@ resource "k8sconnect_object" "web_hpa" {
     kind: HorizontalPodAutoscaler
     metadata:
       name: web-hpa
-      namespace: k3d-validation
+      namespace: kind-validation
     spec:
       scaleTargetRef:
         apiVersion: apps/v1
@@ -826,7 +826,7 @@ resource "k8sconnect_object" "custom_endpoints" {
     kind: Endpoints
     metadata:
       name: external-service
-      namespace: k3d-validation
+      namespace: kind-validation
     subsets:
     - addresses:
       - ip: 192.168.1.100
@@ -845,7 +845,7 @@ resource "k8sconnect_object" "external_service" {
     kind: Service
     metadata:
       name: external-service
-      namespace: k3d-validation
+      namespace: kind-validation
     spec:
       type: ClusterIP
       ports:
@@ -870,12 +870,12 @@ resource "null_resource" "external_configmap" {
 
   provisioner "local-exec" {
     command = <<-EOT
-      kubectl --kubeconfig ${kind_cluster.k3d_validation.kubeconfig_path} apply -f - <<EOF
+      kubectl --kubeconfig ${kind_cluster.kind_validation.kubeconfig_path} apply -f - <<EOF
       apiVersion: v1
       kind: ConfigMap
       metadata:
         name: external-config
-        namespace: k3d-validation
+        namespace: kind-validation
         labels:
           managed-by: kubectl
       data:
@@ -887,11 +887,11 @@ resource "null_resource" "external_configmap" {
 
   provisioner "local-exec" {
     when    = destroy
-    command = "kubectl --kubeconfig ${self.triggers.kubeconfig_path} delete configmap external-config -n k3d-validation --ignore-not-found=true"
+    command = "kubectl --kubeconfig ${self.triggers.kubeconfig_path} delete configmap external-config -n kind-validation --ignore-not-found=true"
   }
 
   triggers = {
-    kubeconfig_path = kind_cluster.k3d_validation.kubeconfig_path
+    kubeconfig_path = kind_cluster.kind_validation.kubeconfig_path
   }
 }
 
@@ -901,12 +901,12 @@ resource "null_resource" "external_service" {
 
   provisioner "local-exec" {
     command = <<-EOT
-      kubectl --kubeconfig ${kind_cluster.k3d_validation.kubeconfig_path} apply -f - <<EOF
+      kubectl --kubeconfig ${kind_cluster.kind_validation.kubeconfig_path} apply -f - <<EOF
       apiVersion: v1
       kind: Service
       metadata:
         name: external-service-patch-test
-        namespace: k3d-validation
+        namespace: kind-validation
         labels:
           managed-by: kubectl
       spec:
@@ -923,11 +923,11 @@ resource "null_resource" "external_service" {
 
   provisioner "local-exec" {
     when    = destroy
-    command = "kubectl --kubeconfig ${self.triggers.kubeconfig_path} delete service external-service-patch-test -n k3d-validation --ignore-not-found=true"
+    command = "kubectl --kubeconfig ${self.triggers.kubeconfig_path} delete service external-service-patch-test -n kind-validation --ignore-not-found=true"
   }
 
   triggers = {
-    kubeconfig_path = kind_cluster.k3d_validation.kubeconfig_path
+    kubeconfig_path = kind_cluster.kind_validation.kubeconfig_path
   }
 }
 
@@ -937,12 +937,12 @@ resource "null_resource" "external_deployment_strategic" {
 
   provisioner "local-exec" {
     command = <<-EOT
-      kubectl --kubeconfig ${kind_cluster.k3d_validation.kubeconfig_path} apply -f - <<EOF
+      kubectl --kubeconfig ${kind_cluster.kind_validation.kubeconfig_path} apply -f - <<EOF
       apiVersion: apps/v1
       kind: Deployment
       metadata:
         name: external-deployment-strategic
-        namespace: k3d-validation
+        namespace: kind-validation
         labels:
           app: external-strategic
           managed-by: kubectl
@@ -973,11 +973,11 @@ resource "null_resource" "external_deployment_strategic" {
 
   provisioner "local-exec" {
     when    = destroy
-    command = "kubectl --kubeconfig ${self.triggers.kubeconfig_path} delete deployment external-deployment-strategic -n k3d-validation --ignore-not-found=true"
+    command = "kubectl --kubeconfig ${self.triggers.kubeconfig_path} delete deployment external-deployment-strategic -n kind-validation --ignore-not-found=true"
   }
 
   triggers = {
-    kubeconfig_path = kind_cluster.k3d_validation.kubeconfig_path
+    kubeconfig_path = kind_cluster.kind_validation.kubeconfig_path
   }
 }
 
@@ -994,7 +994,7 @@ resource "k8sconnect_patch" "deployment_strategic" {
     api_version = "apps/v1"
     kind        = "Deployment"
     name        = "external-deployment-strategic"
-    namespace   = "k3d-validation"
+    namespace   = "kind-validation"
   }
   patch = jsonencode({
     metadata = {
@@ -1018,7 +1018,7 @@ resource "k8sconnect_patch" "configmap_json" {
     api_version = "v1"
     kind        = "ConfigMap"
     name        = "external-config"
-    namespace   = "k3d-validation"
+    namespace   = "kind-validation"
   }
   json_patch = jsonencode([
     {
@@ -1042,14 +1042,14 @@ resource "k8sconnect_patch" "service_merge" {
     api_version = "v1"
     kind        = "Service"
     name        = "external-service-patch-test"
-    namespace   = "k3d-validation"
+    namespace   = "kind-validation"
   }
   merge_patch = jsonencode({
     metadata = {
       labels = {
         "patched"     = "true"
         "patch-type"  = "merge"
-        "environment" = "k3d-validation"
+        "environment" = "kind-validation"
       }
     }
   })
@@ -1063,7 +1063,7 @@ resource "k8sconnect_patch" "external_deployment_patch" {
     api_version = "apps/v1"
     kind        = "Deployment"
     name        = "external-app"
-    namespace   = "k3d-validation"
+    namespace   = "kind-validation"
   }
   patch = jsonencode({
     metadata = {
@@ -1088,12 +1088,12 @@ resource "null_resource" "external_deployment" {
 
   provisioner "local-exec" {
     command = <<-EOT
-      kubectl --kubeconfig ${kind_cluster.k3d_validation.kubeconfig_path} apply -f - <<EOF
+      kubectl --kubeconfig ${kind_cluster.kind_validation.kubeconfig_path} apply -f - <<EOF
       apiVersion: apps/v1
       kind: Deployment
       metadata:
         name: external-app
-        namespace: k3d-validation
+        namespace: kind-validation
         labels:
           app: external
           managed-by: kubectl
@@ -1124,11 +1124,11 @@ resource "null_resource" "external_deployment" {
 
   provisioner "local-exec" {
     when    = destroy
-    command = "kubectl --kubeconfig ${self.triggers.kubeconfig_path} delete deployment external-app -n k3d-validation --ignore-not-found=true"
+    command = "kubectl --kubeconfig ${self.triggers.kubeconfig_path} delete deployment external-app -n kind-validation --ignore-not-found=true"
   }
 
   triggers = {
-    kubeconfig_path = kind_cluster.k3d_validation.kubeconfig_path
+    kubeconfig_path = kind_cluster.kind_validation.kubeconfig_path
   }
 }
 
@@ -1138,7 +1138,7 @@ resource "k8sconnect_wait" "external_app_rollout" {
     api_version = "apps/v1"
     kind        = "Deployment"
     name        = "external-app"
-    namespace   = "k3d-validation"
+    namespace   = "kind-validation"
   }
   wait_for = {
     rollout = true
@@ -1156,7 +1156,7 @@ resource "k8sconnect_wait" "external_app_rollout" {
 data "k8sconnect_object" "namespace_info" {
   api_version        = "v1"
   kind               = "Namespace"
-  name               = "k3d-validation"
+  name               = "kind-validation"
   cluster_connection = local.cluster_connection
   depends_on         = [k8sconnect_object.namespace]
 }
@@ -1166,7 +1166,7 @@ data "k8sconnect_object" "app_config" {
   api_version        = "v1"
   kind               = "ConfigMap"
   name               = "app-config"
-  namespace          = "k3d-validation"
+  namespace          = "kind-validation"
   cluster_connection = local.cluster_connection
   depends_on         = [k8sconnect_object.split_resources]
 }
@@ -1176,7 +1176,7 @@ data "k8sconnect_object" "external_config_patched" {
   api_version        = "v1"
   kind               = "ConfigMap"
   name               = "external-config"
-  namespace          = "k3d-validation"
+  namespace          = "kind-validation"
   cluster_connection = local.cluster_connection
   depends_on         = [k8sconnect_patch.configmap_json]
 }
@@ -1185,7 +1185,7 @@ data "k8sconnect_object" "external_service_patched" {
   api_version        = "v1"
   kind               = "Service"
   name               = "external-service-patch-test"
-  namespace          = "k3d-validation"
+  namespace          = "kind-validation"
   cluster_connection = local.cluster_connection
   depends_on         = [k8sconnect_patch.service_merge]
 }
@@ -1194,7 +1194,7 @@ data "k8sconnect_object" "external_deployment_patched" {
   api_version        = "apps/v1"
   kind               = "Deployment"
   name               = "external-deployment-strategic"
-  namespace          = "k3d-validation"
+  namespace          = "kind-validation"
   cluster_connection = local.cluster_connection
   depends_on         = [k8sconnect_patch.deployment_strategic]
 }
@@ -1205,11 +1205,11 @@ data "k8sconnect_object" "external_deployment_patched" {
 
 output "cluster_endpoint" {
   description = "Kind cluster API endpoint"
-  value       = kind_cluster.k3d_validation.endpoint
+  value       = kind_cluster.kind_validation.endpoint
 }
 
 output "namespace_uid" {
-  description = "UID of the k3d-validation namespace (from datasource)"
+  description = "UID of the kind-validation namespace (from datasource)"
   value       = yamldecode(data.k8sconnect_object.namespace_info.yaml_body).metadata.uid
 }
 

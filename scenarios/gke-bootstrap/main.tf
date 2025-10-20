@@ -5,16 +5,14 @@
 #
 # This validates:
 # - Inline cluster connections work with "known after apply" values
-# - apply_timeout (when implemented) handles cluster startup delays
 # - Provider can connect to cluster as soon as API server is ready
+# - Node pool dependency ensures workloads can schedule
 #
 # Expected timeline:
 # - t=0s: GKE cluster creation starts
-# - t=5-10m: GKE cluster ready (faster than EKS typically)
-# - t=5-10m+: Workloads deployed
-#
-# IMPORTANT: Set apply_timeout appropriately for GKE clusters!
-# Default 2m may be insufficient - recommend 10m for GKE bootstrap.
+# - t=~8-10m: Cluster completes, API server is ready
+# - t=~8-10m: k8sconnect resources deploy immediately (0-1s)
+# - t=~10-12m: Node pool completes, pods can schedule
 
 terraform {
   required_providers {
@@ -148,9 +146,6 @@ resource "k8sconnect_object" "namespace" {
 
   cluster_connection = local.cluster_connection
 
-  # When apply_timeout is implemented, uncomment:
-  # apply_timeout = "10m"  # GKE needs longer than default 2m
-
   depends_on = [
     google_container_cluster.main,
     google_container_node_pool.main,
@@ -183,9 +178,6 @@ resource "k8sconnect_object" "test_deployment" {
   YAML
 
   cluster_connection = local.cluster_connection
-
-  # When apply_timeout is implemented, uncomment:
-  # apply_timeout = "10m"
 
   depends_on = [k8sconnect_object.namespace]
 }

@@ -3,9 +3,9 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: app-config
-  namespace: k3d-validation
+  namespace: kind-validation
 data:
-  database.host: "postgres.k3d-validation.svc.cluster.local"
+  database.host: "postgres.kind-validation.svc.cluster.local"
   database.port: "5432"
   log.level: "info"
 ---
@@ -13,7 +13,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: app-secrets
-  namespace: k3d-validation
+  namespace: kind-validation
 type: Opaque
 stringData:
   database.password: "secretpassword123"
@@ -23,13 +23,13 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: app-service-account
-  namespace: k3d-validation
+  namespace: kind-validation
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: app-role
-  namespace: k3d-validation
+  namespace: kind-validation
 rules:
 - apiGroups: [""]
   resources: ["configmaps", "secrets"]
@@ -39,11 +39,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: app-role-binding
-  namespace: k3d-validation
+  namespace: kind-validation
 subjects:
 - kind: ServiceAccount
   name: app-service-account
-  namespace: k3d-validation
+  namespace: kind-validation
 roleRef:
   kind: Role
   name: app-role
