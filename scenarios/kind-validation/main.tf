@@ -75,6 +75,34 @@ resource "k8sconnect_object" "namespace" {
 }
 
 #############################################
+# CRD + CR AUTO-RETRY TEST (HEADLINE FEATURE)
+#############################################
+
+# Create a CRD with non-standard plural (cacti) to test DiscoverGVR
+resource "k8sconnect_object" "cactus_crd" {
+  yaml_body          = file("${path.module}/cactus-crd.yaml")
+  cluster_connection = local.cluster_connection
+}
+
+# Create CR immediately - should auto-retry until CRD is ready
+# NO depends_on! This proves zero-configuration auto-retry
+resource "k8sconnect_object" "my_cactus" {
+  yaml_body = <<-YAML
+    apiVersion: plants.example.com/v1
+    kind: Cactus
+    metadata:
+      name: prickly-pear
+      namespace: kind-validation
+    spec:
+      height: "6ft"
+      species: "Opuntia"
+  YAML
+
+  cluster_connection = local.cluster_connection
+  # Intentionally NO depends_on - tests auto-retry when CRD doesn't exist yet
+}
+
+#############################################
 # CLUSTER-SCOPED RESOURCES FROM DATASOURCE
 #############################################
 
@@ -187,6 +215,30 @@ resource "k8sconnect_wait" "pvc_volume_name" {
     timeout = "60s"
   }
   cluster_connection = local.cluster_connection
+}
+
+# Demonstrate wait status usage - use PVC volume name in ConfigMap
+# This proves the wait resource extracts and exposes status fields
+resource "k8sconnect_object" "volume_info" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: volume-info
+      namespace: kind-validation
+      labels:
+        purpose: status-usage-demo
+    data:
+      pvc_name: "test-pvc"
+      volume_name: "${k8sconnect_wait.pvc_volume_name.status.spec.volumeName}"
+      bound_phase: "${k8sconnect_wait.pvc_bound.status.status.phase}"
+  YAML
+
+  cluster_connection = local.cluster_connection
+  depends_on = [
+    k8sconnect_wait.pvc_volume_name,
+    k8sconnect_wait.pvc_bound
+  ]
 }
 
 #############################################
@@ -1257,3 +1309,51 @@ output "external_deployment_replicas" {
   description = "External Deployment replicas after strategic merge patch (should be 2)"
   value       = yamldecode(data.k8sconnect_object.external_deployment_patched.yaml_body).spec.replicas
 }
+
+output "volume_info_data" {
+  description = "ConfigMap data using wait status outputs (proves status field extraction)"
+  value       = yamldecode(k8sconnect_object.volume_info.yaml_body).data
+}
+
+output "cactus_custom_resource" {
+  description = "Custom resource with non-standard plural (proves CRD auto-retry + DiscoverGVR)"
+  value       = k8sconnect_object.my_cactus.object_ref
+}
+
+#############################################
+# FIELD VALIDATION TEST (UNCOMMENT TO TEST)
+#############################################
+#
+# This resource intentionally contains typos to demonstrate field validation.
+# Uncomment to see validation errors during plan:
+#
+# resource "k8sconnect_object" "field_validation_test" {
+#   yaml_body = <<-YAML
+#     apiVersion: apps/v1
+#     kind: Deployment
+#     metadata:
+#       name: validation-test
+#       namespace: kind-validation
+#     spec:
+#       replica: 1  # TYPO! Should be "replicas"
+#       selector:
+#         matchLabels:
+#           app: test
+#       template:
+#         metadata:
+#           labels:
+#             app: test
+#         spec:
+#           containers:
+#           - name: nginx
+#             image: nginx:1.21
+#             imagePullPolice: Always  # TYPO! Should be "imagePullPolicy"
+#   YAML
+#
+#   cluster_connection = local.cluster_connection
+#   depends_on         = [k8sconnect_object.namespace]
+# }
+#
+# Expected errors during terraform plan:
+# - "unknown field spec.replica" (should be spec.replicas)
+# - "unknown field spec.template.spec.containers[0].imagePullPolice" (should be imagePullPolicy)
