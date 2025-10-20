@@ -723,6 +723,36 @@ metadata:
 	fmt.Printf("✅ Created ConfigMap %s/%s with kubectl (field manager: kubectl)\n", namespace, name)
 }
 
+// DeleteResourceWithKubectl deletes a resource using kubectl delete command
+// This simulates an out-of-band deletion (e.g., CRD deletion cascading to CRs)
+func DeleteResourceWithKubectl(t *testing.T, kubeconfigRaw, resourceType, name, namespace string) {
+	// Write kubeconfig to temp file
+	tmpKubeconfig := fmt.Sprintf("/tmp/kubectl-kubeconfig-%d.yaml", time.Now().UnixNano())
+	if err := os.WriteFile(tmpKubeconfig, []byte(kubeconfigRaw), 0600); err != nil {
+		t.Fatalf("Failed to write kubeconfig for kubectl: %v", err)
+	}
+	defer os.Remove(tmpKubeconfig)
+
+	// Build kubectl delete command
+	args := []string{"--kubeconfig", tmpKubeconfig, "delete", resourceType, name}
+	if namespace != "" {
+		args = append(args, "-n", namespace)
+	}
+	args = append(args, "--ignore-not-found=true")
+
+	cmd := exec.Command("kubectl", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("kubectl delete failed: %v\nOutput: %s", err, output)
+	}
+
+	if namespace != "" {
+		fmt.Printf("✅ Deleted %s %s/%s with kubectl\n", resourceType, namespace, name)
+	} else {
+		fmt.Printf("✅ Deleted %s %s with kubectl\n", resourceType, name)
+	}
+}
+
 // CheckFieldManager verifies that a resource has the expected field manager
 func CheckFieldManager(client kubernetes.Interface, namespace, kind, name, expectedManager string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {

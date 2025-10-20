@@ -28,7 +28,7 @@ func (r *objectResource) Create(ctx context.Context, req resource.CreateRequest,
 	data.ID = types.StringValue(r.generateID())
 
 	// 3. Setup context
-	rc, err := r.prepareContext(ctx, &data, false)
+	rc, err := r.prepareContext(ctx, &data, false, false)
 	if err != nil {
 		resp.Diagnostics.AddError("Preparation Failed", err.Error())
 		return
@@ -90,9 +90,21 @@ func (r *objectResource) Read(ctx context.Context, req resource.ReadRequest, res
 	}
 
 	// 2. Setup context
-	rc, err := r.prepareContext(ctx, &data, false)
+	rc, err := r.prepareContext(ctx, &data, false, false)
 	if err != nil {
 		resp.Diagnostics.AddError("Preparation Failed", err.Error())
+		return
+	}
+
+	// 2a. If GVR is empty, the resource type is not discoverable (e.g., CRD was deleted)
+	// Treat this the same as resource not found - remove from state
+	if rc.GVR.Empty() {
+		tflog.Info(ctx, "Resource type not discoverable during read, treating as deleted", map[string]interface{}{
+			"kind":      rc.Object.GetKind(),
+			"name":      rc.Object.GetName(),
+			"namespace": rc.Object.GetNamespace(),
+		})
+		resp.State.RemoveResource(ctx)
 		return
 	}
 
@@ -168,7 +180,7 @@ func (r *objectResource) Update(ctx context.Context, req resource.UpdateRequest,
 	}
 
 	// 2. Setup context
-	rc, err := r.prepareContext(ctx, &plan, false)
+	rc, err := r.prepareContext(ctx, &plan, false, false)
 	if err != nil {
 		resp.Diagnostics.AddError("Preparation Failed", err.Error())
 		return
@@ -236,9 +248,19 @@ func (r *objectResource) Delete(ctx context.Context, req resource.DeleteRequest,
 	}
 
 	// 3. Setup context
-	rc, err := r.prepareContext(ctx, &data, true)
+	rc, err := r.prepareContext(ctx, &data, true, true)
 	if err != nil {
 		resp.Diagnostics.AddError("Preparation Failed", err.Error())
+		return
+	}
+
+	// 3a. If GVR discovery failed (e.g., CRD deleted before CR), assume already deleted
+	if rc.GVR.Empty() {
+		tflog.Info(ctx, "Resource type no longer discoverable, assuming already deleted", map[string]interface{}{
+			"kind":      rc.Object.GetKind(),
+			"name":      rc.Object.GetName(),
+			"namespace": rc.Object.GetNamespace(),
+		})
 		return
 	}
 
