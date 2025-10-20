@@ -6,7 +6,7 @@ terraform {
     }
     k8sconnect = {
       source  = "local/k8sconnect"
-      version = ">= 0.1.0"
+      version = ">= 0.1.2"
     }
   }
   required_version = ">= 1.6"
@@ -16,7 +16,7 @@ terraform {
 # CLUSTER SETUP
 #############################################
 
-resource "kind_cluster" "kind-validation" {
+resource "kind_cluster" "kind_validation" {
   name           = "kind-validation"
   node_image     = "kindest/node:v1.31.0"
   wait_for_ready = true
@@ -62,7 +62,7 @@ data "k8sconnect_yaml_scoped" "mixed_scope" {
 #############################################
 
 resource "k8sconnect_object" "namespace" {
-  yaml_body = <<-YAML
+  yaml_body          = <<-YAML
     apiVersion: v1
     kind: Namespace
     metadata:
@@ -115,7 +115,7 @@ resource "k8sconnect_object" "namespaced_scoped" {
 
 # Create a PVC (kind provides local-path storage)
 resource "k8sconnect_object" "test_pvc" {
-  yaml_body = <<-YAML
+  yaml_body          = <<-YAML
     apiVersion: v1
     kind: PersistentVolumeClaim
     metadata:
@@ -135,7 +135,7 @@ resource "k8sconnect_object" "test_pvc" {
 
 # Create a pod that uses the PVC (required for WaitForFirstConsumer binding)
 resource "k8sconnect_object" "pvc_consumer_pod" {
-  yaml_body = <<-YAML
+  yaml_body          = <<-YAML
     apiVersion: v1
     kind: Pod
     metadata:
@@ -194,7 +194,7 @@ resource "k8sconnect_wait" "pvc_volume_name" {
 #############################################
 
 resource "k8sconnect_object" "migration_job" {
-  yaml_body = <<-YAML
+  yaml_body          = <<-YAML
     apiVersion: batch/v1
     kind: Job
     metadata:
@@ -238,7 +238,7 @@ resource "k8sconnect_wait" "migration_complete" {
 #############################################
 
 resource "k8sconnect_object" "backup_cronjob" {
-  yaml_body = <<-YAML
+  yaml_body          = <<-YAML
     apiVersion: batch/v1
     kind: CronJob
     metadata:
@@ -274,7 +274,7 @@ resource "k8sconnect_object" "backup_cronjob" {
 #############################################
 
 resource "k8sconnect_object" "replicaset" {
-  yaml_body = <<-YAML
+  yaml_body          = <<-YAML
     apiVersion: apps/v1
     kind: ReplicaSet
     metadata:
@@ -316,7 +316,7 @@ resource "k8sconnect_object" "replicaset" {
 #############################################
 
 resource "k8sconnect_object" "standalone_pod" {
-  yaml_body = <<-YAML
+  yaml_body          = <<-YAML
     apiVersion: v1
     kind: Pod
     metadata:
@@ -360,7 +360,7 @@ resource "k8sconnect_wait" "pod_running" {
 #############################################
 
 resource "k8sconnect_object" "web_deployment" {
-  yaml_body = <<-YAML
+  yaml_body          = <<-YAML
     apiVersion: apps/v1
     kind: Deployment
     metadata:
@@ -418,7 +418,7 @@ resource "k8sconnect_wait" "web_rollout" {
 #############################################
 
 resource "k8sconnect_object" "web_service" {
-  yaml_body = <<-YAML
+  yaml_body          = <<-YAML
     apiVersion: v1
     kind: Service
     metadata:
@@ -446,7 +446,7 @@ resource "k8sconnect_object" "web_service" {
 #############################################
 
 resource "k8sconnect_object" "network_policy" {
-  yaml_body = <<-YAML
+  yaml_body          = <<-YAML
     apiVersion: networking.k8s.io/v1
     kind: NetworkPolicy
     metadata:
@@ -485,7 +485,7 @@ resource "k8sconnect_object" "network_policy" {
 #############################################
 
 resource "k8sconnect_object" "database_statefulset" {
-  yaml_body = <<-YAML
+  yaml_body          = <<-YAML
     apiVersion: apps/v1
     kind: StatefulSet
     metadata:
@@ -552,7 +552,7 @@ resource "k8sconnect_wait" "postgres_ready" {
 
 # StatefulSet headless service
 resource "k8sconnect_object" "postgres_service" {
-  yaml_body = <<-YAML
+  yaml_body          = <<-YAML
     apiVersion: v1
     kind: Service
     metadata:
@@ -576,7 +576,7 @@ resource "k8sconnect_object" "postgres_service" {
 #############################################
 
 resource "k8sconnect_object" "log_collector" {
-  yaml_body = <<-YAML
+  yaml_body          = <<-YAML
     apiVersion: apps/v1
     kind: DaemonSet
     metadata:
@@ -619,7 +619,7 @@ resource "k8sconnect_object" "log_collector" {
 #############################################
 
 resource "k8sconnect_object" "web_ingress" {
-  yaml_body = <<-YAML
+  yaml_body          = <<-YAML
     apiVersion: networking.k8s.io/v1
     kind: Ingress
     metadata:
@@ -650,7 +650,7 @@ resource "k8sconnect_object" "web_ingress" {
 #############################################
 
 resource "k8sconnect_object" "web_pdb" {
-  yaml_body = <<-YAML
+  yaml_body          = <<-YAML
     apiVersion: policy/v1
     kind: PodDisruptionBudget
     metadata:
@@ -671,7 +671,7 @@ resource "k8sconnect_object" "web_pdb" {
 #############################################
 
 resource "k8sconnect_object" "metrics_reader_role" {
-  yaml_body = <<-YAML
+  yaml_body          = <<-YAML
     apiVersion: rbac.authorization.k8s.io/v1
     kind: ClusterRole
     metadata:
@@ -688,7 +688,7 @@ resource "k8sconnect_object" "metrics_reader_role" {
 }
 
 resource "k8sconnect_object" "metrics_reader_binding" {
-  yaml_body = <<-YAML
+  yaml_body          = <<-YAML
     apiVersion: rbac.authorization.k8s.io/v1
     kind: ClusterRoleBinding
     metadata:
@@ -714,7 +714,7 @@ resource "k8sconnect_object" "metrics_reader_binding" {
 #############################################
 
 resource "k8sconnect_object" "fast_storage" {
-  yaml_body = <<-YAML
+  yaml_body          = <<-YAML
     apiVersion: storage.k8s.io/v1
     kind: StorageClass
     metadata:
@@ -731,7 +731,7 @@ resource "k8sconnect_object" "fast_storage" {
 #############################################
 
 resource "k8sconnect_object" "high_priority" {
-  yaml_body = <<-YAML
+  yaml_body          = <<-YAML
     apiVersion: scheduling.k8s.io/v1
     kind: PriorityClass
     metadata:
@@ -745,7 +745,7 @@ resource "k8sconnect_object" "high_priority" {
 
 # Create a deployment using the priority class
 resource "k8sconnect_object" "priority_deployment" {
-  yaml_body = <<-YAML
+  yaml_body          = <<-YAML
     apiVersion: apps/v1
     kind: Deployment
     metadata:
@@ -786,7 +786,7 @@ resource "k8sconnect_object" "priority_deployment" {
 #############################################
 
 resource "k8sconnect_object" "web_hpa" {
-  yaml_body = <<-YAML
+  yaml_body          = <<-YAML
     apiVersion: autoscaling/v2
     kind: HorizontalPodAutoscaler
     metadata:
@@ -821,7 +821,7 @@ resource "k8sconnect_object" "web_hpa" {
 # Note: EndpointSlices are typically auto-created by K8s from Services,
 # but we can create custom ones for testing
 resource "k8sconnect_object" "custom_endpoints" {
-  yaml_body = <<-YAML
+  yaml_body          = <<-YAML
     apiVersion: v1
     kind: Endpoints
     metadata:
@@ -840,7 +840,7 @@ resource "k8sconnect_object" "custom_endpoints" {
 
 # Service for the custom endpoints
 resource "k8sconnect_object" "external_service" {
-  yaml_body = <<-YAML
+  yaml_body          = <<-YAML
     apiVersion: v1
     kind: Service
     metadata:
