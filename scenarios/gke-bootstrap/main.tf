@@ -7,12 +7,6 @@
 # - Inline cluster connections work with "known after apply" values
 # - Provider can connect to cluster as soon as API server is ready
 # - Node pool dependency ensures workloads can schedule
-#
-# Expected timeline:
-# - t=0s: GKE cluster creation starts
-# - t=~8-10m: Cluster completes, API server is ready
-# - t=~8-10m: k8sconnect resources deploy immediately (0-1s)
-# - t=~10-12m: Node pool completes, pods can schedule
 
 terraform {
   required_providers {

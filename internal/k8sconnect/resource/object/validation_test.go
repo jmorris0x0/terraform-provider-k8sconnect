@@ -25,7 +25,9 @@ func TestAccObjectResource_CELValidationError(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
-	ns := fmt.Sprintf("cel-validation-ns-%d", time.Now().UnixNano()%1000000)
+	suffix := time.Now().UnixNano() % 1000000
+	ns := fmt.Sprintf("cel-validation-ns-%d", suffix)
+	testGroup := fmt.Sprintf("test-%d.com", suffix)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
@@ -35,10 +37,11 @@ func TestAccObjectResource_CELValidationError(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create namespace and CRD with CEL validation
 			{
-				Config: testAccObjectResourceCELValidationCRD(ns),
+				Config: testAccObjectResourceCELValidationCRD(ns, testGroup),
 				ConfigVariables: config.Variables{
-					"raw":       config.StringVariable(raw),
-					"namespace": config.StringVariable(ns),
+					"raw":        config.StringVariable(raw),
+					"namespace":  config.StringVariable(ns),
+					"test_group": config.StringVariable(testGroup),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("k8sconnect_object.namespace", "id"),
@@ -48,10 +51,11 @@ func TestAccObjectResource_CELValidationError(t *testing.T) {
 			// Step 2: Try to create CR that violates CEL validation rule
 			// Should fail with clear CEL validation error
 			{
-				Config: testAccObjectResourceCELValidationViolation(ns),
+				Config: testAccObjectResourceCELValidationViolation(ns, testGroup),
 				ConfigVariables: config.Variables{
-					"raw":       config.StringVariable(raw),
-					"namespace": config.StringVariable(ns),
+					"raw":        config.StringVariable(raw),
+					"namespace":  config.StringVariable(ns),
+					"test_group": config.StringVariable(testGroup),
 				},
 				// Expect CEL validation error
 				ExpectError: regexp.MustCompile("CEL Validation Failed"),
@@ -72,7 +76,9 @@ func TestAccObjectResource_CELValidationError_Multiple(t *testing.T) {
 		t.Fatal("TF_ACC_KUBECONFIG must be set")
 	}
 
-	ns := fmt.Sprintf("cel-multi-ns-%d", time.Now().UnixNano()%1000000)
+	suffix := time.Now().UnixNano() % 1000000
+	ns := fmt.Sprintf("cel-multi-ns-%d", suffix)
+	testGroup := fmt.Sprintf("test-%d.com", suffix)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
@@ -82,10 +88,11 @@ func TestAccObjectResource_CELValidationError_Multiple(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create namespace and CRD with multiple CEL validation rules
 			{
-				Config: testAccObjectResourceCELMultipleRulesCRD(ns),
+				Config: testAccObjectResourceCELMultipleRulesCRD(ns, testGroup),
 				ConfigVariables: config.Variables{
-					"raw":       config.StringVariable(raw),
-					"namespace": config.StringVariable(ns),
+					"raw":        config.StringVariable(raw),
+					"namespace":  config.StringVariable(ns),
+					"test_group": config.StringVariable(testGroup),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("k8sconnect_object.namespace", "id"),
@@ -94,10 +101,11 @@ func TestAccObjectResource_CELValidationError_Multiple(t *testing.T) {
 			},
 			// Step 2: Try to create CR that violates multiple CEL rules
 			{
-				Config: testAccObjectResourceCELMultipleViolations(ns),
+				Config: testAccObjectResourceCELMultipleViolations(ns, testGroup),
 				ConfigVariables: config.Variables{
-					"raw":       config.StringVariable(raw),
-					"namespace": config.StringVariable(ns),
+					"raw":        config.StringVariable(raw),
+					"namespace":  config.StringVariable(ns),
+					"test_group": config.StringVariable(testGroup),
 				},
 				// Expect CEL validation error mentioning multiple errors
 				ExpectError: regexp.MustCompile("CEL Validation Failed"),
@@ -110,7 +118,7 @@ func TestAccObjectResource_CELValidationError_Multiple(t *testing.T) {
 }
 
 // testAccObjectResourceCELValidationCRD creates a CRD with CEL validation rules
-func testAccObjectResourceCELValidationCRD(namespace string) string {
+func testAccObjectResourceCELValidationCRD(namespace, testGroup string) string {
 	return fmt.Sprintf(`
 resource "k8sconnect_object" "namespace" {
   yaml_body = <<-YAML
@@ -130,9 +138,9 @@ resource "k8sconnect_object" "crd" {
     apiVersion: apiextensions.k8s.io/v1
     kind: CustomResourceDefinition
     metadata:
-      name: widgets.example.com
+      name: widgets.%[2]s
     spec:
-      group: example.com
+      group: %[2]s
       names:
         kind: Widget
         plural: widgets
@@ -171,11 +179,15 @@ variable "raw" {
 variable "namespace" {
   type = string
 }
-`, namespace)
+
+variable "test_group" {
+  type = string
+}
+`, namespace, testGroup)
 }
 
 // testAccObjectResourceCELValidationViolation tries to create CR that violates CEL rule
-func testAccObjectResourceCELValidationViolation(namespace string) string {
+func testAccObjectResourceCELValidationViolation(namespace, testGroup string) string {
 	return fmt.Sprintf(`
 resource "k8sconnect_object" "namespace" {
   yaml_body = <<-YAML
@@ -195,9 +207,9 @@ resource "k8sconnect_object" "crd" {
     apiVersion: apiextensions.k8s.io/v1
     kind: CustomResourceDefinition
     metadata:
-      name: widgets.example.com
+      name: widgets.%[2]s
     spec:
-      group: example.com
+      group: %[2]s
       names:
         kind: Widget
         plural: widgets
@@ -232,7 +244,7 @@ resource "k8sconnect_object" "crd" {
 # This should fail - replicas: 15 violates CEL rule (must be <= 10)
 resource "k8sconnect_object" "widget" {
   yaml_body = <<-YAML
-    apiVersion: example.com/v1
+    apiVersion: %[2]s/v1
     kind: Widget
     metadata:
       name: test-widget
@@ -255,11 +267,15 @@ variable "raw" {
 variable "namespace" {
   type = string
 }
-`, namespace)
+
+variable "test_group" {
+  type = string
+}
+`, namespace, testGroup)
 }
 
 // testAccObjectResourceCELMultipleRulesCRD creates a CRD with multiple CEL validation rules
-func testAccObjectResourceCELMultipleRulesCRD(namespace string) string {
+func testAccObjectResourceCELMultipleRulesCRD(namespace, testGroup string) string {
 	return fmt.Sprintf(`
 resource "k8sconnect_object" "namespace" {
   yaml_body = <<-YAML
@@ -279,9 +295,9 @@ resource "k8sconnect_object" "crd" {
     apiVersion: apiextensions.k8s.io/v1
     kind: CustomResourceDefinition
     metadata:
-      name: gadgets.example.com
+      name: gadgets.%[2]s
     spec:
-      group: example.com
+      group: %[2]s
       names:
         kind: Gadget
         plural: gadgets
@@ -325,11 +341,15 @@ variable "raw" {
 variable "namespace" {
   type = string
 }
-`, namespace)
+
+variable "test_group" {
+  type = string
+}
+`, namespace, testGroup)
 }
 
 // testAccObjectResourceCELMultipleViolations tries to create CR that violates multiple CEL rules
-func testAccObjectResourceCELMultipleViolations(namespace string) string {
+func testAccObjectResourceCELMultipleViolations(namespace, testGroup string) string {
 	return fmt.Sprintf(`
 resource "k8sconnect_object" "namespace" {
   yaml_body = <<-YAML
@@ -349,9 +369,9 @@ resource "k8sconnect_object" "crd" {
     apiVersion: apiextensions.k8s.io/v1
     kind: CustomResourceDefinition
     metadata:
-      name: gadgets.example.com
+      name: gadgets.%[2]s
     spec:
-      group: example.com
+      group: %[2]s
       names:
         kind: Gadget
         plural: gadgets
@@ -393,7 +413,7 @@ resource "k8sconnect_object" "crd" {
 # 2. replicas: 15 > maxReplicas: 5 (violates comparison rule)
 resource "k8sconnect_object" "gadget" {
   yaml_body = <<-YAML
-    apiVersion: example.com/v1
+    apiVersion: %[2]s/v1
     kind: Gadget
     metadata:
       name: test-gadget
@@ -417,5 +437,9 @@ variable "raw" {
 variable "namespace" {
   type = string
 }
-`, namespace)
+
+variable "test_group" {
+  type = string
+}
+`, namespace, testGroup)
 }
