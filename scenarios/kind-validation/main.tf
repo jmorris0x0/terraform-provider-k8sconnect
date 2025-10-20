@@ -217,9 +217,11 @@ resource "k8sconnect_wait" "pvc_volume_name" {
   cluster_connection = local.cluster_connection
 }
 
-# NOTE: Wait status usage removed due to v0.1.2 limitation
-# field wait .object is not populated in current version
-# Will be added in future release
+# Now test that we can extract the volume name from the wait result
+output "extracted_volume_name" {
+  description = "Volume name extracted from PVC spec via wait resource"
+  value       = k8sconnect_wait.pvc_volume_name.result.spec.volumeName
+}
 
 #############################################
 # JOB TESTS - with condition wait
