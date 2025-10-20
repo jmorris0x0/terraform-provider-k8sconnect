@@ -625,3 +625,64 @@ func TestFieldValidationErrorPriority(t *testing.T) {
 		t.Errorf("Expected error severity, got: %s", severity)
 	}
 }
+
+// TestExtractConflictDetails tests parsing of SSA conflict error messages
+// Note: SSA conflicts are intentionally prevented by using Force=true (ADR-005)
+// This test exists for defensive programming in case Force is ever disabled
+func TestExtractConflictDetails(t *testing.T) {
+	tests := []struct {
+		name           string
+		err            error
+		expectedSubstr string
+	}{
+		{
+			name: "conflict with kubectl",
+			err: &errors.StatusError{
+				ErrStatus: metav1.Status{
+					Code:    409,
+					Message: `Apply failed with 1 conflict: conflict with "kubectl" using v1: .spec.replicas`,
+				},
+			},
+			expectedSubstr: "kubectl",
+		},
+		{
+			name: "conflict with hpa-controller",
+			err: &errors.StatusError{
+				ErrStatus: metav1.Status{
+					Code:    409,
+					Message: `conflict with "hpa-controller" with subresource "scale" using autoscaling/v1: .spec.replicas`,
+				},
+			},
+			expectedSubstr: "hpa-controller",
+		},
+		{
+			name: "multiple conflicts",
+			err: &errors.StatusError{
+				ErrStatus: metav1.Status{
+					Code:    409,
+					Message: `Apply failed with 2 conflicts: conflict with "kubectl" using v1: .metadata.annotations conflict with "helm" using v1: .metadata.labels`,
+				},
+			},
+			expectedSubstr: "kubectl",
+		},
+		{
+			name: "unparseable conflict message",
+			err: &errors.StatusError{
+				ErrStatus: metav1.Status{
+					Code:    409,
+					Message: `some generic conflict error`,
+				},
+			},
+			expectedSubstr: "field ownership conflicts",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			details := ExtractConflictDetails(tt.err)
+			if !strings.Contains(details, tt.expectedSubstr) {
+				t.Errorf("ExtractConflictDetails() = %q, expected to contain %q", details, tt.expectedSubstr)
+			}
+		})
+	}
+}

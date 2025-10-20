@@ -23,6 +23,9 @@ func ClassifyError(err error, operation, resourceDesc string) (severity, title, 
 			fmt.Sprintf("RBAC permissions insufficient to %s %s. Check that your credentials have the required permissions for this operation. Details: %v",
 				operation, resourceDesc, err)
 
+	// Note: SSA conflicts are intentionally prevented by using Force=true (ADR-005)
+	// This code path exists for defensive programming in case Force is ever disabled
+	// ExtractConflictDetails has defensive unit test coverage despite being unreachable in production
 	case errors.IsConflict(err):
 		conflictDetails := ExtractConflictDetails(err)
 		return "error", fmt.Sprintf("%s: Field Manager Conflict", operation),
@@ -98,6 +101,9 @@ func ClassifyError(err error, operation, resourceDesc string) (severity, title, 
 			fmt.Sprintf("The %s contains invalid fields or values. Review the YAML specification and ensure all required fields are present and correctly formatted. Details: %v",
 				resourceDesc, err)
 
+	// Note: "Already Exists" errors are prevented by using Server-Side Apply (SSA)
+	// SSA is idempotent - it updates existing resources instead of failing
+	// This code path exists for defensive programming in case non-SSA operations are added
 	case errors.IsAlreadyExists(err):
 		return "error", fmt.Sprintf("%s: Resource Already Exists", operation),
 			fmt.Sprintf("The %s already exists in the cluster and cannot be created. Use import to manage existing resources with Terraform. Details: %v",
