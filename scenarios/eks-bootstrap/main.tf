@@ -40,7 +40,7 @@ provider "k8sconnect" {}
 variable "aws_region" {
   description = "AWS region for EKS cluster"
   type        = string
-  default     = "us-west-2"
+  default     = "us-west-1"
 }
 
 variable "cluster_name" {
@@ -53,16 +53,62 @@ variable "cluster_name" {
 # VPC AND NETWORKING
 #############################################
 
-# Use default VPC for simplicity (production would use custom VPC)
-data "aws_vpc" "default" {
-  default = true
+# Create a simple VPC for the EKS cluster
+resource "aws_vpc" "main" {
+  cidr_block           = "10.0.0.0/16"
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+
+  tags = {
+    Name = "${var.cluster_name}-vpc"
+  }
 }
 
-data "aws_subnets" "default" {
-  filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.default.id]
+# Create subnets in multiple AZs (required for EKS)
+data "aws_availability_zones" "available" {
+  state = "available"
+}
+
+resource "aws_subnet" "public" {
+  count                   = 2
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = "10.0.${count.index}.0/24"
+  availability_zone       = data.aws_availability_zones.available.names[count.index]
+  map_public_ip_on_launch = true
+
+  tags = {
+    Name = "${var.cluster_name}-public-${count.index + 1}"
   }
+}
+
+# Internet gateway for public subnets
+resource "aws_internet_gateway" "main" {
+  vpc_id = aws_vpc.main.id
+
+  tags = {
+    Name = "${var.cluster_name}-igw"
+  }
+}
+
+# Route table for public subnets
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.main.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.main.id
+  }
+
+  tags = {
+    Name = "${var.cluster_name}-public-rt"
+  }
+}
+
+# Associate route table with subnets
+resource "aws_route_table_association" "public" {
+  count          = 2
+  subnet_id      = aws_subnet.public[count.index].id
+  route_table_id = aws_route_table.public.id
 }
 
 #############################################
@@ -130,7 +176,7 @@ resource "aws_eks_cluster" "main" {
   role_arn = aws_iam_role.eks_cluster.arn
 
   vpc_config {
-    subnet_ids = data.aws_subnets.default.ids
+    subnet_ids = aws_subnet.public[*].id
   }
 
   depends_on = [
@@ -143,7 +189,7 @@ resource "aws_eks_node_group" "main" {
   cluster_name    = aws_eks_cluster.main.name
   node_group_name = "${var.cluster_name}-nodes"
   node_role_arn   = aws_iam_role.eks_node_group.arn
-  subnet_ids      = data.aws_subnets.default.ids
+  subnet_ids      = aws_subnet.public[*].id
 
   scaling_config {
     desired_size = 2
@@ -204,9 +250,7 @@ resource "k8sconnect_object" "namespace" {
 
   cluster_connection = local.cluster_connection
 
-  # When apply_timeout is implemented, uncomment:
-  # apply_timeout = "10m"  # EKS needs longer than default 2m
-
+  # For EKS: ensure nodes are ready before deploying workloads
   depends_on = [
     aws_eks_cluster.main,
     aws_eks_node_group.main,

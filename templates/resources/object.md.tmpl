@@ -21,6 +21,11 @@ resource "aws_eks_cluster" "main" {
   # ... (cluster configuration)
 }
 
+resource "aws_eks_node_group" "main" {
+  cluster_name = aws_eks_cluster.main.name
+  # ... (node group configuration)
+}
+
 # Connection can be reused across resources
 locals {
   cluster_connection = {
@@ -38,6 +43,9 @@ locals {
 resource "k8sconnect_object" "cert_manager" {
   yaml_body          = file("cert-manager.yaml")
   cluster_connection = local.cluster_connection
+
+  # For EKS: ensure nodes are ready before deploying workloads
+  depends_on = [aws_eks_node_group.main]
 }
 ```
 
