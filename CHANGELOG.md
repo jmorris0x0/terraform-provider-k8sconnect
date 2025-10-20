@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2025-10-19
+
 ### Added
 - Server-side field validation to catch typos and invalid fields (ADR-017)
   - Detects common mistakes like `replica` instead of `replicas` during plan phase
