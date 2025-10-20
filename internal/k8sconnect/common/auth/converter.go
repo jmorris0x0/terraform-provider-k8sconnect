@@ -1,4 +1,3 @@
-// internal/k8sconnect/common/auth/converter.go
 package auth
 
 import (

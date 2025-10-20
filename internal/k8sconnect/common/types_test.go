@@ -1,4 +1,3 @@
-// internal/k8sconnect/common/types_test.go
 package common
 
 import (

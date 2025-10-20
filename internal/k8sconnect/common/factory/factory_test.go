@@ -1,4 +1,3 @@
-// internal/k8sconnect/common/factory/factory_test.go
 package factory
 
 import (

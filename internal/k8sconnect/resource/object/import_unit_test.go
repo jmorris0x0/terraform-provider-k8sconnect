@@ -1,4 +1,3 @@
-// internal/k8sconnect/resource/object/import_unit_test.go
 package object
 
 import (

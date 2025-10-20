@@ -1,4 +1,3 @@
-// internal/k8sconnect/resource/object/projection.go
 package object
 
 import (
@@ -107,8 +106,6 @@ func mergeFields(dest, source map[string]interface{}) {
 		dest[key] = sourceVal
 	}
 }
-
-// internal/k8sconnect/resource/object/projection_v2.go
 
 var matcher = NewMergeKeyMatcher()
 

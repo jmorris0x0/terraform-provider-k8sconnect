@@ -1,4 +1,3 @@
-// internal/k8sconnect/common/validators/patch.go
 package validators
 
 import (

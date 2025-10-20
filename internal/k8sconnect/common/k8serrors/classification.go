@@ -1,4 +1,3 @@
-// internal/k8sconnect/common/k8serrors/classification.go
 package k8serrors
 
 import (

@@ -1,4 +1,3 @@
-// internal/k8sconnect/resource/object/crud_common.go
 package object
 
 import (

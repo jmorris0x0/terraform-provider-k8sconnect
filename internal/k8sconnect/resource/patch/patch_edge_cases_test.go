@@ -1,4 +1,3 @@
-// internal/k8sconnect/resource/patch/patch_edge_cases_test.go
 package patch_test
 
 import (

@@ -1,4 +1,3 @@
-// internal/k8sconnect/resource/patch/patch.go
 package patch
 
 import (

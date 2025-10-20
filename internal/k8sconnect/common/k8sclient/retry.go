@@ -1,4 +1,3 @@
-// internal/k8sconnect/common/k8sclient/retry.go
 package k8sclient
 
 import (

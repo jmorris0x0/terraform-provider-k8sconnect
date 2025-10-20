@@ -1,4 +1,3 @@
-// internal/k8sconnect/common/k8sclient/warnings.go
 package k8sclient
 
 import (

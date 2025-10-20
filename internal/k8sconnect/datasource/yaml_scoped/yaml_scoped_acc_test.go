@@ -1,4 +1,3 @@
-// internal/k8sconnect/datasource/yaml_scoped/yaml_scoped_acc_test.go
 package yaml_scoped_test
 
 import (

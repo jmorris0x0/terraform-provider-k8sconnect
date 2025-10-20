@@ -1,4 +1,3 @@
-// internal/k8sconnect/resource/object/yaml.go
 package object
 
 import (

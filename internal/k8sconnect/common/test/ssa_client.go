@@ -1,4 +1,3 @@
-// internal/k8sconnect/common/test/ssa_client.go
 package test
 
 import (

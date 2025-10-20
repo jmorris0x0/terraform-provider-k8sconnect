@@ -1,4 +1,3 @@
-// internal/k8sconnect/resource/object/import.go
 package object
 
 import (
@@ -71,7 +70,7 @@ func (r *objectResource) loadKubeconfig(ctx context.Context, resp *resource.Impo
 
 // createImportClient creates a Kubernetes client for import operations
 // Returns the client and true on success; nil and false on error
-func (r *objectResource) createImportClient(ctx context.Context, kubeconfigData []byte, kubeconfigPath, kubeContext string, resp *resource.ImportStateResponse) (*k8sclient.DynamicK8sClient, bool) {
+func (r *objectResource) createImportClient(ctx context.Context, kubeconfigData []byte, kubeconfigPath, kubeContext string, resp *resource.ImportStateResponse) (k8sclient.K8sClient, bool) {
 	// Create temporary connection model for import
 	tempConn := auth.ClusterConnectionModel{
 		Kubeconfig: types.StringValue(string(kubeconfigData)),
@@ -127,7 +126,7 @@ func (r *objectResource) createImportClient(ctx context.Context, kubeconfigData 
 
 // fetchImportResource fetches the resource from Kubernetes for import
 // Returns the resource and true on success; nil and false on error
-func (r *objectResource) fetchImportResource(ctx context.Context, client *k8sclient.DynamicK8sClient, apiVersion, kind, namespace, name, kubeContext string, resp *resource.ImportStateResponse) (*unstructured.Unstructured, bool) {
+func (r *objectResource) fetchImportResource(ctx context.Context, client k8sclient.K8sClient, apiVersion, kind, namespace, name, kubeContext string, resp *resource.ImportStateResponse) (*unstructured.Unstructured, bool) {
 	// Discover GVR using apiVersion and kind (both required)
 	tflog.Info(ctx, "Discovering GVR for import", map[string]interface{}{
 		"apiVersion": apiVersion,
@@ -136,7 +135,22 @@ func (r *objectResource) fetchImportResource(ctx context.Context, client *k8scli
 		"name":       name,
 	})
 
-	_, liveObj, err := client.GetGVRFromAPIVersionKind(ctx, apiVersion, kind, namespace, name)
+	gvr, err := client.DiscoverGVR(ctx, apiVersion, kind)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Import Failed: Resource Type Discovery",
+			fmt.Sprintf("Failed to discover resource type for kind %q in apiVersion %q: %s", kind, apiVersion, err.Error()),
+		)
+		return nil, false
+	}
+
+	tflog.Info(ctx, "Fetching resource from cluster", map[string]interface{}{
+		"gvr":       gvr.String(),
+		"namespace": namespace,
+		"name":      name,
+	})
+
+	liveObj, err := client.Get(ctx, gvr, namespace, name)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			// Build kubectl command (with or without namespace)

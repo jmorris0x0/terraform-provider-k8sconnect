@@ -1,4 +1,3 @@
-// internal/k8sconnect/common/fieldmanagement/ownership.go
 package fieldmanagement
 
 import (

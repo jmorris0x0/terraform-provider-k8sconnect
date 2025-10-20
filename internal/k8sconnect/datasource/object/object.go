@@ -1,4 +1,3 @@
-// internal/k8sconnect/datasource/object/object.go
 package object
 
 import (
@@ -11,7 +10,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
@@ -129,21 +127,15 @@ func (d *objectDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 		return
 	}
 
-	// Use the client's discovery-based GVR resolution instead of naive pluralization
-	// Create a minimal unstructured object for GVR discovery
-	tempObj := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": data.APIVersion.ValueString(),
-			"kind":       data.Kind.ValueString(),
-		},
-	}
+	// Discover the GVR using the discovery API
+	apiVersion := data.APIVersion.ValueString()
+	kind := data.Kind.ValueString()
 
-	// Use the client's proper discovery-based resolution
-	gvr, err := client.GetGVR(ctx, tempObj)
+	gvr, err := client.DiscoverGVR(ctx, apiVersion, kind)
 	if err != nil {
 		// GVR resolution errors
-		resourceDesc := fmt.Sprintf("%s/%s", data.APIVersion.ValueString(), data.Kind.ValueString())
-		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Resolve Resource Type", resourceDesc)
+		resourceDesc := fmt.Sprintf("%s/%s", apiVersion, kind)
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Discover Resource Type", resourceDesc)
 		return
 	}
 

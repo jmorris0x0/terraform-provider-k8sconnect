@@ -334,29 +334,6 @@ coverage: create-cluster
 	echo "HTML report written to ./coverage.html"; \
 	echo "Separate reports: coverage-unit.out, coverage-acceptance.out"
 
-.PHONY: fix-headers
-fix-headers: ## Fix file path header comments in all Go files
-	@echo "🔧 Fixing file path headers..."
-	@find internal -name "*.go" -type f | while read file; do \
-		first_line=$$(head -n1 "$$file"); \
-		expected="// $$file"; \
-		if [ "$$first_line" != "$$expected" ]; then \
-			if echo "$$first_line" | grep -q "^//"; then \
-				echo "  Fixing: $$file"; \
-				tail -n +2 "$$file" > "$$file.tmp" && \
-				echo "$$expected" > "$$file" && \
-				cat "$$file.tmp" >> "$$file" && \
-				rm "$$file.tmp"; \
-			else \
-				echo "  Adding: $$file"; \
-				echo "$$expected" > "$$file.tmp" && \
-				cat "$$file" >> "$$file.tmp" && \
-				mv "$$file.tmp" "$$file"; \
-			fi \
-		fi \
-	done
-	@echo "✅ Headers fixed"
-
 .PHONY: complexity
 complexity: ## Check code complexity
 	@go run github.com/fzipp/gocyclo/cmd/gocyclo@latest -over 15 . | sort -rn || true

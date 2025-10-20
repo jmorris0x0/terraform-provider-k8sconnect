@@ -1,4 +1,3 @@
-// internal/k8sconnect/resource/patch/patch_drift_test.go
 package patch_test
 
 import (

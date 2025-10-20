@@ -1,10 +1,8 @@
-// internal/k8sconnect/resource/wait/crud.go
 package wait
 
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -202,12 +200,12 @@ func (r *waitResource) buildWaitContext(ctx context.Context, data *waitResourceM
 		return nil, diags
 	}
 
-	// Construct GVR from object_ref
-	gvr, err := r.constructGVR(ctx, objRef)
+	// Construct GVR from object_ref using discovery
+	gvr, err := r.constructGVR(ctx, client, objRef)
 	if err != nil {
 		diags.AddError(
-			"Failed to Construct GVR",
-			fmt.Sprintf("Could not determine resource type: %s", err.Error()),
+			"Failed to Discover GVR",
+			fmt.Sprintf("Could not discover resource type: %s", err.Error()),
 		)
 		return nil, diags
 	}
@@ -222,55 +220,18 @@ func (r *waitResource) buildWaitContext(ctx context.Context, data *waitResourceM
 	}, diags
 }
 
-// constructGVR builds a GroupVersionResource from object_ref
-func (r *waitResource) constructGVR(ctx context.Context, objRef objectRefModel) (schema.GroupVersionResource, error) {
+// constructGVR builds a GroupVersionResource from object_ref using discovery
+func (r *waitResource) constructGVR(ctx context.Context, client k8sclient.K8sClient, objRef objectRefModel) (schema.GroupVersionResource, error) {
 	apiVersion := objRef.APIVersion.ValueString()
 	kind := objRef.Kind.ValueString()
 
-	// Parse group and version from apiVersion
-	gv, err := schema.ParseGroupVersion(apiVersion)
+	// Use discovery to get the GVR - this works for all resources including CRDs with custom plurals
+	gvr, err := client.DiscoverGVR(ctx, apiVersion, kind)
 	if err != nil {
-		return schema.GroupVersionResource{}, fmt.Errorf("invalid api_version %q: %w", apiVersion, err)
+		return schema.GroupVersionResource{}, fmt.Errorf("failed to discover resource type: %w", err)
 	}
 
-	// Convert kind to resource name (lowercase, pluralized)
-	resource := r.kindToResource(kind)
-
-	return schema.GroupVersionResource{
-		Group:    gv.Group,
-		Version:  gv.Version,
-		Resource: resource,
-	}, nil
-}
-
-// kindToResource converts a Kubernetes Kind to its resource name
-// This is a simplified version - a proper implementation would use RESTMapper
-func (r *waitResource) kindToResource(kind string) string {
-	// Common Kubernetes resource mappings
-	resourceMap := map[string]string{
-		"Namespace":             "namespaces",
-		"Pod":                   "pods",
-		"Service":               "services",
-		"Deployment":            "deployments",
-		"StatefulSet":           "statefulsets",
-		"DaemonSet":             "daemonsets",
-		"Job":                   "jobs",
-		"CronJob":               "cronjobs",
-		"ConfigMap":             "configmaps",
-		"Secret":                "secrets",
-		"ServiceAccount":        "serviceaccounts",
-		"PersistentVolume":      "persistentvolumes",
-		"PersistentVolumeClaim": "persistentvolumeclaims",
-		"Ingress":               "ingresses",
-		"NetworkPolicy":         "networkpolicies",
-	}
-
-	if resource, ok := resourceMap[kind]; ok {
-		return resource
-	}
-
-	// Default: lowercase + 's'
-	return strings.ToLower(kind) + "s"
+	return gvr, nil
 }
 
 // performWait executes the wait operation

@@ -1,4 +1,3 @@
-// internal/k8sconnect/resource/patch/crud.go
 package patch
 
 import (

@@ -1,4 +1,3 @@
-// internal/k8sconnect/common/k8sclient/stub.go
 package k8sclient
 
 import (
@@ -150,6 +149,48 @@ func (s *stubK8sClient) GetGVR(ctx context.Context, obj *unstructured.Unstructur
 	return schema.GroupVersionResource{
 		Group:    gvk.Group,
 		Version:  gvk.Version,
+		Resource: resource,
+	}, nil
+}
+
+func (s *stubK8sClient) DiscoverGVR(ctx context.Context, apiVersion, kind string) (schema.GroupVersionResource, error) {
+	// Parse apiVersion to get group and version
+	gv, err := schema.ParseGroupVersion(apiVersion)
+	if err != nil {
+		return schema.GroupVersionResource{}, fmt.Errorf("invalid apiVersion %q: %w", apiVersion, err)
+	}
+
+	// Simple mapping for common Kubernetes resources
+	var resource string
+	switch kind {
+	case "Namespace":
+		resource = "namespaces"
+	case "Pod":
+		resource = "pods"
+	case "Service":
+		resource = "services"
+	case "Deployment":
+		resource = "deployments"
+	case "ConfigMap":
+		resource = "configmaps"
+	case "Secret":
+		resource = "secrets"
+	case "StatefulSet":
+		resource = "statefulsets"
+	case "DaemonSet":
+		resource = "daemonsets"
+	case "Job":
+		resource = "jobs"
+	case "Ingress":
+		resource = "ingresses"
+	default:
+		// For custom resources, use a simple plural form
+		resource = strings.ToLower(kind) + "s"
+	}
+
+	return schema.GroupVersionResource{
+		Group:    gv.Group,
+		Version:  gv.Version,
 		Resource: resource,
 	}, nil
 }

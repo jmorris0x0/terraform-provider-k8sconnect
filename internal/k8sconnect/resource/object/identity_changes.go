@@ -1,4 +1,3 @@
-// internal/k8sconnect/resource/object/identity_changes.go
 package object
 
 import (

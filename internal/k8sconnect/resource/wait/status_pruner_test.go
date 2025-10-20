@@ -1,4 +1,3 @@
-// internal/k8sconnect/resource/wait/status_pruner_test.go
 package wait
 
 import (

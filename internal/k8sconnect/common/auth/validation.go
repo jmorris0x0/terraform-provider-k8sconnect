@@ -1,4 +1,3 @@
-// internal/k8sconnect/common/auth/validation.go
 package auth
 
 import (

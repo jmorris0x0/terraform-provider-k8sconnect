@@ -1,4 +1,3 @@
-// internal/k8sconnect/resource/object/token_refresh_test.go
 package object_test
 
 import (
