@@ -1,8 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: provider-comparison
-  labels:
-    environment: test
-    purpose: provider-comparison
-

@@ -31,6 +31,7 @@ coverage.html
 *.tfstate.*
 .terraform/
 *.terraform.lock.hcl
+terraform.tfvars
 *provider-comparison-config
 
 # Log files
@@ -46,7 +47,7 @@ Thumbs.db
 test/oidc-setup/ssl/
 .testbuild/
 bin/
-terraform/*/*-config
+scenarios/*/*-config
 
 # Build
 dist/

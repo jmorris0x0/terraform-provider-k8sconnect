@@ -1,0 +1,16 @@
+# EKS Bootstrap Test Variables
+#
+# Copy this file to terraform.tfvars and fill in your values:
+#   cp terraform.tfvars.example terraform.tfvars
+#
+# The .gitignore will prevent terraform.tfvars from being committed.
+
+# AWS region to create the EKS cluster in
+# Default: us-west-2 (Oregon)
+# Other common options: us-east-1 (Virginia), us-west-1 (California), eu-west-1 (Ireland)
+aws_region = "us-west-2"
+
+# Name of the EKS cluster
+# Default: k8sconnect-bootstrap-test
+# Customize if running multiple tests or to avoid naming conflicts
+cluster_name = "k8sconnect-bootstrap-test"
