@@ -392,30 +392,38 @@ func TestPruneStatusToField(t *testing.T) {
 		{
 			name: "simple field extraction",
 			fullStatus: map[string]interface{}{
-				"replicas":      3,
-				"readyReplicas": 3,
-				"phase":         "Running",
+				"status": map[string]interface{}{
+					"replicas":      3,
+					"readyReplicas": 3,
+					"phase":         "Running",
+				},
 			},
 			fieldPath: "status.replicas",
 			expected: map[string]interface{}{
-				"replicas": 3,
+				"status": map[string]interface{}{
+					"replicas": 3,
+				},
 			},
 		},
 		{
 			name: "nested field extraction",
 			fullStatus: map[string]interface{}{
-				"loadBalancer": map[string]interface{}{
-					"ingress": []interface{}{
-						map[string]interface{}{"ip": "1.2.3.4"},
+				"status": map[string]interface{}{
+					"loadBalancer": map[string]interface{}{
+						"ingress": []interface{}{
+							map[string]interface{}{"ip": "1.2.3.4"},
+						},
 					},
+					"replicas": 3,
 				},
-				"replicas": 3,
 			},
 			fieldPath: "status.loadBalancer.ingress",
 			expected: map[string]interface{}{
-				"loadBalancer": map[string]interface{}{
-					"ingress": []interface{}{
-						map[string]interface{}{"ip": "1.2.3.4"},
+				"status": map[string]interface{}{
+					"loadBalancer": map[string]interface{}{
+						"ingress": []interface{}{
+							map[string]interface{}{"ip": "1.2.3.4"},
+						},
 					},
 				},
 			},
@@ -423,19 +431,23 @@ func TestPruneStatusToField(t *testing.T) {
 		{
 			name: "array element extraction",
 			fullStatus: map[string]interface{}{
-				"loadBalancer": map[string]interface{}{
-					"ingress": []interface{}{
-						map[string]interface{}{"ip": "1.2.3.4"},
-						map[string]interface{}{"ip": "5.6.7.8"},
+				"status": map[string]interface{}{
+					"loadBalancer": map[string]interface{}{
+						"ingress": []interface{}{
+							map[string]interface{}{"ip": "1.2.3.4"},
+							map[string]interface{}{"ip": "5.6.7.8"},
+						},
 					},
 				},
 			},
 			fieldPath: "status.loadBalancer.ingress[0].ip",
 			expected: map[string]interface{}{
-				"loadBalancer": map[string]interface{}{
-					"ingress": []interface{}{
-						map[string]interface{}{
-							"ip": "1.2.3.4",
+				"status": map[string]interface{}{
+					"loadBalancer": map[string]interface{}{
+						"ingress": []interface{}{
+							map[string]interface{}{
+								"ip": "1.2.3.4",
+							},
 						},
 					},
 				},
@@ -469,7 +481,9 @@ func TestPruneStatusToField(t *testing.T) {
 		{
 			name: "field not found",
 			fullStatus: map[string]interface{}{
-				"replicas": 3,
+				"status": map[string]interface{}{
+					"replicas": 3,
+				},
 			},
 			fieldPath: "status.nonexistent",
 			expected:  nil,
@@ -477,7 +491,9 @@ func TestPruneStatusToField(t *testing.T) {
 		{
 			name: "array index out of bounds",
 			fullStatus: map[string]interface{}{
-				"items": []interface{}{"first", "second"},
+				"status": map[string]interface{}{
+					"items": []interface{}{"first", "second"},
+				},
 			},
 			fieldPath: "status.items[5]",
 			expected:  nil,
@@ -485,24 +501,28 @@ func TestPruneStatusToField(t *testing.T) {
 		{
 			name: "complex nested structure",
 			fullStatus: map[string]interface{}{
-				"conditions": []interface{}{
-					map[string]interface{}{
-						"type":   "Progressing",
-						"status": "True",
+				"status": map[string]interface{}{
+					"conditions": []interface{}{
+						map[string]interface{}{
+							"type":   "Progressing",
+							"status": "True",
+						},
+						map[string]interface{}{
+							"type":   "Available",
+							"status": "True",
+						},
 					},
-					map[string]interface{}{
-						"type":   "Available",
-						"status": "True",
-					},
+					"replicas": 3,
 				},
-				"replicas": 3,
 			},
 			fieldPath: "status.conditions[1].type",
 			expected: map[string]interface{}{
-				"conditions": []interface{}{
-					nil,
-					map[string]interface{}{
-						"type": "Available",
+				"status": map[string]interface{}{
+					"conditions": []interface{}{
+						nil,
+						map[string]interface{}{
+							"type": "Available",
+						},
 					},
 				},
 			},
