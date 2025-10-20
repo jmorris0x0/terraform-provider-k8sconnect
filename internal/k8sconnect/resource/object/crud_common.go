@@ -152,8 +152,9 @@ func (r *objectResource) applyResourceWithConflictHandling(ctx context.Context, 
 
 	// Apply the resource with CRD retry (always force conflicts)
 	err := r.applyWithCRDRetry(ctx, rc.Client, objToApply, k8sclient.ApplyOptions{
-		FieldManager: "k8sconnect",
-		Force:        true, // Always force ownership of conflicted fields
+		FieldManager:    "k8sconnect",
+		Force:           true,     // Always force ownership of conflicted fields
+		FieldValidation: "Strict", // ADR-017: Validate fields against OpenAPI schema during apply
 	})
 
 	if err != nil {

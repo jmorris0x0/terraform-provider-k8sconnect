@@ -19,6 +19,7 @@ Bootstrap Kubernetes clusters and workloads in a **single `terraform apply`**. N
 | CRD + CR in single apply              | ❌ Manual workaround or requires config                                     | ✅ Auto-retry, zero configuration                                           |
 | Controller coexistence                | ⚠️ SSA optional or no ignore_fields                                         | ✅ Always-on SSA + ignore_fields for HPA, webhooks, operators               |
 | Unpredictable plan diffs              | ❌ Plan shows what you send, not what K8s will do                           | ✅ Dry-run projections show exact changes before apply                      |
+| Typos and invalid fields              | ❌ Always out-of-date typed resources                                       | ✅ Dry-run + field validation makes typed resources obsolete                |
 | Surgical patches on managed resources | ❌ Import or take full ownership                                            | ✅ Patch EKS/GKE/Helm/operator resources                                    |
 | Wait timeout behavior                 | ⚠️ Taints resource, forces recreate on retry                                | ✅ Separate wait resource, retry in-place                                   |
 
@@ -296,9 +297,11 @@ k8sconnect uses **Server-Side Apply with Dry-Run** for every operation, giving y
 
 1. **Accurate plan diffs** - The `managed_state_projection` attribute shows exactly what Kubernetes will change, computed via dry-run. No surprises between plan and apply.
 
-2. **SSA-aware field ownership** - The `field_ownership` attribute tracks which controller owns each field. See when HPA takes over replicas, when webhooks modify annotations, or when another Terraform state conflicts with yours.
+2. **Field validation** - Strict validation during plan catches typos and invalid fields before apply (`replica` vs `replicas`, `imagePullPolice` vs `imagePullPolicy`, etc.).
 
-3. **True drift detection** - Only diffs fields you actually manage. If a controller updates status or another field manager changes something, you'll see it clearly separated:
+3. **SSA-aware field ownership** - The `field_ownership` attribute tracks which controller owns each field. See when HPA takes over replicas, when webhooks modify annotations, or when another Terraform state conflicts with yours.
+
+4. **True drift detection** - Only diffs fields you actually manage. If a controller updates status or another field manager changes something, you'll see it clearly separated:
    - `yaml_body` diffs = Changes you made to your config
    - `managed_state_projection` diffs = External changes that will be corrected
    - `field_ownership` diffs = Ownership changes between controllers

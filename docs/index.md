@@ -86,6 +86,7 @@ cluster_connection = {
 
 - **Single-apply cluster bootstrapping** - Deploy clusters and workloads together without dependency cycles
 - **Accurate dry-run projections** - See exactly what Kubernetes will do before apply, not just what you send
+- **Field validation** - Catch typos and invalid fields during plan (`replica` vs `replicas`, `imagePullPolice` vs `imagePullPolicy`)
 - **Field ownership tracking** - Coexist with controllers (HPA, operators) via Server-Side Apply
 - **Surgical patching** - Modify EKS/GKE defaults, Helm charts, and operator-managed resources without full ownership
 - **Multi-cluster support** - Different connections per resource, works in modules

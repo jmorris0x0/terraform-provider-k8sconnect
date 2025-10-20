@@ -46,7 +46,24 @@ func ClassifyError(err error, operation, resourceDesc string) (severity, title, 
 			fmt.Sprintf("Authentication failed for %s %s. Check your credentials and ensure they are valid. Details: %v",
 				operation, resourceDesc, err)
 
+	// ADR-017: Field validation errors (status 400) - check BEFORE IsInvalid (status 422)
+	case IsFieldValidationError(err):
+		fieldDetails := ExtractFieldValidationDetails(err)
+		return "error", fmt.Sprintf("%s: Field Validation Failed", operation),
+			fmt.Sprintf("Field validation failed for %s.\n\n"+
+				"%s\n\n"+
+				"Field validation checks that all fields in your YAML exist in the Kubernetes resource schema.\n"+
+				"This validation runs during both plan and apply to catch typos and invalid fields immediately.\n\n"+
+				"Common causes:\n"+
+				"- Typo in field name (e.g., 'replica' instead of 'replicas')\n"+
+				"- Field doesn't exist in this Kubernetes version\n"+
+				"- Field is for a different resource type\n"+
+				"- Duplicate field in YAML\n\n"+
+				"Details: %v",
+				resourceDesc, fieldDetails, err)
+
 	case errors.IsInvalid(err):
+
 		// Check if this is specifically a CEL validation error
 		if IsCELValidationError(err) {
 			celDetails := ExtractCELValidationDetails(err)
@@ -76,7 +93,7 @@ func ClassifyError(err error, operation, resourceDesc string) (severity, title, 
 					immutableFields, resourceDesc)
 		}
 
-		// Generic invalid resource error (for non-immutable and non-CEL field errors)
+		// Generic invalid resource error (for non-field-validation, non-CEL, and non-immutable errors)
 		return "error", fmt.Sprintf("%s: Invalid Resource", operation),
 			fmt.Sprintf("The %s contains invalid fields or values. Review the YAML specification and ensure all required fields are present and correctly formatted. Details: %v",
 				resourceDesc, err)
@@ -238,6 +255,50 @@ func ExtractConflictDetails(err error) string {
 	return strings.Join(details, "\n")
 }
 
+// IsFieldValidationError checks if error is due to field validation (unknown/duplicate field)
+// Field validation errors occur when FieldValidation="Strict" and YAML contains fields
+// not present in the resource's OpenAPI schema
+func IsFieldValidationError(err error) bool {
+	// Nil check to prevent panic
+	if err == nil {
+		return false
+	}
+
+	if statusErr, ok := err.(*errors.StatusError); ok {
+		// Field validation errors are status code 400 (Bad Request)
+		// vs CEL/immutable which are 422 (Unprocessable Entity)
+		if statusErr.ErrStatus.Code == 400 {
+			msg := strings.ToLower(statusErr.ErrStatus.Message)
+
+			// Primary indicators of field validation errors
+			if strings.Contains(msg, "unknown field") ||
+				strings.Contains(msg, "duplicate field") {
+				return true
+			}
+
+			// K8s also uses these message formats for field validation
+			if strings.Contains(msg, "strict decoding error") ||
+				strings.Contains(msg, "field not declared in schema") {
+				return true
+			}
+		}
+		// IMPORTANT: Return false for StatusError with other status codes (like 404, 422, etc.)
+		// Don't fall through to wrapped error check for StatusError types
+		return false
+	}
+
+	// For non-StatusError types, check if error message contains field validation indicators
+	// This handles wrapped errors that don't expose the underlying StatusError
+	errMsg := strings.ToLower(err.Error())
+	if strings.Contains(errMsg, "field not declared in schema") ||
+		strings.Contains(errMsg, "unknown field") ||
+		strings.Contains(errMsg, "duplicate field") {
+		return true
+	}
+
+	return false
+}
+
 // IsCELValidationError checks if error is due to CEL validation rule failure
 func IsCELValidationError(err error) bool {
 	if statusErr, ok := err.(*errors.StatusError); ok {
@@ -286,6 +347,85 @@ func IsCELValidationError(err error) bool {
 		}
 	}
 	return false
+}
+
+// ExtractFieldValidationDetails parses field validation error for user-friendly display
+// Handles both single and multiple field validation errors
+func ExtractFieldValidationDetails(err error) string {
+	statusErr, ok := err.(*errors.StatusError)
+	if !ok {
+		return "Unable to parse field validation error details"
+	}
+
+	msg := statusErr.ErrStatus.Message
+
+	// Field validation errors can have several formats:
+	// 1. "unknown field \"spec.replica\""
+	// 2. "duplicate field \"spec.replicas\""
+	// 3. Multiple errors in a list (may be bracketed or newline-separated)
+	// 4. "strict decoding error: unknown field \"spec.replica\", unknown field \"spec.container\""
+
+	var details []string
+	foundErrors := 0
+
+	// Extract content between brackets if present (multiple errors format)
+	msgToParse := msg
+	if strings.Contains(msg, "[") && strings.Contains(msg, "]") {
+		start := strings.Index(msg, "[")
+		end := strings.LastIndex(msg, "]")
+		if start >= 0 && end > start {
+			msgToParse = msg[start+1 : end]
+		}
+	}
+
+	// Pattern 1: unknown field "path" or duplicate field "path"
+	// Also handles: strict decoding error: unknown field "path"
+	fieldPattern1 := regexp.MustCompile(`(unknown field|duplicate field)\s*"([^"]+)"`)
+	matches1 := fieldPattern1.FindAllStringSubmatch(msgToParse, -1)
+
+	// Pattern 2: .spec.replica: field not declared in schema
+	fieldPattern2 := regexp.MustCompile(`([\w\[\]\.]+):\s*field not declared in schema`)
+	matches2 := fieldPattern2.FindAllStringSubmatch(msgToParse, -1)
+
+	// Combine both patterns
+	var matches [][]string
+	for _, match := range matches1 {
+		if len(match) >= 3 {
+			matches = append(matches, match)
+		}
+	}
+	for _, match := range matches2 {
+		if len(match) >= 2 {
+			// Reformat to match pattern 1 structure: [full, "unknown field", "path"]
+			matches = append(matches, []string{match[0], "field not declared in schema", match[1]})
+		}
+	}
+
+	if len(matches) > 0 {
+		for _, match := range matches {
+			if len(match) >= 3 {
+				errorType := match[1] // "unknown field" or "duplicate field"
+				fieldPath := match[2] // e.g., "spec.replica"
+
+				if foundErrors > 0 {
+					details = append(details, "") // Blank line between errors
+				}
+				details = append(details, fmt.Sprintf("Field: %s", fieldPath))
+				details = append(details, fmt.Sprintf("Error: %s", errorType))
+				foundErrors++
+			}
+		}
+
+		if foundErrors > 0 {
+			if foundErrors > 1 {
+				details = append([]string{fmt.Sprintf("Found %d field validation errors:", foundErrors)}, details...)
+			}
+			return strings.Join(details, "\n")
+		}
+	}
+
+	// Fallback: extract any useful information from the error
+	return fmt.Sprintf("Field validation failed.\n\nFull error: %s", msg)
 }
 
 // ExtractCELValidationDetails parses CEL validation error for user-friendly display

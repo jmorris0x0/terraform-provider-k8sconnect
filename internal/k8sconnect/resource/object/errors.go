@@ -2,6 +2,7 @@
 package object
 
 import (
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8serrors"
 )
 
@@ -33,4 +34,14 @@ func (r *objectResource) isImmutableFieldError(err error) bool {
 // extractImmutableFields is a wrapper around the common function
 func (r *objectResource) extractImmutableFields(err error) []string {
 	return k8serrors.ExtractImmutableFields(err)
+}
+
+// isFieldValidationError is a wrapper around the common function
+func (r *objectResource) isFieldValidationError(err error) bool {
+	return k8serrors.IsFieldValidationError(err)
+}
+
+// addClassifiedError is a wrapper around the common function
+func (r *objectResource) addClassifiedError(diags *diag.Diagnostics, err error, operation, resourceDesc string) {
+	k8serrors.AddClassifiedError(diags, err, operation, resourceDesc)
 }

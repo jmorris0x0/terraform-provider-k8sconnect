@@ -288,14 +288,33 @@ func (r *objectResource) performDryRun(ctx context.Context, client k8sclient.K8s
 	}
 
 	dryRunResult, err := client.DryRunApply(ctx, objToApply, k8sclient.ApplyOptions{
-		FieldManager: "k8sconnect",
-		Force:        true,
+		FieldManager:    "k8sconnect",
+		Force:           true,
+		FieldValidation: "Strict", // ADR-017: Validate fields against OpenAPI schema during plan
 	})
 
 	// Surface any API warnings from dry-run operation
 	surfaceK8sWarnings(ctx, client, desiredObj, &resp.Diagnostics)
 
 	if err != nil {
+		// ADR-017: Check if this is a field validation error (typos, unknown fields, etc.)
+		// Field validation errors should fail immediately with clear error message
+		// These are USER errors, not cluster state issues, so don't retry
+		if r.isFieldValidationError(err) {
+			resourceDesc := fmt.Sprintf("%s/%s %s/%s",
+				desiredObj.GetAPIVersion(), desiredObj.GetKind(),
+				desiredObj.GetNamespace(), desiredObj.GetName())
+
+			// Use classified error formatting for clear user feedback
+			r.addClassifiedError(&resp.Diagnostics, err, "Plan", resourceDesc)
+
+			// Set projection to unknown (can't project invalid resource)
+			plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
+
+			// Return error to stop planning
+			return nil, err
+		}
+
 		// ADR-002: Check if this is an immutable field error
 		// If so, trigger automatic resource replacement instead of failing
 		if r.isImmutableFieldError(err) {

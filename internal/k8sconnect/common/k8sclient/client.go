@@ -55,9 +55,10 @@ type K8sClient interface {
 
 // ApplyOptions holds options for server-side apply operations.
 type ApplyOptions struct {
-	FieldManager string
-	Force        bool
-	DryRun       []string
+	FieldManager    string
+	Force           bool
+	DryRun          []string
+	FieldValidation string // "Strict", "Warn", or "Ignore" - validates fields against OpenAPI schema
 }
 
 // DeleteOptions holds options for delete operations.
