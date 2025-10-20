@@ -1,4 +1,3 @@
-// internal/k8sconnect/common/auth/schema.go
 package auth
 
 import (

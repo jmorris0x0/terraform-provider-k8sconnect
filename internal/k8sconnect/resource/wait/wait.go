@@ -1,4 +1,3 @@
-// internal/k8sconnect/resource/wait/wait.go
 package wait
 
 import (

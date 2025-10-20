@@ -1,4 +1,3 @@
-// internal/k8sconnect/resource/object/projection_test.go
 package object
 
 import (

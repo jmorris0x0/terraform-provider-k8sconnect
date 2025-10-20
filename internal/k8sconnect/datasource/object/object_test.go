@@ -1,4 +1,3 @@
-// internal/k8sconnect/datasource/object/object_test.go
 package object_test
 
 import (

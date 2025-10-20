@@ -1,4 +1,3 @@
-// internal/k8sconnect/resource/patch/helpers.go
 package patch
 
 import (
@@ -45,19 +44,13 @@ func (r *patchResource) setupClient(ctx context.Context, data *patchResourceMode
 
 // getTargetResource retrieves the target resource from Kubernetes
 func (r *patchResource) getTargetResource(ctx context.Context, client k8sclient.K8sClient, target patchTargetModel) (schema.GroupVersionResource, *unstructured.Unstructured, error) {
-	// Create a dummy object to get the GVR
-	dummyObj := &unstructured.Unstructured{}
-	dummyObj.SetAPIVersion(target.APIVersion.ValueString())
-	dummyObj.SetKind(target.Kind.ValueString())
-	dummyObj.SetName(target.Name.ValueString())
-	if !target.Namespace.IsNull() {
-		dummyObj.SetNamespace(target.Namespace.ValueString())
-	}
+	// Discover the GVR from apiVersion and kind
+	apiVersion := target.APIVersion.ValueString()
+	kind := target.Kind.ValueString()
 
-	// Get the GVR
-	gvr, err := client.GetGVR(ctx, dummyObj)
+	gvr, err := client.DiscoverGVR(ctx, apiVersion, kind)
 	if err != nil {
-		return schema.GroupVersionResource{}, nil, fmt.Errorf("failed to determine resource type: %w", err)
+		return schema.GroupVersionResource{}, nil, fmt.Errorf("failed to discover resource type: %w", err)
 	}
 
 	// Get the actual resource

@@ -1,4 +1,3 @@
-// internal/k8sconnect/resource/wait/wait_drift_test.go
 package wait_test
 
 import (

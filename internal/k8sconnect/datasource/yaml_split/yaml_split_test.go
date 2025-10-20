@@ -1,4 +1,3 @@
-// internal/k8sconnect/datasource/yaml_split/yaml_split_test.go
 package yaml_split
 
 import (

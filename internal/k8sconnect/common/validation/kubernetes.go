@@ -1,4 +1,3 @@
-// internal/k8sconnect/common/validation/kubernetes.go
 package validation
 
 import (

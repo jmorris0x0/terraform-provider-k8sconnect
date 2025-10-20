@@ -1,4 +1,3 @@
-// internal/k8sconnect/common/validators/jsonpath.go
 package validators
 
 import (

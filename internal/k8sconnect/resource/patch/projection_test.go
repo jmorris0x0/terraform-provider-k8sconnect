@@ -1,4 +1,3 @@
-// internal/k8sconnect/resource/patch/projection_test.go
 package patch_test
 
 import (

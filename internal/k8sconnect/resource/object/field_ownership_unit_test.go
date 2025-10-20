@@ -1,4 +1,3 @@
-// internal/k8sconnect/resource/object/field_ownership_unit_test.go
 package object
 
 // These tests have been moved to internal/k8sconnect/common/fieldmanagement/ownership_test.go

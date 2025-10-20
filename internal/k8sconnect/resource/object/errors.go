@@ -1,4 +1,3 @@
-// internal/k8sconnect/resource/object/errors.go
 package object
 
 import (

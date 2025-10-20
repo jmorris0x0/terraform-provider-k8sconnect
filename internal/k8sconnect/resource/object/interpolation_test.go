@@ -1,4 +1,3 @@
-// internal/k8sconnect/resource/object/interpolation_test.go
 package object_test
 
 import (

@@ -1,4 +1,3 @@
-// internal/k8sconnect/common/fieldmanagement/mergekeys.go
 package fieldmanagement
 
 import (

@@ -1,4 +1,3 @@
-// internal/k8sconnect/resource/object/plan_modifier.go
 package object
 
 import (

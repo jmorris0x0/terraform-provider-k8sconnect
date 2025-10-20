@@ -1,5 +1,3 @@
-// internal/k8sconnect/resource/wait/wait_test.go
-
 package wait_test
 
 import (

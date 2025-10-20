@@ -1,4 +1,3 @@
-// internal/k8sconnect/resource/object/deletion.go
 package object
 
 import (

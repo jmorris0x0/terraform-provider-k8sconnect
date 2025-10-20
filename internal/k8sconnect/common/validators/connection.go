@@ -1,4 +1,3 @@
-// internal/k8sconnect/common/validators/connection.go
 package validators
 
 import (

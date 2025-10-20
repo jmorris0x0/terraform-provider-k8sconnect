@@ -1,4 +1,3 @@
-// internal/k8sconnect/datasource/yaml_common/parsing.go
 package yaml_common
 
 import (

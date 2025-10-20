@@ -1,4 +1,3 @@
-// internal/k8sconnect/resource/object/resource_ownership.go
 package object
 
 import (

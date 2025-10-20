@@ -1,4 +1,3 @@
-// internal/k8sconnect/common/test/helpers.go
 package test
 
 import (

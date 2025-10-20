@@ -1,4 +1,3 @@
-// internal/k8sconnect/common/auth/encoding.go
 package auth
 
 import (

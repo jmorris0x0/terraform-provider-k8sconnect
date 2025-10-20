@@ -1,4 +1,3 @@
-// internal/k8sconnect/resource/object/field_validators.go
 package object
 
 import (

@@ -1,4 +1,3 @@
-// internal/k8sconnect/provider.go
 package k8sconnect
 
 import (
