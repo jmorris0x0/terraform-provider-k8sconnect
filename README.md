@@ -206,7 +206,7 @@ resource "k8sconnect_patch" "aws_node_config" {
 }
 ```
 
-Perfect for EKS/GKE defaults, Helm deployments, and operator-managed resources. On destroy, ownership transfers back cleanly.
+Perfect for EKS/GKE defaults, Helm deployments, and operator-managed resources. On destroy, ownership transfers back cleanly—current values are left unchanged for safety.
 
 **→ [Patch examples](examples/#patch-resource)** - Strategic Merge, JSON Patch, Merge Patch | **[Documentation](docs/resources/patch.md)**
 
@@ -214,7 +214,7 @@ Perfect for EKS/GKE defaults, Helm deployments, and operator-managed resources. 
 
 ## Wait for Resources and Use Status
 
-Stop writing `null_resource` provisioners with kubectl wait. Built-in waiting with extractable results lets you chain resources naturally:
+Wait for resources and extract status fields without drift. The separate `k8sconnect_wait` resource gives you fine-grained control over what you track and works with resources you don't even manage:
 
 <!-- runnable-test: readme-wait-for-loadbalancer -->
 ```hcl
