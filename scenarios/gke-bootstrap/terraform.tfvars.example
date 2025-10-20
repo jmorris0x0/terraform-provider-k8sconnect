@@ -1,0 +1,20 @@
+# GKE Bootstrap Test Variables
+#
+# Copy this file to terraform.tfvars and fill in your values:
+#   cp terraform.tfvars.example terraform.tfvars
+#
+# The .gitignore will prevent terraform.tfvars from being committed.
+
+# REQUIRED: Your GCP project ID
+# Find it with: gcloud projects list
+gcp_project = "your-project-id-here"
+
+# GCP region to create the GKE cluster in
+# Default: us-central1 (Iowa)
+# Other common options: us-west1 (Oregon), us-east1 (South Carolina), europe-west1 (Belgium)
+gcp_region = "us-central1"
+
+# Name of the GKE cluster
+# Default: k8sconnect-bootstrap-test
+# Customize if running multiple tests or to avoid naming conflicts
+cluster_name = "k8sconnect-bootstrap-test"

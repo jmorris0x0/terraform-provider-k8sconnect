@@ -11,7 +11,7 @@ kind: ConfigMap
 metadata:
   name: cluster-config
 data:
-  cluster.name: "dogfood-cluster"
+  cluster.name: "kind-validation-cluster"
   region: "us-west-2"
 ---
 apiVersion: v1

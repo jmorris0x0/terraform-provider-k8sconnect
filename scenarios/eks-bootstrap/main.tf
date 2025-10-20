@@ -1,0 +1,333 @@
+# EKS Bootstrap Test
+#
+# This configuration tests the critical bootstrap scenario:
+# Creating an EKS cluster and deploying workloads in a SINGLE terraform apply.
+#
+# This validates:
+# - Inline cluster connections work with "known after apply" values
+# - Provider can connect to cluster as soon as API server is ready
+# - Node group dependency ensures workloads can schedule
+
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+    k8sconnect = {
+      source  = "local/k8sconnect"
+      version = ">= 0.1.0"
+    }
+  }
+  required_version = ">= 1.6"
+}
+
+provider "aws" {
+  region = var.aws_region
+}
+
+provider "k8sconnect" {}
+
+variable "aws_region" {
+  description = "AWS region for EKS cluster"
+  type        = string
+  default     = "us-west-1"
+}
+
+variable "cluster_name" {
+  description = "Name of the EKS cluster"
+  type        = string
+  default     = "k8sconnect-bootstrap-test"
+}
+
+#############################################
+# VPC AND NETWORKING
+#############################################
+
+# Create a simple VPC for the EKS cluster
+resource "aws_vpc" "main" {
+  cidr_block           = "10.0.0.0/16"
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+
+  tags = {
+    Name = "${var.cluster_name}-vpc"
+  }
+}
+
+# Create subnets in multiple AZs (required for EKS)
+data "aws_availability_zones" "available" {
+  state = "available"
+}
+
+resource "aws_subnet" "public" {
+  count                   = 2
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = "10.0.${count.index}.0/24"
+  availability_zone       = data.aws_availability_zones.available.names[count.index]
+  map_public_ip_on_launch = true
+
+  tags = {
+    Name = "${var.cluster_name}-public-${count.index + 1}"
+  }
+}
+
+# Internet gateway for public subnets
+resource "aws_internet_gateway" "main" {
+  vpc_id = aws_vpc.main.id
+
+  tags = {
+    Name = "${var.cluster_name}-igw"
+  }
+}
+
+# Route table for public subnets
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.main.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.main.id
+  }
+
+  tags = {
+    Name = "${var.cluster_name}-public-rt"
+  }
+}
+
+# Associate route table with subnets
+resource "aws_route_table_association" "public" {
+  count          = 2
+  subnet_id      = aws_subnet.public[count.index].id
+  route_table_id = aws_route_table.public.id
+}
+
+#############################################
+# IAM ROLES
+#############################################
+
+# EKS cluster role
+resource "aws_iam_role" "eks_cluster" {
+  name = "${var.cluster_name}-cluster-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = {
+        Service = "eks.amazonaws.com"
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+  role       = aws_iam_role.eks_cluster.name
+}
+
+# EKS node group role
+resource "aws_iam_role" "eks_node_group" {
+  name = "${var.cluster_name}-node-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = {
+        Service = "ec2.amazonaws.com"
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "eks_worker_node_policy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+  role       = aws_iam_role.eks_node_group.name
+}
+
+resource "aws_iam_role_policy_attachment" "eks_cni_policy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+  role       = aws_iam_role.eks_node_group.name
+}
+
+resource "aws_iam_role_policy_attachment" "eks_container_registry_policy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+  role       = aws_iam_role.eks_node_group.name
+}
+
+#############################################
+# EKS CLUSTER
+#############################################
+
+resource "aws_eks_cluster" "main" {
+  name     = var.cluster_name
+  role_arn = aws_iam_role.eks_cluster.arn
+
+  vpc_config {
+    subnet_ids = aws_subnet.public[*].id
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.eks_cluster_policy,
+  ]
+}
+
+# Node group - small for testing
+resource "aws_eks_node_group" "main" {
+  cluster_name    = aws_eks_cluster.main.name
+  node_group_name = "${var.cluster_name}-nodes"
+  node_role_arn   = aws_iam_role.eks_node_group.arn
+  subnet_ids      = aws_subnet.public[*].id
+
+  scaling_config {
+    desired_size = 2
+    max_size     = 3
+    min_size     = 1
+  }
+
+  instance_types = ["t3.small"]
+
+  depends_on = [
+    aws_iam_role_policy_attachment.eks_worker_node_policy,
+    aws_iam_role_policy_attachment.eks_cni_policy,
+    aws_iam_role_policy_attachment.eks_container_registry_policy,
+  ]
+}
+
+#############################################
+# CLUSTER CONNECTION
+#############################################
+
+# This is the critical part - inline connection with exec auth
+# The endpoint and certificate_authority are "known after apply"
+# The provider MUST handle this gracefully during bootstrap
+locals {
+  cluster_connection = {
+    host                   = aws_eks_cluster.main.endpoint
+    cluster_ca_certificate = aws_eks_cluster.main.certificate_authority[0].data
+    exec = {
+      api_version = "client.authentication.k8s.io/v1beta1"
+      command     = "aws"
+      args = [
+        "eks",
+        "get-token",
+        "--cluster-name",
+        aws_eks_cluster.main.name,
+        "--region",
+        var.aws_region,
+      ]
+    }
+  }
+}
+
+#############################################
+# BOOTSTRAP WORKLOADS
+#############################################
+
+# Create namespace IMMEDIATELY after cluster creation
+# This is the critical test - no time_sleep workaround!
+resource "k8sconnect_object" "namespace" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: bootstrap-test
+      labels:
+        test: eks-bootstrap
+  YAML
+
+  cluster_connection = local.cluster_connection
+
+  # For EKS: ensure nodes are ready before deploying workloads
+  depends_on = [
+    aws_eks_cluster.main,
+    aws_eks_node_group.main,
+  ]
+}
+
+# Deploy a simple workload to prove cluster is functional
+resource "k8sconnect_object" "test_deployment" {
+  yaml_body = <<-YAML
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: nginx-bootstrap-test
+      namespace: bootstrap-test
+    spec:
+      replicas: 2
+      selector:
+        matchLabels:
+          app: nginx
+      template:
+        metadata:
+          labels:
+            app: nginx
+        spec:
+          containers:
+          - name: nginx
+            image: nginx:1.25
+            ports:
+            - containerPort: 80
+  YAML
+
+  cluster_connection = local.cluster_connection
+
+  depends_on = [k8sconnect_object.namespace]
+}
+
+# Create a ConfigMap to test basic resource creation
+resource "k8sconnect_object" "test_configmap" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: bootstrap-config
+      namespace: bootstrap-test
+    data:
+      cluster_type: eks
+      test_date: "${timestamp()}"
+      provider: k8sconnect
+  YAML
+
+  cluster_connection = local.cluster_connection
+
+  depends_on = [k8sconnect_object.namespace]
+}
+
+#############################################
+# OUTPUTS
+#############################################
+
+output "cluster_endpoint" {
+  description = "EKS cluster endpoint"
+  value       = aws_eks_cluster.main.endpoint
+}
+
+output "cluster_name" {
+  description = "EKS cluster name"
+  value       = aws_eks_cluster.main.name
+}
+
+output "cluster_certificate_authority" {
+  description = "EKS cluster CA certificate"
+  value       = aws_eks_cluster.main.certificate_authority[0].data
+  sensitive   = true
+}
+
+output "namespace_id" {
+  description = "K8sconnect object ID for namespace"
+  value       = k8sconnect_object.namespace.id
+}
+
+output "deployment_id" {
+  description = "K8sconnect object ID for deployment"
+  value       = k8sconnect_object.test_deployment.id
+}
+
+output "kubeconfig_command" {
+  description = "Command to update kubeconfig"
+  value       = "aws eks update-kubeconfig --region ${var.aws_region} --name ${aws_eks_cluster.main.name}"
+}

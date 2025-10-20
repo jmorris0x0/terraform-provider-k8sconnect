@@ -31,22 +31,17 @@ Bootstrap Kubernetes clusters and workloads in a **single `terraform apply`**. N
 ## Getting Started
 
 ```hcl
-terraform {
-  required_providers {
-    k8sconnect = {
-      source  = "jmorris0x0/k8sconnect"
-      version = ">= 0.1.2"
-    }
-  }
-}
-
-provider "k8sconnect" {}
+provider "k8sconnect" {}  # No configuration needed
 
 # Create a new cluster
 resource "aws_eks_cluster" "main" {
   name     = "my-cluster"
-  role_arn = aws_iam_role.cluster.arn
   # ... (cluster configuration)
+}
+
+resource "aws_eks_node_group" "main" {
+  cluster_name = aws_eks_cluster.main.name
+  # ... (node group configuration)
 }
 
 # Connection can be reused across resources
@@ -63,9 +58,12 @@ locals {
 }
 
 # Deploy workloads immediately - no waiting for provider configuration!
-resource "k8sconnect_object" "cert_manager" {
-  yaml_body          = file("cert-manager.yaml")
+resource "k8sconnect_object" "app" {
+  yaml_body          = file("deployment.yaml")
   cluster_connection = local.cluster_connection
+
+  # For EKS: ensure nodes are ready before deploying workloads
+  depends_on = [aws_eks_node_group.main]
 }
 ```
 
