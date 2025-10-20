@@ -658,8 +658,9 @@ func (r *patchResource) transferOwnershipForFields(ctx context.Context, client k
 
 	// Apply with the target owner's field manager
 	err := client.Apply(ctx, patchObj, k8sclient.ApplyOptions{
-		FieldManager: targetOwner,
-		Force:        true, // Required to take ownership
+		FieldManager:    targetOwner,
+		Force:           true,     // Required to take ownership
+		FieldValidation: "Strict", // ADR-017: Validate fields against OpenAPI schema during apply
 	})
 
 	return err

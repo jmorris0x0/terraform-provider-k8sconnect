@@ -325,8 +325,9 @@ func (r *patchResource) dryRunStrategicMergePatch(ctx context.Context, client k8
 
 	// Perform dry-run using SSA
 	dryRunResult, err := client.DryRunApply(ctx, patchObj, k8sclient.ApplyOptions{
-		FieldManager: fieldManager,
-		Force:        true, // Required for taking ownership
+		FieldManager:    fieldManager,
+		Force:           true,     // Required for taking ownership
+		FieldValidation: "Strict", // ADR-017: Validate fields against OpenAPI schema during plan
 	})
 
 	if err != nil {
