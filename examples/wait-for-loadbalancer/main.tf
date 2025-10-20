@@ -52,7 +52,7 @@ resource "k8sconnect_object" "endpoint_config" {
       name: external-endpoints
       namespace: example
     data:
-      service_endpoint: "${k8sconnect_wait.loadbalancer_service.status.loadBalancer.ingress[0].ip}:8080"
+      service_endpoint: "${k8sconnect_wait.loadbalancer_service.result.status.loadBalancer.ingress[0].ip}:8080"
       endpoint_ready: "true"
   YAML
 
@@ -62,8 +62,8 @@ resource "k8sconnect_object" "endpoint_config" {
 
 output "loadbalancer_endpoint" {
   value = try(
-    "${k8sconnect_wait.loadbalancer_service.status.loadBalancer.ingress[0].ip}:8080",
-    "${k8sconnect_wait.loadbalancer_service.status.loadBalancer.ingress[0].hostname}:8080",
+    "${k8sconnect_wait.loadbalancer_service.result.status.loadBalancer.ingress[0].ip}:8080",
+    "${k8sconnect_wait.loadbalancer_service.result.status.loadBalancer.ingress[0].hostname}:8080",
     "pending"
   )
   description = "The LoadBalancer endpoint for the demo service"

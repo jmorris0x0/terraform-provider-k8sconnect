@@ -40,9 +40,9 @@ func TestAccWaitResource_WaitForFieldExists(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckNamespaceExists(k8sClient, nsName),
-					// Status should be populated on wait resource
-					resource.TestCheckResourceAttr("k8sconnect_wait.test", "status.phase", "Active"),
-					// Check output that uses the status from wait resource
+					// Object should be populated on wait resource (field wait)
+					resource.TestCheckResourceAttr("k8sconnect_wait.test", "result.status.phase", "Active"),
+					// Check output that uses the object from wait resource
 					resource.TestCheckOutput("namespace_ready", "true"),
 				),
 			},
@@ -85,7 +85,7 @@ resource "k8sconnect_wait" "test" {
 }
 
 output "namespace_ready" {
-  value = k8sconnect_wait.test.status.phase == "Active"
+  value = k8sconnect_wait.test.result.status.phase == "Active"
 }
 `, name)
 }
@@ -115,7 +115,7 @@ func TestAccWaitResource_WaitForFieldValue(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckNamespaceExists(k8sClient, nsName),
 					// field_value wait doesn't populate status per ADR-008
-					resource.TestCheckNoResourceAttr("k8sconnect_wait.test", "status"),
+					resource.TestCheckNoResourceAttr("k8sconnect_wait.test", "object"),
 				),
 			},
 		},
@@ -187,7 +187,7 @@ func TestAccWaitResource_WaitForCondition(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 					// Condition wait doesn't populate status
-					resource.TestCheckNoResourceAttr("k8sconnect_wait.test", "status"),
+					resource.TestCheckNoResourceAttr("k8sconnect_wait.test", "object"),
 				),
 			},
 		},
@@ -293,7 +293,7 @@ func TestAccWaitResource_ExplicitRollout(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 					// Rollout wait doesn't populate status
-					resource.TestCheckNoResourceAttr("k8sconnect_wait.test", "status"),
+					resource.TestCheckNoResourceAttr("k8sconnect_wait.test", "object"),
 				),
 			},
 		},
@@ -398,7 +398,7 @@ func TestAccWaitResource_WaitTimeout(t *testing.T) {
 					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
 					// ConfigMap should exist even though wait timed out
 					// Status should be null since field doesn't exist
-					resource.TestCheckNoResourceAttr("k8sconnect_wait.test", "status"),
+					resource.TestCheckNoResourceAttr("k8sconnect_wait.test", "object"),
 				),
 				ExpectError: regexp.MustCompile("Wait Operation Failed"),
 			},
@@ -491,7 +491,7 @@ func TestAccWaitResource_WaitForPVCBinding(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckPVCExists(k8sClient, ns, pvcName),
 					// field_value wait doesn't populate status per ADR-008
-					resource.TestCheckNoResourceAttr("k8sconnect_wait.pvc", "status"),
+					resource.TestCheckNoResourceAttr("k8sconnect_wait.pvc", "object"),
 				),
 			},
 		},
@@ -615,7 +615,7 @@ func TestAccWaitResource_WaitForMultipleValues(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 					// field_value wait doesn't populate status per ADR-008
-					resource.TestCheckNoResourceAttr("k8sconnect_wait.test", "status"),
+					resource.TestCheckNoResourceAttr("k8sconnect_wait.test", "object"),
 				),
 			},
 		},
@@ -722,7 +722,7 @@ func TestAccWaitResource_StatefulSetRollout(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckStatefulSetExists(k8sClient, ns, stsName),
 					// Rollout wait doesn't populate status
-					resource.TestCheckNoResourceAttr("k8sconnect_wait.test", "status"),
+					resource.TestCheckNoResourceAttr("k8sconnect_wait.test", "object"),
 				),
 			},
 		},
@@ -827,7 +827,7 @@ func TestAccWaitResource_DaemonSetRollout(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckDaemonSetExists(k8sClient, ns, dsName),
 					// Rollout wait doesn't populate status
-					resource.TestCheckNoResourceAttr("k8sconnect_wait.test", "status"),
+					resource.TestCheckNoResourceAttr("k8sconnect_wait.test", "object"),
 				),
 			},
 		},

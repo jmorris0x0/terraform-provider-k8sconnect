@@ -37,7 +37,7 @@ type waitResourceModel struct {
 	ObjectRef         types.Object  `tfsdk:"object_ref"`
 	ClusterConnection types.Object  `tfsdk:"cluster_connection"`
 	WaitFor           types.Object  `tfsdk:"wait_for"`
-	Status            types.Dynamic `tfsdk:"status"`
+	Result            types.Dynamic `tfsdk:"result"`
 }
 
 // objectRefModel defines the structure for referencing a Kubernetes object
@@ -186,11 +186,11 @@ func (r *waitResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 					},
 				},
 			},
-			"status": schema.DynamicAttribute{
+			"result": schema.DynamicAttribute{
 				Computed: true,
-				Description: "Resource status from the cluster, populated when wait completes successfully. " +
-					"Contains resource-specific runtime information. " +
-					"Follows ADR-008: 'You get only what you wait for' - only populated when waiting on status fields.",
+				Description: "Result of the wait operation containing extracted fields from the Kubernetes resource. " +
+					"The structure preserves the full path from the resource (e.g., field='spec.volumeName' → result.spec.volumeName). " +
+					"Follows ADR-008: 'You get only what you wait for' - only populated for field waits, null for condition/rollout waits.",
 			},
 		},
 	}

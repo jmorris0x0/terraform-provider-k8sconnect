@@ -18,25 +18,25 @@ Choose the right wait strategy based on your use case:
 ### Field Wait (`field`)
 **Use for**: Infrastructure resources that need status values for DNS, outputs, or resource chaining
 - LoadBalancer Services, Ingress, cert-manager Certificates, Crossplane resources, Custom CRDs
-- **Populates `.status` attribute** for use in other resources
-- Only the waited-for field is tracked in status to prevent drift
+- **Populates `.result` attribute** for use in other resources
+- Only the waited-for field is extracted to prevent drift from volatile fields
 
 ### Rollout Wait (`rollout`)
 **Use for**: Workloads that need complete deployment confirmation
 - Deployments, StatefulSets, DaemonSets
-- **Does NOT populate `.status`** - use `depends_on` for sequencing
+- **Does NOT populate `.result`** - use `depends_on` for sequencing
 - Checks replicas, updatedReplicas, readyReplicas, and observedGeneration
 
 ### Condition Wait (`condition`)
 **Use for**: Resources with Kubernetes conditions (Ready, Available, etc.)
 - Deployments (Available, Progressing), Custom CRDs with conditions
-- **Does NOT populate `.status`** - use `depends_on` for sequencing
+- **Does NOT populate `.result`** - use `depends_on` for sequencing
 - Waits for condition status to be "True"
 
 ### Field Value Wait (`field_value`)
 **Use for**: Waiting for specific field values (Job completion, PVC binding, etc.)
 - Jobs (status.succeeded), PVCs (status.phase)
-- **Does NOT populate `.status`** - use `depends_on` for sequencing
+- **Does NOT populate `.result`** - use `depends_on` for sequencing
 - Checks exact string match for field values
 
 ## Example Usage - Wait for LoadBalancer (field wait)
@@ -84,7 +84,7 @@ resource "k8sconnect_object" "endpoint_config" {
       name: external-endpoints
       namespace: example
     data:
-      service_endpoint: "${k8sconnect_wait.service.status.loadBalancer.ingress[0].ip}:80"
+      service_endpoint: "${k8sconnect_wait.service.result.status.loadBalancer.ingress[0].ip}:80"
   YAML
 
   cluster_connection = var.cluster_connection
@@ -434,9 +434,9 @@ output "cluster_ready" {
 
 {{ .SchemaMarkdown | trimspace }}
 
-## Status Output
+## Result Output
 
-Only **field waits** populate the `status` attribute. The status contains only the waited-for field to prevent drift from volatile or controller-managed fields.
+Only **field waits** populate the `result` attribute. The result contains only the waited-for field to prevent drift from volatile or controller-managed fields.
 
 **Example:**
 ```terraform
@@ -450,13 +450,13 @@ resource "k8sconnect_wait" "service" {
   cluster_connection = var.cluster_connection
 }
 
-# Access the pruned status
+# Access the extracted field from result
 output "loadbalancer_ip" {
-  value = k8sconnect_wait.service.status.loadBalancer.ingress[0].ip
+  value = k8sconnect_wait.service.result.status.loadBalancer.ingress[0].ip
 }
 ```
 
-**Other wait types** (`rollout`, `condition`, `field_value`) do NOT populate status. Use `depends_on` to sequence resources:
+**Other wait types** (`rollout`, `condition`, `field_value`) do NOT populate result. Use `depends_on` to sequence resources:
 
 ```terraform
 resource "k8sconnect_wait" "app" {

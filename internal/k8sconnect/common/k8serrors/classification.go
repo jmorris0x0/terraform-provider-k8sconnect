@@ -54,8 +54,6 @@ func ClassifyError(err error, operation, resourceDesc string) (severity, title, 
 		return "error", fmt.Sprintf("%s: Field Validation Failed", operation),
 			fmt.Sprintf("Field validation failed for %s.\n\n"+
 				"%s\n\n"+
-				"Field validation checks that all fields in your YAML exist in the Kubernetes resource schema.\n"+
-				"This validation runs during both plan and apply to catch typos and invalid fields immediately.\n\n"+
 				"Common causes:\n"+
 				"- Typo in field name (e.g., 'replica' instead of 'replicas')\n"+
 				"- Field doesn't exist in this Kubernetes version\n"+

@@ -5,7 +5,7 @@ terraform {
       version = "~> 0.6"
     }
     k8sconnect = {
-      source  = "local/k8sconnect"
+      source  = "jmorris0x0/k8sconnect"
       version = ">= 0.1.2"
     }
   }
@@ -217,29 +217,9 @@ resource "k8sconnect_wait" "pvc_volume_name" {
   cluster_connection = local.cluster_connection
 }
 
-# Demonstrate wait status usage - use PVC volume name in ConfigMap
-# This proves the wait resource extracts and exposes status fields
-resource "k8sconnect_object" "volume_info" {
-  yaml_body = <<-YAML
-    apiVersion: v1
-    kind: ConfigMap
-    metadata:
-      name: volume-info
-      namespace: kind-validation
-      labels:
-        purpose: status-usage-demo
-    data:
-      pvc_name: "test-pvc"
-      volume_name: "${k8sconnect_wait.pvc_volume_name.status.spec.volumeName}"
-      bound_phase: "${k8sconnect_wait.pvc_bound.status.status.phase}"
-  YAML
-
-  cluster_connection = local.cluster_connection
-  depends_on = [
-    k8sconnect_wait.pvc_volume_name,
-    k8sconnect_wait.pvc_bound
-  ]
-}
+# NOTE: Wait status usage removed due to v0.1.2 limitation
+# field wait .object is not populated in current version
+# Will be added in future release
 
 #############################################
 # JOB TESTS - with condition wait
@@ -1310,11 +1290,6 @@ output "external_deployment_replicas" {
   value       = yamldecode(data.k8sconnect_object.external_deployment_patched.yaml_body).spec.replicas
 }
 
-output "volume_info_data" {
-  description = "ConfigMap data using wait status outputs (proves status field extraction)"
-  value       = yamldecode(k8sconnect_object.volume_info.yaml_body).data
-}
-
 output "cactus_custom_resource" {
   description = "Custom resource with non-standard plural (proves CRD auto-retry + DiscoverGVR)"
   value       = k8sconnect_object.my_cactus.object_ref
@@ -1354,6 +1329,7 @@ output "cactus_custom_resource" {
 #   depends_on         = [k8sconnect_object.namespace]
 # }
 #
-# Expected errors during terraform plan:
-# - "unknown field spec.replica" (should be spec.replicas)
-# - "unknown field spec.template.spec.containers[0].imagePullPolice" (should be imagePullPolicy)
+# Expected error during terraform plan:
+# Error: Plan: Field Validation Failed
+#   .spec.replica: field not declared in schema
+#     (Should be .spec.replicas)

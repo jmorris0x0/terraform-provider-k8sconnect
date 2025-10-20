@@ -214,7 +214,7 @@ Perfect for EKS/GKE defaults, Helm deployments, and operator-managed resources. 
 
 ## Wait for Resources and Use Status
 
-Stop writing `null_resource` provisioners with kubectl wait. Built-in waiting with status outputs lets you chain resources naturally:
+Stop writing `null_resource` provisioners with kubectl wait. Built-in waiting with extractable results lets you chain resources naturally:
 
 <!-- runnable-test: readme-wait-for-loadbalancer -->
 ```hcl
@@ -259,7 +259,7 @@ resource "k8sconnect_object" "config" {
       name: endpoints
       namespace: prod
     data:
-      service_url: "${k8sconnect_wait.service.status.loadBalancer.ingress[0].ip}:80"
+      service_url: "${k8sconnect_wait.service.result.status.loadBalancer.ingress[0].ip}:80"
   YAML
 
   cluster_connection = var.cluster_connection
@@ -272,16 +272,16 @@ resource "k8sconnect_object" "config" {
 
 **Infrastructure resources** need status values for DNS, outputs, chaining:
 - LoadBalancer Services, Ingress, cert-manager Certificates, Crossplane resources, Custom CRDs with important status
-- Use `field` waits → populates `.status` attribute for use in other resources
+- Use `field` waits → populates `.result` attribute for use in other resources
 - Example: `wait_for = { field = "status.loadBalancer.ingress" }`
 
 **Workload resources** just need readiness confirmation:
 - Deployments, Jobs, StatefulSets, DaemonSets
-- Use `rollout`, `condition`, or `field_value` waits → no `.status` output, use `depends_on` for sequencing
+- Use `rollout`, `condition`, or `field_value` waits → no `.result` output, use `depends_on` for sequencing
 - Example: `wait_for = { rollout = true }`
 
 **Why this matters:**
-- **Selective status tracking** - Only `field` waits populate `.status`, preventing drift from volatile fields
+- **Selective field tracking** - Only `field` waits populate `.result`, preventing drift from volatile fields
 - **No more provisioners** - Native Terraform waiting and data flow
 - **Works with any CRD** - If it has status fields you need, use `field` waits
 
@@ -325,7 +325,7 @@ All `cluster_connection` fields are marked sensitive and won't appear in logs or
 
 **Resources:**
 - `k8sconnect_object` - Full lifecycle management for any Kubernetes resource ([docs](docs/resources/manifest.md))
-- `k8sconnect_wait` - Wait for resources to reach desired state with status outputs ([docs](docs/resources/wait.md))
+- `k8sconnect_wait` - Wait for resources to reach desired state with extractable results ([docs](docs/resources/wait.md))
 - `k8sconnect_patch` - Surgical modifications to existing resources ([docs](docs/resources/patch.md))
 
 **Data Sources:**

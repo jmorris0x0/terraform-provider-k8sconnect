@@ -6,21 +6,22 @@ import (
 	"strings"
 )
 
-// pruneStatusToField extracts only the specified field path from the full status
-// and returns it in the exact same structure
-func pruneStatusToField(fullStatus map[string]interface{}, fieldPath string) map[string]interface{} {
-	if fullStatus == nil || fieldPath == "" {
+// pruneStatusToField extracts only the specified field path from the entire K8s resource
+// and returns it in the exact same structure.
+// The field can be anywhere in the resource: spec.volumeName, metadata.uid, status.phase, etc.
+func pruneStatusToField(fullResource map[string]interface{}, fieldPath string) map[string]interface{} {
+	if fullResource == nil || fieldPath == "" {
 		return nil
 	}
 
-	path := strings.TrimPrefix(fieldPath, "status.")
-	segments, err := parseFieldPath(path)
+	// Do NOT strip "status." prefix anymore - field can be anywhere in the resource
+	segments, err := parseFieldPath(fieldPath)
 	if err != nil {
 		return nil
 	}
 
 	// Navigate to get the value
-	value, found, err := navigateToValue(fullStatus, segments)
+	value, found, err := navigateToValue(fullResource, segments)
 	if !found || err != nil {
 		return nil
 	}
