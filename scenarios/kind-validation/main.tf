@@ -5,8 +5,8 @@ terraform {
       version = "~> 0.6"
     }
     k8sconnect = {
-      source  = "jmorris0x0/k8sconnect"
-      version = ">= 0.1.2"
+      source  = "local/k8sconnect"
+      version = "0.1.0"
     }
   }
   required_version = ">= 1.6"
