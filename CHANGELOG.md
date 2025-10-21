@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2025-10-21
+
+### Fixed
+- Fixed import causing "Provider produced inconsistent result after apply" errors
+- Fixed `ignore_fields` JSONPath predicates not matching array elements by field value
+  - Example: `spec.template.spec.containers[?(@.name=='app')].env[?(@.name=='EXTERNAL_VAR')].value`
+
 ## [0.1.3] - 2025-10-20
 
 ### Changed
