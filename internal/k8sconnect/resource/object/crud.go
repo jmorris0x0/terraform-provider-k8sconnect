@@ -12,6 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"k8s.io/apimachinery/pkg/api/errors"
 
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 )
 
@@ -25,7 +26,7 @@ func (r *objectResource) Create(ctx context.Context, req resource.CreateRequest,
 	}
 
 	// 2. Generate resource ID
-	data.ID = types.StringValue(r.generateID())
+	data.ID = types.StringValue(common.GenerateID())
 
 	// 3. Setup context
 	rc, err := r.prepareContext(ctx, &data, false, false)

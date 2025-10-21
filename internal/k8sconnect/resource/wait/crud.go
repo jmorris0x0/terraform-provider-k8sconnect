@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -12,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 )
@@ -36,7 +36,7 @@ func (r *waitResource) Create(ctx context.Context, req resource.CreateRequest, r
 	}
 
 	// Generate unique ID
-	data.ID = types.StringValue(uuid.New().String())
+	data.ID = types.StringValue(common.GenerateID())
 
 	// Build wait context
 	wc, diags := r.buildWaitContext(ctx, &data)

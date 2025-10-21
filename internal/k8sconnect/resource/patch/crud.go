@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -15,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/fieldmanagement"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8serrors"
@@ -30,7 +30,7 @@ func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, 
 	}
 
 	// 2. Generate unique ID
-	data.ID = types.StringValue(generatePatchID())
+	data.ID = types.StringValue(common.GenerateID())
 
 	// 3. Setup client
 	client, err := r.setupClient(ctx, &data, &resp.Diagnostics)
@@ -587,27 +587,6 @@ func (r *patchResource) ImportState(ctx context.Context, req resource.ImportStat
 			"1. Patches represent partial ownership, not full resource state\n"+
 			"2. There's no way to determine the original patch content from the current state\n"+
 			"Instead, define the patch in your Terraform configuration.")
-}
-
-// generatePatchID generates a unique ID for a patch
-func generatePatchID() string {
-	return fmt.Sprintf("patch-%d", currentTimeMillis())
-}
-
-// currentTimeMillis returns current time in milliseconds
-func currentTimeMillis() int64 {
-	return currentTime().UnixNano() / 1000000
-}
-
-// Helper function for testing
-var currentTime = func() interface{ UnixNano() int64 } {
-	return timeNow{}
-}
-
-type timeNow struct{}
-
-func (timeNow) UnixNano() int64 {
-	return time.Now().UnixNano()
 }
 
 // groupFieldsByPreviousOwner groups field paths by their previous owner

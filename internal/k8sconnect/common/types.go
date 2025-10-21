@@ -2,6 +2,8 @@ package common
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 
@@ -119,4 +121,17 @@ func FormatValueForDisplay(v interface{}) string {
 	default:
 		return fmt.Sprintf("%v", val)
 	}
+}
+
+// GenerateID creates a random 12-character hex ID for Terraform resource identification.
+// This is used consistently across all resources (object, patch, wait) for state tracking.
+// Returns a string like "b61bf80287d8" (6 random bytes encoded as hex).
+// Panics if the OS CSPRNG is unavailable (which indicates a critically broken system).
+func GenerateID() string {
+	bytes := make([]byte, 6) // 6 bytes = 12 hex chars
+	if _, err := rand.Read(bytes); err != nil {
+		// If crypto/rand fails, the system is fundamentally broken - panic loudly
+		panic(fmt.Sprintf("crypto/rand.Read failed (OS CSPRNG unavailable): %v", err))
+	}
+	return hex.EncodeToString(bytes)
 }
