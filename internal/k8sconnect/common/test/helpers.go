@@ -431,6 +431,40 @@ func CheckDeploymentImage(client *kubernetes.Clientset, namespace, name, expecte
 	}
 }
 
+// CheckDeploymentEnvVar checks that a specific environment variable in a deployment's container has the expected value
+func CheckDeploymentEnvVar(client *kubernetes.Clientset, namespace, name, containerName, envVarName, expectedValue string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		deployment, err := client.AppsV1().Deployments(namespace).Get(context.Background(), name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to get deployment: %v", err)
+		}
+
+		// Find the container
+		var container *corev1.Container
+		for i := range deployment.Spec.Template.Spec.Containers {
+			if deployment.Spec.Template.Spec.Containers[i].Name == containerName {
+				container = &deployment.Spec.Template.Spec.Containers[i]
+				break
+			}
+		}
+		if container == nil {
+			return fmt.Errorf("container %q not found in deployment %s/%s", containerName, namespace, name)
+		}
+
+		// Find the env var
+		for _, env := range container.Env {
+			if env.Name == envVarName {
+				if env.Value != expectedValue {
+					return fmt.Errorf("expected env var %q to have value %q, got %q", envVarName, expectedValue, env.Value)
+				}
+				return nil
+			}
+		}
+
+		return fmt.Errorf("env var %q not found in container %q", envVarName, containerName)
+	}
+}
+
 func CheckStatefulSetExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()

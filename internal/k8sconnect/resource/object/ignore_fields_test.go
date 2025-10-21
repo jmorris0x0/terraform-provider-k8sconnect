@@ -1043,3 +1043,159 @@ YAML
 }
 `, namespace, name, namespace, replicas, image, ignoreFieldsLine)
 }
+
+// TestAccObjectResource_IgnoreFieldsJSONPathPredicate tests that JSONPath predicates
+// work correctly in ignore_fields, specifically during UPDATE operations.
+// This test verifies the bug fix where ignored fields with predicates were being
+// reset during apply instead of being excluded from the SSA patch.
+func TestAccObjectResource_IgnoreFieldsJSONPathPredicate(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("ignore-jsonpath-ns-%d", time.Now().UnixNano()%1000000)
+	deployName := fmt.Sprintf("ignore-jsonpath-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+	ssaClient := testhelpers.NewSSATestClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create deployment with JSONPath predicate in ignore_fields
+			{
+				Config: testAccManifestConfigIgnoreFieldsJSONPath(ns, deployName, "managed-value", "external-value"),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_object.test", "id"),
+					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
+					// Verify ignore_fields contains JSONPath predicate
+					resource.TestCheckResourceAttr("k8sconnect_object.test", "ignore_fields.#", "1"),
+					resource.TestCheckResourceAttr("k8sconnect_object.test", "ignore_fields.0",
+						"spec.template.spec.containers[?(@.name=='app')].env[?(@.name=='EXTERNAL_VAR')].value"),
+				),
+			},
+			// Step 2: Modify both env vars externally with kubectl
+			{
+				PreConfig: func() {
+					ctx := context.Background()
+					// Modify MANAGED_VAR (not ignored - should be reverted)
+					err := ssaClient.ForceApplyDeploymentEnvVarSSA(ctx, ns, deployName, "app",
+						"MANAGED_VAR", "kubectl-changed-managed", "kubectl-patch")
+					if err != nil {
+						t.Fatalf("Failed to modify MANAGED_VAR: %v", err)
+					}
+					// Modify EXTERNAL_VAR (ignored - should be preserved)
+					err = ssaClient.ForceApplyDeploymentEnvVarSSA(ctx, ns, deployName, "app",
+						"EXTERNAL_VAR", "kubectl-changed-external", "kubectl-patch")
+					if err != nil {
+						t.Fatalf("Failed to modify EXTERNAL_VAR: %v", err)
+					}
+					t.Logf("✓ Modified both env vars with kubectl")
+				},
+				Config: testAccManifestConfigIgnoreFieldsJSONPath(ns, deployName, "managed-value", "external-value"),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					// After apply, MANAGED_VAR should be reset to terraform's value
+					testhelpers.CheckDeploymentEnvVar(k8sClient.(*kubernetes.Clientset), ns, deployName,
+						"app", "MANAGED_VAR", "managed-value"),
+					// EXTERNAL_VAR should be preserved at kubectl's value
+					testhelpers.CheckDeploymentEnvVar(k8sClient.(*kubernetes.Clientset), ns, deployName,
+						"app", "EXTERNAL_VAR", "kubectl-changed-external"),
+				),
+			},
+			// Step 3: Verify no drift after the fix
+			{
+				Config: testAccManifestConfigIgnoreFieldsJSONPath(ns, deployName, "managed-value", "external-value"),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+			},
+			// Step 4: Update MANAGED_VAR in terraform, verify EXTERNAL_VAR still preserved
+			{
+				Config: testAccManifestConfigIgnoreFieldsJSONPath(ns, deployName, "managed-value-updated", "external-value"),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					// MANAGED_VAR should be updated
+					testhelpers.CheckDeploymentEnvVar(k8sClient.(*kubernetes.Clientset), ns, deployName,
+						"app", "MANAGED_VAR", "managed-value-updated"),
+					// EXTERNAL_VAR should STILL be preserved at kubectl's value (not reset to "external-value")
+					testhelpers.CheckDeploymentEnvVar(k8sClient.(*kubernetes.Clientset), ns, deployName,
+						"app", "EXTERNAL_VAR", "kubectl-changed-external"),
+				),
+			},
+		},
+		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+	})
+}
+
+func testAccManifestConfigIgnoreFieldsJSONPath(namespace, name, managedValue, externalValue string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+
+resource "k8sconnect_object" "namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_object" "test" {
+  depends_on = [k8sconnect_object.namespace]
+
+  yaml_body = <<YAML
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: test
+  template:
+    metadata:
+      labels:
+        app: test
+    spec:
+      containers:
+      - name: app
+        image: nginx:1.21
+        env:
+        - name: MANAGED_VAR
+          value: %s
+        - name: EXTERNAL_VAR
+          value: %s
+YAML
+
+  cluster_connection = {
+    kubeconfig = var.raw
+  }
+
+  # Use JSONPath predicate to ignore only EXTERNAL_VAR
+  ignore_fields = ["spec.template.spec.containers[?(@.name=='app')].env[?(@.name=='EXTERNAL_VAR')].value"]
+}
+`, namespace, name, namespace, managedValue, externalValue)
+}

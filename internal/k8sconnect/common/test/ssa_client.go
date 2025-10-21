@@ -326,3 +326,55 @@ func (c *SSATestClient) ForceApplyDeploymentReplicasSSA(ctx context.Context, nam
 
 	return nil
 }
+
+// ForceApplyDeploymentEnvVarSSA uses Server-Side Apply to modify a deployment's environment variable
+// with a specific field manager. This simulates what an external controller or kubectl would do when
+// modifying a specific env var.
+func (c *SSATestClient) ForceApplyDeploymentEnvVarSSA(ctx context.Context, namespace, name, containerName, envVarName, value, fieldManager string) error {
+	patch := map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]interface{}{
+			"name":      name,
+			"namespace": namespace,
+		},
+		"spec": map[string]interface{}{
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"containers": []map[string]interface{}{
+						{
+							"name": containerName,
+							"env": []map[string]interface{}{
+								{
+									"name":  envVarName,
+									"value": value,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	patchData, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("failed to marshal patch: %w", err)
+	}
+
+	result := c.clientset.AppsV1().RESTClient().
+		Patch(types.ApplyPatchType).
+		Namespace(namespace).
+		Resource("deployments").
+		Name(name).
+		Param("fieldManager", fieldManager).
+		Param("force", "true").
+		Body(patchData).
+		Do(ctx)
+
+	if err := result.Error(); err != nil {
+		return fmt.Errorf("SSA patch failed: %w", err)
+	}
+
+	return nil
+}
