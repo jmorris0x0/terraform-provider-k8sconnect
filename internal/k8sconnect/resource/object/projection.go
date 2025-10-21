@@ -870,7 +870,10 @@ func removeFieldsFromObject(obj *unstructured.Unstructured, ignorePatterns []str
 	result := obj.DeepCopy()
 
 	for _, pattern := range ignorePatterns {
-		segments := parsePath(pattern)
+		// Resolve JSONPath predicates to positional selectors before parsing
+		// Example: containers[?(@.name=='app')] -> containers[0]
+		resolvedPattern := resolveJSONPathPredicates(pattern, obj.Object)
+		segments := parsePath(resolvedPattern)
 		removeFieldFromUnstructured(result.Object, segments, 0)
 	}
 
