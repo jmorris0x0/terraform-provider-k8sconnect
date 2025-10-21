@@ -799,3 +799,38 @@ func CheckFieldManager(client kubernetes.Interface, namespace, kind, name, expec
 		return nil
 	}
 }
+
+// CheckHasAnnotation verifies that a resource has a specific annotation
+func CheckHasAnnotation(client kubernetes.Interface, namespace, kind, name, annotationKey string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+
+		// Get the resource based on kind
+		var annotations map[string]string
+		var err error
+
+		switch kind {
+		case "ConfigMap":
+			var cm *corev1.ConfigMap
+			cm, err = client.CoreV1().ConfigMaps(namespace).Get(ctx, name, metav1.GetOptions{})
+			if err == nil {
+				annotations = cm.Annotations
+			}
+		default:
+			return fmt.Errorf("unsupported kind for annotation check: %s", kind)
+		}
+
+		if err != nil {
+			return fmt.Errorf("failed to get %s %s/%s: %v", kind, namespace, name, err)
+		}
+
+		// Check if the annotation exists
+		if _, found := annotations[annotationKey]; !found {
+			return fmt.Errorf("%s %s/%s does not have annotation %q. Found annotations: %v",
+				kind, namespace, name, annotationKey, annotations)
+		}
+
+		fmt.Printf("✅ Verified %s %s/%s has annotation %q\n", kind, namespace, name, annotationKey)
+		return nil
+	}
+}

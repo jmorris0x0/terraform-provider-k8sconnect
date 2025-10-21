@@ -100,10 +100,24 @@ func (r *objectResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 	}
 }
 
-// setProjectionUnknown sets projection to unknown and saves plan
+// setProjectionUnknown sets projection and field_ownership to unknown and saves plan
+//
+// IMPORTANT: When we can't perform dry-run to predict the result, we must set BOTH
+// managed_state_projection AND field_ownership to unknown. If we only set projection
+// to unknown but leave field_ownership as-is (from imported state), Terraform will
+// detect an inconsistency when apply adds k8sconnect annotations to field_ownership.
+//
+// BUG FIX: This was causing "Provider produced inconsistent result after apply" errors
+// after importing kubectl-created resources, because:
+// 1. Import sets field_ownership to kubectl's ownership (no k8sconnect annotations)
+// 2. Dry-run fails for some reason (CRD not found, client error, etc.)
+// 3. setProjectionUnknown was called but only set projection, not field_ownership
+// 4. Apply added k8sconnect annotations to the resource
+// 5. Terraform saw field_ownership changed from plan (kubectl only) to apply result (kubectl + k8sconnect)
 func (r *objectResource) setProjectionUnknown(ctx context.Context, plannedData *objectResourceModel, resp *resource.ModifyPlanResponse, reason string) {
 	tflog.Debug(ctx, reason)
 	plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
+	plannedData.FieldOwnership = types.MapUnknown(types.StringType)
 	diags := resp.Plan.Set(ctx, plannedData)
 	resp.Diagnostics.Append(diags...)
 }
