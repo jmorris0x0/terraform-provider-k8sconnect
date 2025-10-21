@@ -205,7 +205,7 @@ resource "k8sconnect_object" "staging_app" {
 - `delete_protection` (Boolean) Prevent accidental deletion of the resource. If set to true, the resource cannot be deleted unless this field is set to false.
 - `delete_timeout` (String) How long to wait for a resource to be deleted before considering the deletion failed. Defaults to 300s (5 minutes).
 - `force_destroy` (Boolean) Force deletion by removing finalizers. **WARNING:** Unlike other providers, this REMOVES finalizers after timeout. May cause data loss and orphaned cloud resources. Consult documentation before enabling.
-- `ignore_fields` (List of String) Field paths to exclude from management. On Create, fields are sent to establish initial state; on Update, they're omitted from the Apply patch, releasing ownership to other controllers and excluding them from drift detection. Supports dot notation (e.g., 'metadata.annotations', 'spec.replicas'), array indices ('webhooks[0].clientConfig.caBundle'), and strategic merge keys ('spec.containers[name=nginx].image'). Use for fields managed by controllers (e.g., HPA modifying replicas) or when operators inject values.
+- `ignore_fields` (List of String) Field paths to exclude from management using JSONPath syntax. Use for fields controlled by other systems (HPA replicas, cert-manager CA bundles, operator annotations). Supports dot notation ('spec.replicas'), positional arrays ('webhooks[0].caBundle'), and JSONPath predicates ('containers[?(@.name=="nginx")].image'). Example: 'spec.template.spec.containers[?(@.name=="app")].env[?(@.name=="EXTERNAL_VAR")].value'
 
 ### Read-Only
 

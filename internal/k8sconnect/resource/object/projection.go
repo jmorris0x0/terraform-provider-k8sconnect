@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
@@ -479,7 +480,8 @@ func formatValueForDisplay(v interface{}) string {
 }
 
 // filterIgnoredPaths removes paths that match any ignore pattern
-func filterIgnoredPaths(allPaths []string, ignoreFields []string) []string {
+// Supports JSONPath predicates like: containers[?(@.name=='nginx')].image
+func filterIgnoredPaths(allPaths []string, ignoreFields []string, obj map[string]interface{}) []string {
 	if len(ignoreFields) == 0 {
 		return allPaths
 	}
@@ -488,7 +490,7 @@ func filterIgnoredPaths(allPaths []string, ignoreFields []string) []string {
 	for _, path := range allPaths {
 		ignored := false
 		for _, ignorePattern := range ignoreFields {
-			if pathMatchesIgnorePattern(path, ignorePattern) {
+			if pathMatchesIgnorePattern(path, ignorePattern, obj) {
 				ignored = true
 				break
 			}
@@ -500,11 +502,209 @@ func filterIgnoredPaths(allPaths []string, ignoreFields []string) []string {
 	return filtered
 }
 
+// resolveJSONPathPredicates converts JSONPath predicates to positional selectors
+// Example: containers[?(@.name=='nginx')].image -> containers[0].image
+func resolveJSONPathPredicates(pattern string, obj map[string]interface{}) string {
+	// Regex to match JSONPath predicates: [?(@.field=='value')] or [?(@.field=="value")]
+	predicateRegex := regexp.MustCompile(`\[\?\(@\.([^=]+)==['"]([^'"]+)['"]\)\]`)
+
+	result := pattern
+
+	// Find all predicates and resolve them left-to-right
+	for {
+		match := predicateRegex.FindStringSubmatchIndex(result)
+		if match == nil {
+			break // No more predicates
+		}
+
+		// Extract the field name and value from the predicate
+		field := result[match[2]:match[3]] // e.g., "name"
+		value := result[match[4]:match[5]] // e.g., "nginx"
+		predicateStart := match[0]
+		predicateEnd := match[1]
+
+		// Build the path to the array containing this predicate
+		// Use the ALREADY RESOLVED portion of the path up to the predicate
+		pathToArray := result[:predicateStart]
+
+		// Navigate to the array in the object using the current (partially resolved) path
+		array, ok := navigateToResolvedPath(obj, pathToArray)
+		if !ok {
+			// Can't resolve - leave predicate as-is
+			break
+		}
+
+		// Find the index where field==value
+		arraySlice, ok := array.([]interface{})
+		if !ok {
+			break
+		}
+
+		index := -1
+		for i, item := range arraySlice {
+			itemMap, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if itemValue, exists := itemMap[field]; exists {
+				if fmt.Sprintf("%v", itemValue) == value {
+					index = i
+					break
+				}
+			}
+		}
+
+		if index == -1 {
+			// No match found - can't resolve
+			break
+		}
+
+		// Replace the predicate with a positional selector
+		result = result[:predicateStart] + fmt.Sprintf("[%d]", index) + result[predicateEnd:]
+	}
+
+	return result
+}
+
+// navigateToResolvedPath walks through the object following a path that may contain positional selectors
+// This is used after some predicates have been resolved to [index] notation
+func navigateToResolvedPath(obj map[string]interface{}, path string) (interface{}, bool) {
+	if path == "" {
+		return obj, true
+	}
+
+	// Parse the path segment by segment, handling both dots and array indices
+	current := interface{}(obj)
+	remaining := path
+
+	for remaining != "" {
+		// Find the next segment (either before a dot or before an array selector)
+		dotIdx := strings.Index(remaining, ".")
+		bracketIdx := strings.Index(remaining, "[")
+
+		var segment string
+		var nextIdx int
+
+		if dotIdx == -1 && bracketIdx == -1 {
+			// Last segment
+			segment = remaining
+			remaining = ""
+		} else if dotIdx == -1 {
+			// Only bracket found
+			segment = remaining[:bracketIdx]
+			nextIdx = bracketIdx
+		} else if bracketIdx == -1 {
+			// Only dot found
+			segment = remaining[:dotIdx]
+			nextIdx = dotIdx + 1
+		} else if bracketIdx < dotIdx {
+			// Bracket comes first
+			segment = remaining[:bracketIdx]
+			nextIdx = bracketIdx
+		} else {
+			// Dot comes first
+			segment = remaining[:dotIdx]
+			nextIdx = dotIdx + 1
+		}
+
+		// Navigate through the segment if it's not empty
+		if segment != "" {
+			currentMap, ok := current.(map[string]interface{})
+			if !ok {
+				return nil, false
+			}
+			next, exists := currentMap[segment]
+			if !exists {
+				return nil, false
+			}
+			current = next
+		}
+
+		// Handle array selector if present
+		if bracketIdx != -1 && (dotIdx == -1 || bracketIdx < dotIdx) {
+			// Extract the array index
+			closeBracket := strings.Index(remaining[bracketIdx:], "]")
+			if closeBracket == -1 {
+				return nil, false
+			}
+			closeBracket += bracketIdx
+
+			indexStr := remaining[bracketIdx+1 : closeBracket]
+			var index int
+			if _, err := fmt.Sscanf(indexStr, "%d", &index); err != nil {
+				return nil, false
+			}
+
+			// Navigate into array
+			arraySlice, ok := current.([]interface{})
+			if !ok || index < 0 || index >= len(arraySlice) {
+				return nil, false
+			}
+			current = arraySlice[index]
+
+			nextIdx = closeBracket + 1
+			if nextIdx < len(remaining) && remaining[nextIdx] == '.' {
+				nextIdx++
+			}
+		}
+
+		if nextIdx >= len(remaining) {
+			remaining = ""
+		} else {
+			remaining = remaining[nextIdx:]
+		}
+	}
+
+	return current, true
+}
+
+// navigateToPath walks through the object following a dotted path
+// Returns the value at that path, or nil if not found
+func navigateToPath(obj map[string]interface{}, path string) (interface{}, bool) {
+	if path == "" {
+		return obj, true
+	}
+
+	// Remove trailing array selector if present (we want the array itself)
+	path = strings.TrimSuffix(path, "]")
+	if idx := strings.LastIndex(path, "["); idx != -1 {
+		path = path[:idx]
+	}
+
+	segments := strings.Split(path, ".")
+	current := interface{}(obj)
+
+	for _, seg := range segments {
+		if seg == "" {
+			continue
+		}
+
+		// Navigate into object
+		currentMap, ok := current.(map[string]interface{})
+		if !ok {
+			return nil, false
+		}
+
+		next, exists := currentMap[seg]
+		if !exists {
+			return nil, false
+		}
+
+		current = next
+	}
+
+	return current, true
+}
+
 // pathMatchesIgnorePattern checks if a path matches an ignore pattern
 // Pattern matches if it's a prefix of the path (allowing parent fields to ignore children)
-func pathMatchesIgnorePattern(path, pattern string) bool {
+// Supports JSONPath predicates: containers[?(@.name=='nginx')].image
+func pathMatchesIgnorePattern(path, pattern string, obj map[string]interface{}) bool {
 	pathSegments := parsePath(path)
-	patternSegments := parsePath(pattern)
+
+	// Resolve any JSONPath predicates in the pattern to positional selectors
+	resolvedPattern := resolveJSONPathPredicates(pattern, obj)
+	patternSegments := parsePath(resolvedPattern)
 
 	// Pattern must be <= path length (prefix or exact match)
 	if len(patternSegments) > len(pathSegments) {

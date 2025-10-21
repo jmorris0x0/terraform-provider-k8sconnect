@@ -237,7 +237,7 @@ func (r *objectResource) calculateProjection(ctx context.Context, req resource.M
 
 		// Apply ignore_fields filtering if specified
 		if ignoreFields := getIgnoreFields(ctx, plannedData); ignoreFields != nil {
-			paths = filterIgnoredPaths(paths, ignoreFields)
+			paths = filterIgnoredPaths(paths, ignoreFields, desiredObj.Object)
 		}
 
 		// Set field_ownership to unknown for CREATE (will be populated after apply)
@@ -374,7 +374,7 @@ func (r *objectResource) performDryRun(ctx context.Context, client k8sclient.K8s
 func (r *objectResource) applyProjection(ctx context.Context, dryRunResult *unstructured.Unstructured, paths []string, plannedData *objectResourceModel, resp *resource.ModifyPlanResponse) bool {
 	// Apply ignore_fields filtering if specified
 	if ignoreFields := getIgnoreFields(ctx, plannedData); ignoreFields != nil {
-		paths = filterIgnoredPaths(paths, ignoreFields)
+		paths = filterIgnoredPaths(paths, ignoreFields, dryRunResult.Object)
 		tflog.Debug(ctx, "Applied ignore_fields filtering in plan modifier", map[string]interface{}{
 			"ignored_count":  len(ignoreFields),
 			"filtered_paths": len(paths),
@@ -461,7 +461,7 @@ func (r *objectResource) checkFieldOwnershipConflicts(ctx context.Context, req r
 
 	// Filter out ignored fields - we don't check ownership for fields we're explicitly ignoring
 	if ignoreFields := getIgnoreFields(ctx, &planData); ignoreFields != nil {
-		userWantsPaths = filterIgnoredPaths(userWantsPaths, ignoreFields)
+		userWantsPaths = filterIgnoredPaths(userWantsPaths, ignoreFields, desiredObj.Object)
 	}
 
 	// Normalize user paths to match ownership map format (merge keys -> array indexes)

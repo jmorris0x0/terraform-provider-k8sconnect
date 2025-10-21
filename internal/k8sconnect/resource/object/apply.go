@@ -240,7 +240,7 @@ func (r *objectResource) updateProjectionFromCurrent(ctx context.Context, data *
 
 	// Apply ignore_fields filtering if specified
 	if ignoreFields := getIgnoreFields(ctx, data); ignoreFields != nil {
-		paths = filterIgnoredPaths(paths, ignoreFields)
+		paths = filterIgnoredPaths(paths, ignoreFields, obj.Object)
 		tflog.Debug(ctx, "Applied ignore_fields filtering", map[string]interface{}{
 			"ignored_count":  len(ignoreFields),
 			"filtered_paths": len(paths),
