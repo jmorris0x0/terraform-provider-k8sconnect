@@ -114,16 +114,18 @@ func checkJobStatusSucceeded(t *testing.T, resourceName string, expectedCount in
 			return fmt.Errorf("resource not found: %s", resourceName)
 		}
 
-		// Status is stored as flattened attributes
-		succeededAttr := rs.Primary.Attributes["status.succeeded"]
+		// Object is stored as flattened attributes with full path structure
+		// Since field path is "status.succeeded", it's stored as result.status.succeeded
+		// (wait resource's .result attribute contains {status: {succeeded: N}})
+		succeededAttr := rs.Primary.Attributes["result.status.succeeded"]
 		if succeededAttr == "" {
-			t.Logf("Available status attributes:")
+			t.Logf("Available object attributes:")
 			for k, v := range rs.Primary.Attributes {
-				if k == "status" || k[:7] == "status." {
+				if k == "object" || (len(k) >= 7 && k[:7] == "result.") {
 					t.Logf("  %s = %s", k, v)
 				}
 			}
-			return fmt.Errorf("status.succeeded not found in state - expected %d", expectedCount)
+			return fmt.Errorf("result.status.succeeded not found in state - expected %d", expectedCount)
 		}
 
 		count, err := strconv.ParseInt(succeededAttr, 10, 32)

@@ -7,13 +7,13 @@ Working examples showing k8sconnect provider usage patterns.
 
 ## Wait For Feature
 
-The `wait_for` block supports four strategies. **Only `field` waits populate `.status` for resource chaining.**
+The `wait_for` block supports four strategies. **Only `field` waits populate `.result` for resource chaining.**
 
 ### Standalone Wait (no k8sconnect_object needed)
 
 - [`wait-for-external-resources/`](wait-for-external-resources/) - **Wait for resources you don't manage** - Use k8sconnect_wait standalone to wait for Helm charts, operators, kubectl-applied resources, etc.
 
-### Field Waits (with status output)
+### Field Waits (with result output)
 
 Infrastructure resources that need status values for DNS, outputs, or chaining:
 
@@ -21,9 +21,9 @@ Infrastructure resources that need status values for DNS, outputs, or chaining:
 - [`wait-for-ingress/`](wait-for-ingress/) - Wait for Ingress hostname and use it for external access
 - [`wait-for-pvc-volume/`](wait-for-pvc-volume/) - Wait for PVC volumeName and track bound PV
 
-**Pattern:** Use `wait_for.field` → populates `.status` → use in outputs/other resources
+**Pattern:** Use `wait_for.field` → populates `.result` → use in outputs/other resources
 
-### Workload Waits (no status output)
+### Workload Waits (no result output)
 
 Workload resources that just need readiness confirmation for sequencing:
 
@@ -31,7 +31,7 @@ Workload resources that just need readiness confirmation for sequencing:
 - [`wait-for-job-completion/`](wait-for-job-completion/) - Wait for Job completion (`wait_for.field_value`)
 - [`wait-for-condition/`](wait-for-condition/) - Wait for Kubernetes conditions (`wait_for.condition`)
 
-**Pattern:** Use `rollout`, `condition`, or `field_value` → no `.status` → use `depends_on` for sequencing
+**Pattern:** Use `rollout`, `condition`, or `field_value` → no `.result` → use `depends_on` for sequencing
 
 ## Ignore Fields
 - [`ignore-fields-hpa/`](ignore-fields-hpa/) - Ignore HPA-managed replicas to prevent drift

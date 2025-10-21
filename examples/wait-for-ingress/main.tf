@@ -81,7 +81,7 @@ resource "k8sconnect_object" "dns_config" {
       name: dns-config
       namespace: example
     data:
-      ingress_hostname: "${try(k8sconnect_wait.ingress.status.loadBalancer.ingress[0].hostname, k8sconnect_wait.ingress.status.loadBalancer.ingress[0].ip)}"
+      ingress_hostname: "${try(k8sconnect_wait.ingress.result.status.loadBalancer.ingress[0].hostname, k8sconnect_wait.ingress.result.status.loadBalancer.ingress[0].ip)}"
       external_url: "https://api.example.com"
   YAML
 
@@ -90,6 +90,6 @@ resource "k8sconnect_object" "dns_config" {
 }
 
 output "ingress_endpoint" {
-  value       = try(k8sconnect_wait.ingress.status.loadBalancer.ingress[0].hostname, k8sconnect_wait.ingress.status.loadBalancer.ingress[0].ip)
+  value       = try(k8sconnect_wait.ingress.result.status.loadBalancer.ingress[0].hostname, k8sconnect_wait.ingress.result.status.loadBalancer.ingress[0].ip)
   description = "Ingress controller assigned hostname or IP"
 }

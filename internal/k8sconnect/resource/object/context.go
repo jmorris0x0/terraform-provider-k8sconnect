@@ -31,6 +31,7 @@ func (r *objectResource) prepareContext(
 	ctx context.Context,
 	data *objectResourceModel,
 	requireConnection bool,
+	isDelete bool,
 ) (*ResourceContext, error) {
 
 	rc := &ResourceContext{
@@ -77,9 +78,18 @@ func (r *objectResource) prepareContext(
 		if rc.Object != nil {
 			gvr, err := client.GetGVR(ctx, rc.Object)
 			if err != nil {
-				// During apply phase, if this is a CRD-not-found error, we'll retry later
-				// So don't fail here - let the apply retry logic handle it
-				if r.isCRDNotFoundError(err) {
+				if isDelete {
+					// During delete, if we can't discover GVR, the resource type may no longer exist
+					// (e.g., CRD was deleted before CR). Assume resource is already gone.
+					tflog.Debug(ctx, "GVR discovery failed during delete, assuming resource already deleted", map[string]interface{}{
+						"kind":  rc.Object.GetKind(),
+						"name":  rc.Object.GetName(),
+						"error": err.Error(),
+					})
+					rc.GVR = schema.GroupVersionResource{}
+				} else if r.isCRDNotFoundError(err) {
+					// During create/update, if this is a CRD-not-found error, we'll retry later
+					// So don't fail here - let the apply retry logic handle it
 					tflog.Debug(ctx, "CRD not found during prepareContext, will retry during apply", map[string]interface{}{
 						"kind": rc.Object.GetKind(),
 						"name": rc.Object.GetName(),

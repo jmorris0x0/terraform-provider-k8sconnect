@@ -63,10 +63,10 @@ func (r *waitResource) Create(ctx context.Context, req resource.CreateRequest, r
 
 	tflog.Info(ctx, "Wait operation completed successfully")
 
-	// Populate status if configured in wait_for (following ADR-008)
+	// Populate result if configured in wait_for (following ADR-008)
 	if err := r.updateStatus(ctx, wc); err != nil {
-		tflog.Warn(ctx, "Failed to populate status after wait", map[string]interface{}{"error": err.Error()})
-		// Don't fail the entire operation - status is optional
+		tflog.Warn(ctx, "Failed to populate result after wait", map[string]interface{}{"error": err.Error()})
+		// Don't fail the entire operation - result is optional
 	}
 
 	// Save data into Terraform state
@@ -100,22 +100,22 @@ func (r *waitResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 		return
 	}
 
-	// For field waits, refresh status from current state (drift detection)
-	// Condition/rollout waits have null status per ADR-008
+	// For field waits, refresh result from current state (drift detection)
+	// Condition/rollout waits have null result per ADR-008
 	// Only refresh if connection is ready (all values known, not during bootstrap)
 	if !wc.WaitConfig.Field.IsNull() && wc.WaitConfig.Field.ValueString() != "" {
 		if r.isConnectionReady(data.ClusterConnection) {
 			if err := r.updateStatus(ctx, wc); err != nil {
-				tflog.Warn(ctx, "Failed to update status during Read", map[string]interface{}{
+				tflog.Warn(ctx, "Failed to update result during Read", map[string]interface{}{
 					"error": err.Error(),
 				})
-				// Don't fail - keep existing status on transient errors
+				// Don't fail - keep existing result on transient errors
 			}
-			tflog.Debug(ctx, "Refreshed status for field wait", map[string]interface{}{
+			tflog.Debug(ctx, "Refreshed result for field wait", map[string]interface{}{
 				"field": wc.WaitConfig.Field.ValueString(),
 			})
 		} else {
-			tflog.Debug(ctx, "Skipping status refresh - connection has unknown values (bootstrap)")
+			tflog.Debug(ctx, "Skipping result refresh - connection has unknown values (bootstrap)")
 		}
 	}
 
@@ -152,10 +152,10 @@ func (r *waitResource) Update(ctx context.Context, req resource.UpdateRequest, r
 
 	tflog.Info(ctx, "Wait operation completed successfully")
 
-	// Populate status if configured in wait_for (following ADR-008)
+	// Populate result if configured in wait_for (following ADR-008)
 	if err := r.updateStatus(ctx, wc); err != nil {
-		tflog.Warn(ctx, "Failed to populate status after wait", map[string]interface{}{"error": err.Error()})
-		// Don't fail the entire operation - status is optional
+		tflog.Warn(ctx, "Failed to populate result after wait", map[string]interface{}{"error": err.Error()})
+		// Don't fail the entire operation - result is optional
 	}
 
 	// Save updated data into Terraform state

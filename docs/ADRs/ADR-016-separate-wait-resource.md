@@ -438,13 +438,13 @@ When user retries after fixing the issue:
 
 Following ADR-008 "You only get what you wait for", status should only be populated for fields that are waited on. Implementation options:
 
-1. **Wait resource has its own status field:** Wait resource stores the pruned status for the field it's waiting on. Users access status via `k8sconnect_wait.pvc_ready.status` instead of `k8sconnect_object.pvc.status`. Manifest resource never populates status when using separate wait.
+1. **Wait resource has its own object field:** Wait resource stores the pruned fields for what it's waiting on. Users access extracted fields via `k8sconnect_wait.pvc_ready.object` instead of `k8sconnect_object.pvc.status`. Manifest resource never populates status when using separate wait.
 
 2. **Manifest Read operation checks for wait resources:** Manifest detects if any wait resources reference it, reads their wait_for configs, populates its own status field accordingly. Complex cross-resource dependency.
 
 3. **Status only works with embedded wait_for:** Separate wait resource doesn't populate status anywhere - it just blocks. Users who need status must use the deprecated embedded `wait_for` attribute. Simpler but less capable.
 
-**Recommendation:** Option 1 - wait resource has its own status field. Cleanest separation, follows ADR-008 principle, no cross-resource state updates needed.
+**Recommendation:** Option 1 - wait resource has its own object field. Cleanest separation, follows ADR-008 principle, no cross-resource state updates needed.
 
 ### Drift Detection and Status Refresh
 
@@ -463,7 +463,7 @@ resource "k8sconnect_wait" "ingress" {
 }
 
 resource "cloudflare_record" "firewall" {
-  value = k8sconnect_wait.ingress.status.loadBalancer.ingress[0].hostname
+  value = k8sconnect_wait.ingress.result.loadBalancer.ingress[0].hostname
   # If hostname changes → firewall updates (DESIRED)
 }
 ```
@@ -519,7 +519,7 @@ resource "k8sconnect_wait" "ingress" {
 }
 
 resource "cloudflare_record" "firewall" {
-  value = k8sconnect_wait.ingress.status.loadBalancer.ingress[0].hostname
+  value = k8sconnect_wait.ingress.result.loadBalancer.ingress[0].hostname
   # If hostname changes → firewall updates (DESIRED)
 }
 

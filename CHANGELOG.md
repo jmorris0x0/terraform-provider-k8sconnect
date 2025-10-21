@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2025-10-20
+
+### Changed
+- **Breaking**: Renamed `k8sconnect_wait` resource output attribute from `.status` to `.result` for semantic accuracy
+  - Previous: `k8sconnect_wait.example.status.loadBalancer.ingress[0].ip`
+  - Now: `k8sconnect_wait.example.result.status.loadBalancer.ingress[0].ip`
+  - This better reflects that the attribute contains extracted field data, not just status
+
+### Fixed
+- Fixed provider crash when CRD is deleted before custom resource instances during `terraform destroy`
+  - Kubernetes cascade-deletes CRs when their CRD is removed
+  - Provider now gracefully handles missing resource types during delete and read operations
+  - Delete succeeds idempotently when resource type no longer exists
+  - Read removes resource from state when type is not discoverable
+
 ## [0.1.2] - 2025-10-19
 
 ### Added
