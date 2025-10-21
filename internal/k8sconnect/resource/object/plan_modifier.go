@@ -100,10 +100,24 @@ func (r *objectResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 	}
 }
 
-// setProjectionUnknown sets projection to unknown and saves plan
+// setProjectionUnknown sets projection and field_ownership to unknown and saves plan
+//
+// IMPORTANT: When we can't perform dry-run to predict the result, we must set BOTH
+// managed_state_projection AND field_ownership to unknown. If we only set projection
+// to unknown but leave field_ownership as-is (from imported state), Terraform will
+// detect an inconsistency when apply adds k8sconnect annotations to field_ownership.
+//
+// BUG FIX: This was causing "Provider produced inconsistent result after apply" errors
+// after importing kubectl-created resources, because:
+// 1. Import sets field_ownership to kubectl's ownership (no k8sconnect annotations)
+// 2. Dry-run fails for some reason (CRD not found, client error, etc.)
+// 3. setProjectionUnknown was called but only set projection, not field_ownership
+// 4. Apply added k8sconnect annotations to the resource
+// 5. Terraform saw field_ownership changed from plan (kubectl only) to apply result (kubectl + k8sconnect)
 func (r *objectResource) setProjectionUnknown(ctx context.Context, plannedData *objectResourceModel, resp *resource.ModifyPlanResponse, reason string) {
 	tflog.Debug(ctx, reason)
 	plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
+	plannedData.FieldOwnership = types.MapUnknown(types.StringType)
 	diags := resp.Plan.Set(ctx, plannedData)
 	resp.Diagnostics.Append(diags...)
 }
@@ -223,7 +237,7 @@ func (r *objectResource) calculateProjection(ctx context.Context, req resource.M
 
 		// Apply ignore_fields filtering if specified
 		if ignoreFields := getIgnoreFields(ctx, plannedData); ignoreFields != nil {
-			paths = filterIgnoredPaths(paths, ignoreFields)
+			paths = filterIgnoredPaths(paths, ignoreFields, desiredObj.Object)
 		}
 
 		// Set field_ownership to unknown for CREATE (will be populated after apply)
@@ -360,7 +374,7 @@ func (r *objectResource) performDryRun(ctx context.Context, client k8sclient.K8s
 func (r *objectResource) applyProjection(ctx context.Context, dryRunResult *unstructured.Unstructured, paths []string, plannedData *objectResourceModel, resp *resource.ModifyPlanResponse) bool {
 	// Apply ignore_fields filtering if specified
 	if ignoreFields := getIgnoreFields(ctx, plannedData); ignoreFields != nil {
-		paths = filterIgnoredPaths(paths, ignoreFields)
+		paths = filterIgnoredPaths(paths, ignoreFields, dryRunResult.Object)
 		tflog.Debug(ctx, "Applied ignore_fields filtering in plan modifier", map[string]interface{}{
 			"ignored_count":  len(ignoreFields),
 			"filtered_paths": len(paths),
@@ -447,7 +461,7 @@ func (r *objectResource) checkFieldOwnershipConflicts(ctx context.Context, req r
 
 	// Filter out ignored fields - we don't check ownership for fields we're explicitly ignoring
 	if ignoreFields := getIgnoreFields(ctx, &planData); ignoreFields != nil {
-		userWantsPaths = filterIgnoredPaths(userWantsPaths, ignoreFields)
+		userWantsPaths = filterIgnoredPaths(userWantsPaths, ignoreFields, desiredObj.Object)
 	}
 
 	// Normalize user paths to match ownership map format (merge keys -> array indexes)

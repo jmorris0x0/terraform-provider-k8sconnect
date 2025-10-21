@@ -63,15 +63,32 @@ ignore_fields = [
 
 ## Path Syntax
 
-The `ignore_fields` attribute supports:
+Uses **JSONPath** syntax (same as `kubectl get -o jsonpath`):
 
-- **Dot notation**: `spec.replicas`, `metadata.annotations`
-- **Array indices**: `webhooks[0].clientConfig.caBundle`
-- **Strategic merge keys**: `spec.containers[name=nginx].image`
+```hcl
+ignore_fields = [
+  # Simple paths
+  "spec.replicas",
+  "metadata.annotations.example.com/key",
 
-When you specify a parent field, all child fields are ignored:
-- `metadata.annotations` ignores all annotations
-- `status` ignores the entire status block
+  # Positional arrays
+  "webhooks[0].clientConfig.caBundle",
+
+  # JSONPath predicates (select by field value)
+  "spec.containers[?(@.name=='nginx')].image",
+  "spec.template.spec.containers[?(@.name=='app')].env[?(@.name=='DATABASE_URL')].value",
+]
+```
+
+**Common patterns:**
+- HPA replicas: `spec.replicas`
+- Cert-manager CA: `webhooks[?(@.name=='my-webhook')].clientConfig.caBundle`
+- External env var: `spec.template.spec.containers[?(@.name=='app')].env[?(@.name=='API_KEY')].value`
+- LoadBalancer nodePort: `spec.ports[0].nodePort`
+
+**Parent paths ignore all children:**
+- `metadata.annotations` → ignores all annotations
+- `spec.template.spec.containers[?(@.name=='sidecar')]` → ignores entire sidecar container
 
 ## Running the Example
 

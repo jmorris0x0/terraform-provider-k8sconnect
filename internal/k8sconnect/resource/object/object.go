@@ -139,11 +139,11 @@ func (r *objectResource) Schema(ctx context.Context, req resource.SchemaRequest,
 			"ignore_fields": schema.ListAttribute{
 				Optional:    true,
 				ElementType: types.StringType,
-				Description: "Field paths to exclude from management. On Create, fields are sent to establish initial state; " +
-					"on Update, they're omitted from the Apply patch, releasing ownership to other controllers and excluding them from drift detection. " +
-					"Supports dot notation (e.g., 'metadata.annotations', 'spec.replicas'), array indices ('webhooks[0].clientConfig.caBundle'), " +
-					"and strategic merge keys ('spec.containers[name=nginx].image'). Use for fields managed by controllers (e.g., HPA modifying replicas) " +
-					"or when operators inject values.",
+				Description: "Field paths to exclude from management using JSONPath syntax. Use for fields controlled by other systems " +
+					"(HPA replicas, cert-manager CA bundles, operator annotations). " +
+					"Supports dot notation ('spec.replicas'), positional arrays ('webhooks[0].caBundle'), " +
+					"and JSONPath predicates ('containers[?(@.name==\"nginx\")].image'). " +
+					"Example: 'spec.template.spec.containers[?(@.name==\"app\")].env[?(@.name==\"EXTERNAL_VAR\")].value'",
 				Validators: []validator.List{
 					listvalidator.ValueStringsAre(ignoreFieldsValidator{}),
 				},

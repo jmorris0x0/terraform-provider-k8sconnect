@@ -64,19 +64,10 @@ func ClassifyError(err error, operation, resourceDesc string) (severity, title, 
 
 	case errors.IsInvalid(err):
 
-		// Check if this is specifically a CEL validation error
-		if IsCELValidationError(err) {
-			celDetails := ExtractCELValidationDetails(err)
-			return "error", fmt.Sprintf("%s: CEL Validation Failed", operation),
-				fmt.Sprintf("CEL validation rule failed for %s.\n\n"+
-					"%s\n\n"+
-					"CEL (Common Expression Language) validation is defined in the CRD schema.\n"+
-					"Fix the field value to satisfy the validation rule or adjust the CRD validation rules.\n\n"+
-					"Details: %v",
-					resourceDesc, celDetails, err)
-		}
-
 		// Check if this is specifically an immutable field error
+		// IMPORTANT: Check this BEFORE CEL validation, since CEL immutability errors
+		// (e.g., "may not change once set") match both IsCELValidationError and IsImmutableFieldError.
+		// Immutable is more specific, so it should take precedence.
 		if IsImmutableFieldError(err) {
 			immutableFields := ExtractImmutableFields(err)
 			return "error", fmt.Sprintf("%s: Immutable Field Changed", operation),
@@ -91,6 +82,18 @@ func ClassifyError(err error, operation, resourceDesc string) (severity, title, 
 					"Option 3 - Use replace (Terraform 1.5+):\n"+
 					"  terraform apply -replace=<resource_address>",
 					immutableFields, resourceDesc)
+		}
+
+		// Check if this is specifically a CEL validation error
+		if IsCELValidationError(err) {
+			celDetails := ExtractCELValidationDetails(err)
+			return "error", fmt.Sprintf("%s: CEL Validation Failed", operation),
+				fmt.Sprintf("CEL validation rule failed for %s.\n\n"+
+					"%s\n\n"+
+					"CEL (Common Expression Language) validation is defined in the CRD schema.\n"+
+					"Fix the field value to satisfy the validation rule or adjust the CRD validation rules.\n\n"+
+					"Details: %v",
+					resourceDesc, celDetails, err)
 		}
 
 		// Generic invalid resource error (for non-field-validation, non-CEL, and non-immutable errors)
@@ -143,7 +146,8 @@ func IsImmutableFieldError(err error) bool {
 			return strings.Contains(msg, "immutable") ||
 				strings.Contains(msg, "forbidden") ||
 				strings.Contains(msg, "cannot be changed") ||
-				strings.Contains(msg, "may not be modified")
+				strings.Contains(msg, "may not be modified") ||
+				strings.Contains(msg, "may not change") // K8s 1.25+ CEL validation
 		}
 	}
 	return false

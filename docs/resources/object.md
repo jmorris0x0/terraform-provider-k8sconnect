@@ -205,7 +205,7 @@ resource "k8sconnect_object" "staging_app" {
 - `delete_protection` (Boolean) Prevent accidental deletion of the resource. If set to true, the resource cannot be deleted unless this field is set to false.
 - `delete_timeout` (String) How long to wait for a resource to be deleted before considering the deletion failed. Defaults to 300s (5 minutes).
 - `force_destroy` (Boolean) Force deletion by removing finalizers. **WARNING:** Unlike other providers, this REMOVES finalizers after timeout. May cause data loss and orphaned cloud resources. Consult documentation before enabling.
-- `ignore_fields` (List of String) Field paths to exclude from management. On Create, fields are sent to establish initial state; on Update, they're omitted from the Apply patch, releasing ownership to other controllers and excluding them from drift detection. Supports dot notation (e.g., 'metadata.annotations', 'spec.replicas'), array indices ('webhooks[0].clientConfig.caBundle'), and strategic merge keys ('spec.containers[name=nginx].image'). Use for fields managed by controllers (e.g., HPA modifying replicas) or when operators inject values.
+- `ignore_fields` (List of String) Field paths to exclude from management using JSONPath syntax. Use for fields controlled by other systems (HPA replicas, cert-manager CA bundles, operator annotations). Supports dot notation ('spec.replicas'), positional arrays ('webhooks[0].caBundle'), and JSONPath predicates ('containers[?(@.name=="nginx")].image'). Example: 'spec.template.spec.containers[?(@.name=="app")].env[?(@.name=="EXTERNAL_VAR")].value'
 
 ### Read-Only
 
@@ -254,3 +254,320 @@ Read-Only:
 - `kind` (String) Kubernetes resource kind (e.g., 'Pod', 'Deployment')
 - `name` (String) Resource name from metadata.name
 - `namespace` (String) Resource namespace from metadata.namespace. Null for cluster-scoped resources.
+
+## Import
+
+Import existing Kubernetes resources (created by kubectl, Helm, or other tools) into Terraform management.
+
+### How Import Works
+
+1. **Import reads from kubeconfig**: The import process uses your `KUBECONFIG` environment variable to connect to the cluster and read the existing resource
+2. **Adds resource to state**: The current state of the resource is captured and added to your Terraform state
+3. **Configure for future operations**: After import, you configure `cluster_connection` in your resource definition for subsequent `plan` and `apply` operations
+
+**Important**: Import does not generate configuration. You must write the resource block yourself before importing.
+
+### Prerequisites
+
+Set the `KUBECONFIG` environment variable to your kubeconfig file:
+
+```shell
+export KUBECONFIG=~/.kube/config
+
+# Or specify a custom path
+export KUBECONFIG=/path/to/your/kubeconfig
+```
+
+**Note**: The import process uses kubeconfig context names. You can view available contexts with:
+
+```shell
+kubectl config get-contexts
+```
+
+### Import ID Format
+
+The import ID uses colons (`:`) as delimiters with the following format:
+
+```
+# Namespaced resources
+context:namespace:apiVersion/Kind:name
+
+# Cluster-scoped resources
+context:apiVersion/Kind:name
+```
+
+**Components:**
+- `context`: The kubeconfig context name (from `kubectl config current-context` or `kubectl config get-contexts`)
+- `namespace`: The Kubernetes namespace (only for namespaced resources)
+- `apiVersion/Kind`: The full API version and kind (e.g., `v1/ConfigMap`, `apps/v1/Deployment`)
+- `name`: The resource name
+
+**Why apiVersion is required**: Multiple API versions can exist for the same Kind (e.g., `autoscaling/v1` vs `autoscaling/v2` for HorizontalPodAutoscaler). The apiVersion prevents ambiguity.
+
+### Import Examples
+
+**Core resources (namespaced):**
+
+```shell
+terraform import k8sconnect_object.nginx "prod-cluster:default:v1/Pod:nginx-abc123"
+terraform import k8sconnect_object.config "prod-cluster:default:v1/ConfigMap:app-config"
+terraform import k8sconnect_object.secret "prod-cluster:kube-system:v1/Secret:tls-cert"
+terraform import k8sconnect_object.svc "prod-cluster:default:v1/Service:api"
+```
+
+**Resources with API groups (namespaced):**
+
+```shell
+terraform import k8sconnect_object.app "prod-cluster:default:apps/v1/Deployment:my-app"
+terraform import k8sconnect_object.sts "prod-cluster:default:apps/v1/StatefulSet:postgres"
+terraform import k8sconnect_object.ing "prod-cluster:default:networking.k8s.io/v1/Ingress:api-gateway"
+terraform import k8sconnect_object.hpa "prod-cluster:default:autoscaling/v2/HorizontalPodAutoscaler:app-hpa"
+```
+
+**Cluster-scoped resources:**
+
+```shell
+terraform import k8sconnect_object.namespace "prod-cluster:v1/Namespace:my-namespace"
+terraform import k8sconnect_object.reader "prod-cluster:rbac.authorization.k8s.io/v1/ClusterRole:pod-reader"
+terraform import k8sconnect_object.pv "prod-cluster:v1/PersistentVolume:data-vol"
+terraform import k8sconnect_object.storage "prod-cluster:storage.k8s.io/v1/StorageClass:fast-ssd"
+```
+
+**Custom resources:**
+
+```shell
+terraform import k8sconnect_object.cert "prod-cluster:default:cert-manager.io/v1/Certificate:my-cert"
+terraform import k8sconnect_object.app "prod-cluster:default:argoproj.io/v1alpha1/Application:my-app"
+terraform import k8sconnect_object.cr "prod-cluster:default:stable.example.com/v1/MyResource:instance-1"
+```
+
+### Complete Import Workflow
+
+**Step 1: Create the resource configuration**
+
+Write the Terraform configuration matching your existing resource:
+
+```terraform
+resource "k8sconnect_object" "my_app" {
+  yaml_body = <<-YAML
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: my-app
+      namespace: default
+      labels:
+        app: my-app
+    spec:
+      replicas: 3
+      selector:
+        matchLabels:
+          app: my-app
+      template:
+        metadata:
+          labels:
+            app: my-app
+        spec:
+          containers:
+          - name: nginx
+            image: nginx:1.25
+  YAML
+
+  cluster_connection = {
+    host                   = var.cluster_endpoint
+    cluster_ca_certificate = var.cluster_ca_cert
+    token                  = var.cluster_token
+  }
+}
+```
+
+**Step 2: Find the context name**
+
+```shell
+kubectl config current-context
+# Output: prod-cluster
+```
+
+**Step 3: Find the apiVersion**
+
+```shell
+kubectl get deployment my-app -n default -o jsonpath='{.apiVersion}'
+# Output: apps/v1
+```
+
+**Step 4: Run the import**
+
+```shell
+export KUBECONFIG=~/.kube/config
+terraform import k8sconnect_object.my_app "prod-cluster:default:apps/v1/Deployment:my-app"
+```
+
+**Step 5: Verify the import**
+
+```shell
+# Plan should show no changes
+terraform plan
+```
+
+If the plan shows changes, adjust your `yaml_body` to match the actual resource state, or use `ignore_fields` for fields managed by controllers (like HPA managing `spec.replicas`).
+
+### Finding Import Information
+
+**Get the context name:**
+
+```shell
+# Current context
+kubectl config current-context
+
+# List all contexts
+kubectl config get-contexts
+```
+
+**Get the apiVersion:**
+
+```shell
+# For a specific resource
+kubectl get <kind> <name> -n <namespace> -o jsonpath='{.apiVersion}'
+
+# Examples
+kubectl get deployment my-app -o jsonpath='{.apiVersion}'           # apps/v1
+kubectl get ingress api-gateway -o jsonpath='{.apiVersion}'         # networking.k8s.io/v1
+kubectl get certificate my-cert -o jsonpath='{.apiVersion}'         # cert-manager.io/v1
+kubectl get namespace kube-system -o jsonpath='{.apiVersion}'       # v1
+```
+
+**Get the full resource details:**
+
+```shell
+kubectl get <kind> <name> -n <namespace> -o yaml
+```
+
+### Troubleshooting Import
+
+**Error: "Context not found in kubeconfig"**
+
+```
+Error: Import Failed: Context Not Found
+Context "my-cluster" not found in kubeconfig.
+```
+
+**Solution**: Check your context name matches exactly:
+
+```shell
+kubectl config get-contexts
+# Use the exact name from the NAME column
+```
+
+**Error: "KUBECONFIG environment variable is not set"**
+
+```
+Error: Import Failed: KUBECONFIG Not Found
+KUBECONFIG environment variable is not set
+```
+
+**Solution**: Set the KUBECONFIG environment variable:
+
+```shell
+export KUBECONFIG=~/.kube/config
+```
+
+**Error: "Invalid Import ID Format"**
+
+```
+Error: Invalid Import ID Format
+expected 3 or 4 colon-separated parts, got X
+```
+
+**Solution**: Ensure you're using the correct format with colons:
+
+```shell
+# Correct (namespaced)
+terraform import k8sconnect_object.app "context:namespace:apiVersion/Kind:name"
+
+# Correct (cluster-scoped)
+terraform import k8sconnect_object.ns "context:apiVersion/Kind:name"
+
+# Wrong - using dots instead of colons
+terraform import k8sconnect_object.app "context.namespace.Kind.name"
+```
+
+**Error: "Resource not found"**
+
+```
+Error: Import Failed: Resource Not Found
+```
+
+**Solution**: Verify the resource exists and check the namespace:
+
+```shell
+# List resources
+kubectl get <kind> -n <namespace>
+
+# Check if resource exists
+kubectl get <kind> <name> -n <namespace>
+```
+
+**Plan shows changes after import**
+
+If `terraform plan` shows changes after import, this usually means your `yaml_body` doesn't match the actual resource state:
+
+- **Server-added fields**: Use `ignore_fields` for fields added by Kubernetes (e.g., `spec.clusterIP` for Services)
+- **Controller-managed fields**: Use `ignore_fields` for fields managed by controllers (e.g., `spec.replicas` when using HPA)
+- **Format differences**: Ensure your YAML formatting matches (quotes, multiline strings, etc.)
+- **Default values**: Kubernetes may have added default values - include them in your config or use `ignore_fields`
+
+**Example - Importing a Service with server-generated clusterIP:**
+
+```terraform
+resource "k8sconnect_object" "api" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: api
+      namespace: default
+    spec:
+      type: ClusterIP
+      # Don't include clusterIP - it's auto-generated
+      selector:
+        app: api
+      ports:
+      - port: 80
+        targetPort: 8080
+  YAML
+
+  # Ignore server-generated fields
+  ignore_fields = [
+    "spec.clusterIP",
+    "spec.clusterIPs",
+    "spec.ports[*].nodePort"
+  ]
+
+  cluster_connection = var.cluster_connection
+}
+```
+
+### Working with Imported Resources
+
+After import, the resource is under Terraform management. Future operations will use the `cluster_connection` you configured:
+
+```terraform
+resource "k8sconnect_object" "imported_app" {
+  yaml_body = file("deployment.yaml")
+
+  # Used for plan/apply operations after import
+  cluster_connection = {
+    host                   = aws_eks_cluster.main.endpoint
+    cluster_ca_certificate = aws_eks_cluster.main.certificate_authority[0].data
+    exec = {
+      api_version = "client.authentication.k8s.io/v1"
+      command     = "aws"
+      args        = ["eks", "get-token", "--cluster-name", "prod"]
+    }
+  }
+
+  # Ignore fields managed by external controllers
+  ignore_fields = ["spec.replicas"]  # If HPA manages this
+}
+```
+
+**Field Ownership**: When you import a resource created by kubectl or other tools, k8sconnect will take ownership of fields in your `yaml_body`. Use `ignore_fields` to release ownership of specific fields back to controllers.

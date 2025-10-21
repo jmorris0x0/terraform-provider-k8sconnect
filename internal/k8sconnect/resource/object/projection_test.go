@@ -608,7 +608,8 @@ func TestFilterIgnoredPaths(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := filterIgnoredPaths(tt.allPaths, tt.ignoreFields)
+			// For these tests without JSONPath predicates, pass empty object
+			result := filterIgnoredPaths(tt.allPaths, tt.ignoreFields, map[string]interface{}{})
 
 			// Sort for comparison
 			sort.Strings(result)
@@ -693,7 +694,8 @@ func TestPathMatchesIgnorePattern(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := pathMatchesIgnorePattern(tt.path, tt.ignorePattern)
+			// For these tests without JSONPath predicates, pass empty object
+			result := pathMatchesIgnorePattern(tt.path, tt.ignorePattern, map[string]interface{}{})
 			if result != tt.shouldMatch {
 				t.Errorf("pathMatchesIgnorePattern(%q, %q) = %v, want %v",
 					tt.path, tt.ignorePattern, result, tt.shouldMatch)
@@ -773,7 +775,7 @@ func TestProjectFieldsWithIgnore(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Filter paths first
-			filteredPaths := filterIgnoredPaths(tt.paths, tt.ignoreFields)
+			filteredPaths := filterIgnoredPaths(tt.paths, tt.ignoreFields, tt.source)
 
 			// Then project
 			result, err := projectFields(tt.source, filteredPaths)
@@ -821,7 +823,7 @@ func TestIgnoreFieldsIntegration(t *testing.T) {
 		allPaths := extractFieldPaths(userYAML, "")
 
 		// Filter ignored paths
-		filteredPaths := filterIgnoredPaths(allPaths, ignoreFields)
+		filteredPaths := filterIgnoredPaths(allPaths, ignoreFields, userYAML)
 
 		// Project both states
 		userProjection, err := projectFields(userYAML, filteredPaths)
@@ -847,6 +849,114 @@ func TestIgnoreFieldsIntegration(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestJSONPathPredicateIgnore tests that JSONPath predicates in ignore_fields work correctly
+func TestJSONPathPredicateIgnore(t *testing.T) {
+	// Create a deployment with multiple containers and env vars
+	deployment := map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]interface{}{
+			"name":      "test-deployment",
+			"namespace": "default",
+		},
+		"spec": map[string]interface{}{
+			"replicas": float64(3),
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name":  "app",
+							"image": "nginx:1.21",
+							"env": []interface{}{
+								map[string]interface{}{
+									"name":  "MANAGED_VAR",
+									"value": "terraform-value",
+								},
+								map[string]interface{}{
+									"name":  "EXTERNAL_VAR",
+									"value": "kubectl-modified",
+								},
+							},
+						},
+						map[string]interface{}{
+							"name":  "sidecar",
+							"image": "busybox:latest",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		name          string
+		ownedPaths    []string
+		ignorePattern string
+		shouldFilter  []string // Paths that SHOULD be filtered out (ignored)
+		shouldKeep    []string // Paths that should remain
+	}{
+		{
+			name: "Ignore specific env var by name using JSONPath predicate",
+			ownedPaths: []string{
+				"spec.template.spec.containers[0].env[0].value",
+				"spec.template.spec.containers[0].env[1].value",
+				"spec.template.spec.containers[0].image",
+			},
+			ignorePattern: "spec.template.spec.containers[?(@.name=='app')].env[?(@.name=='EXTERNAL_VAR')].value",
+			shouldFilter: []string{
+				"spec.template.spec.containers[0].env[1].value", // EXTERNAL_VAR
+			},
+			shouldKeep: []string{
+				"spec.template.spec.containers[0].env[0].value", // MANAGED_VAR
+				"spec.template.spec.containers[0].image",
+			},
+		},
+		{
+			name: "Ignore entire container by name",
+			ownedPaths: []string{
+				"spec.template.spec.containers[0].image",
+				"spec.template.spec.containers[1].image",
+			},
+			ignorePattern: "spec.template.spec.containers[?(@.name=='sidecar')].image",
+			shouldFilter: []string{
+				"spec.template.spec.containers[1].image", // sidecar
+			},
+			shouldKeep: []string{
+				"spec.template.spec.containers[0].image", // app
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := filterIgnoredPaths(tt.ownedPaths, []string{tt.ignorePattern}, deployment)
+
+			// Check that filtered paths were removed
+			for _, shouldBeFiltered := range tt.shouldFilter {
+				for _, resultPath := range result {
+					if resultPath == shouldBeFiltered {
+						t.Errorf("Path %q should have been filtered but was kept", shouldBeFiltered)
+					}
+				}
+			}
+
+			// Check that kept paths are still there
+			for _, shouldBeKept := range tt.shouldKeep {
+				found := false
+				for _, resultPath := range result {
+					if resultPath == shouldBeKept {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Path %q should have been kept but was filtered. Result: %v", shouldBeKept, result)
+				}
+			}
+		})
+	}
 }
 
 // TestRemoveFieldsFromObject tests removing fields from unstructured objects

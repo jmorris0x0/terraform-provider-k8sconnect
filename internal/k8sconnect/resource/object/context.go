@@ -167,7 +167,7 @@ func (r *objectResource) updateProjection(rc *ResourceContext) error {
 
 	// Apply ignore_fields filtering if specified
 	if ignoreFields := getIgnoreFields(rc.Ctx, rc.Data); ignoreFields != nil {
-		paths = filterIgnoredPaths(paths, ignoreFields)
+		paths = filterIgnoredPaths(paths, ignoreFields, currentObj.Object)
 		tflog.Debug(rc.Ctx, "Applied ignore_fields filtering in projection update", map[string]interface{}{
 			"ignored_count":  len(ignoreFields),
 			"filtered_paths": len(paths),

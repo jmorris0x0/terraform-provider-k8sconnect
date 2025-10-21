@@ -129,9 +129,17 @@ func (r *objectResource) Read(ctx context.Context, req resource.ReadRequest, res
 	// 3a. Surface any API warnings from read operation
 	surfaceK8sWarnings(ctx, rc.Client, rc.Object, &resp.Diagnostics)
 
-	// 4. Check ownership
-	if err := r.verifyOwnership(currentObj, data.ID.ValueString(), rc.Object, resp); err != nil {
-		return
+	// 4. Check ownership (skip if just imported without annotations)
+	// When a resource is imported without k8sconnect annotations, we skip the ownership
+	// check until Update adds the annotations. The flag is cleared by Update after applying.
+	if !checkImportedWithoutAnnotationsFlag(ctx, req.Private) {
+		if err := r.verifyOwnership(currentObj, data.ID.ValueString(), rc.Object, resp); err != nil {
+			return
+		}
+	} else {
+		// Don't clear the flag here - let Update clear it after adding annotations
+		// This way, multiple Read calls during import verification all skip the ownership check
+		tflog.Debug(ctx, "Skipped ownership verification for imported resource without annotations")
 	}
 
 	// 5. Update projection (with opportunistic recovery)

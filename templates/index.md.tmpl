@@ -9,7 +9,7 @@ description: |-
 
 Bootstrap Kubernetes clusters and workloads in a **single `terraform apply`**. No two-phase deployments.
 
-The k8sconnect provider uses inline, per-resource connections to break Terraform's provider dependency cycles. Create a cluster and deploy to it immediately, target multiple clusters from one module, or use dynamic outputs for authentication.
+The k8sconnect provider uses inline, per-resource connections instead of provider-level configuration. This bypasses Terraform's provider configuration timing constraints - you can use cluster outputs directly in resource connections. Create a cluster and deploy to it immediately, target multiple clusters from one module, or use dynamic outputs for authentication.
 
 ## Example Usage
 

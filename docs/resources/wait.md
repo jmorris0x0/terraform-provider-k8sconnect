@@ -553,3 +553,30 @@ wait_for = {
   timeout = "10m"  # Options: "30s", "5m", "1h"
 }
 ```
+
+## JSONPath Syntax
+
+The `field` and `field_value` attributes use **JSONPath** syntax (same as `kubectl get -o jsonpath`):
+
+```hcl
+# Simple paths
+field = "status.phase"
+field = "status.loadBalancer.ingress"
+
+# Positional arrays
+field = "status.conditions[0].type"
+field = "status.containerStatuses[0].ready"
+
+# JSONPath predicates (select by field value)
+field = "status.conditions[?(@.type=='Ready')].status"
+field_value = {
+  "status.conditions[?(@.type=='Ready')].status" = "True"
+}
+```
+
+**Common wait patterns:**
+- LoadBalancer IP: `status.loadBalancer.ingress[0].ip`
+- PVC volume name: `spec.volumeName`
+- Job completion: `status.succeeded`
+- Pod phase: `status.phase`
+- Condition status: `status.conditions[?(@.type=='Ready')].status`

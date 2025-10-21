@@ -26,7 +26,7 @@ func TestAccObjectResource_CRDAndCRTogether(t *testing.T) {
 
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano()%1000000)
 	plural := fmt.Sprintf("testcrds%s", suffix)
-	crdName := fmt.Sprintf("%s.example.com", plural)
+	crdName := fmt.Sprintf("%s.crdtest.example.com", plural)
 	crName := fmt.Sprintf("test-instance-%d", time.Now().UnixNano()%1000000)
 	ns := fmt.Sprintf("crd-test-ns-%d", time.Now().UnixNano()%1000000)
 
@@ -86,7 +86,7 @@ resource "k8sconnect_object" "test_crd" {
     metadata:
       name: %[1]s
     spec:
-      group: example.com
+      group: crdtest.example.com
       names:
         kind: TestCRD
         plural: %[2]s
@@ -114,7 +114,7 @@ resource "k8sconnect_object" "test_crd" {
 # Create the Custom Resource - this should succeed thanks to CRD retry
 resource "k8sconnect_object" "test_cr" {
   yaml_body = <<-YAML
-    apiVersion: example.com/v1
+    apiVersion: crdtest.example.com/v1
     kind: TestCRD
     metadata:
       name: %[3]s
