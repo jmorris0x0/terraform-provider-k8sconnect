@@ -56,7 +56,7 @@ func (r *waitResource) Create(ctx context.Context, req resource.CreateRequest, r
 	if err := r.performWait(ctx, wc); err != nil {
 		resp.Diagnostics.AddError(
 			"Wait Operation Failed",
-			fmt.Sprintf("Failed to wait for resource: %s", err.Error()),
+			fmt.Sprintf("Failed to wait for %s: %s", formatObjectRef(wc.ObjectRef), err.Error()),
 		)
 		return
 	}
@@ -145,7 +145,7 @@ func (r *waitResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	if err := r.performWait(ctx, wc); err != nil {
 		resp.Diagnostics.AddError(
 			"Wait Operation Failed",
-			fmt.Sprintf("Failed to wait for resource: %s", err.Error()),
+			fmt.Sprintf("Failed to wait for %s: %s", formatObjectRef(wc.ObjectRef), err.Error()),
 		)
 		return
 	}
@@ -187,7 +187,7 @@ func (r *waitResource) buildWaitContext(ctx context.Context, data *waitResourceM
 	if err != nil {
 		diags.AddError(
 			"Failed to Create Kubernetes Client",
-			fmt.Sprintf("Could not create Kubernetes client: %s", err.Error()),
+			fmt.Sprintf("Could not create Kubernetes client for %s: %s", formatObjectRef(objRef), err.Error()),
 		)
 		return nil, diags
 	}
@@ -205,7 +205,8 @@ func (r *waitResource) buildWaitContext(ctx context.Context, data *waitResourceM
 	if err != nil {
 		diags.AddError(
 			"Failed to Discover GVR",
-			fmt.Sprintf("Could not discover resource type: %s", err.Error()),
+			fmt.Sprintf("Could not discover resource type for %s (apiVersion: %s): %s",
+				formatObjectRef(objRef), objRef.APIVersion.ValueString(), err.Error()),
 		)
 		return nil, diags
 	}

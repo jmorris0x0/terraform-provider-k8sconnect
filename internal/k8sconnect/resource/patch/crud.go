@@ -87,7 +87,8 @@ func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, 
 	patchContent := r.getPatchContent(data)
 	patchedFieldPaths, err := r.extractPatchFieldPaths(ctx, patchContent, r.determinePatchType(data))
 	if err != nil {
-		resp.Diagnostics.AddError("Failed to Parse Patch", err.Error())
+		resp.Diagnostics.AddError("Failed to Parse Patch",
+			fmt.Sprintf("Failed to parse patch for %s: %s", formatTarget(target), err.Error()))
 		return
 	}
 	previousOwners := fieldmanagement.ExtractFieldOwnershipForPaths(targetObj, patchedFieldPaths)
@@ -111,7 +112,9 @@ func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, 
 	// 9. Store ONLY patched fields
 	managedFields, err := fieldmanagement.ExtractManagedFieldsForManager(patchedObj, fieldManager)
 	if err != nil {
-		resp.Diagnostics.AddWarning("Failed to Extract Managed Fields", err.Error())
+		resp.Diagnostics.AddWarning("Failed to Extract Managed Fields",
+			fmt.Sprintf("Failed to extract managed fields for %s (field manager: %s): %s",
+				formatTarget(target), fieldManager, err.Error()))
 		managedFields = "{}"
 	}
 	data.ManagedFields = types.StringValue(managedFields)
@@ -336,7 +339,8 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	newPatchType := r.determinePatchType(plan)
 	newFieldPaths, err := r.extractPatchFieldPaths(ctx, newPatchContent, newPatchType)
 	if err != nil {
-		resp.Diagnostics.AddError("Failed to Parse New Patch Content", err.Error())
+		resp.Diagnostics.AddError("Failed to Parse New Patch Content",
+			fmt.Sprintf("Failed to parse new patch content for %s: %s", formatTarget(target), err.Error()))
 		return
 	}
 
@@ -420,7 +424,9 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	// 8. Update managed fields
 	managedFields, err := fieldmanagement.ExtractManagedFieldsForManager(patchedObj, fieldManager)
 	if err != nil {
-		resp.Diagnostics.AddWarning("Failed to Extract Managed Fields", err.Error())
+		resp.Diagnostics.AddWarning("Failed to Extract Managed Fields",
+			fmt.Sprintf("Failed to extract managed fields for %s (field manager: %s): %s",
+				formatTarget(target), fieldManager, err.Error()))
 		managedFields = "{}"
 	}
 	plan.ManagedFields = types.StringValue(managedFields)

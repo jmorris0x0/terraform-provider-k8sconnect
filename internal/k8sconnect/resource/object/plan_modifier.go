@@ -384,7 +384,8 @@ func (r *objectResource) applyProjection(ctx context.Context, dryRunResult *unst
 	// Project the dry-run result
 	projection, err := projectFields(dryRunResult.Object, paths)
 	if err != nil {
-		resp.Diagnostics.AddError("Projection Failed", fmt.Sprintf("Failed to project fields: %s", err))
+		resp.Diagnostics.AddError("Projection Failed",
+			fmt.Sprintf("Failed to project fields for %s: %s", formatResource(dryRunResult), err))
 		return false
 	}
 
@@ -394,7 +395,8 @@ func (r *objectResource) applyProjection(ctx context.Context, dryRunResult *unst
 	// Convert to types.Map
 	mapValue, diags := types.MapValueFrom(ctx, types.StringType, projectionMap)
 	if diags.HasError() {
-		resp.Diagnostics.AddError("Map Conversion Failed", fmt.Sprintf("Failed to convert projection to map: %s", diags.Errors()))
+		resp.Diagnostics.AddError("Map Conversion Failed",
+			fmt.Sprintf("Failed to convert projection to map for %s: %s", formatResource(dryRunResult), diags.Errors()))
 		return false
 	}
 
@@ -595,14 +597,44 @@ func normalizePathForComparison(path string, obj map[string]interface{}) string 
 func addConflictWarning(resp *resource.ModifyPlanResponse, conflicts []FieldConflict) {
 	// Always warn about conflicts - we will force ownership during apply
 	var conflictDetails []string
+	var conflictPaths []string
 	for _, c := range conflicts {
-		conflictDetails = append(conflictDetails, fmt.Sprintf("  - %s (owned by %s)", c.Path, c.Owner))
+		conflictDetails = append(conflictDetails, fmt.Sprintf("  - %s (managed by \"%s\")", c.Path, c.Owner))
+		conflictPaths = append(conflictPaths, c.Path)
 	}
+
+	// Format ignore_fields suggestion
+	ignoreFieldsSuggestion := formatIgnoreFieldsSuggestion(conflictPaths)
+
 	resp.Diagnostics.AddWarning(
 		"Field Ownership Override",
 		fmt.Sprintf("Forcing ownership of fields managed by other controllers:\n%s\n\n"+
-			"These fields will be forcibly taken over. The other controllers may fight back.\n"+
-			"Consider adding these paths to ignore_fields to release ownership instead.",
-			strings.Join(conflictDetails, "\n")),
+			"These fields will be forcibly taken over. The other controllers may fight back.\n\n"+
+			"To release ownership and allow other controllers to manage these fields, add:\n\n%s",
+			strings.Join(conflictDetails, "\n"), ignoreFieldsSuggestion),
 	)
+}
+
+// formatIgnoreFieldsSuggestion creates a ready-to-use ignore_fields configuration from conflict paths
+func formatIgnoreFieldsSuggestion(paths []string) string {
+	if len(paths) == 0 {
+		return ""
+	}
+
+	if len(paths) == 1 {
+		return fmt.Sprintf("  ignore_fields = [\"%s\"]", paths[0])
+	}
+
+	// Multiple paths - format as multi-line for readability
+	var lines []string
+	lines = append(lines, "  ignore_fields = [")
+	for i, path := range paths {
+		if i < len(paths)-1 {
+			lines = append(lines, fmt.Sprintf("    \"%s\",", path))
+		} else {
+			lines = append(lines, fmt.Sprintf("    \"%s\"", path))
+		}
+	}
+	lines = append(lines, "  ]")
+	return strings.Join(lines, "\n")
 }

@@ -33,7 +33,8 @@ func (r *objectResource) checkResourceExistenceAndOwnership(ctx context.Context,
 			// Different ID - owned by another state
 			resp.Diagnostics.AddError(
 				"Resource Already Managed",
-				fmt.Sprintf("resource managed by different k8sconnect resource (Terraform ID: %s)", existingID),
+				fmt.Sprintf("%s is already managed by a different k8sconnect resource (Terraform ID: %s)",
+					formatResource(rc.Object), existingID),
 			)
 			return fmt.Errorf("resource already managed")
 		}
@@ -51,7 +52,7 @@ func (r *objectResource) checkResourceExistenceAndOwnership(ctx context.Context,
 
 		// Real error checking if resource exists
 		resp.Diagnostics.AddError("Existence Check Failed",
-			fmt.Sprintf("Failed to check if resource exists: %s", err))
+			fmt.Sprintf("Failed to check if %s exists: %s", formatResource(rc.Object), err))
 		return err
 	}
 	return nil
@@ -157,10 +158,10 @@ func (r *objectResource) applyResourceWithConflictHandling(ctx context.Context, 
 	})
 
 	if err != nil {
+		resourceDesc := formatResource(rc.Object)
 		if isFieldConflictError(err) {
-			r.addFieldConflictError(resp, operation)
+			r.addFieldConflictError(resp, operation, resourceDesc)
 		} else {
-			resourceDesc := fmt.Sprintf("%s %s", rc.Object.GetKind(), rc.Object.GetName())
 			r.addOperationError(resp, operation, resourceDesc, err)
 		}
 		return err
@@ -309,15 +310,14 @@ func (r *objectResource) updateFieldOwnershipData(ctx context.Context, data *obj
 }
 
 // Error handling helpers
-func (r *objectResource) addFieldConflictError(resp interface{}, operation string) {
+func (r *objectResource) addFieldConflictError(resp interface{}, operation string, resourceDesc string) {
+	message := fmt.Sprintf("Another controller owns fields you're trying to set on %s. "+
+		"Add conflicting paths to ignore_fields to release ownership.", resourceDesc)
+
 	if createResp, ok := resp.(*resource.CreateResponse); ok {
-		createResp.Diagnostics.AddError("Field Manager Conflict",
-			"Another controller owns fields you're trying to set. "+
-				"Add conflicting paths to ignore_fields to release ownership.")
+		createResp.Diagnostics.AddError("Field Manager Conflict", message)
 	} else if updateResp, ok := resp.(*resource.UpdateResponse); ok {
-		updateResp.Diagnostics.AddError("Field Manager Conflict",
-			"Another controller owns fields you're trying to set. "+
-				"Add conflicting paths to ignore_fields to release ownership.")
+		updateResp.Diagnostics.AddError("Field Manager Conflict", message)
 	}
 }
 
@@ -359,4 +359,26 @@ func getIgnoreFields(ctx context.Context, data *objectResourceModel) []string {
 	}
 
 	return ignoreFields
+}
+
+// formatResource creates a human-readable description of a Kubernetes resource
+// that handles both namespaced and cluster-scoped resources gracefully.
+// Examples:
+//   - Namespaced: "Deployment nginx (namespace: default)"
+//   - Cluster-scoped: "Namespace production" or "ClusterRole admin"
+func formatResource(obj interface {
+	GetKind() string
+	GetName() string
+	GetNamespace() string
+}) string {
+	kind := obj.GetKind()
+	name := obj.GetName()
+	namespace := obj.GetNamespace()
+
+	if namespace == "" {
+		// Cluster-scoped resource
+		return fmt.Sprintf("%s %s", kind, name)
+	}
+	// Namespaced resource
+	return fmt.Sprintf("%s %s (namespace: %s)", kind, name, namespace)
 }
