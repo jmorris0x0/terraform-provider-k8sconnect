@@ -174,7 +174,7 @@ resource "k8sconnect_object" "pvc_consumer_pod" {
     spec:
       containers:
       - name: consumer
-        image: busybox:1.28
+        image: public.ecr.aws/docker/library/busybox:1.28
         command: ["sh", "-c", "echo 'PVC mounted' && sleep 3600"]
         resources:
           requests:
@@ -241,7 +241,7 @@ resource "k8sconnect_object" "migration_job" {
         spec:
           containers:
           - name: migrate
-            image: busybox:1.28
+            image: public.ecr.aws/docker/library/busybox:1.28
             command: ["sh", "-c", "echo 'Running migration...' && sleep 5 && echo 'Migration complete'"]
             resources:
               requests:
@@ -288,7 +288,7 @@ resource "k8sconnect_object" "backup_cronjob" {
             spec:
               containers:
               - name: backup
-                image: busybox:1.28
+                image: public.ecr.aws/docker/library/busybox:1.28
                 command: ["sh", "-c", "echo 'Performing backup...'"]
                 resources:
                   requests:
@@ -362,7 +362,7 @@ resource "k8sconnect_object" "standalone_pod" {
     spec:
       containers:
       - name: app
-        image: busybox:1.28
+        image: public.ecr.aws/docker/library/busybox:1.28
         command: ["sh", "-c", "while true; do echo 'Running...'; sleep 300; done"]
         resources:
           requests:
@@ -538,7 +538,7 @@ resource "k8sconnect_object" "database_statefulset" {
         spec:
           containers:
           - name: postgres
-            image: postgres:14-alpine
+            image: public.ecr.aws/docker/library/postgres:14-alpine
             ports:
             - containerPort: 5432
               name: postgres
@@ -627,7 +627,7 @@ resource "k8sconnect_object" "log_collector" {
         spec:
           containers:
           - name: fluentd
-            image: fluent/fluentd:v1.14-1
+            image: public.ecr.aws/docker/library/fluentd:v1.14-1
             resources:
               requests:
                 memory: "64Mi"
@@ -798,7 +798,7 @@ resource "k8sconnect_object" "priority_deployment" {
           priorityClassName: high-priority
           containers:
           - name: app
-            image: busybox:1.28
+            image: public.ecr.aws/docker/library/busybox:1.28
             command: ["sh", "-c", "sleep 3600"]
             resources:
               requests:
@@ -992,7 +992,7 @@ resource "null_resource" "external_deployment_strategic" {
           spec:
             containers:
             - name: app
-              image: busybox:1.28
+              image: public.ecr.aws/docker/library/busybox:1.28
               command: ["sh", "-c", "sleep 3600"]
               resources:
                 requests:
@@ -1143,7 +1143,7 @@ resource "null_resource" "external_deployment" {
           spec:
             containers:
             - name: app
-              image: busybox:1.28
+              image: public.ecr.aws/docker/library/busybox:1.28
               command: ["sh", "-c", "sleep 3600"]
               resources:
                 requests:
