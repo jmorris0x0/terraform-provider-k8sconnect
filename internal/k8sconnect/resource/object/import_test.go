@@ -342,4 +342,3 @@ resource "k8sconnect_object" "test_import" {
   depends_on = [k8sconnect_object.import_namespace]
 }
 `, namespace, name, namespace)
-}
