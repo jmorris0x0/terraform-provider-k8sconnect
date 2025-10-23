@@ -22,17 +22,16 @@ import (
 //  1. Create resource with kubectl (no k8sconnect annotations)
 //  2. Import resource using import block
 //  3. Apply - should add k8sconnect annotations
-//  4. CURRENTLY FAILS: "Provider produced inconsistent result after apply"
+//  4. PREVIOUSLY FAILED: "Provider produced inconsistent result after apply"
 //     Error: .field_ownership: new element "metadata.annotations.k8sconnect.terraform.io/created-at" has appeared
 //
 // ROOT CAUSE:
-// During plan phase after import, the provider doesn't predict that k8sconnect annotations
-// will be added to field_ownership. Then during apply, they are added, causing Terraform
-// to detect an inconsistency between planned and actual state.
+// Internal annotations (k8sconnect.terraform.io/*) were being tracked in field_ownership
+// during import, but then filtered out during apply, causing inconsistency.
 //
-// FIX REQUIRED:
-// The plan phase (ModifyPlan) needs to predict that k8sconnect annotations will be added
-// for imported resources, so Terraform knows to expect them in the apply result.
+// FIX IMPLEMENTED:
+// Internal annotations are now consistently filtered from field_ownership in ALL code paths
+// (import, create, read, update). They exist in the cluster but are never tracked in state.
 func TestAccObjectResource_ImportInconsistentState(t *testing.T) {
 	t.Parallel()
 

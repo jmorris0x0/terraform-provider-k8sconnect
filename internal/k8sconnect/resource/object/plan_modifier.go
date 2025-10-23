@@ -260,10 +260,9 @@ func (r *objectResource) calculateProjection(ctx context.Context, req resource.M
 		ownershipMap[path] = ownership.Manager
 	}
 
-	// Add annotations that we will set during apply (not in dry-run yet)
-	// These are always owned by k8sconnect since we set them
-	ownershipMap["metadata.annotations.k8sconnect.terraform.io/created-at"] = "k8sconnect"
-	ownershipMap["metadata.annotations.k8sconnect.terraform.io/terraform-id"] = "k8sconnect"
+	// Internal annotations (k8sconnect.terraform.io/*) are intentionally NOT tracked in field_ownership
+	// They exist in the cluster but are filtered from state to avoid unnecessary drift detection
+	// These are implementation details, not user-managed fields
 
 	// Filter out status fields - they are not preserved during Apply operations
 	// Status is managed by controllers after apply, not during apply
