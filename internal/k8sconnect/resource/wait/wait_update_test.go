@@ -305,7 +305,7 @@ resource "k8sconnect_object" "deploy" {
         spec:
           containers:
           - name: nginx
-            image: nginx:1.25
+            image: public.ecr.aws/nginx/nginx:1.25
   YAML
   cluster_connection = {
     kubeconfig = var.raw

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2025-10-23
+
+### Fixed
+- Fixed field ownership prediction race condition when external controllers use Server-Side Apply with `force=true`
+- Fixed import ownership takeover to properly handle field ownership conflicts
+- Improved import `yaml_body` cleaning to remove more server-generated fields
+
+### Changed
+- Enhanced error messages with more actionable suggestions for field conflicts and validation errors
+- Harmonized resource ID format across all resources for consistency
+
 ## [0.1.4] - 2025-10-21
 
 ### Fixed
