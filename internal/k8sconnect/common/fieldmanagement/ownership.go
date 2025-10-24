@@ -36,6 +36,11 @@ func ParseFieldsV1ToPathMap(managedFields []metav1.ManagedFieldsEntry, userJSON 
 
 		// Record ownership for each path
 		for _, path := range paths {
+			// Skip internal k8sconnect annotations - these are implementation details
+			// and should not be tracked as user-managed fields
+			if strings.HasPrefix(path, "metadata.annotations.k8sconnect.terraform.io/") {
+				continue
+			}
 			result[path] = FieldOwnership{
 				Manager: mf.Manager,
 				Version: mf.APIVersion,
@@ -130,6 +135,11 @@ func ExtractFieldOwnershipMap(obj *unstructured.Unstructured) map[string]string 
 		// Extract paths owned by this manager
 		paths := extractPathsFromFieldsV1Simple(fields, "")
 		for _, path := range paths {
+			// Skip internal k8sconnect annotations - these are implementation details
+			// and should not be tracked as user-managed fields
+			if strings.HasPrefix(path, "metadata.annotations.k8sconnect.terraform.io/") {
+				continue
+			}
 			result[path] = mf.Manager
 		}
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 )
@@ -447,7 +448,7 @@ func (r *objectResource) ImportState(ctx context.Context, req resource.ImportSta
 		})
 	} else {
 		// Resource not yet managed - generate new ID
-		resourceID = r.generateID()
+		resourceID = common.GenerateID()
 	}
 
 	// Extract YAML, projection, and ownership

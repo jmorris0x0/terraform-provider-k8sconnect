@@ -26,17 +26,24 @@ func ClassifyError(err error, operation, resourceDesc string) (severity, title, 
 	// This code path exists for defensive programming in case Force is ever disabled
 	// ExtractConflictDetails has defensive unit test coverage despite being unreachable in production
 	case errors.IsConflict(err):
-		conflictDetails := ExtractConflictDetails(err)
-		return "error", fmt.Sprintf("%s: Field Manager Conflict", operation),
-			fmt.Sprintf("Server-side apply conflict detected for %s.\n"+
-				"Another controller is managing one or more fields in this resource.\n\n"+
-				"Conflicting fields:\n%s\n\n"+
-				"To resolve this conflict do one of the following:\n"+
-				"1. Add conflicting field paths to 'ignore_fields' to release ownership to the other controller\n"+
-				"2. Remove the conflicting fields from your Terraform configuration\n"+
-				"3. Ensure only one controller manages these fields\n\n"+
-				"Details: %v",
-				resourceDesc, conflictDetails, err)
+		conflictDetails, conflictPaths := ExtractConflictDetailsAndPaths(err)
+		ignoreFieldsSuggestion := formatIgnoreFieldsSuggestion(conflictPaths)
+
+		message := fmt.Sprintf("Server-side apply conflict detected for %s.\n"+
+			"Another controller is managing one or more fields in this resource.\n\n"+
+			"Conflicting fields:\n%s\n\n", resourceDesc, conflictDetails)
+
+		if ignoreFieldsSuggestion != "" {
+			message += fmt.Sprintf("To release ownership and allow other controllers to manage these fields, add:\n\n%s\n\n", ignoreFieldsSuggestion)
+		} else {
+			message += "To resolve this conflict:\n" +
+				"1. Add conflicting field paths to 'ignore_fields' to release ownership\n" +
+				"2. Remove the conflicting fields from your Terraform configuration\n\n"
+		}
+
+		message += fmt.Sprintf("Details: %v", err)
+
+		return "error", fmt.Sprintf("%s: Field Manager Conflict", operation), message
 
 	case errors.IsTimeout(err) || errors.IsServerTimeout(err):
 		return "error", fmt.Sprintf("%s: Kubernetes API Timeout", operation),
@@ -233,14 +240,15 @@ func ExtractImmutableFields(err error) []string {
 	return fields
 }
 
-// ExtractConflictDetails parses conflict error details
-func ExtractConflictDetails(err error) string {
+// ExtractConflictDetailsAndPaths parses conflict error and returns both formatted details and field paths
+func ExtractConflictDetailsAndPaths(err error) (string, []string) {
 	// The Kubernetes error message typically contains field paths and managers
 	// Example: "conflict with \"kubectl\" with subresource \"scale\" using apps/v1: .spec.replicas"
 	errStr := err.Error()
 
-	// Parse out the conflicts - this is a simplified version
+	// Parse out the conflicts
 	var details []string
+	var paths []string
 
 	// Look for patterns like: conflict with "manager" ... : .field.path
 	conflictPattern := regexp.MustCompile(`conflict with "([^"]+)".*?: ([\.\w\[\]]+)`)
@@ -249,17 +257,50 @@ func ExtractConflictDetails(err error) string {
 	for _, match := range matches {
 		if len(match) >= 3 {
 			manager := match[1]
-			fieldPath := match[2]
-			details = append(details, fmt.Sprintf("- %s: managed by \"%s\"", fieldPath, manager))
+			rawFieldPath := match[2]
+			// Remove leading dot if present (.spec.replicas -> spec.replicas)
+			fieldPath := strings.TrimPrefix(rawFieldPath, ".")
+			details = append(details, fmt.Sprintf("  - %s (managed by \"%s\")", fieldPath, manager))
+			paths = append(paths, fieldPath)
 		}
 	}
 
 	if len(details) == 0 {
-		// Fallback if we can't parse - just show we detected conflicts
-		return "- Multiple field ownership conflicts detected"
+		// Fallback if we can't parse
+		return "- Multiple field ownership conflicts detected", nil
 	}
 
-	return strings.Join(details, "\n")
+	return strings.Join(details, "\n"), paths
+}
+
+// ExtractConflictDetails parses conflict error details (backward compatibility wrapper)
+func ExtractConflictDetails(err error) string {
+	details, _ := ExtractConflictDetailsAndPaths(err)
+	return details
+}
+
+// formatIgnoreFieldsSuggestion creates a ready-to-use ignore_fields configuration from conflict paths
+func formatIgnoreFieldsSuggestion(paths []string) string {
+	if len(paths) == 0 {
+		return ""
+	}
+
+	if len(paths) == 1 {
+		return fmt.Sprintf("  ignore_fields = [\"%s\"]", paths[0])
+	}
+
+	// Multiple paths - format as multi-line for readability
+	var lines []string
+	lines = append(lines, "  ignore_fields = [")
+	for i, path := range paths {
+		if i < len(paths)-1 {
+			lines = append(lines, fmt.Sprintf("    \"%s\",", path))
+		} else {
+			lines = append(lines, fmt.Sprintf("    \"%s\"", path))
+		}
+	}
+	lines = append(lines, "  ]")
+	return strings.Join(lines, "\n")
 }
 
 // IsFieldValidationError checks if error is due to field validation (unknown/duplicate field)

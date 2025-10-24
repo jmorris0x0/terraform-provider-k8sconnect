@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -12,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 )
@@ -36,7 +36,7 @@ func (r *waitResource) Create(ctx context.Context, req resource.CreateRequest, r
 	}
 
 	// Generate unique ID
-	data.ID = types.StringValue(uuid.New().String())
+	data.ID = types.StringValue(common.GenerateID())
 
 	// Build wait context
 	wc, diags := r.buildWaitContext(ctx, &data)
@@ -56,7 +56,7 @@ func (r *waitResource) Create(ctx context.Context, req resource.CreateRequest, r
 	if err := r.performWait(ctx, wc); err != nil {
 		resp.Diagnostics.AddError(
 			"Wait Operation Failed",
-			fmt.Sprintf("Failed to wait for resource: %s", err.Error()),
+			fmt.Sprintf("Failed to wait for %s: %s", formatObjectRef(wc.ObjectRef), err.Error()),
 		)
 		return
 	}
@@ -145,7 +145,7 @@ func (r *waitResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	if err := r.performWait(ctx, wc); err != nil {
 		resp.Diagnostics.AddError(
 			"Wait Operation Failed",
-			fmt.Sprintf("Failed to wait for resource: %s", err.Error()),
+			fmt.Sprintf("Failed to wait for %s: %s", formatObjectRef(wc.ObjectRef), err.Error()),
 		)
 		return
 	}
@@ -187,7 +187,7 @@ func (r *waitResource) buildWaitContext(ctx context.Context, data *waitResourceM
 	if err != nil {
 		diags.AddError(
 			"Failed to Create Kubernetes Client",
-			fmt.Sprintf("Could not create Kubernetes client: %s", err.Error()),
+			fmt.Sprintf("Could not create Kubernetes client for %s: %s", formatObjectRef(objRef), err.Error()),
 		)
 		return nil, diags
 	}
@@ -205,7 +205,8 @@ func (r *waitResource) buildWaitContext(ctx context.Context, data *waitResourceM
 	if err != nil {
 		diags.AddError(
 			"Failed to Discover GVR",
-			fmt.Sprintf("Could not discover resource type: %s", err.Error()),
+			fmt.Sprintf("Could not discover resource type for %s (apiVersion: %s): %s",
+				formatObjectRef(objRef), objRef.APIVersion.ValueString(), err.Error()),
 		)
 		return nil, diags
 	}

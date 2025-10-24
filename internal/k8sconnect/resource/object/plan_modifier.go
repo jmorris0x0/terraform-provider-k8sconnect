@@ -260,10 +260,36 @@ func (r *objectResource) calculateProjection(ctx context.Context, req resource.M
 		ownershipMap[path] = ownership.Manager
 	}
 
-	// Add annotations that we will set during apply (not in dry-run yet)
-	// These are always owned by k8sconnect since we set them
-	ownershipMap["metadata.annotations.k8sconnect.terraform.io/created-at"] = "k8sconnect"
-	ownershipMap["metadata.annotations.k8sconnect.terraform.io/terraform-id"] = "k8sconnect"
+	// FIX: Override prediction for fields we'll forcibly take ownership of
+	// Dry-run with force=true doesn't predict ownership takeover in managedFields.
+	// We use force=true during apply, so we WILL take ownership of all fields we're applying.
+	// Get the list of fields we're actually applying (desiredObj with ignored fields removed)
+	objToApply := desiredObj.DeepCopy()
+	if ignoreFields := getIgnoreFields(ctx, plannedData); ignoreFields != nil {
+		objToApply = removeFieldsFromObject(objToApply, ignoreFields)
+	}
+	appliedFieldsList := extractAllFieldsFromYAML(objToApply.Object, "")
+	// Normalize paths to match ownershipMap format (merge keys -> array indexes)
+	appliedFields := make(map[string]bool)
+	for _, path := range appliedFieldsList {
+		normalized := normalizePathForComparison(path, objToApply.Object)
+		appliedFields[normalized] = true
+	}
+
+	// Override ownership prediction for fields we're applying
+	// Only override fields that:
+	// 1. Exist in ownershipMap (dry-run knows about them)
+	// 2. Have a non-k8sconnect owner (need correction)
+	// 3. Are in appliedFields (terraform is actually applying them, not controller-managed/ignored)
+	for path, currentOwner := range ownershipMap {
+		if currentOwner != "k8sconnect" && appliedFields[path] {
+			ownershipMap[path] = "k8sconnect"
+		}
+	}
+
+	// Internal annotations (k8sconnect.terraform.io/*) are intentionally NOT tracked in field_ownership
+	// They exist in the cluster but are filtered from state to avoid unnecessary drift detection
+	// These are implementation details, not user-managed fields
 
 	// Filter out status fields - they are not preserved during Apply operations
 	// Status is managed by controllers after apply, not during apply
@@ -384,7 +410,8 @@ func (r *objectResource) applyProjection(ctx context.Context, dryRunResult *unst
 	// Project the dry-run result
 	projection, err := projectFields(dryRunResult.Object, paths)
 	if err != nil {
-		resp.Diagnostics.AddError("Projection Failed", fmt.Sprintf("Failed to project fields: %s", err))
+		resp.Diagnostics.AddError("Projection Failed",
+			fmt.Sprintf("Failed to project fields for %s: %s", formatResource(dryRunResult), err))
 		return false
 	}
 
@@ -394,7 +421,8 @@ func (r *objectResource) applyProjection(ctx context.Context, dryRunResult *unst
 	// Convert to types.Map
 	mapValue, diags := types.MapValueFrom(ctx, types.StringType, projectionMap)
 	if diags.HasError() {
-		resp.Diagnostics.AddError("Map Conversion Failed", fmt.Sprintf("Failed to convert projection to map: %s", diags.Errors()))
+		resp.Diagnostics.AddError("Map Conversion Failed",
+			fmt.Sprintf("Failed to convert projection to map for %s: %s", formatResource(dryRunResult), diags.Errors()))
 		return false
 	}
 
@@ -595,14 +623,44 @@ func normalizePathForComparison(path string, obj map[string]interface{}) string 
 func addConflictWarning(resp *resource.ModifyPlanResponse, conflicts []FieldConflict) {
 	// Always warn about conflicts - we will force ownership during apply
 	var conflictDetails []string
+	var conflictPaths []string
 	for _, c := range conflicts {
-		conflictDetails = append(conflictDetails, fmt.Sprintf("  - %s (owned by %s)", c.Path, c.Owner))
+		conflictDetails = append(conflictDetails, fmt.Sprintf("  - %s (managed by \"%s\")", c.Path, c.Owner))
+		conflictPaths = append(conflictPaths, c.Path)
 	}
+
+	// Format ignore_fields suggestion
+	ignoreFieldsSuggestion := formatIgnoreFieldsSuggestion(conflictPaths)
+
 	resp.Diagnostics.AddWarning(
 		"Field Ownership Override",
 		fmt.Sprintf("Forcing ownership of fields managed by other controllers:\n%s\n\n"+
-			"These fields will be forcibly taken over. The other controllers may fight back.\n"+
-			"Consider adding these paths to ignore_fields to release ownership instead.",
-			strings.Join(conflictDetails, "\n")),
+			"These fields will be forcibly taken over. The other controllers may fight back.\n\n"+
+			"To release ownership and allow other controllers to manage these fields, add:\n\n%s",
+			strings.Join(conflictDetails, "\n"), ignoreFieldsSuggestion),
 	)
+}
+
+// formatIgnoreFieldsSuggestion creates a ready-to-use ignore_fields configuration from conflict paths
+func formatIgnoreFieldsSuggestion(paths []string) string {
+	if len(paths) == 0 {
+		return ""
+	}
+
+	if len(paths) == 1 {
+		return fmt.Sprintf("  ignore_fields = [\"%s\"]", paths[0])
+	}
+
+	// Multiple paths - format as multi-line for readability
+	var lines []string
+	lines = append(lines, "  ignore_fields = [")
+	for i, path := range paths {
+		if i < len(paths)-1 {
+			lines = append(lines, fmt.Sprintf("    \"%s\",", path))
+		} else {
+			lines = append(lines, fmt.Sprintf("    \"%s\"", path))
+		}
+	}
+	lines = append(lines, "  ]")
+	return strings.Join(lines, "\n")
 }

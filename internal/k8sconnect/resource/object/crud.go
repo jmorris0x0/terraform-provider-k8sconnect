@@ -12,6 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"k8s.io/apimachinery/pkg/api/errors"
 
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 )
 
@@ -25,7 +26,7 @@ func (r *objectResource) Create(ctx context.Context, req resource.CreateRequest,
 	}
 
 	// 2. Generate resource ID
-	data.ID = types.StringValue(r.generateID())
+	data.ID = types.StringValue(common.GenerateID())
 
 	// 3. Setup context
 	rc, err := r.prepareContext(ctx, &data, false, false)
@@ -65,7 +66,8 @@ func (r *objectResource) Create(ctx context.Context, req resource.CreateRequest,
 
 	// 8a. Populate object_ref output
 	if err := r.populateObjectRef(ctx, rc); err != nil {
-		resp.Diagnostics.AddError("Failed to populate object_ref", err.Error())
+		resp.Diagnostics.AddError("Failed to populate object_ref",
+			fmt.Sprintf("Failed to populate object_ref for %s: %s", formatResource(rc.Object), err.Error()))
 		return
 	}
 
@@ -154,7 +156,7 @@ func (r *objectResource) Read(ctx context.Context, req resource.ReadRequest, res
 			setPendingProjectionFlag(ctx, resp.Private)
 		} else {
 			resp.Diagnostics.AddError("Projection Failed",
-				fmt.Sprintf("Failed to project managed fields: %s", err))
+				fmt.Sprintf("Failed to project managed fields for %s: %s", formatResource(rc.Object), err))
 			return
 		}
 	} else {
@@ -223,7 +225,8 @@ func (r *objectResource) Update(ctx context.Context, req resource.UpdateRequest,
 
 	// 6. Populate object_ref output
 	if err := r.populateObjectRef(ctx, rc); err != nil {
-		resp.Diagnostics.AddError("Failed to populate object_ref", err.Error())
+		resp.Diagnostics.AddError("Failed to populate object_ref",
+			fmt.Sprintf("Failed to populate object_ref for %s: %s", formatResource(rc.Object), err.Error()))
 		return
 	}
 
@@ -417,8 +420,9 @@ func handleProjectionFailure(
 	// Return error to stop CI/CD pipeline
 	diagnostics.AddError(
 		"Projection Calculation Failed",
-		fmt.Sprintf("Resource was %s successfully but projection calculation failed: %s\n\n"+
-			"This is typically caused by network issues. Run 'terraform apply' again to complete the operation.", operation, err),
+		fmt.Sprintf("%s was %s successfully but projection calculation failed: %s\n\n"+
+			"This is typically caused by network issues. Run 'terraform apply' again to complete the operation.",
+			formatResource(rc.Object), operation, err),
 	)
 }
 

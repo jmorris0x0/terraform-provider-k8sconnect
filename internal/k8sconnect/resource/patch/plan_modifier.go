@@ -285,9 +285,13 @@ type fieldConflict struct {
 // addConflictWarning adds a warning about field ownership takeovers
 func (r *patchResource) addConflictWarning(resp *resource.ModifyPlanResponse, conflicts []fieldConflict) {
 	var conflictDetails []string
+	var conflictPaths []string
 	for _, c := range conflicts {
-		conflictDetails = append(conflictDetails, fmt.Sprintf("  - %s (currently owned by %s)", c.Path, c.CurrentOwner))
+		conflictDetails = append(conflictDetails, fmt.Sprintf("  - %s (managed by \"%s\")", c.Path, c.CurrentOwner))
+		conflictPaths = append(conflictPaths, c.Path)
 	}
+
+	ignoreFieldsSuggestion := formatIgnoreFieldsSuggestion(conflictPaths)
 
 	resp.Diagnostics.AddWarning(
 		"Field Ownership Takeover",
@@ -296,9 +300,34 @@ func (r *patchResource) addConflictWarning(resp *resource.ModifyPlanResponse, co
 			"This is expected behavior for patches (force=true is always used), but be aware that:\n"+
 			"• External controllers may revert your changes\n"+
 			"• You may need to disable or reconfigure those controllers\n"+
-			"• Consider if k8sconnect_object with ignore_fields would be better for full lifecycle management",
-			strings.Join(conflictDetails, "\n")),
+			"• Consider if k8sconnect_object with ignore_fields would be better for full lifecycle management\n\n"+
+			"If using k8sconnect_object instead, add this configuration to release ownership:\n\n%s",
+			strings.Join(conflictDetails, "\n"), ignoreFieldsSuggestion),
 	)
+}
+
+// formatIgnoreFieldsSuggestion creates a ready-to-use ignore_fields configuration from conflict paths
+func formatIgnoreFieldsSuggestion(paths []string) string {
+	if len(paths) == 0 {
+		return ""
+	}
+
+	if len(paths) == 1 {
+		return fmt.Sprintf("  ignore_fields = [\"%s\"]", paths[0])
+	}
+
+	// Multiple paths - format as multi-line for readability
+	var lines []string
+	lines = append(lines, "  ignore_fields = [")
+	for i, path := range paths {
+		if i < len(paths)-1 {
+			lines = append(lines, fmt.Sprintf("    \"%s\",", path))
+		} else {
+			lines = append(lines, fmt.Sprintf("    \"%s\"", path))
+		}
+	}
+	lines = append(lines, "  ]")
+	return strings.Join(lines, "\n")
 }
 
 // dryRunStrategicMergePatch performs a dry-run of a strategic merge patch using SSA

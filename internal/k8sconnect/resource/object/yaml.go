@@ -73,7 +73,7 @@ func (r *objectResource) parseYAML(yamlStr string) (*unstructured.Unstructured, 
 // objectToYAML converts an unstructured object back to clean YAML
 func (r *objectResource) objectToYAML(obj *unstructured.Unstructured) ([]byte, error) {
 	// Create a clean copy without managed fields and other cluster-added metadata
-	cleanObj := r.cleanObjectForExport(obj)
+	cleanObj := r.cleanObjectForImport(obj)
 
 	// Convert to YAML
 	yamlBytes, err := sigsyaml.Marshal(cleanObj.Object)
@@ -84,24 +84,66 @@ func (r *objectResource) objectToYAML(obj *unstructured.Unstructured) ([]byte, e
 	return yamlBytes, nil
 }
 
-// cleanObjectForExport removes server-generated fields that would cause apply failures
-func (r *objectResource) cleanObjectForExport(obj *unstructured.Unstructured) *unstructured.Unstructured {
+// cleanObjectForImport removes server-generated fields from imported resources
+// to produce clean yaml_body that looks like user-written configuration.
+// This is used during import to ensure state contains plausible user config,
+// not raw cluster state with server-added metadata.
+func (r *objectResource) cleanObjectForImport(obj *unstructured.Unstructured) *unstructured.Unstructured {
 	// Create a deep copy
 	cleaned := obj.DeepCopy()
 
-	// Remove only the fields that will definitely cause problems on re-apply
 	metadata := cleaned.Object["metadata"].(map[string]interface{})
 
-	// Remove server-managed metadata fields using shared constant list
+	// Remove server-managed metadata fields (uid, resourceVersion, etc.)
 	for _, field := range validation.ServerManagedMetadataFields {
 		delete(metadata, field)
 	}
 
-	// Remove status field entirely (never needed for apply)
+	// Remove status block entirely (never needed for apply)
 	delete(cleaned.Object, "status")
 
-	// Leave everything else - let the user clean up if they want
-	// This is safer than trying to guess what's system-generated
+	// Remove server-added annotations
+	if annotations, ok := metadata["annotations"].(map[string]interface{}); ok {
+		// kubectl's last-applied-configuration annotation
+		delete(annotations, "kubectl.kubernetes.io/last-applied-configuration")
+		// Deployment revision annotation (added by kube-controller-manager)
+		delete(annotations, "deployment.kubernetes.io/revision")
+		// StatefulSet revision annotation
+		delete(annotations, "statefulset.kubernetes.io/revision")
+		// DaemonSet revision annotation
+		delete(annotations, "deprecated.daemonset.template.generation")
+
+		// If annotations is now empty, remove it entirely
+		if len(annotations) == 0 {
+			delete(metadata, "annotations")
+		}
+	}
+
+	// Clean nested pod template metadata (for Deployments, StatefulSets, DaemonSets, Jobs, CronJobs)
+	if spec, ok := cleaned.Object["spec"].(map[string]interface{}); ok {
+		r.cleanPodTemplateMetadata(spec)
+	}
 
 	return cleaned
+}
+
+// cleanPodTemplateMetadata removes server-added fields from pod template metadata
+func (r *objectResource) cleanPodTemplateMetadata(spec map[string]interface{}) {
+	// Handle Deployment, StatefulSet, DaemonSet, ReplicaSet
+	if template, ok := spec["template"].(map[string]interface{}); ok {
+		if templateMeta, ok := template["metadata"].(map[string]interface{}); ok {
+			delete(templateMeta, "creationTimestamp")
+		}
+	}
+
+	// Handle Job
+	if jobTemplate, ok := spec["jobTemplate"].(map[string]interface{}); ok {
+		if jobSpec, ok := jobTemplate["spec"].(map[string]interface{}); ok {
+			if template, ok := jobSpec["template"].(map[string]interface{}); ok {
+				if templateMeta, ok := template["metadata"].(map[string]interface{}); ok {
+					delete(templateMeta, "creationTimestamp")
+				}
+			}
+		}
+	}
 }

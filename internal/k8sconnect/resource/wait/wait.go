@@ -229,3 +229,21 @@ func (v durationValidator) ValidateString(ctx context.Context, req validator.Str
 		)
 	}
 }
+
+// formatObjectRef creates a human-readable description of a Kubernetes resource
+// from an objectRefModel, handling both namespaced and cluster-scoped resources.
+// Examples:
+//   - Namespaced: "Deployment nginx (namespace: default)"
+//   - Cluster-scoped: "Namespace production" or "ClusterRole admin"
+func formatObjectRef(objRef objectRefModel) string {
+	kind := objRef.Kind.ValueString()
+	name := objRef.Name.ValueString()
+	namespace := objRef.Namespace.ValueString()
+
+	if namespace == "" {
+		// Cluster-scoped resource
+		return fmt.Sprintf("%s %s", kind, name)
+	}
+	// Namespaced resource
+	return fmt.Sprintf("%s %s (namespace: %s)", kind, name, namespace)
+}

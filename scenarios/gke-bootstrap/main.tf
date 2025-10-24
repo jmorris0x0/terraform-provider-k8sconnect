@@ -166,7 +166,7 @@ resource "k8sconnect_object" "test_deployment" {
         spec:
           containers:
           - name: nginx
-            image: nginx:1.25
+            image: public.ecr.aws/nginx/nginx:latest
             ports:
             - containerPort: 80
   YAML
