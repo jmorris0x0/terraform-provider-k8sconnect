@@ -1,15 +1,30 @@
-resource "k8sconnect_object" "imported_configmap" {
+import {
+  to = k8sconnect_object.imported_deploy
+  id = "kind-kind-validation:import-test:apps/v1/Deployment:test-deploy"
+}
+
+resource "k8sconnect_object" "imported_deploy" {
   yaml_body = <<-YAML
-    apiVersion: v1
-    kind: ConfigMap
+    apiVersion: apps/v1
+    kind: Deployment
     metadata:
-      name: test-import
+      name: test-deploy
       namespace: import-test
       labels:
-        created-by: kubectl
-    data:
-      key1: value1
-      key2: value2
+        app: test-deploy
+    spec:
+      replicas: 2
+      selector:
+        matchLabels:
+          app: test-deploy
+      template:
+        metadata:
+          labels:
+            app: test-deploy
+        spec:
+          containers:
+          - name: nginx
+            image: nginx:1.25
   YAML
 
   cluster_connection = {

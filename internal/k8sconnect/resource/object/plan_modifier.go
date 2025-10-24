@@ -260,6 +260,33 @@ func (r *objectResource) calculateProjection(ctx context.Context, req resource.M
 		ownershipMap[path] = ownership.Manager
 	}
 
+	// FIX: Override prediction for fields we'll forcibly take ownership of
+	// Dry-run with force=true doesn't predict ownership takeover in managedFields.
+	// We use force=true during apply, so we WILL take ownership of all fields we're applying.
+	// Get the list of fields we're actually applying (desiredObj with ignored fields removed)
+	objToApply := desiredObj.DeepCopy()
+	if ignoreFields := getIgnoreFields(ctx, plannedData); ignoreFields != nil {
+		objToApply = removeFieldsFromObject(objToApply, ignoreFields)
+	}
+	appliedFieldsList := extractAllFieldsFromYAML(objToApply.Object, "")
+	// Normalize paths to match ownershipMap format (merge keys -> array indexes)
+	appliedFields := make(map[string]bool)
+	for _, path := range appliedFieldsList {
+		normalized := normalizePathForComparison(path, objToApply.Object)
+		appliedFields[normalized] = true
+	}
+
+	// Override ownership prediction for fields we're applying
+	// Only override fields that:
+	// 1. Exist in ownershipMap (dry-run knows about them)
+	// 2. Have a non-k8sconnect owner (need correction)
+	// 3. Are in appliedFields (terraform is actually applying them, not controller-managed/ignored)
+	for path, currentOwner := range ownershipMap {
+		if currentOwner != "k8sconnect" && appliedFields[path] {
+			ownershipMap[path] = "k8sconnect"
+		}
+	}
+
 	// Internal annotations (k8sconnect.terraform.io/*) are intentionally NOT tracked in field_ownership
 	// They exist in the cluster but are filtered from state to avoid unnecessary drift detection
 	// These are implementation details, not user-managed fields
