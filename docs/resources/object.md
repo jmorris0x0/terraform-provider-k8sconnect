@@ -259,13 +259,78 @@ Read-Only:
 
 Import existing Kubernetes resources (created by kubectl, Helm, or other tools) into Terraform management.
 
+### Import Workflows
+
+k8sconnect supports three import workflows:
+
+#### 1. CLI Import (Classic)
+
+Traditional import command - requires writing resource configuration first:
+
+```shell
+# 1. Write resource block
+resource "k8sconnect_object" "nginx" {
+  yaml_body = file("nginx.yaml")
+  cluster_connection = var.cluster_connection
+}
+
+# 2. Run import
+export KUBECONFIG=~/.kube/config
+terraform import k8sconnect_object.nginx "prod:default:apps/v1/Deployment:nginx"
+
+# 3. Verify
+terraform plan  # Should show no changes
+```
+
+#### 2. Import Blocks with Config Generation (Terraform 1.5+)
+
+**Recommended** - Terraform generates the resource configuration for you:
+
+```hcl
+# Only write the import block - no resource definition needed
+import {
+  to = k8sconnect_object.nginx
+  id = "prod:default:apps/v1/Deployment:nginx"
+}
+```
+
+```shell
+# Terraform generates the full resource block
+export KUBECONFIG=~/.kube/config
+terraform plan -generate-config-out=generated.tf
+```
+
+This creates `generated.tf` with a complete resource block including `yaml_body` and `cluster_connection`. Review and move it to your main configuration.
+
+**Note**: The generated `cluster_connection` will have the full kubeconfig file inlined as a string. You'll want to replace it with `kubeconfig = file("~/.kube/config")` for cleaner code.
+
+#### 3. Import Blocks (Terraform 1.5+)
+
+Declarative import - write both the import block and resource definition:
+
+```hcl
+import {
+  to = k8sconnect_object.nginx
+  id = "prod:default:apps/v1/Deployment:nginx"
+}
+
+resource "k8sconnect_object" "nginx" {
+  yaml_body = file("nginx.yaml")
+  cluster_connection = var.cluster_connection
+}
+```
+
+```shell
+export KUBECONFIG=~/.kube/config
+terraform apply  # Imports and reconciles in one command
+```
+
 ### How Import Works
 
-1. **Import reads from kubeconfig**: The import process uses your `KUBECONFIG` environment variable to connect to the cluster and read the existing resource
-2. **Adds resource to state**: The current state of the resource is captured and added to your Terraform state
-3. **Configure for future operations**: After import, you configure `cluster_connection` in your resource definition for subsequent `plan` and `apply` operations
-
-**Important**: Import does not generate configuration. You must write the resource block yourself before importing.
+1. **Import reads from kubeconfig**: The import process uses your `KUBECONFIG` environment variable to connect to the cluster
+2. **Ownership takeover**: If the resource was created by kubectl or other tools, k8sconnect automatically takes ownership using Server-Side Apply with `force=true`
+3. **Adds resource to state**: The current state is captured (with server-added fields cleaned)
+4. **Configure for future operations**: After import, the `cluster_connection` in your resource definition is used for all subsequent operations
 
 ### Prerequisites
 

@@ -125,6 +125,12 @@ resource "k8sconnect_object" "nginx" {
 
 ### Import Strategy
 
+k8sconnect supports three import workflows. Choose based on your Terraform version and preferences:
+
+#### Option 1: CLI Import (All Terraform versions)
+
+Traditional workflow - write config first, then import:
+
 ```bash
 # 1. Get YAML from cluster
 kubectl get deployment nginx -n default -o yaml > nginx.yaml
@@ -136,8 +142,8 @@ resource "k8sconnect_object" "nginx" {
 }
 
 # 3. Import existing resource
-terraform import 'k8sconnect_object.nginx' \
-  'prod:default:apps/v1/Deployment:nginx'
+export KUBECONFIG=~/.kube/config
+terraform import 'k8sconnect_object.nginx' 'prod:default:apps/v1/Deployment:nginx'
 
 # 4. Remove old state
 terraform state rm 'kubernetes_manifest.nginx'
@@ -146,9 +152,62 @@ terraform state rm 'kubernetes_manifest.nginx'
 terraform plan  # Should show no changes
 ```
 
-**Import ID format:**
-- Namespaced: `context:namespace:apiVersion/kind:name`
-- Cluster-scoped: `context:apiVersion/kind:name`
+#### Option 2: Import Blocks with Config Generation (Terraform 1.5+, Recommended)
+
+Let Terraform generate the resource configuration for you:
+
+```hcl
+# Just write the import block
+import {
+  to = k8sconnect_object.nginx
+  id = "prod:default:apps/v1/Deployment:nginx"
+}
+```
+
+```bash
+# Generate config automatically
+export KUBECONFIG=~/.kube/config
+terraform plan -generate-config-out=generated.tf
+
+# Review generated.tf and move to your main config
+# Note: Replace inlined kubeconfig with file() reference for cleaner code
+
+# Remove old state
+terraform state rm 'kubernetes_manifest.nginx'
+
+# Verify
+terraform plan  # Should show no changes
+```
+
+#### Option 3: Import Blocks (Terraform 1.5+)
+
+Declarative import - write both import block and resource:
+
+```hcl
+import {
+  to = k8sconnect_object.nginx
+  id = "prod:default:apps/v1/Deployment:nginx"
+}
+
+resource "k8sconnect_object" "nginx" {
+  yaml_body          = file("nginx.yaml")
+  cluster_connection = var.cluster_connection
+}
+```
+
+```bash
+# Import and apply in one command
+export KUBECONFIG=~/.kube/config
+terraform apply
+
+# Remove old state
+terraform state rm 'kubernetes_manifest.nginx'
+```
+
+### Import ID Format
+
+- **Namespaced**: `context:namespace:apiVersion/kind:name`
+- **Cluster-scoped**: `context:apiVersion/kind:name`
 
 **Examples:**
 ```
@@ -157,6 +216,22 @@ prod:default:apps/v1/Deployment:app
 prod:networking.k8s.io/v1/Ingress:web
 prod:v1/Namespace:my-namespace
 ```
+
+### Automatic Ownership Takeover
+
+When importing resources created by kubectl or other tools, k8sconnect automatically takes ownership using Server-Side Apply with `force=true`. You'll see a warning during import:
+
+```
+Warning: Field Ownership Override
+
+Forcing ownership of fields managed by other controllers:
+  - spec.replicas (managed by "kubectl-client-side-apply")
+  - data.key1 (managed by "kubectl-client-side-apply")
+
+These fields will be forcibly taken over.
+```
+
+This is expected and allows k8sconnect to manage the resource. Use `ignore_fields` to release specific fields back to other controllers (e.g., HPA managing `spec.replicas`).
 
 ## Migration Patterns
 
