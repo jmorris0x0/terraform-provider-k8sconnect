@@ -7,11 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2025-10-25
+
+### Fixed
+- Fixed field ownership prediction accuracy when using Server-Side Apply with `force=true` (ADR-019)
+
 ## [0.1.5] - 2025-10-23
 
 ### Fixed
-- Fixed field ownership prediction race condition when external controllers use Server-Side Apply with `force=true`
-- Fixed import ownership takeover to properly handle field ownership conflicts
 - Improved import `yaml_body` cleaning to remove more server-generated fields
 
 ### Changed

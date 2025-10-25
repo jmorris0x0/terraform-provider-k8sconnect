@@ -10,6 +10,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -260,31 +261,46 @@ func (r *objectResource) calculateProjection(ctx context.Context, req resource.M
 		ownershipMap[path] = ownership.Manager
 	}
 
-	// FIX: Override prediction for fields we'll forcibly take ownership of
-	// Dry-run with force=true doesn't predict ownership takeover in managedFields.
-	// We use force=true during apply, so we WILL take ownership of all fields we're applying.
-	// Get the list of fields we're actually applying (desiredObj with ignored fields removed)
-	objToApply := desiredObj.DeepCopy()
-	if ignoreFields := getIgnoreFields(ctx, plannedData); ignoreFields != nil {
-		objToApply = removeFieldsFromObject(objToApply, ignoreFields)
-	}
-	appliedFieldsList := extractAllFieldsFromYAML(objToApply.Object, "")
-	// Normalize paths to match ownershipMap format (merge keys -> array indexes)
-	appliedFields := make(map[string]bool)
-	for _, path := range appliedFieldsList {
-		normalized := normalizePathForComparison(path, objToApply.Object)
-		appliedFields[normalized] = true
+	// ADR-019: Override predicted ownership for fields we're applying with force=true
+	// Kubernetes dry-run doesn't predict force=true ownership takeover, so we must
+	// explicitly recognize that fields we apply with force=true WILL be owned by k8sconnect
+	// after the actual apply, regardless of what dry-run's managedFields suggest.
+	//
+	// Why this is needed: Dry-run shows current ownership state, not post-force ownership.
+	// When we apply with force=true, we WILL take ownership, but dry-run doesn't reflect this.
+	// This causes "Provider produced inconsistent result" errors when prediction doesn't match
+	// actual post-apply ownership.
+	//
+	// Implementation: Find which fields k8sconnect is sending in the dry-run (from k8sconnect's
+	// FieldsV1 entry), and override ownership for those fields. This ensures we only override
+	// fields we're actually applying, not fields set by other controllers.
+
+	// Extract fields that k8sconnect is sending (from dry-run's k8sconnect manager entry)
+	fieldsWeAreSending := make(map[string]bool)
+	for _, mf := range dryRunResult.GetManagedFields() {
+		if mf.Manager == "k8sconnect" && mf.FieldsV1 != nil {
+			// Parse k8sconnect's FieldsV1 to get the paths we're sending
+			k8sconnectOwnership := parseFieldsV1ToPathMap([]metav1.ManagedFieldsEntry{mf}, desiredObj.Object)
+			for path := range k8sconnectOwnership {
+				fieldsWeAreSending[path] = true
+			}
+			break
+		}
 	}
 
-	// Override ownership prediction for fields we're applying
-	// Only override fields that:
-	// 1. Exist in ownershipMap (dry-run knows about them)
-	// 2. Have a non-k8sconnect owner (need correction)
-	// 3. Are in appliedFields (terraform is actually applying them, not controller-managed/ignored)
+	overrideCount := 0
 	for path, currentOwner := range ownershipMap {
-		if currentOwner != "k8sconnect" && appliedFields[path] {
+		// Only override if we're actually sending this field
+		if fieldsWeAreSending[path] && currentOwner != "k8sconnect" {
 			ownershipMap[path] = "k8sconnect"
+			overrideCount++
 		}
+	}
+
+	if overrideCount > 0 {
+		tflog.Info(ctx, "Applied force=true ownership prediction overrides", map[string]interface{}{
+			"override_count": overrideCount,
+		})
 	}
 
 	// Internal annotations (k8sconnect.terraform.io/*) are intentionally NOT tracked in field_ownership

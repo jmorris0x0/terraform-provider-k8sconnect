@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1070,7 +1071,15 @@ func TestAccObjectResource_IgnoreFieldsJSONPathPredicate(t *testing.T) {
 
 	// Detect environment and configure iterations to catch race condition
 	isCI := os.Getenv("CI") != ""
-	artificialDelay := os.Getenv("TEST_RACE_DELAY") != ""
+	delayStr := os.Getenv("TEST_RACE_DELAY")
+	var delayMs int
+	if delayStr != "" {
+		var err error
+		delayMs, err = strconv.Atoi(delayStr)
+		if err != nil || delayMs <= 0 {
+			delayMs = 75 // Default to 75ms if invalid value
+		}
+	}
 
 	iterations := 5 // Default for CI
 	if !isCI {
@@ -1078,8 +1087,8 @@ func TestAccObjectResource_IgnoreFieldsJSONPathPredicate(t *testing.T) {
 		t.Logf("🏠 Running locally: using %d iterations to catch race condition (vs 5 in CI)", iterations)
 	}
 
-	if artificialDelay {
-		t.Logf("⏱️  Artificial delay enabled (TEST_RACE_DELAY=1) to widen race window")
+	if delayMs > 0 {
+		t.Logf("⏱️  Artificial delay enabled (TEST_RACE_DELAY=%d) to widen race window", delayMs)
 	}
 
 	// Build test steps: initial creation + multiple patch-apply cycles
@@ -1103,7 +1112,7 @@ func TestAccObjectResource_IgnoreFieldsJSONPathPredicate(t *testing.T) {
 
 	// Add multiple kubectl patch → terraform apply cycles to catch race condition
 	testSteps = append(testSteps, generateIgnoreFieldsPatchApplyCycles(
-		t, ssaClient, k8sClient, ns, deployName, raw, iterations, artificialDelay)...)
+		t, ssaClient, k8sClient, ns, deployName, raw, iterations, delayMs)...)
 
 	// Final steps: verify no drift and test terraform update
 	testSteps = append(testSteps, []resource.TestStep{
@@ -1155,7 +1164,7 @@ func generateIgnoreFieldsPatchApplyCycles(
 	k8sClient kubernetes.Interface,
 	ns, deployName, raw string,
 	iterations int,
-	artificialDelay bool,
+	delayMs int,
 ) []resource.TestStep {
 	steps := []resource.TestStep{}
 
@@ -1180,8 +1189,8 @@ func generateIgnoreFieldsPatchApplyCycles(
 				}
 
 				// Optional: artificial delay to widen race window for local testing
-				if artificialDelay {
-					time.Sleep(75 * time.Millisecond)
+				if delayMs > 0 {
+					time.Sleep(time.Duration(delayMs) * time.Millisecond)
 				}
 
 				t.Logf("✓ Iteration %d/%d: Patched env vars with kubectl", iteration, iterations)
