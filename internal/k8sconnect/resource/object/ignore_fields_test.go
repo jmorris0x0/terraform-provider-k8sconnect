@@ -17,7 +17,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 
 	"k8s.io/client-go/kubernetes"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect"
 	testhelpers "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/test"
