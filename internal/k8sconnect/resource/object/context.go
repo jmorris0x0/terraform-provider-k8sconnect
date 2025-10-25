@@ -204,6 +204,12 @@ func (r *objectResource) updateProjection(rc *ResourceContext) error {
 	// Update field ownership (existing code continues...)
 	ownership := extractFieldOwnership(currentObj)
 
+	// DEBUG: Log actual ownership after apply
+	fmt.Printf("\n[AFTER APPLY] Actual ownership from K8s for %s/%s:\n", currentObj.GetNamespace(), currentObj.GetName())
+	for _, mf := range currentObj.GetManagedFields() {
+		fmt.Printf("  Manager: %s, Operation: %s\n", mf.Manager, mf.Operation)
+	}
+
 	// Convert map[string]FieldOwnership to map[string]string (just manager names)
 	// Filter out status fields - they're always owned by controllers and provide no actionable information
 	ownershipMap := make(map[string]string, len(ownership))
@@ -214,6 +220,14 @@ func (r *objectResource) updateProjection(rc *ResourceContext) error {
 			continue
 		}
 		ownershipMap[path] = owner.Manager
+	}
+
+	// DEBUG: Log actual field ownership for env vars
+	fmt.Printf("[AFTER APPLY] Actual field ownership:\n")
+	for path, manager := range ownershipMap {
+		if strings.Contains(path, "env") {
+			fmt.Printf("  %s: %s\n", path, manager)
+		}
 	}
 
 	// Convert to types.Map

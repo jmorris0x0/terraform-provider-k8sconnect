@@ -4,14 +4,20 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
+
+// DEBUG: Track ModifyPlan call counts per resource
+var modifyPlanCallCounts = make(map[string]int)
+var modifyPlanMutex sync.Mutex
 
 // ModifyPlan implements resource.ResourceWithModifyPlan
 func (r *objectResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
@@ -23,6 +29,14 @@ func (r *objectResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 	// Get planned data
 	var plannedData objectResourceModel
 	diags := req.Plan.Get(ctx, &plannedData)
+
+	// DEBUG: Track call number for this resource
+	modifyPlanMutex.Lock()
+	modifyPlanCallCounts[plannedData.ID.ValueString()]++
+	callNum := modifyPlanCallCounts[plannedData.ID.ValueString()]
+	modifyPlanMutex.Unlock()
+
+	fmt.Printf("\n[MODIFYPLAN CALL #%d] for %s\n", callNum, plannedData.ID.ValueString())
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -83,7 +97,7 @@ func (r *objectResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 	}
 
 	// Execute dry-run and compute projection
-	if !r.executeDryRunAndProjection(ctx, req, &plannedData, desiredObj, resp) {
+	if !r.executeDryRunAndProjection(ctx, req, &plannedData, desiredObj, resp, callNum) {
 		return
 	}
 
@@ -162,7 +176,7 @@ func (r *objectResource) checkDriftAndPreserveState(ctx context.Context, req res
 }
 
 // executeDryRunAndProjection performs dry-run and calculates field projection
-func (r *objectResource) executeDryRunAndProjection(ctx context.Context, req resource.ModifyPlanRequest, plannedData *objectResourceModel, desiredObj *unstructured.Unstructured, resp *resource.ModifyPlanResponse) bool {
+func (r *objectResource) executeDryRunAndProjection(ctx context.Context, req resource.ModifyPlanRequest, plannedData *objectResourceModel, desiredObj *unstructured.Unstructured, resp *resource.ModifyPlanResponse, callNum int) bool {
 	// Setup client
 	client, err := r.setupDryRunClient(ctx, plannedData, resp)
 	if err != nil {
@@ -198,7 +212,7 @@ func (r *objectResource) executeDryRunAndProjection(ctx context.Context, req res
 	}
 
 	// Calculate and apply projection
-	return r.calculateProjection(ctx, req, plannedData, desiredObj, dryRunResult, client, resp)
+	return r.calculateProjection(ctx, req, plannedData, desiredObj, dryRunResult, client, resp, callNum)
 }
 
 // setupDryRunClient creates the k8s client for dry-run
@@ -223,7 +237,7 @@ func (r *objectResource) setupDryRunClient(ctx context.Context, plannedData *obj
 }
 
 // calculateProjection determines projection strategy and calculates projection
-func (r *objectResource) calculateProjection(ctx context.Context, req resource.ModifyPlanRequest, plannedData *objectResourceModel, desiredObj, dryRunResult *unstructured.Unstructured, client k8sclient.K8sClient, resp *resource.ModifyPlanResponse) bool {
+func (r *objectResource) calculateProjection(ctx context.Context, req resource.ModifyPlanRequest, plannedData *objectResourceModel, desiredObj, dryRunResult *unstructured.Unstructured, client k8sclient.K8sClient, resp *resource.ModifyPlanResponse, callNum int) bool {
 	isCreate := isCreateOperation(req)
 
 	// CREATE operations: Use dry-run result to show accurate preview with K8s defaults
@@ -254,10 +268,80 @@ func (r *objectResource) calculateProjection(ctx context.Context, req resource.M
 	// Extract predicted field ownership from dry-run for plan
 	predictedOwnership := parseFieldsV1ToPathMap(dryRunResult.GetManagedFields(), desiredObj.Object)
 
+	// DEBUG: Log what dry-run sees for managedFields
+	fmt.Printf("[DRY-RUN #%d] Ownership from dry-run for %s/%s:\n", callNum, desiredObj.GetNamespace(), desiredObj.GetName())
+	for i, mf := range dryRunResult.GetManagedFields() {
+		fmt.Printf("  [%d] Manager: %s, Operation: %s, Time: %v\n", i, mf.Manager, mf.Operation, mf.Time)
+
+		// Show fieldsV1 for env-related managers
+		if mf.FieldsV1 != nil && (mf.Manager == "k8sconnect" || mf.Manager == "kubectl-patch") {
+			fieldsV1Str := string(mf.FieldsV1.Raw)
+			if strings.Contains(fieldsV1Str, "env") {
+				fmt.Printf("      FieldsV1 (env): %s\n", fieldsV1Str)
+			}
+		}
+	}
+
 	// Convert to types.Map for Terraform
 	ownershipMap := make(map[string]string)
 	for path, ownership := range predictedOwnership {
 		ownershipMap[path] = ownership.Manager
+	}
+
+	// DEBUG: Log predicted ownership for env vars specifically
+	fmt.Printf("[DRY-RUN #%d] Predicted field ownership (env vars only):\n", callNum)
+	for path, manager := range ownershipMap {
+		if strings.Contains(path, "env") {
+			fmt.Printf("  %s: %s\n", path, manager)
+		}
+	}
+
+	// ADR-019: Override predicted ownership for fields we're applying with force=true
+	// Kubernetes dry-run doesn't predict force=true ownership takeover, so we must
+	// explicitly recognize that fields we apply with force=true WILL be owned by k8sconnect
+	// after the actual apply, regardless of what dry-run's managedFields suggest.
+	//
+	// Why this is needed: Dry-run shows current ownership state, not post-force ownership.
+	// When we apply with force=true, we WILL take ownership, but dry-run doesn't reflect this.
+	// This causes "Provider produced inconsistent result" errors when prediction doesn't match
+	// actual post-apply ownership.
+	//
+	// Implementation: Find which fields k8sconnect is sending in the dry-run (from k8sconnect's
+	// FieldsV1 entry), and override ownership for those fields. This ensures we only override
+	// fields we're actually applying, not fields set by other controllers.
+
+	// Extract fields that k8sconnect is sending (from dry-run's k8sconnect manager entry)
+	fieldsWeAreSending := make(map[string]bool)
+	for _, mf := range dryRunResult.GetManagedFields() {
+		if mf.Manager == "k8sconnect" && mf.FieldsV1 != nil {
+			// Parse k8sconnect's FieldsV1 to get the paths we're sending
+			k8sconnectOwnership := parseFieldsV1ToPathMap([]metav1.ManagedFieldsEntry{mf}, desiredObj.Object)
+			for path := range k8sconnectOwnership {
+				fieldsWeAreSending[path] = true
+			}
+			break
+		}
+	}
+
+	fmt.Printf("[DRY-RUN #%d] Applying force=true ownership prediction overrides\n", callNum)
+	overrideCount := 0
+	for path, currentOwner := range ownershipMap {
+		// Only override if we're actually sending this field
+		if fieldsWeAreSending[path] && currentOwner != "k8sconnect" {
+			// DEBUG: Show ownership transitions for env vars
+			if strings.Contains(path, "env") {
+				fmt.Printf("  Override %s: %s -> k8sconnect (force=true)\n", path, currentOwner)
+			}
+			ownershipMap[path] = "k8sconnect"
+			overrideCount++
+		}
+	}
+
+	if overrideCount > 0 {
+		fmt.Printf("[DRY-RUN #%d] Applied %d force=true ownership overrides\n", callNum, overrideCount)
+		tflog.Info(ctx, "Applied force=true ownership prediction overrides", map[string]interface{}{
+			"override_count": overrideCount,
+		})
 	}
 
 	// Internal annotations (k8sconnect.terraform.io/*) are intentionally NOT tracked in field_ownership
@@ -297,6 +381,22 @@ func (r *objectResource) performDryRun(ctx context.Context, client k8sclient.K8s
 		tflog.Debug(ctx, "Filtered ignore_fields before dry-run", map[string]interface{}{
 			"ignored_count": len(ignoreFields),
 		})
+	}
+
+	// DEBUG: Show what env vars we're sending in the dry-run patch
+	if containers, found, _ := unstructured.NestedSlice(objToApply.Object, "spec", "template", "spec", "containers"); found {
+		fmt.Printf("[DRY-RUN PATCH] Sending env vars:\n")
+		for i, container := range containers {
+			if containerMap, ok := container.(map[string]interface{}); ok {
+				if env, found, _ := unstructured.NestedSlice(containerMap, "env"); found {
+					for _, envVar := range env {
+						if envMap, ok := envVar.(map[string]interface{}); ok {
+							fmt.Printf("  containers[%d].env: name=%s, value=%s\n", i, envMap["name"], envMap["value"])
+						}
+					}
+				}
+			}
+		}
 	}
 
 	dryRunResult, err := client.DryRunApply(ctx, objToApply, k8sclient.ApplyOptions{

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 
 	"k8s.io/client-go/kubernetes"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect"
 	testhelpers "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/test"
@@ -1070,7 +1072,15 @@ func TestAccObjectResource_IgnoreFieldsJSONPathPredicate(t *testing.T) {
 
 	// Detect environment and configure iterations to catch race condition
 	isCI := os.Getenv("CI") != ""
-	artificialDelay := os.Getenv("TEST_RACE_DELAY") != ""
+	delayStr := os.Getenv("TEST_RACE_DELAY")
+	var delayMs int
+	if delayStr != "" {
+		var err error
+		delayMs, err = strconv.Atoi(delayStr)
+		if err != nil || delayMs <= 0 {
+			delayMs = 75 // Default to 75ms if invalid value
+		}
+	}
 
 	iterations := 5 // Default for CI
 	if !isCI {
@@ -1078,8 +1088,8 @@ func TestAccObjectResource_IgnoreFieldsJSONPathPredicate(t *testing.T) {
 		t.Logf("🏠 Running locally: using %d iterations to catch race condition (vs 5 in CI)", iterations)
 	}
 
-	if artificialDelay {
-		t.Logf("⏱️  Artificial delay enabled (TEST_RACE_DELAY=1) to widen race window")
+	if delayMs > 0 {
+		t.Logf("⏱️  Artificial delay enabled (TEST_RACE_DELAY=%d) to widen race window", delayMs)
 	}
 
 	// Build test steps: initial creation + multiple patch-apply cycles
@@ -1103,7 +1113,7 @@ func TestAccObjectResource_IgnoreFieldsJSONPathPredicate(t *testing.T) {
 
 	// Add multiple kubectl patch → terraform apply cycles to catch race condition
 	testSteps = append(testSteps, generateIgnoreFieldsPatchApplyCycles(
-		t, ssaClient, k8sClient, ns, deployName, raw, iterations, artificialDelay)...)
+		t, ssaClient, k8sClient, ns, deployName, raw, iterations, delayMs)...)
 
 	// Final steps: verify no drift and test terraform update
 	testSteps = append(testSteps, []resource.TestStep{
@@ -1155,7 +1165,7 @@ func generateIgnoreFieldsPatchApplyCycles(
 	k8sClient kubernetes.Interface,
 	ns, deployName, raw string,
 	iterations int,
-	artificialDelay bool,
+	delayMs int,
 ) []resource.TestStep {
 	steps := []resource.TestStep{}
 
@@ -1165,8 +1175,18 @@ func generateIgnoreFieldsPatchApplyCycles(
 			PreConfig: func() {
 				ctx := context.Background()
 
+				// DEBUG: Get ownership BEFORE kubectl patch
+				deployBefore, err := k8sClient.AppsV1().Deployments(ns).Get(ctx, deployName, metav1.GetOptions{})
+				if err == nil && len(deployBefore.ManagedFields) > 0 {
+					fmt.Printf("\n[ITER %d] BEFORE kubectl patch:\n", iteration)
+					for _, mf := range deployBefore.ManagedFields {
+						fmt.Printf("  Manager: %s, Operation: %s, FieldsType: %s\n",
+							mf.Manager, mf.Operation, mf.FieldsType)
+					}
+				}
+
 				// Modify MANAGED_VAR (not ignored - should be reverted)
-				err := ssaClient.ForceApplyDeploymentEnvVarSSA(ctx, ns, deployName, "app",
+				err = ssaClient.ForceApplyDeploymentEnvVarSSA(ctx, ns, deployName, "app",
 					"MANAGED_VAR", fmt.Sprintf("kubectl-managed-%d", iteration), "kubectl-patch")
 				if err != nil {
 					t.Fatalf("Iteration %d: Failed to modify MANAGED_VAR: %v", iteration, err)
@@ -1179,9 +1199,28 @@ func generateIgnoreFieldsPatchApplyCycles(
 					t.Fatalf("Iteration %d: Failed to modify EXTERNAL_VAR: %v", iteration, err)
 				}
 
+				// DEBUG: Get ownership IMMEDIATELY AFTER kubectl patch
+				deployAfter, err := k8sClient.AppsV1().Deployments(ns).Get(ctx, deployName, metav1.GetOptions{})
+				if err == nil && len(deployAfter.ManagedFields) > 0 {
+					fmt.Printf("[ITER %d] AFTER kubectl patch (immediate GET):\n", iteration)
+					for _, mf := range deployAfter.ManagedFields {
+						fmt.Printf("  Manager: %s, Operation: %s, FieldsType: %s\n",
+							mf.Manager, mf.Operation, mf.FieldsType)
+
+						// DEBUG: Show fieldsV1 structure for env-related fields
+						if mf.FieldsV1 != nil && (mf.Manager == "k8sconnect" || mf.Manager == "kubectl-patch") {
+							fieldsV1Str := string(mf.FieldsV1.Raw)
+							if strings.Contains(fieldsV1Str, "env") {
+								fmt.Printf("    FieldsV1 (env excerpt): %s\n", fieldsV1Str)
+							}
+						}
+					}
+				}
+
 				// Optional: artificial delay to widen race window for local testing
-				if artificialDelay {
-					time.Sleep(75 * time.Millisecond)
+				if delayMs > 0 {
+					fmt.Printf("[ITER %d] Sleeping %dms (TEST_RACE_DELAY=%d)...\n", iteration, delayMs, delayMs)
+					time.Sleep(time.Duration(delayMs) * time.Millisecond)
 				}
 
 				t.Logf("✓ Iteration %d/%d: Patched env vars with kubectl", iteration, iterations)
