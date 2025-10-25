@@ -18,7 +18,7 @@ import (
 	testhelpers "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/test"
 )
 
-// TestFieldOwnershipTransitionVisibility validates that ownership transitions
+// TestAccFieldOwnershipTransitionVisibility validates that ownership transitions
 // are visible in the Terraform plan diff. This is a CRITICAL feature that took
 // hundreds of hours to build.
 //
@@ -31,7 +31,7 @@ import (
 // 4. Apply terraform (k8sconnect takes ownership back)
 //
 // The critical requirement: Step 3 MUST show the ownership transition in the plan output.
-func TestFieldOwnershipTransitionVisibility(t *testing.T) {
+func TestAccFieldOwnershipTransitionVisibility(t *testing.T) {
 	t.Parallel()
 
 	raw := os.Getenv("TF_ACC_KUBECONFIG")
