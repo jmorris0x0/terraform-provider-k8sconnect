@@ -147,10 +147,6 @@ func (r *objectResource) applyResourceWithConflictHandling(ctx context.Context, 
 			tflog.Debug(ctx, "Filtered ignored fields from Apply patch", map[string]interface{}{
 				"ignored_fields": ignoreFields,
 			})
-
-			// DEBUG: Log what we're actually applying
-			fmt.Printf("\n[APPLY-%s] About to apply %s/%s with ignore_fields filtered\n", operation, objToApply.GetNamespace(), objToApply.GetName())
-			fmt.Printf("[APPLY-%s] Ignored fields: %v\n", operation, ignoreFields)
 		}
 	}
 

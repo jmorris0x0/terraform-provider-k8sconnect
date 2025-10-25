@@ -1175,18 +1175,8 @@ func generateIgnoreFieldsPatchApplyCycles(
 			PreConfig: func() {
 				ctx := context.Background()
 
-				// DEBUG: Get ownership BEFORE kubectl patch
-				deployBefore, err := k8sClient.AppsV1().Deployments(ns).Get(ctx, deployName, metav1.GetOptions{})
-				if err == nil && len(deployBefore.ManagedFields) > 0 {
-					fmt.Printf("\n[ITER %d] BEFORE kubectl patch:\n", iteration)
-					for _, mf := range deployBefore.ManagedFields {
-						fmt.Printf("  Manager: %s, Operation: %s, FieldsType: %s\n",
-							mf.Manager, mf.Operation, mf.FieldsType)
-					}
-				}
-
 				// Modify MANAGED_VAR (not ignored - should be reverted)
-				err = ssaClient.ForceApplyDeploymentEnvVarSSA(ctx, ns, deployName, "app",
+				err := ssaClient.ForceApplyDeploymentEnvVarSSA(ctx, ns, deployName, "app",
 					"MANAGED_VAR", fmt.Sprintf("kubectl-managed-%d", iteration), "kubectl-patch")
 				if err != nil {
 					t.Fatalf("Iteration %d: Failed to modify MANAGED_VAR: %v", iteration, err)
@@ -1199,27 +1189,8 @@ func generateIgnoreFieldsPatchApplyCycles(
 					t.Fatalf("Iteration %d: Failed to modify EXTERNAL_VAR: %v", iteration, err)
 				}
 
-				// DEBUG: Get ownership IMMEDIATELY AFTER kubectl patch
-				deployAfter, err := k8sClient.AppsV1().Deployments(ns).Get(ctx, deployName, metav1.GetOptions{})
-				if err == nil && len(deployAfter.ManagedFields) > 0 {
-					fmt.Printf("[ITER %d] AFTER kubectl patch (immediate GET):\n", iteration)
-					for _, mf := range deployAfter.ManagedFields {
-						fmt.Printf("  Manager: %s, Operation: %s, FieldsType: %s\n",
-							mf.Manager, mf.Operation, mf.FieldsType)
-
-						// DEBUG: Show fieldsV1 structure for env-related fields
-						if mf.FieldsV1 != nil && (mf.Manager == "k8sconnect" || mf.Manager == "kubectl-patch") {
-							fieldsV1Str := string(mf.FieldsV1.Raw)
-							if strings.Contains(fieldsV1Str, "env") {
-								fmt.Printf("    FieldsV1 (env excerpt): %s\n", fieldsV1Str)
-							}
-						}
-					}
-				}
-
 				// Optional: artificial delay to widen race window for local testing
 				if delayMs > 0 {
-					fmt.Printf("[ITER %d] Sleeping %dms (TEST_RACE_DELAY=%d)...\n", iteration, delayMs, delayMs)
 					time.Sleep(time.Duration(delayMs) * time.Millisecond)
 				}
 
