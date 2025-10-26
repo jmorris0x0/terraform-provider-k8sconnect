@@ -167,7 +167,7 @@ Deploy the same resource to multiple clusters:
 locals {
   prod_connection = {
     host                   = aws_eks_cluster.prod.endpoint
-    cluster_ca_certificate = base64decode(aws_eks_cluster.prod.certificate_authority[0].data)
+    cluster_ca_certificate = aws_eks_cluster.prod.certificate_authority[0].data
     exec = {
       api_version = "client.authentication.k8s.io/v1"
       command     = "aws"
