@@ -110,7 +110,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     host                   = var.host
     cluster_ca_certificate = var.ca
 
@@ -184,7 +184,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -271,7 +271,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -290,7 +290,7 @@ spec:
     command: ["sleep", "3600"]
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   
@@ -365,7 +365,7 @@ data:
   key1: value1
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -407,12 +407,12 @@ func TestAccObjectResource_DeferredAuthWithComputedEnvVars(t *testing.T) {
 					resource.TestCheckResourceAttrSet("k8sconnect_object.test_deferred_env", "id"),
 					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
 					// Verify the random values made it into the exec env vars (not the YAML)
-					resource.TestCheckResourceAttrSet("k8sconnect_object.test_deferred_env", "cluster_connection.exec.env.TEST_SESSION_ID"),
-					resource.TestCheckResourceAttrSet("k8sconnect_object.test_deferred_env", "cluster_connection.exec.env.TEST_TRACE_ID"),
-					resource.TestCheckResourceAttrSet("k8sconnect_object.test_deferred_env", "cluster_connection.exec.env.TEST_RUN_ID"),
+					resource.TestCheckResourceAttrSet("k8sconnect_object.test_deferred_env", "cluster.exec.env.TEST_SESSION_ID"),
+					resource.TestCheckResourceAttrSet("k8sconnect_object.test_deferred_env", "cluster.exec.env.TEST_TRACE_ID"),
+					resource.TestCheckResourceAttrSet("k8sconnect_object.test_deferred_env", "cluster.exec.env.TEST_RUN_ID"),
 					// Verify the exec command and args are what we expect
-					resource.TestCheckResourceAttr("k8sconnect_object.test_deferred_env", "cluster_connection.exec.command", "sh"),
-					resource.TestCheckResourceAttr("k8sconnect_object.test_deferred_env", "cluster_connection.exec.args.#", "2"),
+					resource.TestCheckResourceAttr("k8sconnect_object.test_deferred_env", "cluster.exec.command", "sh"),
+					resource.TestCheckResourceAttr("k8sconnect_object.test_deferred_env", "cluster.exec.args.#", "2"),
 				),
 			},
 		},
@@ -448,7 +448,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -466,7 +466,7 @@ data:
   static_key: "static_value"
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
     
     # This exec block contains env vars that are unknown during plan
@@ -564,7 +564,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -587,7 +587,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -604,7 +604,7 @@ data:
   key2: "value2"
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -614,7 +614,7 @@ YAML
 }
 
 // TestAccObjectResource_UnknownConnectionHost tests the bootstrap scenario where
-// cluster_connection.host is unknown at plan time (e.g., EKS cluster being created).
+// cluster.host is unknown at plan time (e.g., EKS cluster being created).
 // This validates ADR-011 bootstrap handling - projection should fall back gracefully.
 func TestAccObjectResource_UnknownConnectionHost(t *testing.T) {
 	t.Parallel()
@@ -706,7 +706,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -726,13 +726,13 @@ data:
   ca: "${var.ca}"
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
 
 # Resource that uses the cluster info (host is unknown during initial plan)
-# This simulates: cluster_connection.host = aws_eks_cluster.main.endpoint
+# This simulates: cluster.host = aws_eks_cluster.main.endpoint
 resource "k8sconnect_object" "test_dependent" {
   depends_on = [k8sconnect_object.cluster_info]
 
@@ -749,7 +749,7 @@ YAML
 
   # During initial plan, cluster_info doesn't exist yet, so its projection is unknown
   # This makes the host unknown, testing ADR-011 bootstrap fallback
-  cluster_connection = {
+  cluster = {
     host                   = k8sconnect_object.cluster_info.managed_state_projection["data.endpoint"]
     cluster_ca_certificate = var.ca
     token                  = var.token

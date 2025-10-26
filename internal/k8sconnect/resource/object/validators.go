@@ -20,7 +20,7 @@ import (
 // ConfigValidators implements resource-level validation for the object resource
 func (r *objectResource) ConfigValidators(ctx context.Context) []resource.ConfigValidator {
 	return []resource.ConfigValidator{
-		&validators.ClusterConnection{},
+		&validators.Cluster{},
 		&validators.ExecAuth{},
 		&conflictingAttributesValidator{},
 		&requiredFieldsValidator{},
@@ -82,11 +82,11 @@ func (v *conflictingAttributesValidator) ValidateResource(ctx context.Context, r
 type requiredFieldsValidator struct{}
 
 func (v *requiredFieldsValidator) Description(ctx context.Context) string {
-	return "Ensures required fields yaml_body and cluster_connection are specified"
+	return "Ensures required fields yaml_body and cluster are specified"
 }
 
 func (v *requiredFieldsValidator) MarkdownDescription(ctx context.Context) string {
-	return "Ensures required fields `yaml_body` and `cluster_connection` are specified"
+	return "Ensures required fields `yaml_body` and `cluster` are specified"
 }
 
 func (v *requiredFieldsValidator) ValidateResource(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
@@ -130,19 +130,19 @@ func (v *requiredFieldsValidator) ValidateResource(ctx context.Context, req reso
 		}
 	}
 
-	// Note: cluster_connection validation is handled by clusterConnectionValidator
+	// Note: cluster validation is handled by clusterConnectionValidator
 	// We just check that the block exists at all
-	if isClusterConnectionEmpty(data.ClusterConnection) {
+	if isClusterEmpty(data.Cluster) {
 		resp.Diagnostics.AddAttributeError(
-			path.Root("cluster_connection"),
+			path.Root("cluster"),
 			"Missing Required Configuration Block",
-			"'cluster_connection' block is required. It must specify how to connect to your Kubernetes cluster.",
+			"'cluster' block is required. It must specify how to connect to your Kubernetes cluster.",
 		)
 	}
 }
 
 // Helper function to check if cluster connection is completely empty
-func isClusterConnectionEmpty(conn types.Object) bool {
+func isClusterEmpty(conn types.Object) bool {
 	// If connection is unknown during planning, it's NOT empty - just not ready yet
 	if conn.IsUnknown() {
 		return false // Unknown != empty, it means values will be available later

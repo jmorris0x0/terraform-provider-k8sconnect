@@ -60,7 +60,7 @@ resource "k8sconnect_patch" "aws_node_proxy" {
     }
   })
 
-  cluster_connection = var.eks_connection
+  cluster = var.eks_connection
 
   # Computed
   managed_fields   = (computed)  # Only patched fields

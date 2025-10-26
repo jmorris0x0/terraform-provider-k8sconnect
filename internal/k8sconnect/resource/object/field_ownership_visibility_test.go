@@ -214,7 +214,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -243,7 +243,7 @@ spec:
         image: nginx:1.21
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }

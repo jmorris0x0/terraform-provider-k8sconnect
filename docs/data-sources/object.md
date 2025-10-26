@@ -85,7 +85,7 @@ The datasource provides three output formats:
 ### Required
 
 - `api_version` (String) API version of the resource (e.g., 'v1', 'apps/v1')
-- `cluster_connection` (Attributes) Cluster connection configuration (see [below for nested schema](#nestedatt--cluster_connection))
+- `cluster` (Attributes) Cluster connection configuration (see [below for nested schema](#nestedatt--cluster))
 - `kind` (String) Kind of the resource (e.g., 'ConfigMap', 'Deployment')
 - `name` (String) Name of the resource
 
@@ -99,8 +99,8 @@ The datasource provides three output formats:
 - `object` (Dynamic) The resource object for accessing individual fields
 - `yaml_body` (String) YAML representation of the complete resource
 
-<a id="nestedatt--cluster_connection"></a>
-### Nested Schema for `cluster_connection`
+<a id="nestedatt--cluster"></a>
+### Nested Schema for `cluster`
 
 Optional:
 
@@ -108,15 +108,15 @@ Optional:
 - `client_key` (String, Sensitive) Client certificate key for TLS authentication. Accepts PEM format or base64-encoded PEM - automatically detected.
 - `cluster_ca_certificate` (String, Sensitive) Root certificate bundle for TLS authentication. Accepts PEM format or base64-encoded PEM - automatically detected.
 - `context` (String) Context to use from the kubeconfig. Optional when kubeconfig contains exactly one context (that context will be used automatically). Required when kubeconfig contains multiple contexts to prevent accidental connection to the wrong cluster. Error will list available contexts if not specified when required.
-- `exec` (Attributes, Sensitive) Configuration for exec-based authentication. (see [below for nested schema](#nestedatt--cluster_connection--exec))
+- `exec` (Attributes, Sensitive) Configuration for exec-based authentication. (see [below for nested schema](#nestedatt--cluster--exec))
 - `host` (String) The hostname (in form of URI) of the Kubernetes API server.
 - `insecure` (Boolean) Whether server should be accessed without verifying the TLS certificate.
 - `kubeconfig` (String, Sensitive) Raw kubeconfig file content.
 - `proxy_url` (String) URL of the proxy to use for requests.
 - `token` (String, Sensitive) Token to authenticate to the Kubernetes API server.
 
-<a id="nestedatt--cluster_connection--exec"></a>
-### Nested Schema for `cluster_connection.exec`
+<a id="nestedatt--cluster--exec"></a>
+### Nested Schema for `cluster.exec`
 
 Required:
 

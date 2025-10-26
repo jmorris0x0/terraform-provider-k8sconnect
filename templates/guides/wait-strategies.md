@@ -29,7 +29,7 @@ Extract a status field for use in other resources.
 ```terraform
 resource "k8sconnect_object" "lb" {
   yaml_body = file("loadbalancer.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 resource "k8sconnect_wait" "lb" {
@@ -40,7 +40,7 @@ resource "k8sconnect_wait" "lb" {
     timeout = "10m"
   }
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 # Use the extracted value
@@ -60,19 +60,19 @@ Wait for Deployment/StatefulSet/DaemonSet to fully deploy.
 ```terraform
 resource "k8sconnect_object" "database" {
   yaml_body = file("postgres.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 resource "k8sconnect_wait" "database" {
   object_ref = k8sconnect_object.database.object_ref
   wait_for   = { rollout = true, timeout = "5m" }
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 # Run migrations after DB is ready
 resource "k8sconnect_object" "migration" {
   yaml_body  = file("migration-job.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on = [k8sconnect_wait.database]
 }
 ```
@@ -88,18 +88,18 @@ Wait for Kubernetes condition status to be "True".
 ```terraform
 resource "k8sconnect_object" "argocd_app" {
   yaml_body = file("argocd-application.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 resource "k8sconnect_wait" "argocd_app" {
   object_ref = k8sconnect_object.argocd_app.object_ref
   wait_for   = { condition = "Healthy", timeout = "15m" }
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 resource "k8sconnect_object" "dependent_service" {
   yaml_body  = file("service.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on = [k8sconnect_wait.argocd_app]
 }
 ```
@@ -113,7 +113,7 @@ Wait for field to match exact string value.
 ```terraform
 resource "k8sconnect_object" "setup_job" {
   yaml_body = file("setup-job.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 resource "k8sconnect_wait" "setup_job" {
@@ -125,12 +125,12 @@ resource "k8sconnect_wait" "setup_job" {
     timeout     = "10m"
   }
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 resource "k8sconnect_object" "app" {
   yaml_body  = file("app.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on = [k8sconnect_wait.setup_job]
 }
 ```
@@ -143,20 +143,20 @@ resource "k8sconnect_object" "app" {
 # Create → Wait → Extract → Use
 resource "k8sconnect_object" "cert" {
   yaml_body = file("certificate.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 resource "k8sconnect_wait" "cert" {
   object_ref = k8sconnect_object.cert.object_ref
   wait_for   = { field = "status.conditions[?type=='Ready'].status", timeout = "10m" }
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 resource "k8sconnect_object" "ingress" {
   yaml_body = templatefile("ingress.yaml", {
     tls_secret = k8sconnect_wait.cert.result.spec.secretName
   })
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on = [k8sconnect_wait.cert]
 }
 ```
@@ -190,13 +190,13 @@ resource "k8sconnect_object" "db" {
             - name: POSTGRES_PASSWORD
               value: testpass
   YAML
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 resource "k8sconnect_wait" "db" {
   object_ref = k8sconnect_object.db.object_ref
   wait_for   = { rollout = true, timeout = "5m" }
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 resource "k8sconnect_object" "migration" {
@@ -216,7 +216,7 @@ resource "k8sconnect_object" "migration" {
           restartPolicy: Never
       backoffLimit: 1
   YAML
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   depends_on = [k8sconnect_wait.db]
 }
@@ -231,7 +231,7 @@ resource "k8sconnect_wait" "migration" {
     timeout = "5m"
   }
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 resource "k8sconnect_object" "app" {
@@ -255,7 +255,7 @@ resource "k8sconnect_object" "app" {
           - name: app
             image: nginx:1.21
   YAML
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on = [k8sconnect_wait.migration]
 }
 ```
@@ -268,7 +268,7 @@ resource "k8sconnect_object" "app" {
 resource "k8sconnect_object" "services" {
   for_each = toset(["api", "worker", "scheduler"])
   yaml_body = file("${each.key}.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 resource "k8sconnect_wait" "services" {
@@ -276,12 +276,12 @@ resource "k8sconnect_wait" "services" {
 
   object_ref = each.value.object_ref
   wait_for   = { rollout = true, timeout = "5m" }
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 resource "k8sconnect_object" "lb" {
   yaml_body  = file("lb.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on = [k8sconnect_wait.services]
 }
 ```

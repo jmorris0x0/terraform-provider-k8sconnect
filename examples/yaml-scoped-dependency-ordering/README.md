@@ -45,7 +45,7 @@ terraform plan
 terraform apply
 ```
 
-The `cluster_connection` variable should be provided via `-var`, `-var-file`, or environment variables.
+The `cluster` variable should be provided via `-var`, `-var-file`, or environment variables.
 
 ## Manifest Categories
 

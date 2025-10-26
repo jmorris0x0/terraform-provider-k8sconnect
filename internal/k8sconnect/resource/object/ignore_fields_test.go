@@ -175,7 +175,7 @@ metadata:
   name: ${var.namespace}
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -204,7 +204,7 @@ spec:
         image: nginx:1.21
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -509,7 +509,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -538,7 +538,7 @@ spec:
         image: nginx:1.21
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -570,7 +570,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -589,7 +589,7 @@ data:
   key2: value2
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -751,7 +751,7 @@ resource "k8sconnect_object" "test" {
 %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -827,7 +827,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -846,7 +846,7 @@ data:
   config: "replicas"
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -883,7 +883,7 @@ spec:
         image: nginx:1.21
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -1007,7 +1007,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -1036,7 +1036,7 @@ spec:
         image: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -1225,7 +1225,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -1259,7 +1259,7 @@ spec:
           value: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 

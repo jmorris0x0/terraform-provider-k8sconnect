@@ -766,7 +766,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_patch" "test" {
@@ -792,7 +792,7 @@ spec:
             cpu: "200m"
 YAML
 
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, deployName, namespace)
@@ -810,7 +810,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_patch" "test" {
@@ -834,7 +834,7 @@ resource "k8sconnect_patch" "test" {
     }
   ])
 
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, deployName, namespace)
@@ -852,7 +852,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_patch" "test" {
@@ -888,7 +888,7 @@ resource "k8sconnect_patch" "test" {
     }
   })
 
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, deployName, namespace)
@@ -906,7 +906,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_patch" "test" {
@@ -922,7 +922,7 @@ data:
   patched: value1
 YAML
 
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
@@ -940,7 +940,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_patch" "test" {
@@ -956,7 +956,7 @@ data:
   patched: value
 YAML
 
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
@@ -974,7 +974,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_object" "test_crd" {
@@ -1006,7 +1006,7 @@ spec:
               field2:
                 type: integer
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, crdPlural, crdPlural)
@@ -1024,7 +1024,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_object" "test_crd" {
@@ -1056,7 +1056,7 @@ spec:
               field2:
                 type: integer
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 
@@ -1074,7 +1074,7 @@ spec:
   field2: 100
 YAML
 
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_crd]
 }
 `, namespace, crdPlural, crdPlural, crName, namespace)
@@ -1092,7 +1092,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_patch" "test" {
@@ -1112,7 +1112,7 @@ resource "k8sconnect_patch" "test" {
     }
   ])
 
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, deployName, namespace)
@@ -1204,7 +1204,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_patch" "patch1" {
@@ -1220,7 +1220,7 @@ data:
   field1: patched-by-patch1
 YAML
 
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
@@ -1238,7 +1238,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_patch" "patch1" {
@@ -1254,7 +1254,7 @@ data:
   field1: patched-by-patch1
 YAML
 
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 
@@ -1271,7 +1271,7 @@ data:
   field2: patched-by-patch2
 YAML
 
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace, cmName, namespace)
@@ -1289,7 +1289,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_patch" "patch1" {
@@ -1305,7 +1305,7 @@ data:
   field1: patched-by-patch1
 YAML
 
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 
@@ -1322,7 +1322,7 @@ data:
   field2: patched-by-patch2
 YAML
 
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 
@@ -1339,7 +1339,7 @@ data:
   field1: conflicting-patch  # This conflicts with patch1
 YAML
 
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace, cmName, namespace, cmName, namespace)
@@ -1657,7 +1657,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_patch" "test" {
@@ -1675,7 +1675,7 @@ data:
   field3: patched3
 YAML
 
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
@@ -1693,7 +1693,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_patch" "test" {
@@ -1710,7 +1710,7 @@ data:
   field2: patched2
 YAML
 
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
@@ -1728,7 +1728,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_patch" "test" {
@@ -1747,7 +1747,7 @@ data:
   field4: patched4
 YAML
 
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
@@ -1765,7 +1765,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_patch" "test" {
@@ -1782,7 +1782,7 @@ data:
   field4: patched4
 YAML
 
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
@@ -1800,7 +1800,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_patch" "test" {
@@ -1824,7 +1824,7 @@ resource "k8sconnect_patch" "test" {
     }
   ])
 
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
@@ -1842,7 +1842,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_patch" "test" {
@@ -1861,7 +1861,7 @@ resource "k8sconnect_patch" "test" {
     }
   ])
 
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
@@ -1879,7 +1879,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_patch" "test" {
@@ -1897,7 +1897,7 @@ resource "k8sconnect_patch" "test" {
     }
   })
 
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
@@ -1915,7 +1915,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_patch" "test" {
@@ -1932,7 +1932,7 @@ resource "k8sconnect_patch" "test" {
     }
   })
 
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
@@ -1950,7 +1950,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_patch" "test" {
@@ -1967,7 +1967,7 @@ data:
   key2: value2
 YAML
 
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
@@ -1985,7 +1985,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_patch" "test" {
@@ -2003,7 +2003,7 @@ data:
   key2: value2  # second key
 YAML
 
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
@@ -2021,7 +2021,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_patch" "test" {
@@ -2037,7 +2037,7 @@ data:
   field1: patched-value-1
 YAML
 
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
@@ -2055,7 +2055,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_patch" "test" {
@@ -2071,7 +2071,7 @@ data:
   field1: patched-value-2
 YAML
 
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)
@@ -2089,7 +2089,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_patch" "test" {
@@ -2105,7 +2105,7 @@ data:
   field1: patched-value-3
 YAML
 
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 `, namespace, cmName, namespace)

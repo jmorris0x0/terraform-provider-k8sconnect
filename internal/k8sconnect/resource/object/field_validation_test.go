@@ -175,7 +175,7 @@ resource "k8sconnect_object" "namespace" {
       name: %[1]s
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -200,7 +200,7 @@ resource "k8sconnect_object" "namespace" {
       name: %[1]s
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -228,7 +228,7 @@ resource "k8sconnect_object" "deployment" {
             image: nginx:1.27
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -255,7 +255,7 @@ resource "k8sconnect_object" "namespace" {
       name: %[1]s
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -284,7 +284,7 @@ resource "k8sconnect_object" "deployment" {
             imagePullPolice: Always  # TYPO: should be "imagePullPolicy"
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -311,7 +311,7 @@ resource "k8sconnect_object" "namespace" {
       name: %[1]s
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -338,7 +338,7 @@ resource "k8sconnect_object" "deployment" {
             image: nginx:1.27
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -365,7 +365,7 @@ resource "k8sconnect_object" "namespace" {
       name: %[1]s
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -394,7 +394,7 @@ resource "k8sconnect_object" "deployment" {
             imagePullPolice: Always  # TYPO: should be "imagePullPolicy"
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 

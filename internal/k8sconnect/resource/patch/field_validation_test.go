@@ -179,7 +179,7 @@ resource "k8sconnect_object" "namespace" {
       name: %[1]s
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -198,7 +198,7 @@ resource "k8sconnect_patch" "deployment_patch" {
       replica: 3  # TYPO: should be "replicas"
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -225,7 +225,7 @@ resource "k8sconnect_object" "namespace" {
       name: %[1]s
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -244,7 +244,7 @@ resource "k8sconnect_patch" "deployment_patch" {
       replicas: 3
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -271,7 +271,7 @@ resource "k8sconnect_object" "namespace" {
       name: %[1]s
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -290,7 +290,7 @@ resource "k8sconnect_patch" "deployment_patch" {
       replica: 5  # TYPO: should be "replicas"
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -319,7 +319,7 @@ resource "k8sconnect_object" "namespace" {
       name: %[1]s
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }

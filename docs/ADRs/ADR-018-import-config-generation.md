@@ -23,7 +23,7 @@ import {
 terraform plan -generate-config-out=generated.tf
 ```
 
-The generated file contains HCL configuration reverse-engineered from the imported state, eliminating the manual step of writing `yaml_body` and `cluster_connection` before running `terraform import`.
+The generated file contains HCL configuration reverse-engineered from the imported state, eliminating the manual step of writing `yaml_body` and `cluster` before running `terraform import`.
 
 ### Current Import Workflow (Manual)
 
@@ -54,7 +54,7 @@ When `terraform plan -generate-config-out` runs:
 
 To support config generation, providers must:
 1. **Implement `ImportState`** ✅ We have this (`internal/k8sconnect/resource/object/import.go`)
-2. **Populate state correctly** ✅ We populate `yaml_body`, `cluster_connection`, etc.
+2. **Populate state correctly** ✅ We populate `yaml_body`, `cluster`, etc.
 3. **Have a sensible schema** ✅ Our schema is clean (Required, Optional, Computed clearly separated)
 
 **We technically already support this feature.** The question is: does it work well for k8sconnect's use case?
@@ -82,7 +82,7 @@ spec:
   # ... rest of manifest
 EOT
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = <<-EOT
 apiVersion: v1
 clusters:
@@ -206,7 +206,7 @@ Kubeconfig: types.StringValue(kubeconfigPath)
 
 **Generated config would be**:
 ```hcl
-cluster_connection = {
+cluster = {
   kubeconfig = "/Users/you/.kube/config"  # Much better!
   context    = "prod"
 }
@@ -220,7 +220,7 @@ cluster_connection = {
 - **BREAKS PORTABILITY**: State now has absolute paths
 - Moving kubeconfig file breaks Terraform
 - Sharing state across machines breaks
-- **Violates our design principle**: cluster_connection should be self-contained
+- **Violates our design principle**: cluster should be self-contained
 
 **Verdict**: **NO**. We intentionally store contents, not paths (see ADR discussion in provider auth design).
 
@@ -317,7 +317,7 @@ terraform plan -generate-config-out=generated.tf
 
 **What gets generated**:
 - `yaml_body`: Clean manifest (server fields removed)
-- `cluster_connection`: Kubeconfig inlined as string ⚠️
+- `cluster`: Kubeconfig inlined as string ⚠️
 
 **Recommended cleanup**:
 ```bash
@@ -391,7 +391,7 @@ sed -i 's|kubeconfig = <<-EOT.*EOT|kubeconfig = file("~/.kube/config")|' generat
 - Risk: Generator might crash or produce invalid HCL
 
 **Possible outcomes**:
-1. ✅ **Works**: Terraform skips these fields, generates only yaml_body + cluster_connection
+1. ✅ **Works**: Terraform skips these fields, generates only yaml_body + cluster
 2. ❌ **Crashes**: Generator fails on map serialization
 3. ❌ **Invalid HCL**: Generates unparseble configuration
 4. ❌ **Generates them anyway**: Produces config with hundreds of lines of computed maps
@@ -402,7 +402,7 @@ If Terraform tries to generate these fields, the output would be:
 ```hcl
 resource "k8sconnect_object" "nginx" {
   yaml_body = "..."
-  cluster_connection = {...}
+  cluster = {...}
 
   # ERROR: Can't set computed-only fields in config!
   managed_state_projection = {
@@ -480,9 +480,9 @@ terraform plan -generate-config-out=generated.tf
 - ✅ No crashes
 - ✅ Valid HCL generated
 - ✅ Computed fields (managed_state_projection, field_ownership, object_ref) **correctly excluded**
-- ✅ Only yaml_body and cluster_connection generated
+- ✅ Only yaml_body and cluster generated
 - ✅ yaml_body is clean (server fields removed)
-- ⚠️ cluster_connection has kubeconfig inlined as multi-line string (expected limitation)
+- ⚠️ cluster has kubeconfig inlined as multi-line string (expected limitation)
 
 **Generated config quality:**
 ```hcl
@@ -500,7 +500,7 @@ data:
   key2: value2
 EOT
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = <<-EOT
 apiVersion: v1
 clusters:
@@ -563,7 +563,7 @@ EOT
 sed -i '' 's/kubeconfig = <<-EOT.*EOT/kubeconfig = file("~\/.kube\/config")/g' generated.tf
 
 # Or manually edit to replace the heredoc with:
-cluster_connection = {
+cluster = {
   kubeconfig = file("~/.kube/config")
   context    = "your-context"
 }

@@ -10,33 +10,33 @@ import (
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 )
 
-func TestIsClusterConnectionEmpty(t *testing.T) {
+func TestIsClusterEmpty(t *testing.T) {
 	ctx := context.Background()
 	r := &objectResource{} // gives access to convertConnectionModelToObject
 
 	cases := []struct {
 		name     string
-		conn     auth.ClusterConnectionModel
+		conn     auth.ClusterModel
 		expected bool
 	}{
-		{"completely empty", auth.ClusterConnectionModel{}, true},
-		{"host only", auth.ClusterConnectionModel{
+		{"completely empty", auth.ClusterModel{}, true},
+		{"host only", auth.ClusterModel{
 			Host: types.StringValue("https://example.com"),
 		}, false},
-		{"cluster_ca_certificate only", auth.ClusterConnectionModel{
+		{"cluster_ca_certificate only", auth.ClusterModel{
 			ClusterCACertificate: types.StringValue("cert-bytes"),
 		}, false},
-		{"kubeconfig only", auth.ClusterConnectionModel{
+		{"kubeconfig only", auth.ClusterModel{
 			Kubeconfig: types.StringValue("raw-config"),
 		}, false},
-		{"exec present", auth.ClusterConnectionModel{
+		{"exec present", auth.ClusterModel{
 			Exec: &auth.ExecAuthModel{
 				APIVersion: types.StringValue("v1"),
 				Command:    types.StringValue("kubectl"),
 				Args:       []types.String{types.StringValue("version")},
 			},
 		}, false},
-		{"all nulls", auth.ClusterConnectionModel{
+		{"all nulls", auth.ClusterModel{
 			Host:                 types.StringNull(),
 			ClusterCACertificate: types.StringNull(),
 			Kubeconfig:           types.StringNull(),
@@ -50,7 +50,7 @@ func TestIsClusterConnectionEmpty(t *testing.T) {
 			if err != nil {
 				t.Fatalf("conversion failed: %v", err)
 			}
-			if got := isClusterConnectionEmpty(obj); got != tc.expected {
+			if got := isClusterEmpty(obj); got != tc.expected {
 				t.Fatalf("expected %v, got %v", tc.expected, got)
 			}
 		})
@@ -59,7 +59,7 @@ func TestIsClusterConnectionEmpty(t *testing.T) {
 
 func TestConnectionModeDetection(t *testing.T) {
 	// inline
-	inline := auth.ClusterConnectionModel{
+	inline := auth.ClusterModel{
 		Host:                 types.StringValue("https://example.com"),
 		ClusterCACertificate: types.StringValue("ca"),
 	}
@@ -104,7 +104,7 @@ func TestConfigValidatorsSlice(t *testing.T) {
 	for _, v := range validatorList {
 		typeName := reflect.TypeOf(v).String()
 		switch {
-		case typeName == "*validators.ClusterConnection":
+		case typeName == "*validators.Cluster":
 			typeNames["cluster"] = true
 		case typeName == "*validators.ExecAuth":
 			typeNames["exec"] = true
@@ -121,11 +121,11 @@ func TestConfigValidatorsSlice(t *testing.T) {
 	}
 }
 
-func hasInlineMode(c auth.ClusterConnectionModel) bool {
+func hasInlineMode(c auth.ClusterModel) bool {
 	return !c.Host.IsNull() || !c.ClusterCACertificate.IsNull()
 }
 
-func countModes(c auth.ClusterConnectionModel) int {
+func countModes(c auth.ClusterModel) int {
 	n := 0
 	if hasInlineMode(c) {
 		n++

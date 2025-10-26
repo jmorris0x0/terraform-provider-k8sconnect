@@ -32,5 +32,5 @@ resource "k8sconnect_object" "resources" {
   for_each = data.k8sconnect_yaml_split.resources.manifests
 
   yaml_body          = each.value
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }

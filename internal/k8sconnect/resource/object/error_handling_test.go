@@ -73,7 +73,7 @@ resource "k8sconnect_object" "namespace" {
       name: %[1]s
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -98,7 +98,7 @@ resource "k8sconnect_object" "namespace" {
       name: %[1]s
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -117,7 +117,7 @@ resource "k8sconnect_object" "invalid_pod" {
       restartPolicy: Never
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 

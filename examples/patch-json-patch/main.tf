@@ -20,7 +20,7 @@ resource "k8sconnect_patch" "kubernetes_svc_label" {
     }
   ])
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 # Output the patch ID

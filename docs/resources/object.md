@@ -197,7 +197,7 @@ resource "k8sconnect_object" "staging_app" {
 
 ### Required
 
-- `cluster_connection` (Attributes) Kubernetes cluster connection for this specific resource. Can be different per-resource, enabling multi-cluster deployments without provider aliases. Supports inline credentials (token, exec, client certs) or kubeconfig. (see [below for nested schema](#nestedatt--cluster_connection))
+- `cluster` (Attributes) Kubernetes cluster connection for this specific resource. Can be different per-resource, enabling multi-cluster deployments without provider aliases. Supports inline credentials (token, exec, client certs) or kubeconfig. (see [below for nested schema](#nestedatt--cluster))
 - `yaml_body` (String) UTF-8 encoded, single-document Kubernetes YAML. Multi-doc files will fail validation.
 
 ### Optional
@@ -214,8 +214,8 @@ resource "k8sconnect_object" "staging_app" {
 - `managed_state_projection` (Map of String) Field-by-field snapshot of managed state as flat key-value pairs with dotted paths. Shows exactly which fields k8sconnect manages and their current values. Terraform automatically displays only changed keys in diffs for clean, scannable output. When this differs from current cluster state, it indicates drift - someone modified your managed fields outside Terraform. Computed via Server-Side Apply dry-run for accuracy, enabling precise drift detection without false positives.
 - `object_ref` (Attributes) Kubernetes object reference containing the identity of the applied resource. Populated after successful apply. Used by k8sconnect_wait resource to locate the object for waiting. Contains api_version, kind, name, and namespace (if namespaced). (see [below for nested schema](#nestedatt--object_ref))
 
-<a id="nestedatt--cluster_connection"></a>
-### Nested Schema for `cluster_connection`
+<a id="nestedatt--cluster"></a>
+### Nested Schema for `cluster`
 
 Optional:
 
@@ -223,15 +223,15 @@ Optional:
 - `client_key` (String, Sensitive) Client certificate key for TLS authentication. Accepts PEM format or base64-encoded PEM - automatically detected.
 - `cluster_ca_certificate` (String, Sensitive) Root certificate bundle for TLS authentication. Accepts PEM format or base64-encoded PEM - automatically detected.
 - `context` (String) Context to use from the kubeconfig. Optional when kubeconfig contains exactly one context (that context will be used automatically). Required when kubeconfig contains multiple contexts to prevent accidental connection to the wrong cluster. Error will list available contexts if not specified when required.
-- `exec` (Attributes, Sensitive) Configuration for exec-based authentication. (see [below for nested schema](#nestedatt--cluster_connection--exec))
+- `exec` (Attributes, Sensitive) Configuration for exec-based authentication. (see [below for nested schema](#nestedatt--cluster--exec))
 - `host` (String) The hostname (in form of URI) of the Kubernetes API server.
 - `insecure` (Boolean) Whether server should be accessed without verifying the TLS certificate.
 - `kubeconfig` (String, Sensitive) Raw kubeconfig file content.
 - `proxy_url` (String) URL of the proxy to use for requests.
 - `token` (String, Sensitive) Token to authenticate to the Kubernetes API server.
 
-<a id="nestedatt--cluster_connection--exec"></a>
-### Nested Schema for `cluster_connection.exec`
+<a id="nestedatt--cluster--exec"></a>
+### Nested Schema for `cluster.exec`
 
 Required:
 

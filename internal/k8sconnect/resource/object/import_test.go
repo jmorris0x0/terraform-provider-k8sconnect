@@ -56,7 +56,7 @@ func TestAccObjectResource_Import(t *testing.T) {
 				ImportStateId:     fmt.Sprintf("k3d-k8sconnect-test:v1/Namespace:%s", namespaceName),
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
-					"cluster_connection",
+					"cluster",
 					"yaml_body",
 					"managed_state_projection",
 					"delete_protection",
@@ -90,7 +90,7 @@ metadata:
     created-by: terraform-test
 YAML
   
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -143,7 +143,7 @@ func TestAccObjectResource_ImportWithManagedFields(t *testing.T) {
 				ImportStateId:     fmt.Sprintf("k3d-k8sconnect-test:%s:v1/ConfigMap:%s", ns, configMapName),
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
-					"cluster_connection",       // Import uses file, config uses raw
+					"cluster",       // Import uses file, config uses raw
 					"yaml_body",                // Formatting and annotations differ
 					"managed_state_projection", // Import includes extra K8s fields
 					"delete_protection",        // Only in import, not in config
@@ -176,7 +176,7 @@ resource "k8sconnect_object" "import_namespace" {
       name: %s
   YAML
   
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -199,7 +199,7 @@ resource "k8sconnect_object" "test_import" {
       key3: value3
   YAML
   
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   
@@ -292,7 +292,7 @@ resource "k8sconnect_object" "import_namespace" {
       name: %s
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -315,7 +315,7 @@ resource "k8sconnect_object" "import_namespace" {
       name: %s
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -335,7 +335,7 @@ resource "k8sconnect_object" "test_import" {
       key2: value2
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 

@@ -24,7 +24,7 @@ var _ resource.ResourceWithImportState = (*objectResource)(nil)
 var _ resource.ResourceWithConfigure = (*objectResource)(nil)
 
 // ClientGetter function type for dependency injection
-type ClientGetter func(auth.ClusterConnectionModel) (k8sclient.K8sClient, error)
+type ClientGetter func(auth.ClusterModel) (k8sclient.K8sClient, error)
 
 type objectResource struct {
 	clientGetter  ClientGetter // Keep for now
@@ -34,7 +34,7 @@ type objectResource struct {
 type objectResourceModel struct {
 	ID                     types.String `tfsdk:"id"`
 	YAMLBody               types.String `tfsdk:"yaml_body"`
-	ClusterConnection      types.Object `tfsdk:"cluster_connection"`
+	Cluster      types.Object `tfsdk:"cluster"`
 	DeleteProtection       types.Bool   `tfsdk:"delete_protection"`
 	DeleteTimeout          types.String `tfsdk:"delete_timeout"`
 	FieldOwnership         types.Map    `tfsdk:"field_ownership"`
@@ -82,7 +82,7 @@ func (r *objectResource) Configure(ctx context.Context, req resource.ConfigureRe
 	r.clientFactory = clientFactory
 
 	// For backward compatibility, create a clientGetter that uses the factory
-	r.clientGetter = func(conn auth.ClusterConnectionModel) (k8sclient.K8sClient, error) {
+	r.clientGetter = func(conn auth.ClusterModel) (k8sclient.K8sClient, error) {
 		return r.clientFactory.GetClient(conn)
 	}
 }
@@ -106,7 +106,7 @@ func (r *objectResource) Schema(ctx context.Context, req resource.SchemaRequest,
 					serverManagedFieldsValidator{},
 				},
 			},
-			"cluster_connection": schema.SingleNestedAttribute{
+			"cluster": schema.SingleNestedAttribute{
 				Required: true,
 				Description: "Kubernetes cluster connection for this specific resource. Can be different per-resource, enabling multi-cluster " +
 					"deployments without provider aliases. Supports inline credentials (token, exec, client certs) or kubeconfig.",

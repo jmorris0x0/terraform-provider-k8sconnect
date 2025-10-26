@@ -44,7 +44,7 @@ resource "aws_eks_node_group" "main" {
 
 # Define connection once, reuse everywhere
 locals {
-  cluster_connection = {
+  cluster = {
     host                   = aws_eks_cluster.main.endpoint
     cluster_ca_certificate = aws_eks_cluster.main.certificate_authority[0].data
     exec = {
@@ -58,7 +58,7 @@ locals {
 # Deploy immediately in same apply!
 resource "k8sconnect_object" "app" {
   yaml_body          = file("app.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [aws_eks_node_group.main]
 }
 ```
@@ -100,7 +100,7 @@ resource "aws_eks_node_group" "main" {
 
 # Connection config (reusable)
 locals {
-  cluster_connection = {
+  cluster = {
     host                   = aws_eks_cluster.main.endpoint
     cluster_ca_certificate = aws_eks_cluster.main.certificate_authority[0].data
     exec = {
@@ -115,7 +115,7 @@ locals {
 resource "k8sconnect_object" "app" {
   yaml_body = file("app.yaml")
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [aws_eks_node_group.main]
 }
 ```
@@ -140,7 +140,7 @@ resource "k8sconnect_object" "cert_manager" {
   for_each = data.k8sconnect_yaml_split.cert_manager.documents
 
   yaml_body          = each.value
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [aws_eks_node_group.main]
 }
 
@@ -157,7 +157,7 @@ resource "k8sconnect_object" "ingress_nginx" {
   for_each = data.k8sconnect_yaml_split.ingress_nginx.documents
 
   yaml_body          = each.value
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [aws_eks_node_group.main]
 }
 
@@ -170,7 +170,7 @@ resource "k8sconnect_wait" "ingress_lb" {
     timeout = "10m"
   }
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 # Create DNS record
@@ -186,7 +186,7 @@ resource "aws_route53_record" "ingress" {
 resource "k8sconnect_object" "app" {
   yaml_body = file("app-with-ingress.yaml")
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [k8sconnect_wait.ingress_lb, k8sconnect_object.cert_manager]
 }
 ```
@@ -223,7 +223,7 @@ resource "google_container_node_pool" "main" {
 }
 
 locals {
-  cluster_connection = {
+  cluster = {
     host                   = "https://${google_container_cluster.main.endpoint}"
     cluster_ca_certificate = google_container_cluster.main.master_auth[0].cluster_ca_certificate
     exec = {
@@ -235,7 +235,7 @@ locals {
 
 resource "k8sconnect_object" "app" {
   yaml_body          = file("app.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [google_container_node_pool.main]
 }
 ```
@@ -266,7 +266,7 @@ resource "azurerm_kubernetes_cluster" "main" {
 }
 
 locals {
-  cluster_connection = {
+  cluster = {
     host                   = azurerm_kubernetes_cluster.main.kube_config[0].host
     cluster_ca_certificate = azurerm_kubernetes_cluster.main.kube_config[0].cluster_ca_certificate
     client_certificate     = azurerm_kubernetes_cluster.main.kube_config[0].client_certificate
@@ -276,7 +276,7 @@ locals {
 
 resource "k8sconnect_object" "app" {
   yaml_body          = file("app.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 ```
 
@@ -287,21 +287,21 @@ resource "k8sconnect_object" "app" {
 ```terraform
 resource "k8sconnect_object" "namespace" {
   yaml_body = file("namespace.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   depends_on = [aws_eks_node_group.main]
 }
 
 resource "k8sconnect_object" "config" {
   yaml_body = file("config.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   depends_on = [k8sconnect_object.namespace]
 }
 
 resource "k8sconnect_object" "app" {
   yaml_body = file("app.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   depends_on = [k8sconnect_object.config]
 }
@@ -318,7 +318,7 @@ resource "k8sconnect_object" "secret" {
       password: ${random_password.db.result}
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 resource "k8sconnect_object" "app" {
@@ -330,7 +330,7 @@ resource "k8sconnect_object" "app" {
           name: ${k8sconnect_object.secret.object_ref.name}
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 ```
 
@@ -342,19 +342,19 @@ Terraform auto-orders: `random_password` → `secret` → `app`
 # These deploy simultaneously (no dependencies)
 resource "k8sconnect_object" "monitoring_namespace" {
   yaml_body = file("monitoring-ns.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 resource "k8sconnect_object" "app_namespace" {
   yaml_body = file("app-ns.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 # Each stack deploys in parallel too
 resource "k8sconnect_object" "monitoring" {
   for_each = data.k8sconnect_yaml_split.prometheus.documents
   yaml_body = each.value
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   depends_on = [k8sconnect_object.monitoring_namespace]
 }
@@ -362,7 +362,7 @@ resource "k8sconnect_object" "monitoring" {
 resource "k8sconnect_object" "app" {
   for_each = data.k8sconnect_yaml_split.app.documents
   yaml_body = each.value
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   depends_on = [k8sconnect_object.app_namespace]
 }
@@ -374,20 +374,20 @@ resource "k8sconnect_object" "app" {
 # Deploy DB
 resource "k8sconnect_object" "postgres" {
   yaml_body = file("postgres.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 # Wait for ready
 resource "k8sconnect_wait" "postgres" {
   object_ref = k8sconnect_object.postgres.object_ref
   wait_for   = { rollout = true, timeout = "10m" }
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 # Run migration
 resource "k8sconnect_object" "migration" {
   yaml_body  = file("migration-job.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   depends_on = [k8sconnect_wait.postgres]
 }
@@ -396,13 +396,13 @@ resource "k8sconnect_object" "migration" {
 resource "k8sconnect_wait" "migration" {
   object_ref = k8sconnect_object.migration.object_ref
   wait_for   = { field = "status.succeeded", field_value = "1", timeout = "15m" }
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 # Deploy app
 resource "k8sconnect_object" "app" {
   yaml_body  = file("app.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   depends_on = [k8sconnect_wait.migration]
 }
@@ -478,7 +478,7 @@ resource "k8sconnect_object" "cr" {
 
 ```terraform
 locals {
-  cluster_connection = { /* ... */ }
+  cluster = { /* ... */ }
 }
 ```
 

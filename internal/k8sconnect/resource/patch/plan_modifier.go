@@ -71,7 +71,7 @@ func (r *patchResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanR
 	}
 
 	// Validate connection is ready for operations
-	if !r.isConnectionReady(plannedData.ClusterConnection) {
+	if !r.isConnectionReady(plannedData.Cluster) {
 		tflog.Debug(ctx, "Connection has unknown values, skipping dry-run")
 		plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
 		plannedData.ManagedFields = types.StringUnknown()
@@ -238,7 +238,7 @@ func (r *patchResource) executeDryRunPatch(ctx context.Context, req resource.Mod
 // setupDryRunClient creates the k8s client for dry-run (reused from manifest pattern)
 func (r *patchResource) setupDryRunClient(ctx context.Context, plannedData *patchResourceModel, resp *resource.ModifyPlanResponse) (k8sclient.K8sClient, error) {
 	// Convert connection
-	conn, err := auth.ObjectToConnectionModel(ctx, plannedData.ClusterConnection)
+	conn, err := auth.ObjectToConnectionModel(ctx, plannedData.Cluster)
 	if err != nil {
 		tflog.Debug(ctx, "Skipping dry-run due to connection conversion error", map[string]interface{}{"error": err.Error()})
 		setProjectionUnknown(plannedData)

@@ -173,7 +173,7 @@ metadata:
   name: %[1]s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -190,7 +190,7 @@ data:
   key2: "value2"
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   depends_on = [k8sconnect_object.namespace]
@@ -203,7 +203,7 @@ resource "k8sconnect_wait" "test" {
     field = "data.key1"
   }
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   depends_on = [k8sconnect_object.cm]
@@ -227,7 +227,7 @@ metadata:
   name: %[1]s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -244,7 +244,7 @@ data:
   key2: "value2"
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   depends_on = [k8sconnect_object.namespace]
@@ -257,7 +257,7 @@ resource "k8sconnect_wait" "test" {
     field = "data.key2"  # Changed from key1 to key2
   }
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   depends_on = [k8sconnect_object.cm]
@@ -281,7 +281,7 @@ resource "k8sconnect_object" "namespace" {
     metadata:
       name: %[1]s
   YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -307,7 +307,7 @@ resource "k8sconnect_object" "deploy" {
           - name: nginx
             image: public.ecr.aws/nginx/nginx:1.25
   YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   depends_on = [k8sconnect_object.namespace]
@@ -325,7 +325,7 @@ resource "k8sconnect_wait" "test" {
     field = "status.replicas"
   }
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   depends_on = [k8sconnect_object.deploy]
@@ -349,7 +349,7 @@ resource "k8sconnect_object" "namespace" {
     metadata:
       name: %[1]s
   YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -375,7 +375,7 @@ resource "k8sconnect_object" "deploy" {
           - name: nginx
             image: nginx:1.25
   YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   depends_on = [k8sconnect_object.namespace]
@@ -393,7 +393,7 @@ resource "k8sconnect_wait" "test" {
     condition = "Available"
   }
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   depends_on = [k8sconnect_object.deploy]
@@ -417,7 +417,7 @@ resource "k8sconnect_object" "namespace" {
     metadata:
       name: %[1]s
   YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -434,7 +434,7 @@ resource "k8sconnect_object" "pod" {
       - name: nginx
         image: nginx:1.25
   YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   depends_on = [k8sconnect_object.namespace]
@@ -453,7 +453,7 @@ resource "k8sconnect_wait" "test" {
     timeout   = "1m"
   }
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   depends_on = [k8sconnect_object.pod]
@@ -477,7 +477,7 @@ resource "k8sconnect_object" "namespace" {
     metadata:
       name: %[1]s
   YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -494,7 +494,7 @@ resource "k8sconnect_object" "pod" {
       - name: nginx
         image: nginx:1.25
   YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   depends_on = [k8sconnect_object.namespace]
@@ -513,7 +513,7 @@ resource "k8sconnect_wait" "test" {
     timeout   = "2m"  # Changed from 1m to 2m
   }
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   depends_on = [k8sconnect_object.pod]

@@ -108,7 +108,7 @@ resource "k8sconnect_object" "import_namespace" {
       name: %s
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -131,7 +131,7 @@ resource "k8sconnect_object" "import_namespace" {
       name: %s
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -148,7 +148,7 @@ resource "k8sconnect_object" "external_import" {
       purpose: import-test
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 

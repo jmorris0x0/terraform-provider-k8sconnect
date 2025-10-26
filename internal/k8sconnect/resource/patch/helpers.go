@@ -22,11 +22,11 @@ import (
 // setupClient creates a Kubernetes client from the patch resource's connection configuration
 func (r *patchResource) setupClient(ctx context.Context, data *patchResourceModel, diagnostics *diag.Diagnostics) (k8sclient.K8sClient, error) {
 	// Convert connection object to model
-	conn, err := auth.ObjectToConnectionModel(ctx, data.ClusterConnection)
+	conn, err := auth.ObjectToConnectionModel(ctx, data.Cluster)
 	if err != nil {
 		diagnostics.AddError(
 			"Invalid Connection Configuration",
-			fmt.Sprintf("Failed to parse cluster_connection: %s", err))
+			fmt.Sprintf("Failed to parse cluster: %s", err))
 		return nil, err
 	}
 

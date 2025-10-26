@@ -94,7 +94,7 @@ metadata:
   namespace: default
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -116,7 +116,7 @@ subjects:
     namespace: default
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 

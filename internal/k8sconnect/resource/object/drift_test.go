@@ -142,7 +142,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -163,7 +163,7 @@ data:
   key3: value3
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   
@@ -276,7 +276,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -294,7 +294,7 @@ data:
     setting2=value2
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   
@@ -402,7 +402,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -431,7 +431,7 @@ spec:
         - containerPort: 80
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   
@@ -530,7 +530,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -556,7 +556,7 @@ spec:
     targetPort: 443
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   
@@ -629,7 +629,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -651,7 +651,7 @@ spec:
     protocol: TCP
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -816,7 +816,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -843,7 +843,7 @@ spec:
         image: public.ecr.aws/nginx/nginx:1.21
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -862,7 +862,7 @@ data:
   key2: value2
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 

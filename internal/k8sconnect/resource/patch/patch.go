@@ -26,7 +26,7 @@ var _ resource.ResourceWithConfigure = (*patchResource)(nil)
 var _ resource.ResourceWithModifyPlan = (*patchResource)(nil)
 
 // ClientGetter function type for dependency injection
-type ClientGetter func(auth.ClusterConnectionModel) (k8sclient.K8sClient, error)
+type ClientGetter func(auth.ClusterModel) (k8sclient.K8sClient, error)
 
 type patchResource struct {
 	clientGetter  ClientGetter
@@ -39,7 +39,7 @@ type patchResourceModel struct {
 	Patch             types.String `tfsdk:"patch"`
 	JSONPatch         types.String `tfsdk:"json_patch"`
 	MergePatch        types.String `tfsdk:"merge_patch"`
-	ClusterConnection types.Object `tfsdk:"cluster_connection"`
+	Cluster types.Object `tfsdk:"cluster"`
 
 	// Computed fields
 
@@ -87,7 +87,7 @@ func (r *patchResource) Configure(ctx context.Context, req resource.ConfigureReq
 	r.clientFactory = clientFactory
 
 	// For backward compatibility, create a clientGetter that uses the factory
-	r.clientGetter = func(conn auth.ClusterConnectionModel) (k8sclient.K8sClient, error) {
+	r.clientGetter = func(conn auth.ClusterModel) (k8sclient.K8sClient, error) {
 		return r.clientFactory.GetClient(conn)
 	}
 }
@@ -212,7 +212,7 @@ When you destroy a patch resource, ownership is released but patched values rema
 				},
 			},
 
-			"cluster_connection": schema.SingleNestedAttribute{
+			"cluster": schema.SingleNestedAttribute{
 				Required: true,
 				Description: "Kubernetes cluster connection for this specific patch. Can be different per-resource, enabling multi-cluster " +
 					"deployments without provider aliases. Supports inline credentials (token, exec, client certs) or kubeconfig.",

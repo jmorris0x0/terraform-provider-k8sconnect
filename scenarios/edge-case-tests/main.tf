@@ -27,7 +27,7 @@ resource "kind_cluster" "test" {
 }
 
 locals {
-  cluster_connection = {
+  cluster = {
     host                   = kind_cluster.test.endpoint
     cluster_ca_certificate = base64encode(kind_cluster.test.cluster_ca_certificate)
     client_certificate     = base64encode(kind_cluster.test.client_certificate)
@@ -43,7 +43,7 @@ resource "k8sconnect_object" "test_namespace" {
     metadata:
       name: identity-test
   YAML
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 # Test resource for identity changes
@@ -57,7 +57,7 @@ resource "k8sconnect_object" "test_configmap" {
     data:
       foo: bar
   YAML
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on = [k8sconnect_object.test_namespace]
 }
 
@@ -78,7 +78,7 @@ resource "k8sconnect_object" "test_service" {
       - port: 80
         targetPort: 8080
   YAML
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on = [k8sconnect_object.test_namespace]
 }
 
@@ -88,7 +88,7 @@ data "k8sconnect_object" "import_test_read" {
   kind = "ConfigMap"
   name = "external-import-test"
   namespace = "identity-test"
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on = [k8sconnect_object.test_namespace]
 }
 

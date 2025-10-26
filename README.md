@@ -46,7 +46,7 @@ resource "aws_eks_node_group" "main" {
 
 # Connection can be reused across resources
 locals {
-  cluster_connection = {
+  cluster = {
     host                   = aws_eks_cluster.main.endpoint
     cluster_ca_certificate = aws_eks_cluster.main.certificate_authority[0].data
     exec = {
@@ -60,7 +60,7 @@ locals {
 # Deploy workloads immediately - no waiting for provider configuration!
 resource "k8sconnect_object" "app" {
   yaml_body          = file("deployment.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   # For EKS: ensure nodes are ready before deploying workloads
   depends_on = [aws_eks_node_group.main]
@@ -77,7 +77,7 @@ The provider supports three ways to connect to clusters:
 
 **Inline with token auth**
 ```hcl
-cluster_connection = {
+cluster = {
   host                   = "https://k8s.example.com"
   cluster_ca_certificate = file("ca.pem")
   token                  = var.cluster_token
@@ -86,7 +86,7 @@ cluster_connection = {
 
 **Inline with exec auth** (AWS EKS, GKE, etc.)
 ```hcl
-cluster_connection = {
+cluster = {
   host                   = "https://k8s.example.com"
   cluster_ca_certificate = file("ca.pem")
   exec = {
@@ -100,13 +100,13 @@ cluster_connection = {
 **kubeconfig**
 ```hcl
 # From file
-cluster_connection = {
+cluster = {
   kubeconfig = file("~/.kube/config")
   context    = "production"  # optional
 }
 
 # From variable (CI-friendly)
-cluster_connection = {
+cluster = {
   kubeconfig = var.kubeconfig_content
 }
 ```
@@ -136,12 +136,12 @@ locals {
 # Deploy to different clusters in one apply
 resource "k8sconnect_object" "prod_app" {
   yaml_body          = file("app.yaml")
-  cluster_connection = local.prod_connection
+  cluster = local.prod_connection
 }
 
 resource "k8sconnect_object" "staging_app" {
   yaml_body          = file("app.yaml")
-  cluster_connection = local.staging_connection
+  cluster = local.staging_connection
 }
 ```
 
@@ -163,7 +163,7 @@ resource "k8sconnect_object" "app" {
   
   yaml_body = each.value
   
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.kubeconfig
   }
 }
@@ -202,7 +202,7 @@ resource "k8sconnect_patch" "aws_node_config" {
     }
   })
 
-  cluster_connection = var.cluster_connection
+  cluster = var.cluster
 }
 ```
 
@@ -235,7 +235,7 @@ resource "k8sconnect_object" "service" {
         app: myapp
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 # Wait for LoadBalancer IP to be assigned
@@ -247,7 +247,7 @@ resource "k8sconnect_wait" "service" {
     timeout = "5m"
   }
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 # Use the LoadBalancer IP immediately
@@ -262,7 +262,7 @@ resource "k8sconnect_object" "config" {
       service_url: "${k8sconnect_wait.service.result.status.loadBalancer.ingress[0].ip}:80"
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [k8sconnect_wait.service]
 }
 ```
@@ -317,7 +317,7 @@ Connection credentials are stored in Terraform state. Mitigate by:
 *You should probably be doing these things regardless.*
 
 
-All `cluster_connection` fields are marked sensitive and won't appear in logs or plan output.
+All `cluster` fields are marked sensitive and won't appear in logs or plan output.
 
 ---
 

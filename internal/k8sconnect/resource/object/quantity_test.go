@@ -83,7 +83,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -105,7 +105,7 @@ spec:
     limits.cpu: "2"             # Should stay as-is
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -182,7 +182,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -202,7 +202,7 @@ spec:
       storage: "5Gi"  # This MUST NOT show as drift when K8s stores as bytes
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   
@@ -277,7 +277,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -311,7 +311,7 @@ spec:
             cpu: "500m"       # Normalizes to "0.5"
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   

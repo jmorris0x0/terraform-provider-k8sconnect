@@ -119,7 +119,7 @@ resource "k8sconnect_object" "namespace" {
       name: %s
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -141,7 +141,7 @@ resource "k8sconnect_object" "namespace" {
       name: %s
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -164,7 +164,7 @@ resource "k8sconnect_object" "imported_cm" {
       purpose: import-inconsistent-test
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 

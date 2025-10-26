@@ -81,7 +81,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -98,7 +98,7 @@ data:
   value: "test"
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   
@@ -120,7 +120,7 @@ data:
   static_value: "known-at-plan-time"
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   
@@ -189,7 +189,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -205,7 +205,7 @@ data:
   value: "first"
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   
@@ -223,7 +223,7 @@ data:
   first_id: "${k8sconnect_object.first.id}"
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   
@@ -242,7 +242,7 @@ data:
   second_id: "${k8sconnect_object.second.id}"
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   

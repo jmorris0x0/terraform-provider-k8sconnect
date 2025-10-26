@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2025-10-27
+
+### BREAKING CHANGES
+
+⚠️ **This release contains breaking changes to reduce verbosity**
+
+- **Renamed `cluster_connection` to `cluster`** across all resources and data sources
+  - Affects: `k8sconnect_object`, `k8sconnect_patch`, `k8sconnect_wait`, and all data sources
+  - **Migration required:** Replace `cluster_connection =` with `cluster =` in your Terraform configurations
+  - **One-liner migration (macOS/Linux):**
+    ```bash
+    find . -name "*.tf" -exec sed -i.bak 's/cluster_connection =/cluster =/g' {} +
+    ```
+  - **Windows PowerShell migration:**
+    ```powershell
+    Get-ChildItem -Recurse -Filter *.tf | ForEach-Object {
+      (Get-Content $_.FullName) -replace 'cluster_connection =', 'cluster =' |
+      Set-Content $_.FullName
+    }
+    ```
+
+**Why this change?**
+
+Early user feedback indicated `cluster_connection` was excessively verbose (18 characters repeated in every resource). We're making this breaking change now while the user base is small (pre-1.0, <50 downloads) to improve long-term developer experience. Apologies for the inconvenience - it's better to fix this now than carry the technical debt forever.
+
+**Before (0.1.x):**
+```hcl
+resource "k8sconnect_object" "example" {
+  cluster_connection = local.conn
+  yaml_body = "..."
+}
+```
+
+**After (0.2.0):**
+```hcl
+resource "k8sconnect_object" "example" {
+  cluster = local.conn
+  yaml_body = "..."
+}
+```
+
 ## [0.1.7] - 2025-10-26
 
 ### Fixed

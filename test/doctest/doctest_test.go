@@ -315,7 +315,7 @@ func ensureNamespaceExists(content string) string {
       name: %s
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 `, foundNamespace)
@@ -342,7 +342,7 @@ func writeTestFiles(t *testing.T, dir string, kubeconfig string) {
 
 	// Write locals.tf with cluster connection
 	locals := fmt.Sprintf(`locals {
-  cluster_connection = {
+  cluster = {
     kubeconfig = %q
   }
 }`, kubeconfig)

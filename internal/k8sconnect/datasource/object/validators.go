@@ -13,26 +13,26 @@ import (
 // ConfigValidators implements datasource.DataSourceWithConfigValidators
 func (d *objectDataSource) ConfigValidators(ctx context.Context) []datasource.ConfigValidator {
 	return []datasource.ConfigValidator{
-		&manifestDSClusterConnectionValidator{},
+		&manifestDSClusterValidator{},
 		&manifestDSExecAuthValidator{},
 	}
 }
 
 // =============================================================================
-// manifestDSClusterConnectionValidator ensures exactly one connection mode is specified
+// manifestDSClusterValidator ensures exactly one connection mode is specified
 // =============================================================================
 
-type manifestDSClusterConnectionValidator struct{}
+type manifestDSClusterValidator struct{}
 
-func (v *manifestDSClusterConnectionValidator) Description(ctx context.Context) string {
+func (v *manifestDSClusterValidator) Description(ctx context.Context) string {
 	return "Ensures exactly one cluster connection mode is specified: inline (host + cluster_ca_certificate or insecure) or kubeconfig"
 }
 
-func (v *manifestDSClusterConnectionValidator) MarkdownDescription(ctx context.Context) string {
+func (v *manifestDSClusterValidator) MarkdownDescription(ctx context.Context) string {
 	return "Ensures exactly one cluster connection mode is specified: inline (`host` + `cluster_ca_certificate` or `insecure`), `kubeconfig`"
 }
 
-func (v *manifestDSClusterConnectionValidator) ValidateDataSource(ctx context.Context, req datasource.ValidateConfigRequest, resp *datasource.ValidateConfigResponse) {
+func (v *manifestDSClusterValidator) ValidateDataSource(ctx context.Context, req datasource.ValidateConfigRequest, resp *datasource.ValidateConfigResponse) {
 	var data objectDataSourceModel
 	diags := req.Config.Get(ctx, &data)
 	resp.Diagnostics.Append(diags...)
@@ -41,22 +41,22 @@ func (v *manifestDSClusterConnectionValidator) ValidateDataSource(ctx context.Co
 	}
 
 	// Skip validation for unknown connections (during planning)
-	if data.ClusterConnection.IsUnknown() {
+	if data.Cluster.IsUnknown() {
 		return
 	}
 
 	// Check connection exists
-	if data.ClusterConnection.IsNull() {
+	if data.Cluster.IsNull() {
 		resp.Diagnostics.AddAttributeError(
-			path.Root("cluster_connection"),
+			path.Root("cluster"),
 			"Missing Cluster Connection Configuration",
-			"cluster_connection block is required.",
+			"cluster block is required.",
 		)
 		return
 	}
 
 	// Convert to connection model
-	connModel, err := auth.ObjectToConnectionModel(ctx, data.ClusterConnection)
+	connModel, err := auth.ObjectToConnectionModel(ctx, data.Cluster)
 	if err != nil {
 		// Unknown values during planning - skip validation
 		return
@@ -66,7 +66,7 @@ func (v *manifestDSClusterConnectionValidator) ValidateDataSource(ctx context.Co
 	err = auth.ValidateConnectionWithUnknowns(ctx, connModel)
 	if err != nil {
 		resp.Diagnostics.AddAttributeError(
-			path.Root("cluster_connection"),
+			path.Root("cluster"),
 			"Invalid Cluster Connection Configuration",
 			err.Error(),
 		)
@@ -96,12 +96,12 @@ func (v *manifestDSExecAuthValidator) ValidateDataSource(ctx context.Context, re
 	}
 
 	// If connection is unknown or null, skip validation
-	if data.ClusterConnection.IsUnknown() || data.ClusterConnection.IsNull() {
+	if data.Cluster.IsUnknown() || data.Cluster.IsNull() {
 		return
 	}
 
 	// Convert to connection model
-	connModel, err := auth.ObjectToConnectionModel(ctx, data.ClusterConnection)
+	connModel, err := auth.ObjectToConnectionModel(ctx, data.Cluster)
 	if err != nil {
 		// Unknown values during planning
 		return
@@ -113,7 +113,7 @@ func (v *manifestDSExecAuthValidator) ValidateDataSource(ctx context.Context, re
 		// Only report if it's an exec-related error
 		if strings.Contains(err.Error(), "exec authentication") {
 			resp.Diagnostics.AddAttributeError(
-				path.Root("cluster_connection").AtName("exec"),
+				path.Root("cluster").AtName("exec"),
 				"Invalid Exec Authentication Configuration",
 				err.Error(),
 			)

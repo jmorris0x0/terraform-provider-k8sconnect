@@ -10,7 +10,7 @@ resource "k8sconnect_object" "namespace" {
       name: example
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 # Create backend service
@@ -29,7 +29,7 @@ resource "k8sconnect_object" "backend" {
         app: backend
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [k8sconnect_object.namespace]
 }
 
@@ -55,7 +55,7 @@ resource "k8sconnect_object" "ingress" {
                   number: 8080
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [k8sconnect_object.backend]
 }
 
@@ -64,7 +64,7 @@ resource "k8sconnect_object" "ingress" {
 resource "k8sconnect_wait" "ingress" {
   object_ref = k8sconnect_object.ingress.object_ref
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   wait_for = {
     field   = "status.loadBalancer.ingress"
@@ -85,7 +85,7 @@ resource "k8sconnect_object" "dns_config" {
       external_url: "https://api.example.com"
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [k8sconnect_wait.ingress]
 }
 

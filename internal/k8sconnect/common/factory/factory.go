@@ -16,7 +16,7 @@ import (
 
 // ClientFactory handles creation and caching of K8s clients
 type ClientFactory interface {
-	GetClient(conn auth.ClusterConnectionModel) (k8sclient.K8sClient, error)
+	GetClient(conn auth.ClusterModel) (k8sclient.K8sClient, error)
 }
 
 // CachedClientFactory implements ClientFactory with connection caching
@@ -33,7 +33,7 @@ func NewCachedClientFactory() *CachedClientFactory {
 }
 
 // GetClient returns a cached client or creates a new one
-func (f *CachedClientFactory) GetClient(conn auth.ClusterConnectionModel) (k8sclient.K8sClient, error) {
+func (f *CachedClientFactory) GetClient(conn auth.ClusterModel) (k8sclient.K8sClient, error) {
 	cacheKey := f.generateCacheKey(conn)
 
 	// First check with read lock
@@ -69,7 +69,7 @@ func (f *CachedClientFactory) GetClient(conn auth.ClusterConnectionModel) (k8scl
 }
 
 // generateCacheKey creates a unique key for caching clients based on connection config
-func (f *CachedClientFactory) generateCacheKey(conn auth.ClusterConnectionModel) string {
+func (f *CachedClientFactory) generateCacheKey(conn auth.ClusterModel) string {
 	h := sha256.New()
 
 	// Hash all connection fields that affect the client

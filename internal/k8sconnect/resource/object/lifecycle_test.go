@@ -93,7 +93,7 @@ YAML
 
   delete_protection = true
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -121,7 +121,7 @@ YAML
 
   delete_protection = false
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -188,7 +188,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -209,7 +209,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
     context        = "k3d-k8sconnect-test"  # Explicit context (connection change)
   }
@@ -274,7 +274,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -297,7 +297,7 @@ YAML
   delete_timeout = "30s"
   force_destroy = true
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   
@@ -359,7 +359,7 @@ YAML
 
   delete_timeout = "2m"
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -446,7 +446,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -463,7 +463,7 @@ spec:
   - name: nginx
     image: nginx:latest
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   depends_on = [k8sconnect_object.namespace]
@@ -485,7 +485,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -500,7 +500,7 @@ metadata:
 data:
   key: value
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   depends_on = [k8sconnect_object.namespace]
@@ -575,7 +575,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -590,7 +590,7 @@ metadata:
 data:
   key: value
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   depends_on = [k8sconnect_object.namespace]
@@ -671,7 +671,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -683,7 +683,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -698,7 +698,7 @@ metadata:
 data:
   key: value
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   depends_on = [
@@ -781,7 +781,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -800,7 +800,7 @@ spec:
     requests:
       storage: %s
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   depends_on = [k8sconnect_object.namespace]
@@ -902,7 +902,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -933,7 +933,7 @@ spec:
               color:
                 type: string
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -955,7 +955,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -986,7 +986,7 @@ spec:
               color:
                 type: string
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -1001,7 +1001,7 @@ metadata:
 spec:
   color: blue
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   depends_on = [
@@ -1027,7 +1027,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -1070,7 +1070,7 @@ spec:
               color:
                 type: string
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -1092,7 +1092,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -1135,7 +1135,7 @@ spec:
               color:
                 type: string
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -1150,7 +1150,7 @@ metadata:
 spec:
   color: red
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   depends_on = [
@@ -1208,7 +1208,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -1265,7 +1265,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -1280,7 +1280,7 @@ metadata:
 data:
   config-value: ${var.config_value}
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   depends_on = [k8sconnect_object.namespace]
@@ -1341,7 +1341,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -1372,7 +1372,7 @@ YAML
 
   ignore_fields = ["spec.replicas"]
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -1464,7 +1464,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -1484,7 +1484,7 @@ YAML
 
   delete_timeout = "2s"
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   depends_on = [k8sconnect_object.namespace]
@@ -1505,7 +1505,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -1577,7 +1577,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -1598,7 +1598,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -1613,7 +1613,7 @@ metadata:
 data:
   managed: "true"
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   depends_on = [k8sconnect_object.namespace]
@@ -1702,7 +1702,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -1723,7 +1723,7 @@ spec:
     requests:
       storage: %s
 YAML
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   depends_on = [k8sconnect_object.namespace]

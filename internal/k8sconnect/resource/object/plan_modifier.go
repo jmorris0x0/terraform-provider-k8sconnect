@@ -75,7 +75,7 @@ func (r *objectResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 	}
 
 	// Validate connection is ready for operations
-	if !r.isConnectionReady(plannedData.ClusterConnection) {
+	if !r.isConnectionReady(plannedData.Cluster) {
 		// Connection has unknown values (bootstrap scenario) - set projection to unknown
 		// User can review yaml_body in plan output
 		r.setProjectionUnknown(ctx, &plannedData, resp,
@@ -205,7 +205,7 @@ func (r *objectResource) executeDryRunAndProjection(ctx context.Context, req res
 // setupDryRunClient creates the k8s client for dry-run
 func (r *objectResource) setupDryRunClient(ctx context.Context, plannedData *objectResourceModel, resp *resource.ModifyPlanResponse) (k8sclient.K8sClient, error) {
 	// Convert connection
-	conn, err := r.convertObjectToConnectionModel(ctx, plannedData.ClusterConnection)
+	conn, err := r.convertObjectToConnectionModel(ctx, plannedData.Cluster)
 	if err != nil {
 		r.setProjectionUnknown(ctx, plannedData, resp,
 			fmt.Sprintf("Skipping dry-run due to connection conversion error: %s", err))

@@ -10,7 +10,7 @@ resource "k8sconnect_object" "namespace" {
       name: example
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 resource "k8sconnect_object" "loadbalancer_service" {
@@ -29,14 +29,14 @@ resource "k8sconnect_object" "loadbalancer_service" {
         app: demo
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [k8sconnect_object.namespace]
 }
 
 resource "k8sconnect_wait" "loadbalancer_service" {
   object_ref = k8sconnect_object.loadbalancer_service.object_ref
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   wait_for = {
     field   = "status.loadBalancer.ingress"
@@ -56,7 +56,7 @@ resource "k8sconnect_object" "endpoint_config" {
       endpoint_ready: "true"
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [k8sconnect_wait.loadbalancer_service]
 }
 

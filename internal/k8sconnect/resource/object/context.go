@@ -19,7 +19,7 @@ import (
 type ResourceContext struct {
 	Ctx                        context.Context
 	Data                       *objectResourceModel
-	Connection                 auth.ClusterConnectionModel
+	Connection                 auth.ClusterModel
 	Client                     k8sclient.K8sClient
 	Object                     *unstructured.Unstructured
 	GVR                        schema.GroupVersionResource
@@ -114,21 +114,21 @@ func (r *objectResource) loadConnectionFromData(
 	ctx context.Context,
 	data *objectResourceModel,
 	requireConnection bool,
-) (auth.ClusterConnectionModel, error) {
+) (auth.ClusterModel, error) {
 
 	// Connection is always required from the resource now
-	if data.ClusterConnection.IsNull() || data.ClusterConnection.IsUnknown() {
+	if data.Cluster.IsNull() || data.Cluster.IsUnknown() {
 		if requireConnection {
-			return auth.ClusterConnectionModel{}, fmt.Errorf(
-				"cluster_connection is required")
+			return auth.ClusterModel{}, fmt.Errorf(
+				"cluster is required")
 		}
-		return auth.ClusterConnectionModel{}, nil
+		return auth.ClusterModel{}, nil
 	}
 
 	// Convert the connection object to our model
-	conn, err := r.convertObjectToConnectionModel(ctx, data.ClusterConnection)
+	conn, err := r.convertObjectToConnectionModel(ctx, data.Cluster)
 	if err != nil {
-		return auth.ClusterConnectionModel{}, fmt.Errorf("invalid connection: %w", err)
+		return auth.ClusterModel{}, fmt.Errorf("invalid connection: %w", err)
 	}
 
 	return conn, nil
@@ -235,7 +235,7 @@ func (r *objectResource) updateProjection(rc *ResourceContext) error {
 }
 
 // isConnectionEmpty checks if connection is empty
-func (r *objectResource) isConnectionEmpty(conn auth.ClusterConnectionModel) bool {
+func (r *objectResource) isConnectionEmpty(conn auth.ClusterModel) bool {
 	return conn.Host.IsNull() &&
 		conn.Kubeconfig.IsNull() &&
 		conn.Kubeconfig.IsNull() &&
