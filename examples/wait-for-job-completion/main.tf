@@ -10,7 +10,7 @@ resource "k8sconnect_object" "namespace" {
       name: example
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 resource "k8sconnect_object" "migration_job" {
@@ -35,14 +35,14 @@ resource "k8sconnect_object" "migration_job" {
           restartPolicy: Never
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
   depends_on         = [k8sconnect_object.namespace]
 }
 
 resource "k8sconnect_wait" "migration_job" {
   object_ref = k8sconnect_object.migration_job.object_ref
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 
   wait_for = {
     field_value = {
@@ -67,7 +67,7 @@ resource "k8sconnect_object" "app_deployment" {
       migrations_complete: "true"
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
   depends_on         = [k8sconnect_wait.migration_job]
 }
 

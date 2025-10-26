@@ -54,7 +54,7 @@ resource "k8sconnect_patch" "coredns_label" {
     }
   })
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 ```
 <!-- /runnable-test -->
@@ -82,7 +82,7 @@ resource "k8sconnect_patch" "kubernetes_svc_label" {
     }
   ])
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 ```
 <!-- /runnable-test -->
@@ -110,7 +110,7 @@ resource "k8sconnect_patch" "kube_dns_annotation" {
     }
   })
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 ```
 <!-- /runnable-test -->
@@ -147,7 +147,7 @@ resource "k8sconnect_patch" "aws_node_env" {
 
   cluster_connection = {
     host                   = aws_eks_cluster.main.endpoint
-    cluster_ca_certificate = base64decode(aws_eks_cluster.main.certificate_authority[0].data)
+    cluster_ca_certificate = aws_eks_cluster.main.certificate_authority[0].data
     exec = {
       api_version = "client.authentication.k8s.io/v1"
       command     = "aws"

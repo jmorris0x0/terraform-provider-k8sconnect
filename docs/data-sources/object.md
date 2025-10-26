@@ -20,7 +20,7 @@ data "k8sconnect_object" "kubernetes_api" {
   name        = "kubernetes"
   namespace   = "default"
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 # Use the .object attribute to access fields with dot notation
@@ -37,7 +37,7 @@ resource "k8sconnect_object" "api_endpoint_config" {
       endpoint: "https://${data.k8sconnect_object.kubernetes_api.object.spec.clusterIP}:${tostring(data.k8sconnect_object.kubernetes_api.object.spec.ports[0].port)}"
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 ```
 <!-- /runnable-test -->
@@ -56,7 +56,7 @@ data "k8sconnect_object" "aws_node" {
 
   cluster_connection = {
     host                   = aws_eks_cluster.main.endpoint
-    cluster_ca_certificate = base64decode(aws_eks_cluster.main.certificate_authority[0].data)
+    cluster_ca_certificate = aws_eks_cluster.main.certificate_authority[0].data
     exec = {
       api_version = "client.authentication.k8s.io/v1"
       command     = "aws"

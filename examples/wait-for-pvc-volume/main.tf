@@ -10,7 +10,7 @@ resource "k8sconnect_object" "namespace" {
       name: example
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 # Create PersistentVolume
@@ -31,7 +31,7 @@ resource "k8sconnect_object" "pv" {
         path: /tmp/data
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 # Create PVC
@@ -51,7 +51,7 @@ resource "k8sconnect_object" "pvc" {
           storage: 5Gi
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
   depends_on         = [k8sconnect_object.namespace, k8sconnect_object.pv]
 }
 
@@ -59,7 +59,7 @@ resource "k8sconnect_object" "pvc" {
 resource "k8sconnect_wait" "pvc" {
   object_ref = k8sconnect_object.pvc.object_ref
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 
   wait_for = {
     field_value = { "status.phase" = "Bound" }
@@ -81,6 +81,6 @@ resource "k8sconnect_object" "volume_metadata" {
       capacity: "5Gi"
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
   depends_on         = [k8sconnect_wait.pvc]
 }

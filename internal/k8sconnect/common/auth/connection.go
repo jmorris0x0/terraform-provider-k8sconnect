@@ -12,6 +12,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
+	"sigs.k8s.io/yaml"
 )
 
 // ClusterConnectionModel represents the connection configuration for a Kubernetes cluster.
@@ -214,12 +215,19 @@ func configureProxy(config *rest.Config, conn ClusterConnectionModel) error {
 
 // createKubeconfigConfig creates a REST config from kubeconfig data
 func createKubeconfigConfig(conn ClusterConnectionModel) (*rest.Config, error) {
-	kubeconfigData := []byte(conn.Kubeconfig.ValueString())
+	kubeconfigContent := conn.Kubeconfig.ValueString()
+
+	// Validate kubeconfig content before parsing
+	if err := validateKubeconfigContent(kubeconfigContent); err != nil {
+		return nil, err
+	}
+
+	kubeconfigData := []byte(kubeconfigContent)
 
 	// Load kubeconfig to inspect contexts
 	clientConfig, err := clientcmd.Load(kubeconfigData)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load kubeconfig: %w", err)
+		return nil, fmt.Errorf("failed to parse kubeconfig YAML: %w\n\nHint: Ensure kubeconfig contains valid YAML content. If loading from a file, use: kubeconfig = file(\"~/.kube/config\")", err)
 	}
 
 	if !conn.Context.IsNull() {
@@ -270,6 +278,51 @@ func createKubeconfigConfig(conn ClusterConnectionModel) (*rest.Config, error) {
 
 	return nil, fmt.Errorf("kubeconfig contains %d contexts - you must explicitly specify which one to use via 'context' attribute.\n\nAvailable contexts:\n  - %s",
 		contextCount, strings.Join(contextNames, "\n  - "))
+}
+
+// validateKubeconfigContent performs early validation of kubeconfig content to catch common mistakes
+func validateKubeconfigContent(content string) error {
+	// Check for empty content
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return fmt.Errorf("kubeconfig is empty\n\nProvide valid kubeconfig YAML content, or use: kubeconfig = file(\"~/.kube/config\")")
+	}
+
+	// Check if it looks like a file path (common mistake)
+	if strings.HasPrefix(trimmed, "/") || strings.HasPrefix(trimmed, "~/") || strings.HasPrefix(trimmed, "./") {
+		return fmt.Errorf("kubeconfig appears to be a file path (%q) instead of file content\n\nDid you mean to use: kubeconfig = file(%q)", trimmed, trimmed)
+	}
+
+	// Check if it looks like a Windows path
+	if len(trimmed) > 2 && trimmed[1] == ':' && (trimmed[2] == '\\' || trimmed[2] == '/') {
+		return fmt.Errorf("kubeconfig appears to be a Windows file path (%q) instead of file content\n\nDid you mean to use: kubeconfig = file(%q)", trimmed, trimmed)
+	}
+
+	// Try to parse as YAML to validate structure
+	var parsed map[string]interface{}
+	if err := yaml.Unmarshal([]byte(content), &parsed); err != nil {
+		// Clean up the error message - remove confusing internal implementation details
+		errMsg := err.Error()
+		errMsg = strings.ReplaceAll(errMsg, "error unmarshaling JSON: while decoding JSON: ", "")
+		errMsg = strings.ReplaceAll(errMsg, "error converting YAML to JSON: ", "")
+
+		// Simplify "json: cannot unmarshal X" messages
+		if strings.HasPrefix(errMsg, "json: cannot unmarshal") {
+			errMsg = "content is not a valid YAML document (expected key-value pairs)"
+		}
+
+		return fmt.Errorf("kubeconfig is not valid YAML: %s\n\nEnsure you're providing valid YAML content. If loading from a file, use: kubeconfig = file(\"~/.kube/config\")", errMsg)
+	}
+
+	// Check for required kubeconfig fields
+	hasApiVersion := parsed["apiVersion"] != nil
+	hasClusters := parsed["clusters"] != nil
+
+	if !hasApiVersion && !hasClusters {
+		return fmt.Errorf("kubeconfig is missing required fields (expected 'apiVersion' or 'clusters')\n\nThis doesn't appear to be a valid kubeconfig file. If loading from a file, use: kubeconfig = file(\"~/.kube/config\")")
+	}
+
+	return nil
 }
 
 // IsConnectionReady checks if the connection has all values known (not unknown).

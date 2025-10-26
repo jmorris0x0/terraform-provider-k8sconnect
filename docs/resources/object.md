@@ -62,7 +62,7 @@ resource "k8sconnect_object" "namespace" {
       name: example
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 resource "k8sconnect_object" "deployment" {
@@ -87,7 +87,7 @@ resource "k8sconnect_object" "deployment" {
             image: nginx:1.21
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
   depends_on         = [k8sconnect_object.namespace]
 }
 ```
@@ -127,7 +127,7 @@ resource "k8sconnect_object" "app" {
   # Ignore spec.replicas because HPA will modify it
   ignore_fields = ["spec.replicas"]
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 resource "k8sconnect_object" "hpa" {
@@ -153,7 +153,7 @@ resource "k8sconnect_object" "hpa" {
             averageUtilization: 50
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
   depends_on         = [k8sconnect_object.app]
 }
 ```
@@ -167,7 +167,7 @@ Deploy the same resource to multiple clusters:
 locals {
   prod_connection = {
     host                   = aws_eks_cluster.prod.endpoint
-    cluster_ca_certificate = base64decode(aws_eks_cluster.prod.certificate_authority[0].data)
+    cluster_ca_certificate = aws_eks_cluster.prod.certificate_authority[0].data
     exec = {
       api_version = "client.authentication.k8s.io/v1"
       command     = "aws"
@@ -271,7 +271,7 @@ Traditional import command - requires writing resource configuration first:
 # 1. Write resource block
 resource "k8sconnect_object" "nginx" {
   yaml_body = file("nginx.yaml")
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 # 2. Run import
@@ -316,7 +316,7 @@ import {
 
 resource "k8sconnect_object" "nginx" {
   yaml_body = file("nginx.yaml")
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 ```
 
@@ -607,7 +607,7 @@ resource "k8sconnect_object" "api" {
     "spec.ports[*].nodePort"
   ]
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 ```
 

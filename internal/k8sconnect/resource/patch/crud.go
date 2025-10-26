@@ -189,12 +189,26 @@ func (r *patchResource) Read(ctx context.Context, req resource.ReadRequest, resp
 
 	// 6. If value drift detected, warn and re-apply patch to correct it
 	if valueDriftDetected {
-		// Format drifted fields for display (limit to first 5 for readability)
-		fieldsList := driftedFields
-		if len(fieldsList) > 5 {
-			fieldsList = append(driftedFields[:5], fmt.Sprintf("... and %d more", len(driftedFields)-5))
+		// Extract current field ownership to show which controllers are fighting
+		patchContent := r.getPatchContent(data)
+		patchType := r.determinePatchType(data)
+		patchedFieldPaths, _ := r.extractPatchFieldPaths(ctx, patchContent, patchType)
+		currentOwnership := fieldmanagement.ExtractFieldOwnershipForPaths(currentObj, patchedFieldPaths)
+
+		// Format drifted fields with ownership info (limit to first 5 for readability)
+		var fieldDetails []string
+		displayLimit := 5
+		for i, field := range driftedFields {
+			if i >= displayLimit {
+				fieldDetails = append(fieldDetails, fmt.Sprintf("... and %d more", len(driftedFields)-displayLimit))
+				break
+			}
+			if owner, exists := currentOwnership[field]; exists && owner != fieldManager {
+				fieldDetails = append(fieldDetails, fmt.Sprintf("  - %s (owned by \"%s\")", field, owner))
+			} else {
+				fieldDetails = append(fieldDetails, fmt.Sprintf("  - %s", field))
+			}
 		}
-		fieldsStr := strings.Join(fieldsList, ", ")
 
 		// Build kubectl command (with or without namespace)
 		kubectlCmd := fmt.Sprintf("kubectl get %s %s",
@@ -206,13 +220,14 @@ func (r *patchResource) Read(ctx context.Context, req resource.ReadRequest, resp
 		kubectlCmd += " -o yaml"
 
 		resp.Diagnostics.AddWarning(
-			"Patched Field Values Changed Externally",
-			fmt.Sprintf("Fields modified externally and automatically corrected: %s\n\n"+
-				"The patch has been re-applied to restore your desired values. If another controller keeps modifying these fields, consider:\n"+
+			"Field Ownership Conflict - Controllers Fighting",
+			fmt.Sprintf("Other controllers modified fields we manage and will be forcefully corrected:\n%s\n\n"+
+				"The patch has been re-applied with force=true to restore your values. This indicates controllers are fighting over these fields.\n\n"+
+				"If another controller keeps modifying these fields, consider:\n"+
 				"• Removing this patch to allow the other controller to manage these fields\n"+
-				"• Reconfiguring the other controller to avoid conflicts\n\n"+
+				"• Reconfiguring or disabling the other controller to avoid conflicts\n\n"+
 				"To investigate: %s",
-				fieldsStr,
+				strings.Join(fieldDetails, "\n"),
 				kubectlCmd),
 		)
 

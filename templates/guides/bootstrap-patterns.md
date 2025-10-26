@@ -102,7 +102,7 @@ resource "aws_eks_node_group" "main" {
 locals {
   cluster_connection = {
     host                   = aws_eks_cluster.main.endpoint
-    cluster_ca_certificate = base64decode(aws_eks_cluster.main.certificate_authority[0].data)
+    cluster_ca_certificate = aws_eks_cluster.main.certificate_authority[0].data
     exec = {
       api_version = "client.authentication.k8s.io/v1"
       command     = "aws"
@@ -225,7 +225,7 @@ resource "google_container_node_pool" "main" {
 locals {
   cluster_connection = {
     host                   = "https://${google_container_cluster.main.endpoint}"
-    cluster_ca_certificate = base64decode(google_container_cluster.main.master_auth[0].cluster_ca_certificate)
+    cluster_ca_certificate = google_container_cluster.main.master_auth[0].cluster_ca_certificate
     exec = {
       api_version = "client.authentication.k8s.io/v1beta1"
       command     = "gke-gcloud-auth-plugin"
@@ -268,9 +268,9 @@ resource "azurerm_kubernetes_cluster" "main" {
 locals {
   cluster_connection = {
     host                   = azurerm_kubernetes_cluster.main.kube_config[0].host
-    cluster_ca_certificate = base64decode(azurerm_kubernetes_cluster.main.kube_config[0].cluster_ca_certificate)
-    client_certificate     = base64decode(azurerm_kubernetes_cluster.main.kube_config[0].client_certificate)
-    client_key             = base64decode(azurerm_kubernetes_cluster.main.kube_config[0].client_key)
+    cluster_ca_certificate = azurerm_kubernetes_cluster.main.kube_config[0].cluster_ca_certificate
+    client_certificate     = azurerm_kubernetes_cluster.main.kube_config[0].client_certificate
+    client_key             = azurerm_kubernetes_cluster.main.kube_config[0].client_key
   }
 }
 
@@ -288,18 +288,21 @@ resource "k8sconnect_object" "app" {
 resource "k8sconnect_object" "namespace" {
   yaml_body = file("namespace.yaml")
   cluster_connection = local.cluster_connection
+
   depends_on = [aws_eks_node_group.main]
 }
 
 resource "k8sconnect_object" "config" {
   yaml_body = file("config.yaml")
   cluster_connection = local.cluster_connection
+
   depends_on = [k8sconnect_object.namespace]
 }
 
 resource "k8sconnect_object" "app" {
   yaml_body = file("app.yaml")
   cluster_connection = local.cluster_connection
+
   depends_on = [k8sconnect_object.config]
 }
 ```
@@ -314,6 +317,8 @@ resource "k8sconnect_object" "secret" {
     stringData:
       password: ${random_password.db.result}
   YAML
+
+  cluster_connection = local.cluster_connection
 }
 
 resource "k8sconnect_object" "app" {
@@ -324,6 +329,8 @@ resource "k8sconnect_object" "app" {
         secretKeyRef:
           name: ${k8sconnect_object.secret.object_ref.name}
   YAML
+
+  cluster_connection = local.cluster_connection
 }
 ```
 
@@ -348,6 +355,7 @@ resource "k8sconnect_object" "monitoring" {
   for_each = data.k8sconnect_yaml_split.prometheus.documents
   yaml_body = each.value
   cluster_connection = local.cluster_connection
+
   depends_on = [k8sconnect_object.monitoring_namespace]
 }
 
@@ -355,6 +363,7 @@ resource "k8sconnect_object" "app" {
   for_each = data.k8sconnect_yaml_split.app.documents
   yaml_body = each.value
   cluster_connection = local.cluster_connection
+
   depends_on = [k8sconnect_object.app_namespace]
 }
 ```
@@ -379,6 +388,7 @@ resource "k8sconnect_wait" "postgres" {
 resource "k8sconnect_object" "migration" {
   yaml_body  = file("migration-job.yaml")
   cluster_connection = local.cluster_connection
+
   depends_on = [k8sconnect_wait.postgres]
 }
 
@@ -393,6 +403,7 @@ resource "k8sconnect_wait" "migration" {
 resource "k8sconnect_object" "app" {
   yaml_body  = file("app.yaml")
   cluster_connection = local.cluster_connection
+
   depends_on = [k8sconnect_wait.migration]
 }
 ```
@@ -433,6 +444,7 @@ resource "k8sconnect_object" "config" {
   yaml_body = <<-YAML
     endpoint: "${k8sconnect_wait.lb.result.status.loadBalancer.ingress[0].ip}"
   YAML
+
   depends_on = [k8sconnect_wait.lb]
 }
 ```

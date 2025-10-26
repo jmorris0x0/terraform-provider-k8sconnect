@@ -10,7 +10,7 @@ resource "k8sconnect_object" "namespace" {
       name: example
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 resource "k8sconnect_object" "deployment" {
@@ -35,6 +35,6 @@ resource "k8sconnect_object" "deployment" {
             image: public.ecr.aws/nginx/nginx:1.21
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
   depends_on         = [k8sconnect_object.namespace]
 }

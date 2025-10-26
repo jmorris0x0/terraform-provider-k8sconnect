@@ -155,20 +155,13 @@ func writeTestFiles(t *testing.T, dir string, kubeconfig string) {
 }`
 	os.WriteFile(filepath.Join(dir, "versions.tf"), []byte(versions), 0644)
 
-	// Write variables.tf
-	variables := `variable "cluster_connection" {
-  description = "Kubernetes cluster connection"
-  type = object({
-    kubeconfig = string
-  })
-}`
-	os.WriteFile(filepath.Join(dir, "variables.tf"), []byte(variables), 0644)
-
-	// Write terraform.tfvars
-	tfvars := fmt.Sprintf(`cluster_connection = {
-  kubeconfig = %q
+	// Write locals.tf with cluster connection
+	locals := fmt.Sprintf(`locals {
+  cluster_connection = {
+    kubeconfig = %q
+  }
 }`, kubeconfig)
-	os.WriteFile(filepath.Join(dir, "terraform.tfvars"), []byte(tfvars), 0644)
+	os.WriteFile(filepath.Join(dir, "locals.tf"), []byte(locals), 0644)
 }
 
 func runTerraform(t *testing.T, dir string, args ...string) {

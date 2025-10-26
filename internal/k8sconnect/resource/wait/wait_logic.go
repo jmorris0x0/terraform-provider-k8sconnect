@@ -624,6 +624,23 @@ func (r *waitResource) isWorkloadResource(kind string) bool {
 // extractReplicaStatus extracts replica information for workload resources
 // Returns empty string if fields don't exist (not an error)
 func (r *waitResource) extractReplicaStatus(obj *unstructured.Unstructured) string {
+	kind := obj.GetKind()
+
+	// DaemonSet uses different field names
+	if kind == "DaemonSet" {
+		desired, _, _ := unstructured.NestedInt64(obj.Object, "status", "desiredNumberScheduled")
+		ready, _, _ := unstructured.NestedInt64(obj.Object, "status", "numberReady")
+		updated, _, _ := unstructured.NestedInt64(obj.Object, "status", "updatedNumberScheduled")
+
+		if desired == 0 {
+			return "" // No status yet
+		}
+
+		return fmt.Sprintf("Replicas: %d/%d ready, %d/%d updated",
+			ready, desired, updated, desired)
+	}
+
+	// Deployment, StatefulSet, ReplicaSet use standard fields
 	replicas, hasReplicas, _ := unstructured.NestedInt64(obj.Object, "spec", "replicas")
 	readyReplicas, _, _ := unstructured.NestedInt64(obj.Object, "status", "readyReplicas")
 	availableReplicas, _, _ := unstructured.NestedInt64(obj.Object, "status", "availableReplicas")
@@ -855,11 +872,7 @@ func (r *waitResource) waitWithCheck(ctx context.Context, client k8sclient.K8sCl
 			case <-timeoutCh:
 				// Get final status for error message
 				current, _ := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
-				if current != nil {
-					_, reason := checkFunc(current)
-					return fmt.Errorf("timeout after %v waiting for %s: %s", timeout, waitType, reason)
-				}
-				return fmt.Errorf("timeout after %v waiting for %s", timeout, waitType)
+				return r.buildRolloutTimeoutError(current, obj, waitType, timeout)
 			case event, ok := <-watcher.ResultChan():
 				if !ok {
 					return fmt.Errorf("watch ended unexpectedly")
@@ -909,11 +922,7 @@ func (r *waitResource) pollWithCheck(ctx context.Context, client k8sclient.K8sCl
 		case <-ticker.C:
 			if time.Now().After(deadline) {
 				current, _ := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
-				if current != nil {
-					_, reason := checkFunc(current)
-					return fmt.Errorf("timeout after %v waiting for %s: %s", timeout, waitType, reason)
-				}
-				return fmt.Errorf("timeout after %v waiting for %s", timeout, waitType)
+				return r.buildRolloutTimeoutError(current, obj, waitType, timeout)
 			}
 
 			current, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
@@ -960,6 +969,59 @@ func isEmptyValue(v interface{}) bool {
 		// For unknown types, check if it's nil
 		return val == nil
 	}
+}
+
+// buildRolloutTimeoutError creates a clean timeout error for rollout waits
+func (r *waitResource) buildRolloutTimeoutError(current, original *unstructured.Unstructured, waitType string, timeout time.Duration) error {
+	// Use current object if available, otherwise fall back to original
+	obj := current
+	if obj == nil {
+		obj = original
+	}
+
+	kind := obj.GetKind()
+	name := obj.GetName()
+	namespace := obj.GetNamespace()
+
+	resourceRef := fmt.Sprintf("%s/%s", kind, name)
+	if namespace != "" {
+		resourceRef = fmt.Sprintf("%s/%s/%s", kind, namespace, name)
+	}
+
+	errMsg := fmt.Sprintf("Wait Timeout: %s\n\n", resourceRef)
+	errMsg += fmt.Sprintf("%s did not complete rollout within %v\n\n", kind, timeout)
+
+	// Current status section
+	errMsg += "Current status:\n"
+
+	// Show replica status if available
+	if replicaStatus := r.extractReplicaStatus(obj); replicaStatus != "" {
+		errMsg += fmt.Sprintf("  %s\n", replicaStatus)
+	}
+
+	// Show conditions if available
+	conditions, found, err := unstructured.NestedSlice(obj.Object, "status", "conditions")
+	if err == nil && found && len(conditions) > 0 {
+		errMsg += "  Conditions:\n"
+		for _, cond := range conditions {
+			condMap, ok := cond.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			typeVal, _ := condMap["type"].(string)
+			statusVal, _ := condMap["status"].(string)
+			reason, _ := condMap["reason"].(string)
+
+			condStr := fmt.Sprintf("    • %s = %s", typeVal, statusVal)
+			if reason != "" {
+				condStr += fmt.Sprintf(" (reason: %s)", reason)
+			}
+			errMsg += condStr + "\n"
+		}
+	}
+
+	return fmt.Errorf("%s", errMsg)
 }
 
 // buildFieldTimeoutError creates a helpful timeout error for field existence waits

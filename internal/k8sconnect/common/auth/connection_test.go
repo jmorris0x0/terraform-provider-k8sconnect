@@ -599,3 +599,134 @@ users:
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "context \"nonexistent-context\" not found in kubeconfig")
 }
+
+// Kubeconfig content validation tests
+func TestValidateKubeconfigContent_Empty(t *testing.T) {
+	err := validateKubeconfigContent("")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "kubeconfig is empty")
+	assert.Contains(t, err.Error(), "kubeconfig = file(")
+}
+
+func TestValidateKubeconfigContent_UnixFilePath(t *testing.T) {
+	testCases := []struct {
+		name string
+		path string
+	}{
+		{"absolute path", "/home/user/.kube/config"},
+		{"home path", "~/.kube/config"},
+		{"relative path", "./kubeconfig"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateKubeconfigContent(tc.path)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "appears to be a file path")
+			assert.Contains(t, err.Error(), tc.path)
+			assert.Contains(t, err.Error(), "Did you mean to use: kubeconfig = file(")
+		})
+	}
+}
+
+func TestValidateKubeconfigContent_WindowsFilePath(t *testing.T) {
+	testCases := []string{
+		"C:\\Users\\user\\.kube\\config",
+		"D:/kubeconfig",
+		"E:\\config",
+	}
+
+	for _, path := range testCases {
+		t.Run(path, func(t *testing.T) {
+			err := validateKubeconfigContent(path)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "appears to be a Windows file path")
+			assert.Contains(t, err.Error(), "Did you mean to use: kubeconfig = file(")
+			// Don't check exact path due to backslash escaping in error messages
+		})
+	}
+}
+
+func TestValidateKubeconfigContent_NotYAML(t *testing.T) {
+	err := validateKubeconfigContent("just-a-random-string-no-yaml")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is not valid YAML")
+	assert.Contains(t, err.Error(), "kubeconfig = file(")
+}
+
+func TestValidateKubeconfigContent_MissingRequiredFields(t *testing.T) {
+	// YAML structure but missing kubeconfig-specific fields
+	invalidYaml := `some: value
+other: thing
+nested:
+  key: value`
+
+	err := validateKubeconfigContent(invalidYaml)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "missing required fields")
+	assert.Contains(t, err.Error(), "apiVersion")
+	assert.Contains(t, err.Error(), "clusters")
+}
+
+func TestValidateKubeconfigContent_ValidKubeconfig(t *testing.T) {
+	validKubeconfig := `apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: https://test.example.com
+  name: test-cluster
+contexts:
+- context:
+    cluster: test-cluster
+    user: test-user
+  name: test-context
+users:
+- name: test-user
+  user:
+    token: test-token`
+
+	err := validateKubeconfigContent(validKubeconfig)
+	assert.NoError(t, err)
+}
+
+func TestValidateKubeconfigContent_ValidMinimal(t *testing.T) {
+	// Minimal valid - just needs apiVersion or clusters
+	minimalWithApiVersion := `apiVersion: v1
+clusters: []`
+
+	err := validateKubeconfigContent(minimalWithApiVersion)
+	assert.NoError(t, err)
+
+	minimalWithClusters := `clusters:
+- cluster:
+    server: https://test.com
+  name: test`
+
+	err = validateKubeconfigContent(minimalWithClusters)
+	assert.NoError(t, err)
+}
+
+func TestCreateRESTConfig_KubeconfigFilePath(t *testing.T) {
+	// Test that file path gets caught with helpful error
+	conn := ClusterConnectionModel{
+		Kubeconfig: types.StringValue("/home/user/.kube/config"),
+	}
+
+	_, err := CreateRESTConfig(context.Background(), conn)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "appears to be a file path")
+	assert.Contains(t, err.Error(), "Did you mean to use: kubeconfig = file(")
+}
+
+func TestCreateRESTConfig_KubeconfigInvalidYAML(t *testing.T) {
+	// Test that invalid YAML gets caught with helpful error
+	conn := ClusterConnectionModel{
+		Kubeconfig: types.StringValue("not-yaml-content"),
+	}
+
+	_, err := CreateRESTConfig(context.Background(), conn)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is not valid YAML")
+}

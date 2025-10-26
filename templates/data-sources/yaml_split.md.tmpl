@@ -43,7 +43,7 @@ resource "k8sconnect_object" "resources" {
   for_each = data.k8sconnect_yaml_split.resources.manifests
 
   yaml_body          = each.value
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 ```
 <!-- /runnable-test -->
@@ -60,7 +60,7 @@ resource "k8sconnect_object" "all" {
   for_each = data.k8sconnect_yaml_split.all_manifests.manifests
 
   yaml_body          = each.value
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 ```
 

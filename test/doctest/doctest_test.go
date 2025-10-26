@@ -31,6 +31,9 @@ func TestMarkdownDocumentation(t *testing.T) {
 		"../../docs/data-sources/object.md",
 		"../../docs/data-sources/yaml_split.md",
 		"../../docs/data-sources/yaml_scoped.md",
+		"../../docs/guides/field-ownership.md",
+		"../../docs/guides/crd-cr-management.md",
+		"../../docs/guides/wait-strategies.md",
 	}
 
 	// Extract all runnable examples
@@ -312,7 +315,7 @@ func ensureNamespaceExists(content string) string {
       name: %s
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 `, foundNamespace)
@@ -337,23 +340,14 @@ func writeTestFiles(t *testing.T, dir string, kubeconfig string) {
 		t.Fatalf("Failed to write versions.tf: %v", err)
 	}
 
-	// Write variables.tf
-	variables := `variable "cluster_connection" {
-  description = "Kubernetes cluster connection"
-  type = object({
-    kubeconfig = string
-  })
-}`
-	if err := os.WriteFile(filepath.Join(dir, "variables.tf"), []byte(variables), 0644); err != nil {
-		t.Fatalf("Failed to write variables.tf: %v", err)
-	}
-
-	// Write terraform.tfvars
-	tfvars := fmt.Sprintf(`cluster_connection = {
-  kubeconfig = %q
+	// Write locals.tf with cluster connection
+	locals := fmt.Sprintf(`locals {
+  cluster_connection = {
+    kubeconfig = %q
+  }
 }`, kubeconfig)
-	if err := os.WriteFile(filepath.Join(dir, "terraform.tfvars"), []byte(tfvars), 0644); err != nil {
-		t.Fatalf("Failed to write terraform.tfvars: %v", err)
+	if err := os.WriteFile(filepath.Join(dir, "locals.tf"), []byte(locals), 0644); err != nil {
+		t.Fatalf("Failed to write locals.tf: %v", err)
 	}
 }
 

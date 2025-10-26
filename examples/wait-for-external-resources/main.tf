@@ -22,7 +22,7 @@ resource "k8sconnect_wait" "metrics_server" {
     timeout   = "5m"
   }
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 # Wait for CoreDNS to be ready (installed by cluster bootstrap)
@@ -39,7 +39,7 @@ resource "k8sconnect_wait" "coredns" {
     timeout   = "5m"
   }
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 # Wait for local-path-provisioner to be ready (k3d default storage)
@@ -56,7 +56,7 @@ resource "k8sconnect_wait" "storage_provisioner" {
     timeout   = "5m"
   }
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 # Outputs show the waits succeeded

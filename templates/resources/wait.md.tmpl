@@ -61,7 +61,7 @@ resource "k8sconnect_object" "service" {
         app: demo
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 resource "k8sconnect_wait" "service" {
@@ -72,7 +72,7 @@ resource "k8sconnect_wait" "service" {
     timeout = "5m"
   }
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 # Use the LoadBalancer IP in another resource
@@ -87,7 +87,7 @@ resource "k8sconnect_object" "endpoint_config" {
       service_endpoint: "${k8sconnect_wait.service.result.status.loadBalancer.ingress[0].ip}:80"
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
   depends_on         = [k8sconnect_wait.service]
 }
 ```
@@ -125,7 +125,7 @@ resource "k8sconnect_object" "app" {
                 memory: 128Mi
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 # Wait for all replicas to be updated and ready
@@ -137,7 +137,7 @@ resource "k8sconnect_wait" "app" {
     timeout = "5m"
   }
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 # Deploy service only after deployment is fully rolled out
@@ -157,7 +157,7 @@ resource "k8sconnect_object" "service" {
         app: web
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
   depends_on         = [k8sconnect_wait.app]
 }
 ```
@@ -196,7 +196,7 @@ resource "k8sconnect_object" "storage_app" {
                 memory: 64Mi
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 # Wait for "Available" condition (minimum availability reached)
@@ -208,7 +208,7 @@ resource "k8sconnect_wait" "storage_app" {
     timeout   = "3m"
   }
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 ```
 <!-- /runnable-test -->
@@ -238,7 +238,7 @@ resource "k8sconnect_object" "migration_job" {
           restartPolicy: Never
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 # Wait for exactly 1 successful completion
@@ -252,7 +252,7 @@ resource "k8sconnect_wait" "migration_job" {
     timeout = "2m"
   }
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 # Deploy app only after migrations complete
@@ -268,7 +268,7 @@ resource "k8sconnect_object" "app_deployment" {
       migrations_complete: "true"
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
   depends_on         = [k8sconnect_wait.migration_job]
 }
 ```
@@ -297,7 +297,7 @@ resource "k8sconnect_object" "pv" {
         path: /tmp/example-pv
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 resource "k8sconnect_object" "pvc" {
@@ -316,7 +316,7 @@ resource "k8sconnect_object" "pvc" {
           storage: 1Gi
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
   depends_on         = [k8sconnect_object.pv]
 }
 
@@ -331,7 +331,7 @@ resource "k8sconnect_wait" "pvc" {
     timeout = "2m"
   }
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 # Create deployment that uses the PVC - only after it's bound
@@ -369,7 +369,7 @@ resource "k8sconnect_object" "app" {
               claimName: data-claim
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
   depends_on         = [k8sconnect_wait.pvc]
 }
 ```
@@ -395,7 +395,7 @@ resource "k8sconnect_wait" "metrics_server" {
     timeout   = "5m"
   }
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 # Wait for CoreDNS (installed by cluster bootstrap)
@@ -412,7 +412,7 @@ resource "k8sconnect_wait" "coredns" {
     timeout   = "5m"
   }
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 output "cluster_ready" {
@@ -447,7 +447,7 @@ resource "k8sconnect_wait" "service" {
     field = "status.loadBalancer.ingress"
   }
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 # Access the extracted field from result
@@ -466,7 +466,7 @@ resource "k8sconnect_wait" "app" {
     rollout = true
   }
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 resource "k8sconnect_object" "next" {

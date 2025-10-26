@@ -557,7 +557,7 @@ resource "k8sconnect_object" "database_statefulset" {
                 cpu: "200m"
             volumeMounts:
             - name: data
-              mountPath: /var/lib/postgresql/data
+              mountPath: /var/lib/postgresql
       volumeClaimTemplates:
       - metadata:
           name: data
@@ -1335,3 +1335,23 @@ output "cactus_custom_resource" {
 # Error: Plan: Field Validation Failed
 #   .spec.replica: field not declared in schema
 #     (Should be .spec.replicas)
+
+#############################################
+# FORMATTING TEST
+#############################################
+
+resource "k8sconnect_object" "formatting_test" {
+  yaml_body = <<YAML
+# This is a comment
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: formatting-test-cm  # resource name
+  namespace: kind-validation
+data:
+  key1: value1  # first key
+  key2: value2  # second key
+YAML
+
+  cluster_connection = local.cluster_connection
+}
