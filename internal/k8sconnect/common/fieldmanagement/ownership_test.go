@@ -139,20 +139,23 @@ func TestExtractPathsFromFieldsV1_MultipleContainerResources(t *testing.T) {
 }
 
 // TestParseFieldsV1ToPathMap_RealWorldScenario tests with actual managedFields from Kubernetes
+// Note: After fixing shared ownership bug, we only track k8sconnect ownership, not other managers
 func TestParseFieldsV1ToPathMap_RealWorldScenario(t *testing.T) {
-	// Simulate managedFields from two different controllers
-	hpaManagerFields := map[string]interface{}{
+	// Simulate managedFields with k8sconnect and other controllers
+	k8sconnectFields := map[string]interface{}{
 		"f:spec": map[string]interface{}{
-			"f:replicas": map[string]interface{}{},
-		},
-	}
-
-	resourceControllerFields := map[string]interface{}{
-		"f:spec": map[string]interface{}{
+			"f:selector": map[string]interface{}{},
 			"f:template": map[string]interface{}{
+				"f:metadata": map[string]interface{}{
+					"f:labels": map[string]interface{}{
+						"f:app": map[string]interface{}{},
+					},
+				},
 				"f:spec": map[string]interface{}{
 					"f:containers": map[string]interface{}{
 						"k:{\"name\":\"nginx\"}": map[string]interface{}{
+							"f:image": map[string]interface{}{},
+							"f:name":  map[string]interface{}{},
 							"f:resources": map[string]interface{}{
 								"f:limits": map[string]interface{}{
 									"f:cpu": map[string]interface{}{},
@@ -165,8 +168,15 @@ func TestParseFieldsV1ToPathMap_RealWorldScenario(t *testing.T) {
 		},
 	}
 
+	// HPA might own replicas, but we shouldn't track it
+	hpaManagerFields := map[string]interface{}{
+		"f:spec": map[string]interface{}{
+			"f:replicas": map[string]interface{}{},
+		},
+	}
+
+	k8sconnectFieldsRaw, _ := json.Marshal(k8sconnectFields)
 	hpaFieldsRaw, _ := json.Marshal(hpaManagerFields)
-	resourceFieldsRaw, _ := json.Marshal(resourceControllerFields)
 
 	managedFields := []metav1.ManagedFieldsEntry{
 		{
@@ -177,10 +187,10 @@ func TestParseFieldsV1ToPathMap_RealWorldScenario(t *testing.T) {
 			},
 		},
 		{
-			Manager:    "resource-controller",
+			Manager:    "k8sconnect",
 			APIVersion: "apps/v1",
 			FieldsV1: &metav1.FieldsV1{
-				Raw: resourceFieldsRaw,
+				Raw: k8sconnectFieldsRaw,
 			},
 		},
 	}
@@ -188,11 +198,22 @@ func TestParseFieldsV1ToPathMap_RealWorldScenario(t *testing.T) {
 	userJSON := map[string]interface{}{
 		"spec": map[string]interface{}{
 			"replicas": 2,
+			"selector": map[string]interface{}{
+				"matchLabels": map[string]interface{}{
+					"app": "nginx",
+				},
+			},
 			"template": map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"labels": map[string]interface{}{
+						"app": "nginx",
+					},
+				},
 				"spec": map[string]interface{}{
 					"containers": []interface{}{
 						map[string]interface{}{
-							"name": "nginx",
+							"name":  "nginx",
+							"image": "nginx:1.21",
 							"resources": map[string]interface{}{
 								"limits": map[string]interface{}{
 									"cpu": "100m",
@@ -207,10 +228,170 @@ func TestParseFieldsV1ToPathMap_RealWorldScenario(t *testing.T) {
 
 	ownership := ParseFieldsV1ToPathMap(managedFields, userJSON)
 
-	// Verify ownership
-	assert.Equal(t, "hpa-controller", ownership["spec.replicas"].Manager, "spec.replicas should be owned by hpa-controller")
-	assert.Equal(t, "resource-controller", ownership["spec.template.spec.containers[0].resources.limits.cpu"].Manager,
-		"spec.template.spec.containers[0].resources.limits.cpu should be owned by resource-controller")
+	// We should ONLY see k8sconnect ownership, even though hpa-controller also exists
+	assert.Equal(t, "k8sconnect", ownership["spec.selector"].Manager,
+		"spec.selector should be owned by k8sconnect")
+	assert.Equal(t, "k8sconnect", ownership["spec.template.spec.containers[0].resources.limits.cpu"].Manager,
+		"cpu limit should be owned by k8sconnect")
+	assert.Equal(t, "k8sconnect", ownership["spec.template.spec.containers[0].image"].Manager,
+		"container image should be owned by k8sconnect")
 
-	t.Logf("Field ownership map: %+v", ownership)
+	// hpa-controller's fields should NOT be in our ownership map
+	_, replicasOwned := ownership["spec.replicas"]
+	assert.False(t, replicasOwned, "spec.replicas should NOT be tracked (owned by hpa-controller, not k8sconnect)")
+
+	// Verify no other managers appear
+	for _, owner := range ownership {
+		assert.Equal(t, "k8sconnect", owner.Manager, "Only k8sconnect ownership should be tracked")
+	}
+
+	t.Logf("Field ownership map (k8sconnect only): %+v", ownership)
+}
+
+// TestParseFieldsV1ToPathMap_SharedOwnership tests that when multiple managers
+// own the same field (shared ownership from identical values), we only report
+// k8sconnect's ownership, not other managers.
+func TestParseFieldsV1ToPathMap_SharedOwnership(t *testing.T) {
+	// Simulate shared ownership: both k8sconnect and kubectl-patch own the same field
+	k8sconnectFields := map[string]interface{}{
+		"f:spec": map[string]interface{}{
+			"f:replicas": map[string]interface{}{},
+			"f:template": map[string]interface{}{
+				"f:spec": map[string]interface{}{
+					"f:containers": map[string]interface{}{
+						"k:{\"name\":\"app\"}": map[string]interface{}{
+							"f:env": map[string]interface{}{
+								"k:{\"name\":\"EXTERNAL_VAR\"}": map[string]interface{}{
+									".":       map[string]interface{}{},
+									"f:name":  map[string]interface{}{}, // k8sconnect owns this
+									"f:value": map[string]interface{}{}, // k8sconnect owns this too
+								},
+							},
+							"f:name": map[string]interface{}{}, // Container name
+						},
+					},
+				},
+			},
+		},
+	}
+
+	kubectlPatchFields := map[string]interface{}{
+		"f:spec": map[string]interface{}{
+			"f:template": map[string]interface{}{
+				"f:spec": map[string]interface{}{
+					"f:containers": map[string]interface{}{
+						"k:{\"name\":\"app\"}": map[string]interface{}{
+							"f:env": map[string]interface{}{
+								"k:{\"name\":\"EXTERNAL_VAR\"}": map[string]interface{}{
+									".":       map[string]interface{}{},
+									"f:name":  map[string]interface{}{}, // kubectl-patch ALSO owns this (shared)
+									"f:value": map[string]interface{}{}, // kubectl-patch owns this
+								},
+							},
+							"f:name": map[string]interface{}{}, // kubectl-patch ALSO owns this (shared)
+						},
+					},
+				},
+			},
+		},
+	}
+
+	k8sconnectFieldsRaw, _ := json.Marshal(k8sconnectFields)
+	kubectlPatchFieldsRaw, _ := json.Marshal(kubectlPatchFields)
+
+	userJSON := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"replicas": 2,
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name": "app",
+							"env": []interface{}{
+								map[string]interface{}{
+									"name":  "EXTERNAL_VAR",
+									"value": "external-value",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	t.Run("k8sconnect first in array", func(t *testing.T) {
+		managedFields := []metav1.ManagedFieldsEntry{
+			{
+				Manager:    "k8sconnect",
+				APIVersion: "apps/v1",
+				FieldsV1: &metav1.FieldsV1{
+					Raw: k8sconnectFieldsRaw,
+				},
+			},
+			{
+				Manager:    "kubectl-patch",
+				APIVersion: "apps/v1",
+				FieldsV1: &metav1.FieldsV1{
+					Raw: kubectlPatchFieldsRaw,
+				},
+			},
+		}
+
+		ownership := ParseFieldsV1ToPathMap(managedFields, userJSON)
+
+		// We should ONLY report k8sconnect ownership, even though kubectl-patch also owns these
+		assert.Equal(t, "k8sconnect", ownership["spec.replicas"].Manager,
+			"spec.replicas should be owned by k8sconnect only")
+		assert.Equal(t, "k8sconnect", ownership["spec.template.spec.containers[0].env[0].name"].Manager,
+			"env[0].name should be owned by k8sconnect only (not kubectl-patch)")
+		assert.Equal(t, "k8sconnect", ownership["spec.template.spec.containers[0].env[0].value"].Manager,
+			"env[0].value should be owned by k8sconnect only")
+		assert.Equal(t, "k8sconnect", ownership["spec.template.spec.containers[0].name"].Manager,
+			"container name should be owned by k8sconnect only (not kubectl-patch)")
+
+		// kubectl-patch should NOT appear in ownership map at all
+		for _, owner := range ownership {
+			assert.NotEqual(t, "kubectl-patch", owner.Manager,
+				"kubectl-patch should not appear in ownership map")
+		}
+	})
+
+	t.Run("kubectl-patch first in array", func(t *testing.T) {
+		// Test with reversed order - behavior should be IDENTICAL
+		managedFields := []metav1.ManagedFieldsEntry{
+			{
+				Manager:    "kubectl-patch",
+				APIVersion: "apps/v1",
+				FieldsV1: &metav1.FieldsV1{
+					Raw: kubectlPatchFieldsRaw,
+				},
+			},
+			{
+				Manager:    "k8sconnect",
+				APIVersion: "apps/v1",
+				FieldsV1: &metav1.FieldsV1{
+					Raw: k8sconnectFieldsRaw,
+				},
+			},
+		}
+
+		ownership := ParseFieldsV1ToPathMap(managedFields, userJSON)
+
+		// Result should be IDENTICAL to previous test - order shouldn't matter
+		assert.Equal(t, "k8sconnect", ownership["spec.replicas"].Manager,
+			"spec.replicas should be owned by k8sconnect only (order independent)")
+		assert.Equal(t, "k8sconnect", ownership["spec.template.spec.containers[0].env[0].name"].Manager,
+			"env[0].name should be owned by k8sconnect only (order independent)")
+		assert.Equal(t, "k8sconnect", ownership["spec.template.spec.containers[0].env[0].value"].Manager,
+			"env[0].value should be owned by k8sconnect only (order independent)")
+		assert.Equal(t, "k8sconnect", ownership["spec.template.spec.containers[0].name"].Manager,
+			"container name should be owned by k8sconnect only (order independent)")
+
+		// kubectl-patch should NOT appear in ownership map at all
+		for _, owner := range ownership {
+			assert.NotEqual(t, "kubectl-patch", owner.Manager,
+				"kubectl-patch should not appear in ownership map (order independent)")
+		}
+	})
 }

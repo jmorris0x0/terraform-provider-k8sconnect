@@ -16,12 +16,25 @@ type FieldOwnership struct {
 }
 
 // ParseFieldsV1ToPathMap parses managedFields and returns a map of path -> FieldOwnership
-// This is the core parsing logic that both resources can use
+// This is the core parsing logic that both resources can use.
+//
+// IMPORTANT: We only track ownership for the "k8sconnect" manager, not other managers.
+// This is intentional - we don't control whether other controllers become co-owners
+// (when they apply identical values with SSA), so tracking co-ownership would cause
+// plan churn from external changes we can't prevent. We only care: "Do WE own this field?"
+//
+// When multiple managers co-own a field (identical values with SSA), we report "k8sconnect"
+// if we're one of the co-owners. External co-ownership is not tracked.
 func ParseFieldsV1ToPathMap(managedFields []metav1.ManagedFieldsEntry, userJSON map[string]interface{}) map[string]FieldOwnership {
 	result := make(map[string]FieldOwnership)
 
-	// Process each field manager's fields
+	// Only process k8sconnect's ownership entry
+	// Ignore other managers (kubectl-patch, hpa-controller, etc.) even if they co-own fields
 	for _, mf := range managedFields {
+		if mf.Manager != "k8sconnect" {
+			continue // Skip non-k8sconnect managers
+		}
+
 		if mf.FieldsV1 == nil {
 			continue
 		}
@@ -31,10 +44,10 @@ func ParseFieldsV1ToPathMap(managedFields []metav1.ManagedFieldsEntry, userJSON 
 			continue
 		}
 
-		// Extract paths owned by this manager
+		// Extract paths owned by k8sconnect
 		paths := extractPathsFromFieldsV1(fields, "", userJSON)
 
-		// Record ownership for each path
+		// Record k8sconnect ownership for each path
 		for _, path := range paths {
 			// Skip internal k8sconnect annotations - these are implementation details
 			// and should not be tracked as user-managed fields
@@ -119,10 +132,16 @@ func ExtractFieldOwnership(obj *unstructured.Unstructured) map[string]FieldOwner
 
 // ExtractFieldOwnershipMap extracts field ownership as a simple map[path]manager
 // This is a simplified version that returns just the manager name (not full FieldOwnership)
+//
+// Like ParseFieldsV1ToPathMap, this only tracks k8sconnect ownership, not other managers.
 func ExtractFieldOwnershipMap(obj *unstructured.Unstructured) map[string]string {
 	result := make(map[string]string)
 
 	for _, mf := range obj.GetManagedFields() {
+		if mf.Manager != "k8sconnect" {
+			continue // Only track k8sconnect ownership
+		}
+
 		if mf.FieldsV1 == nil {
 			continue
 		}
@@ -132,7 +151,7 @@ func ExtractFieldOwnershipMap(obj *unstructured.Unstructured) map[string]string 
 			continue
 		}
 
-		// Extract paths owned by this manager
+		// Extract paths owned by k8sconnect
 		paths := extractPathsFromFieldsV1Simple(fields, "")
 		for _, path := range paths {
 			// Skip internal k8sconnect annotations - these are implementation details

@@ -33,11 +33,11 @@ type waitResource struct {
 }
 
 type waitResourceModel struct {
-	ID                types.String  `tfsdk:"id"`
-	ObjectRef         types.Object  `tfsdk:"object_ref"`
-	Cluster types.Object  `tfsdk:"cluster"`
-	WaitFor           types.Object  `tfsdk:"wait_for"`
-	Result            types.Dynamic `tfsdk:"result"`
+	ID        types.String  `tfsdk:"id"`
+	ObjectRef types.Object  `tfsdk:"object_ref"`
+	Cluster   types.Object  `tfsdk:"cluster"`
+	WaitFor   types.Object  `tfsdk:"wait_for"`
+	Result    types.Dynamic `tfsdk:"result"`
 }
 
 // objectRefModel defines the structure for referencing a Kubernetes object

@@ -297,7 +297,7 @@ func (r *objectResource) buildImportState(ctx context.Context, resourceID string
 	importedData := objectResourceModel{
 		ID:                     types.StringValue(resourceID),
 		YAMLBody:               types.StringValue(string(yamlBytes)),
-		Cluster:      connectionObj,
+		Cluster:                connectionObj,
 		DeleteProtection:       types.BoolValue(false),
 		IgnoreFields:           types.ListNull(types.StringType),
 		ManagedStateProjection: projectionMapValue,

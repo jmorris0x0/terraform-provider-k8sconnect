@@ -24,11 +24,11 @@ type objectDataSource struct {
 }
 
 type objectDataSourceModel struct {
-	APIVersion        types.String `tfsdk:"api_version"`
-	Kind              types.String `tfsdk:"kind"`
-	Name              types.String `tfsdk:"name"`
-	Namespace         types.String `tfsdk:"namespace"`
-	Cluster types.Object `tfsdk:"cluster"`
+	APIVersion types.String `tfsdk:"api_version"`
+	Kind       types.String `tfsdk:"kind"`
+	Name       types.String `tfsdk:"name"`
+	Namespace  types.String `tfsdk:"namespace"`
+	Cluster    types.Object `tfsdk:"cluster"`
 
 	// Outputs
 	Manifest types.String  `tfsdk:"manifest"`

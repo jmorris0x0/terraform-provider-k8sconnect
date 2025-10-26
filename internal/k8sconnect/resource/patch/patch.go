@@ -34,12 +34,12 @@ type patchResource struct {
 }
 
 type patchResourceModel struct {
-	ID                types.String `tfsdk:"id"`
-	Target            types.Object `tfsdk:"target"`
-	Patch             types.String `tfsdk:"patch"`
-	JSONPatch         types.String `tfsdk:"json_patch"`
-	MergePatch        types.String `tfsdk:"merge_patch"`
-	Cluster types.Object `tfsdk:"cluster"`
+	ID         types.String `tfsdk:"id"`
+	Target     types.Object `tfsdk:"target"`
+	Patch      types.String `tfsdk:"patch"`
+	JSONPatch  types.String `tfsdk:"json_patch"`
+	MergePatch types.String `tfsdk:"merge_patch"`
+	Cluster    types.Object `tfsdk:"cluster"`
 
 	// Computed fields
 

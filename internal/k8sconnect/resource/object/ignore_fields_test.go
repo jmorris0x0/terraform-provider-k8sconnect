@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1069,27 +1068,12 @@ func TestAccObjectResource_IgnoreFieldsJSONPathPredicate(t *testing.T) {
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 	ssaClient := testhelpers.NewSSATestClient(t, raw)
 
-	// Detect environment and configure iterations to catch race condition
-	isCI := os.Getenv("CI") != ""
-	delayStr := os.Getenv("TEST_RACE_DELAY")
-	var delayMs int
-	if delayStr != "" {
-		var err error
-		delayMs, err = strconv.Atoi(delayStr)
-		if err != nil || delayMs <= 0 {
-			delayMs = 75 // Default to 75ms if invalid value
-		}
-	}
-
-	iterations := 5 // Default for CI
-	if !isCI {
-		iterations = 15 // More iterations needed locally due to faster machines
-		t.Logf("🏠 Running locally: using %d iterations to catch race condition (vs 5 in CI)", iterations)
-	}
-
-	if delayMs > 0 {
-		t.Logf("⏱️  Artificial delay enabled (TEST_RACE_DELAY=%d) to widen race window", delayMs)
-	}
+	// After fixing the shared ownership parsing bug, we no longer need many iterations
+	// to catch a race condition. The test is now deterministic - shared ownership is
+	// handled correctly regardless of managedFields array order. We keep 3 iterations
+	// to ensure the fix works across multiple kubectl-patch operations.
+	iterations := 3
+	t.Logf("Running %d patch-apply cycles to verify ownership handling", iterations)
 
 	// Build test steps: initial creation + multiple patch-apply cycles
 	testSteps := []resource.TestStep{
@@ -1110,9 +1094,9 @@ func TestAccObjectResource_IgnoreFieldsJSONPathPredicate(t *testing.T) {
 		},
 	}
 
-	// Add multiple kubectl patch → terraform apply cycles to catch race condition
+	// Add multiple kubectl patch → terraform apply cycles
 	testSteps = append(testSteps, generateIgnoreFieldsPatchApplyCycles(
-		t, ssaClient, k8sClient, ns, deployName, raw, iterations, delayMs)...)
+		t, ssaClient, k8sClient, ns, deployName, raw, iterations, 0)...)
 
 	// Final steps: verify no drift and test terraform update
 	testSteps = append(testSteps, []resource.TestStep{

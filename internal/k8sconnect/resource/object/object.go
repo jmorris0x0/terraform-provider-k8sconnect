@@ -34,7 +34,7 @@ type objectResource struct {
 type objectResourceModel struct {
 	ID                     types.String `tfsdk:"id"`
 	YAMLBody               types.String `tfsdk:"yaml_body"`
-	Cluster      types.Object `tfsdk:"cluster"`
+	Cluster                types.Object `tfsdk:"cluster"`
 	DeleteProtection       types.Bool   `tfsdk:"delete_protection"`
 	DeleteTimeout          types.String `tfsdk:"delete_timeout"`
 	FieldOwnership         types.Map    `tfsdk:"field_ownership"`

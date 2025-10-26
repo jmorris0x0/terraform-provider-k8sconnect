@@ -143,7 +143,7 @@ func TestAccObjectResource_ImportWithManagedFields(t *testing.T) {
 				ImportStateId:     fmt.Sprintf("k3d-k8sconnect-test:%s:v1/ConfigMap:%s", ns, configMapName),
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
-					"cluster",       // Import uses file, config uses raw
+					"cluster",                  // Import uses file, config uses raw
 					"yaml_body",                // Formatting and annotations differ
 					"managed_state_projection", // Import includes extra K8s fields
 					"delete_protection",        // Only in import, not in config

@@ -139,16 +139,37 @@ func (r *objectResource) applyResourceWithConflictHandling(ctx context.Context, 
 	// Prepare the object to apply
 	objToApply := rc.Object.DeepCopy()
 
+	// DEBUG: Log ignore_fields configuration
+	ignoreFields := getIgnoreFields(ctx, data)
+	if len(ignoreFields) > 0 {
+		tflog.Debug(ctx, "=== APPLY PHASE - ignore_fields configuration ===", map[string]interface{}{
+			"operation":     operation,
+			"ignore_fields": ignoreFields,
+			"object_ref":    fmt.Sprintf("%s/%s %s/%s", objToApply.GetAPIVersion(), objToApply.GetKind(), objToApply.GetNamespace(), objToApply.GetName()),
+		})
+	}
+
 	// On Update, filter out ignored fields to release ownership to other controllers
 	// On Create, send everything to establish initial state
 	if operation == "Update" {
-		if ignoreFields := getIgnoreFields(ctx, data); ignoreFields != nil {
+		if ignoreFields != nil {
 			objToApply = removeFieldsFromObject(objToApply, ignoreFields)
 			tflog.Debug(ctx, "Filtered ignored fields from Apply patch", map[string]interface{}{
 				"ignored_fields": ignoreFields,
 			})
 		}
 	}
+
+	// DEBUG: Log what we're actually sending in SSA apply
+	pathsInApply := extractAllFieldsFromYAML(objToApply.Object, "")
+	tflog.Debug(ctx, "=== APPLY PHASE - Fields being sent in SSA Apply ===", map[string]interface{}{
+		"operation":     operation,
+		"force":         true,
+		"field_manager": "k8sconnect",
+		"paths_count":   len(pathsInApply),
+		"paths":         pathsInApply,
+		"object_ref":    fmt.Sprintf("%s/%s %s/%s", objToApply.GetAPIVersion(), objToApply.GetKind(), objToApply.GetNamespace(), objToApply.GetName()),
+	})
 
 	// Apply the resource with CRD retry (always force conflicts)
 	err := r.applyWithCRDRetry(ctx, rc.Client, objToApply, k8sclient.ApplyOptions{
@@ -158,6 +179,11 @@ func (r *objectResource) applyResourceWithConflictHandling(ctx context.Context, 
 	})
 
 	if err != nil {
+		tflog.Error(ctx, "=== APPLY PHASE - SSA Apply FAILED ===", map[string]interface{}{
+			"operation":  operation,
+			"error":      err.Error(),
+			"object_ref": fmt.Sprintf("%s/%s %s/%s", objToApply.GetAPIVersion(), objToApply.GetKind(), objToApply.GetNamespace(), objToApply.GetName()),
+		})
 		resourceDesc := formatResource(rc.Object)
 		if isFieldConflictError(err) {
 			r.addFieldConflictError(resp, operation, resourceDesc)
@@ -166,6 +192,11 @@ func (r *objectResource) applyResourceWithConflictHandling(ctx context.Context, 
 		}
 		return err
 	}
+
+	tflog.Debug(ctx, "=== APPLY PHASE - SSA Apply SUCCEEDED ===", map[string]interface{}{
+		"operation":  operation,
+		"object_ref": fmt.Sprintf("%s/%s %s/%s", objToApply.GetAPIVersion(), objToApply.GetKind(), objToApply.GetNamespace(), objToApply.GetName()),
+	})
 	return nil
 }
 
@@ -281,6 +312,28 @@ func (r *objectResource) updateProjectionFromCurrent(ctx context.Context, data *
 
 // updateFieldOwnershipData updates field ownership tracking data
 func (r *objectResource) updateFieldOwnershipData(ctx context.Context, data *objectResourceModel, currentObj *unstructured.Unstructured) {
+	// DEBUG: Log raw managedFields from actual apply/read
+	tflog.Debug(ctx, "=== ACTUAL APPLY/READ RAW MANAGEDFIELDS ===", map[string]interface{}{
+		"object_ref": fmt.Sprintf("%s/%s %s/%s", currentObj.GetAPIVersion(), currentObj.GetKind(), currentObj.GetNamespace(), currentObj.GetName()),
+	})
+	for i, mf := range currentObj.GetManagedFields() {
+		tflog.Debug(ctx, "ManagedFields entry", map[string]interface{}{
+			"index":     i,
+			"manager":   mf.Manager,
+			"operation": mf.Operation,
+			"time":      mf.Time,
+		})
+
+		// DEBUG: Log fieldsV1 content to see what fields each manager actually owns
+		if mf.FieldsV1 != nil {
+			tflog.Debug(ctx, "FieldsV1 content", map[string]interface{}{
+				"index":    i,
+				"manager":  mf.Manager,
+				"fieldsV1": string(mf.FieldsV1.Raw),
+			})
+		}
+	}
+
 	ownership := extractFieldOwnership(currentObj)
 
 	// Convert map[string]FieldOwnership to map[string]string (just manager names)
@@ -294,6 +347,12 @@ func (r *objectResource) updateFieldOwnershipData(ctx context.Context, data *obj
 		}
 		ownershipMap[path] = owner.Manager
 	}
+
+	// DEBUG: Log the actual ownership map from the resource for debugging flaky tests
+	tflog.Debug(ctx, "APPLY/READ PHASE - Actual field ownership from cluster", map[string]interface{}{
+		"actual_ownership_map": ownershipMap,
+		"object_ref":           fmt.Sprintf("%s/%s %s/%s", currentObj.GetAPIVersion(), currentObj.GetKind(), currentObj.GetNamespace(), currentObj.GetName()),
+	})
 
 	// Convert to types.Map
 	mapValue, diags := types.MapValueFrom(ctx, types.StringType, ownershipMap)

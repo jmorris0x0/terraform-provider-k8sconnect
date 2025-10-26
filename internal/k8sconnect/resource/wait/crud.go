@@ -18,12 +18,12 @@ import (
 
 // waitContext holds all the data needed for a wait operation
 type waitContext struct {
-	Data              *waitResourceModel
-	Client            k8sclient.K8sClient
-	GVR               schema.GroupVersionResource
-	ObjectRef         objectRefModel
-	WaitConfig        waitForModel
-	Cluster auth.ClusterModel
+	Data       *waitResourceModel
+	Client     k8sclient.K8sClient
+	GVR        schema.GroupVersionResource
+	ObjectRef  objectRefModel
+	WaitConfig waitForModel
+	Cluster    auth.ClusterModel
 }
 
 func (r *waitResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -212,12 +212,12 @@ func (r *waitResource) buildWaitContext(ctx context.Context, data *waitResourceM
 	}
 
 	return &waitContext{
-		Data:              data,
-		Client:            client,
-		GVR:               gvr,
-		ObjectRef:         objRef,
-		WaitConfig:        waitConfig,
-		Cluster: connModel,
+		Data:       data,
+		Client:     client,
+		GVR:        gvr,
+		ObjectRef:  objRef,
+		WaitConfig: waitConfig,
+		Cluster:    connModel,
 	}, diags
 }
 

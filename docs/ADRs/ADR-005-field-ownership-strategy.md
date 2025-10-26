@@ -79,6 +79,16 @@ Server-Side Apply tracks which fieldManager owns each field. When we apply with 
 
 We parse this FieldsV1 structure via `extractOwnedPaths()` and only project fields we own. Server-added fields (nodePort, clusterIP, webhook defaults) are ignored in projection, eliminating false drift.
 
+## Shared Ownership Discovery
+
+Kubernetes `managedFields` is an **array** where each field manager has a separate entry with its own `fieldsV1` blob. Multiple managers can list the **same field** in their entries - this is "shared ownership".
+
+**When it happens**: SSA creates shared ownership when multiple managers apply identical values to the same field. The `force=true` flag only takes exclusive ownership when values **differ**. When values match, all appliers become co-owners.
+
+**Parsing implication**: Naively iterating the array and overwriting ownership creates a "last-one-wins" bug. Correct parsing must accumulate all managers for each field path. For Terraform consistency, we report "k8sconnect" if we're one of the co-owners (even if not the only owner), since our plan predicted we'd own the field.
+
+**Key lesson**: SSA ownership is more nuanced than "apply with force=true → you own it". Identical values create collaboration, different values create takeover.
+
 ## Critical Implementation Detail: Always Force Ownership
 
 The provider **always uses `force=true`** during Server-Side Apply. This means we take ownership of conflicted fields from other controllers.

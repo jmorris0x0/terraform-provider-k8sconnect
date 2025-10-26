@@ -563,7 +563,3 @@ Each wait resource blocks its dependent resources, creating explicit dependency 
 ### Internal ADRs
 - ADR-006: State Safety and Projection Recovery - similar use of private state flags for recovery
 - ADR-008: Selective Status Field Population Strategy - "You only get what you wait for" principle
-
-### Research Documents
-- `docs/wait-drift-analysis.md` - Analysis of drift detection requirements for wait resources
-- `docs/wait-drift-research-findings.md` - Confirmed Terraform behavior with depends_on and ignore_changes
