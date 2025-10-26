@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -85,6 +86,9 @@ func (r *patchResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanR
 		return
 	}
 
+	// Check drift and preserve state if needed (similar to object resource pattern)
+	r.checkDriftAndPreserveState(ctx, req, &plannedData, resp)
+
 	// Save the modified plan
 	diags = resp.Plan.Set(ctx, &plannedData)
 	resp.Diagnostics.Append(diags...)
@@ -93,6 +97,58 @@ func (r *patchResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanR
 	if !req.State.Raw.IsNull() {
 		r.checkPatchOwnershipConflicts(ctx, req, resp)
 	}
+}
+
+// checkDriftAndPreserveState compares projections and preserves state if no changes
+// This is the key to suppressing formatting diffs - following the object resource pattern
+func (r *patchResource) checkDriftAndPreserveState(ctx context.Context, req resource.ModifyPlanRequest, plannedData *patchResourceModel, resp *resource.ModifyPlanResponse) {
+	// Only relevant for UPDATE operations
+	if req.State.Raw.IsNull() {
+		return
+	}
+
+	var stateData patchResourceModel
+	diags := req.State.Get(ctx, &stateData)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Determine if patch has actually changed
+	patchChanged := r.hasPatchChanged(ctx, &stateData, plannedData)
+	if !patchChanged {
+		tflog.Debug(ctx, "No patch changes detected, preserving patch input")
+		r.preservePatchInputAndState(ctx, &stateData, plannedData)
+	}
+}
+
+// hasPatchChanged determines if the patch has actually changed
+func (r *patchResource) hasPatchChanged(ctx context.Context, stateData *patchResourceModel, plannedData *patchResourceModel) bool {
+	// For SSA patches (strategic merge), compare projections
+	if !plannedData.ManagedStateProjection.IsNull() && !stateData.ManagedStateProjection.IsNull() {
+		return !stateData.ManagedStateProjection.Equal(plannedData.ManagedStateProjection)
+	}
+
+	// For non-SSA patches (JSON/Merge) or when projection not available, use semantic comparison
+	statePatchContent := r.getPatchContent(*stateData)
+	plannedPatchContent := r.getPatchContent(*plannedData)
+	patchType := r.determinePatchType(*plannedData)
+
+	return !r.patchContentEqual(statePatchContent, plannedPatchContent, patchType)
+}
+
+// preservePatchInputAndState preserves both input attributes and computed state
+func (r *patchResource) preservePatchInputAndState(ctx context.Context, stateData *patchResourceModel, plannedData *patchResourceModel) {
+	// Preserve patch input attributes (suppresses formatting diffs)
+	plannedData.Patch = stateData.Patch
+	plannedData.JSONPatch = stateData.JSONPatch
+	plannedData.MergePatch = stateData.MergePatch
+
+	// Preserve computed attributes
+	plannedData.ManagedStateProjection = stateData.ManagedStateProjection
+	plannedData.ManagedFields = stateData.ManagedFields
+	plannedData.FieldOwnership = stateData.FieldOwnership
+	plannedData.PreviousOwners = stateData.PreviousOwners
 }
 
 // isConnectionReady checks if all connection fields are known (not computed)
@@ -230,6 +286,7 @@ func (r *patchResource) checkPatchOwnershipConflicts(ctx context.Context, req re
 	}
 
 	// Check for ownership changes (takeovers from other controllers)
+	// Only warn when ownership ACTUALLY changes, not on no-ops
 	var conflicts []fieldConflict
 	for path, planOwner := range planOwnership {
 		if stateOwner, existed := stateOwnership[path]; existed {
@@ -245,30 +302,9 @@ func (r *patchResource) checkPatchOwnershipConflicts(ctx context.Context, req re
 		}
 	}
 
-	// If we have previous owners from the plan (first patch application), add those to conflicts
-	if !planData.PreviousOwners.IsNull() {
-		var previousOwners map[string]string
-		diags = planData.PreviousOwners.ElementsAs(ctx, &previousOwners, false)
-		if !diags.HasError() {
-			for path, prevOwner := range previousOwners {
-				// Check if not already in conflicts
-				found := false
-				for _, c := range conflicts {
-					if c.Path == path {
-						found = true
-						break
-					}
-				}
-				if !found {
-					conflicts = append(conflicts, fieldConflict{
-						Path:         path,
-						CurrentOwner: prevOwner,
-						NewOwner:     r.generateFieldManager(planData),
-					})
-				}
-			}
-		}
-	}
+	// NOTE: We intentionally do NOT check previousOwners here.
+	// previousOwners persists in state forever and would cause warnings on every update.
+	// We only want to warn when ownership ACTUALLY changes (detected above).
 
 	if len(conflicts) > 0 {
 		r.addConflictWarning(resp, conflicts)
@@ -415,25 +451,6 @@ func setProjectionUnknown(data *patchResourceModel) {
 	data.ManagedFields = types.StringUnknown()
 	data.FieldOwnership = types.MapUnknown(types.StringType)
 	data.PreviousOwners = types.MapUnknown(types.StringType)
-}
-
-// hasPatchContentChanged checks if patch content has changed between state and plan
-func (r *patchResource) hasPatchContentChanged(ctx context.Context, req resource.ModifyPlanRequest, plannedData patchResourceModel) bool {
-	if req.State.Raw.IsNull() {
-		// CREATE operation - no state to compare
-		return true
-	}
-
-	var stateData patchResourceModel
-	if diags := req.State.Get(ctx, &stateData); diags.HasError() {
-		// Can't compare, assume changed
-		return true
-	}
-
-	statePatchContent := r.getPatchContent(stateData)
-	planPatchContent := r.getPatchContent(plannedData)
-
-	return statePatchContent != planPatchContent
 }
 
 // validatePatchTarget gets and validates the target resource for patching
@@ -621,14 +638,9 @@ func (r *patchResource) handleStrategicMergeProjection(
 		return r.calculateCreateProjection(ctx, plannedData, patchedObj, fieldManager, resp)
 	}
 
-	// For UPDATE: check if content changed
-	if r.hasPatchContentChanged(ctx, req, *plannedData) {
-		// Content changed, calculate new projection
-		return r.calculateUpdateProjection(ctx, plannedData, patchedObj, fieldManager, resp)
-	}
-
-	// Content unchanged, preserve state
-	return r.preserveState(ctx, req, plannedData)
+	// For UPDATE: always calculate new projection
+	// We'll compare projections later in checkDriftAndPreserveState to suppress formatting diffs
+	return r.calculateUpdateProjection(ctx, plannedData, patchedObj, fieldManager, resp)
 }
 
 // handleNonSSAPatchState manages state for JSON/Merge patches (no SSA)
@@ -638,14 +650,8 @@ func (r *patchResource) handleNonSSAPatchState(
 	plannedData *patchResourceModel,
 	resp *resource.ModifyPlanResponse,
 ) bool {
-	// For UPDATE, check if content unchanged
-	if !req.State.Raw.IsNull() && !r.hasPatchContentChanged(ctx, req, *plannedData) {
-		// Content unchanged, preserve state
-		return r.preserveState(ctx, req, plannedData)
-	}
-
-	// CREATE or UPDATE with changed content
-	// Non-SSA patches don't support projection
+	// Non-SSA patches don't support projection - always set to null
+	// We'll use semantic content comparison in checkDriftAndPreserveState
 	plannedData.ManagedStateProjection = types.MapNull(types.StringType) // Null for non-SSA
 	plannedData.ManagedFields = types.StringUnknown()
 	plannedData.FieldOwnership = types.MapUnknown(types.StringType)
@@ -713,21 +719,57 @@ func (r *patchResource) calculateUpdateProjection(
 	return r.calculateProjectionFromDryRun(ctx, plannedData, patchedObj, fieldManager, "UPDATE", resp)
 }
 
-// preserveState preserves existing state when content hasn't changed
-func (r *patchResource) preserveState(
-	ctx context.Context,
-	req resource.ModifyPlanRequest,
-	plannedData *patchResourceModel,
-) bool {
-	var stateData patchResourceModel
-	if diags := req.State.Get(ctx, &stateData); diags.HasError() {
+// patchContentEqual performs semantic comparison of patch content
+// Parses and compares to ignore whitespace, comments, and formatting differences
+func (r *patchResource) patchContentEqual(content1, content2 string, patchType string) bool {
+	// Empty strings are equal
+	if content1 == "" && content2 == "" {
+		return true
+	}
+	if content1 == "" || content2 == "" {
 		return false
 	}
 
-	tflog.Debug(ctx, "Patch content unchanged, preserving state")
-	plannedData.ManagedStateProjection = stateData.ManagedStateProjection
-	plannedData.ManagedFields = stateData.ManagedFields
-	plannedData.FieldOwnership = stateData.FieldOwnership
-	plannedData.PreviousOwners = stateData.PreviousOwners
-	return true
+	switch patchType {
+	case "strategic":
+		// Strategic merge patches can be YAML or JSON
+		// Try parsing as YAML (more lenient, handles both)
+		var obj1, obj2 interface{}
+		if err := yaml.Unmarshal([]byte(content1), &obj1); err != nil {
+			// Fallback to string comparison if parse fails
+			return content1 == content2
+		}
+		if err := yaml.Unmarshal([]byte(content2), &obj2); err != nil {
+			return false
+		}
+		return reflect.DeepEqual(obj1, obj2)
+
+	case "json":
+		// JSON Patch is an array of operations
+		var ops1, ops2 []interface{}
+		if err := json.Unmarshal([]byte(content1), &ops1); err != nil {
+			// Fallback to string comparison
+			return content1 == content2
+		}
+		if err := json.Unmarshal([]byte(content2), &ops2); err != nil {
+			return false
+		}
+		return reflect.DeepEqual(ops1, ops2)
+
+	case "merge":
+		// Merge patch is a JSON object
+		var obj1, obj2 interface{}
+		if err := json.Unmarshal([]byte(content1), &obj1); err != nil {
+			// Fallback to string comparison
+			return content1 == content2
+		}
+		if err := json.Unmarshal([]byte(content2), &obj2); err != nil {
+			return false
+		}
+		return reflect.DeepEqual(obj1, obj2)
+
+	default:
+		// Unknown type, fallback to string comparison
+		return content1 == content2
+	}
 }

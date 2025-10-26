@@ -275,6 +275,160 @@ func TestAccPatchResource_Idempotency(t *testing.T) {
 	})
 }
 
+// TestAccPatchResource_NoWarningOnSubsequentUpdates tests that after taking ownership
+// from another controller, subsequent patch updates don't warn about previousOwners
+// This validates the fix where previousOwners should not cause warnings on every update
+func TestAccPatchResource_NoWarningOnSubsequentUpdates(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("no-warn-ns-%d", time.Now().UnixNano()%1000000)
+	cmName := fmt.Sprintf("no-warn-cm-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 0: Create namespace and ConfigMap with external field manager
+			{
+				Config: testAccPatchConfigEmptyWithNamespace(ns),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					createConfigMapWithFieldManager(t, k8sClient, ns, cmName, "kubectl", map[string]string{
+						"field1": "original-value",
+					}),
+					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
+				),
+			},
+			// Step 1: Apply patch - takes ownership from kubectl (should record previousOwners)
+			{
+				Config:          testAccPatchConfigNoWarnFirst(ns, cmName),
+				ConfigVariables: config.Variables{"raw": config.StringVariable(raw)},
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field1", "patched-value-1"),
+					// Verify previousOwners is recorded
+					resource.TestCheckResourceAttr("k8sconnect_patch.test", "previous_owners.data.field1", "kubectl"),
+				),
+				// ExpectNonEmptyPlan: false, // No warning expected, first takeover
+			},
+			// Step 2: Update patch content - should NOT warn about previousOwners
+			// This is the critical test: previousOwners persists in state, but shouldn't cause warnings
+			{
+				Config:          testAccPatchConfigNoWarnSecond(ns, cmName),
+				ConfigVariables: config.Variables{"raw": config.StringVariable(raw)},
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field1", "patched-value-2"),
+					// previousOwners should still be recorded
+					resource.TestCheckResourceAttr("k8sconnect_patch.test", "previous_owners.data.field1", "kubectl"),
+				),
+				// Should apply cleanly without warnings about ownership takeover
+				ExpectNonEmptyPlan: false,
+			},
+			// Step 3: Another update - still no warnings
+			{
+				Config:          testAccPatchConfigNoWarnThird(ns, cmName),
+				ConfigVariables: config.Variables{"raw": config.StringVariable(raw)},
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field1", "patched-value-3"),
+				),
+				ExpectNonEmptyPlan: false,
+			},
+		},
+		CheckDestroy: resource.ComposeTestCheckFunc(
+			testhelpers.CheckConfigMapDestroy(k8sClient, ns, cmName),
+			testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+		),
+	})
+}
+
+// TestAccPatchResource_SemanticYAMLComparison tests that formatting/whitespace changes
+// in patch YAML don't trigger diffs (semantic comparison, not string comparison)
+func TestAccPatchResource_SemanticYAMLComparison(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("semantic-yaml-ns-%d", time.Now().UnixNano()%1000000)
+	cmName := fmt.Sprintf("semantic-yaml-cm-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 0: Create namespace and ConfigMap
+			{
+				Config: testAccPatchConfigEmptyWithNamespace(ns),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					createConfigMapWithFieldManager(t, k8sClient, ns, cmName, "kubectl", map[string]string{
+						"original": "value",
+					}),
+					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
+				),
+			},
+			// Step 1: Apply patch with specific formatting
+			{
+				Config: testAccPatchConfigSemanticYAMLCompact(ns, cmName),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "key1", "value1"),
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "key2", "value2"),
+				),
+			},
+			// Step 2: Change only whitespace/formatting - should show no changes
+			{
+				Config: testAccPatchConfigSemanticYAMLExpanded(ns, cmName),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: false, // No diff expected - semantically identical
+			},
+			// Step 3: Apply expanded version to verify it actually works
+			{
+				Config: testAccPatchConfigSemanticYAMLExpanded(ns, cmName),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "key1", "value1"),
+					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "key2", "value2"),
+				),
+			},
+			// Step 4: Plan-only check again - still no changes
+			{
+				Config: testAccPatchConfigSemanticYAMLExpanded(ns, cmName),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: false,
+			},
+		},
+		CheckDestroy: resource.ComposeTestCheckFunc(
+			testhelpers.CheckConfigMapDestroy(k8sClient, ns, cmName),
+			testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+		),
+	})
+}
+
 // TestAccPatchResource_TargetDeletedExternally tests behavior when target resource
 // is deleted externally - patch should eventually clean up gracefully
 func TestAccPatchResource_TargetDeletedExternally(t *testing.T) {
@@ -1777,6 +1931,179 @@ resource "k8sconnect_patch" "test" {
       field1 = "merge-patched1"
     }
   })
+
+  cluster_connection = { kubeconfig = var.raw }
+  depends_on = [k8sconnect_object.test_ns]
+}
+`, namespace, cmName, namespace)
+}
+
+func testAccPatchConfigSemanticYAMLCompact(namespace, cmName string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "test_ns" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = { kubeconfig = var.raw }
+}
+
+resource "k8sconnect_patch" "test" {
+  target = {
+    api_version = "v1"
+    kind        = "ConfigMap"
+    name        = "%s"
+    namespace   = "%s"
+  }
+
+  patch = <<YAML
+data:
+  key1: value1
+  key2: value2
+YAML
+
+  cluster_connection = { kubeconfig = var.raw }
+  depends_on = [k8sconnect_object.test_ns]
+}
+`, namespace, cmName, namespace)
+}
+
+func testAccPatchConfigSemanticYAMLExpanded(namespace, cmName string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "test_ns" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = { kubeconfig = var.raw }
+}
+
+resource "k8sconnect_patch" "test" {
+  target = {
+    api_version = "v1"
+    kind        = "ConfigMap"
+    name        = "%s"
+    namespace   = "%s"
+  }
+
+  patch = <<YAML
+# ConfigMap data patch
+data:
+  key1: value1  # first key
+  key2: value2  # second key
+YAML
+
+  cluster_connection = { kubeconfig = var.raw }
+  depends_on = [k8sconnect_object.test_ns]
+}
+`, namespace, cmName, namespace)
+}
+
+func testAccPatchConfigNoWarnFirst(namespace, cmName string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "test_ns" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = { kubeconfig = var.raw }
+}
+
+resource "k8sconnect_patch" "test" {
+  target = {
+    api_version = "v1"
+    kind        = "ConfigMap"
+    name        = "%s"
+    namespace   = "%s"
+  }
+
+  patch = <<YAML
+data:
+  field1: patched-value-1
+YAML
+
+  cluster_connection = { kubeconfig = var.raw }
+  depends_on = [k8sconnect_object.test_ns]
+}
+`, namespace, cmName, namespace)
+}
+
+func testAccPatchConfigNoWarnSecond(namespace, cmName string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "test_ns" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = { kubeconfig = var.raw }
+}
+
+resource "k8sconnect_patch" "test" {
+  target = {
+    api_version = "v1"
+    kind        = "ConfigMap"
+    name        = "%s"
+    namespace   = "%s"
+  }
+
+  patch = <<YAML
+data:
+  field1: patched-value-2
+YAML
+
+  cluster_connection = { kubeconfig = var.raw }
+  depends_on = [k8sconnect_object.test_ns]
+}
+`, namespace, cmName, namespace)
+}
+
+func testAccPatchConfigNoWarnThird(namespace, cmName string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "test_ns" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster_connection = { kubeconfig = var.raw }
+}
+
+resource "k8sconnect_patch" "test" {
+  target = {
+    api_version = "v1"
+    kind        = "ConfigMap"
+    name        = "%s"
+    namespace   = "%s"
+  }
+
+  patch = <<YAML
+data:
+  field1: patched-value-3
+YAML
 
   cluster_connection = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
