@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2025-10-26
+
+### Fixed
+- Fixed `k8sconnect_patch` resource showing formatting-only changes (whitespace, comments) as drift
+
+### Improved
+- Enhanced kubeconfig validation with better error messages
+- Improved `k8sconnect_patch` drift detection warnings
+
 ## [0.1.6] - 2025-10-25
 
 ### Fixed
