@@ -9,5 +9,5 @@ resource "k8sconnect_object" "all" {
   for_each = data.k8sconnect_yaml_split.configs.manifests
 
   yaml_body          = each.value
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }

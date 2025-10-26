@@ -10,7 +10,7 @@ resource "k8sconnect_object" "namespace" {
       name: example
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 # Create deployment
@@ -49,7 +49,7 @@ resource "k8sconnect_object" "app" {
                 memory: 256Mi
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
   depends_on         = [k8sconnect_object.namespace]
 }
 
@@ -62,7 +62,7 @@ resource "k8sconnect_object" "app" {
 resource "k8sconnect_wait" "app" {
   object_ref = k8sconnect_object.app.object_ref
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 
   wait_for = {
     rollout = true
@@ -88,7 +88,7 @@ resource "k8sconnect_object" "service" {
         app: web
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
   depends_on         = [k8sconnect_wait.app]
 }
 

@@ -9,7 +9,7 @@ data "k8sconnect_object" "kubernetes_api" {
   name        = "kubernetes"
   namespace   = "default"
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 # Create a namespace for this example
@@ -21,7 +21,7 @@ resource "k8sconnect_object" "namespace" {
       name: example
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 # Use the datasource .object attribute to access fields with dot notation
@@ -39,7 +39,7 @@ resource "k8sconnect_object" "api_endpoint_config" {
       service_name: "${data.k8sconnect_object.kubernetes_api.object.metadata.name}"
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
   depends_on         = [k8sconnect_object.namespace]
 }
 

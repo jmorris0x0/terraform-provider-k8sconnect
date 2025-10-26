@@ -9,7 +9,7 @@ resource "k8sconnect_object" "namespace" {
       name: example
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 # Create a deployment with HPA-managed replicas
@@ -39,7 +39,7 @@ resource "k8sconnect_object" "app" {
                 memory: 128Mi
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
   depends_on         = [k8sconnect_object.namespace]
 
   # Ignore spec.replicas because HPA will modify it
@@ -73,5 +73,5 @@ resource "k8sconnect_object" "hpa" {
             averageUtilization: 50
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }

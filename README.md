@@ -235,7 +235,7 @@ resource "k8sconnect_object" "service" {
         app: myapp
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 # Wait for LoadBalancer IP to be assigned
@@ -247,7 +247,7 @@ resource "k8sconnect_wait" "service" {
     timeout = "5m"
   }
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 # Use the LoadBalancer IP immediately
@@ -262,7 +262,7 @@ resource "k8sconnect_object" "config" {
       service_url: "${k8sconnect_wait.service.result.status.loadBalancer.ingress[0].ip}:80"
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
   depends_on         = [k8sconnect_wait.service]
 }
 ```

@@ -58,7 +58,7 @@ resource "k8sconnect_object" "nginx" {
     # ...
   YAML
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 ```
 
@@ -78,13 +78,13 @@ resource "kubernetes_manifest" "service" {
 # After (separate wait resource)
 resource "k8sconnect_object" "service" {
   yaml_body = file("service.yaml")
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 resource "k8sconnect_wait" "service" {
   object_ref = k8sconnect_object.service.object_ref
   wait_for   = { field = "status.loadBalancer.ingress", timeout = "10m" }
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 # Access: k8sconnect_wait.service.result.status.loadBalancer.ingress[0].ip
@@ -115,7 +115,7 @@ resource "k8sconnect_object" "nginx" {
       replicas: 3
       # ...
   YAML
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 ```
 
@@ -138,7 +138,7 @@ kubectl get deployment nginx -n default -o yaml > nginx.yaml
 # 2. Create resource block
 resource "k8sconnect_object" "nginx" {
   yaml_body          = file("nginx.yaml")
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 # 3. Import existing resource
@@ -191,7 +191,7 @@ import {
 
 resource "k8sconnect_object" "nginx" {
   yaml_body          = file("nginx.yaml")
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 ```
 
@@ -309,7 +309,7 @@ resource "k8sconnect_object" "deployment" {
   YAML
 
   ignore_fields = ["spec.replicas"]  # Release to HPA
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 ```
 
@@ -329,12 +329,12 @@ resource "kubernetes_manifest" "widget" {
 # After: ONE apply (auto-retry)
 resource "k8sconnect_object" "widget_crd" {
   yaml_body          = file("widget-crd.yaml")
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 resource "k8sconnect_object" "widget" {
   yaml_body          = file("widget.yaml")
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
   depends_on         = [k8sconnect_object.widget_crd]
 }
 ```
@@ -411,7 +411,7 @@ resource "k8sconnect_object" "configs" {
     data = each.value
   })
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 ```
 

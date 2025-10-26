@@ -20,7 +20,7 @@ resource "k8sconnect_patch" "coredns_label" {
     }
   })
 
-  cluster_connection = var.cluster_connection
+  cluster_connection = local.cluster_connection
 }
 
 # Output the field ownership information
