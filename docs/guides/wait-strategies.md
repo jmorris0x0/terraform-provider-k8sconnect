@@ -217,12 +217,20 @@ resource "k8sconnect_object" "migration" {
       backoffLimit: 1
   YAML
   cluster_connection = local.cluster_connection
+
   depends_on = [k8sconnect_wait.db]
 }
 
 resource "k8sconnect_wait" "migration" {
   object_ref = k8sconnect_object.migration.object_ref
-  wait_for   = { field = "status.succeeded", field_value = "1", timeout = "5m" }
+
+  wait_for = {
+    field_value = {
+      "status.succeeded" = "1"
+    }
+    timeout = "5m"
+  }
+
   cluster_connection = local.cluster_connection
 }
 
