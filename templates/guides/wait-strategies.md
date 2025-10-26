@@ -163,10 +163,33 @@ resource "k8sconnect_object" "ingress" {
 
 ### Sequential Deployment
 
+<!-- runnable-test: wait-sequential-deployment -->
 ```terraform
 # Database → Wait → Migration → Wait → App
 resource "k8sconnect_object" "db" {
-  yaml_body = file("db.yaml")
+  yaml_body = <<-YAML
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: postgres
+      namespace: default
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app: postgres
+      template:
+        metadata:
+          labels:
+            app: postgres
+        spec:
+          containers:
+          - name: postgres
+            image: postgres:14
+            env:
+            - name: POSTGRES_PASSWORD
+              value: testpass
+  YAML
   cluster_connection = local.cluster_connection
 }
 
@@ -177,23 +200,58 @@ resource "k8sconnect_wait" "db" {
 }
 
 resource "k8sconnect_object" "migration" {
-  yaml_body  = file("migration.yaml")
+  yaml_body = <<-YAML
+    apiVersion: batch/v1
+    kind: Job
+    metadata:
+      name: db-migration
+      namespace: default
+    spec:
+      template:
+        spec:
+          containers:
+          - name: migrate
+            image: busybox
+            command: ["sh", "-c", "echo 'Running migration'; sleep 2; echo 'Migration complete'"]
+          restartPolicy: Never
+      backoffLimit: 1
+  YAML
   cluster_connection = local.cluster_connection
   depends_on = [k8sconnect_wait.db]
 }
 
 resource "k8sconnect_wait" "migration" {
   object_ref = k8sconnect_object.migration.object_ref
-  wait_for   = { field = "status.succeeded", field_value = "1", timeout = "15m" }
+  wait_for   = { field = "status.succeeded", field_value = "1", timeout = "5m" }
   cluster_connection = local.cluster_connection
 }
 
 resource "k8sconnect_object" "app" {
-  yaml_body  = file("app.yaml")
+  yaml_body = <<-YAML
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: app
+      namespace: default
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app: myapp
+      template:
+        metadata:
+          labels:
+            app: myapp
+        spec:
+          containers:
+          - name: app
+            image: nginx:1.21
+  YAML
   cluster_connection = local.cluster_connection
   depends_on = [k8sconnect_wait.migration]
 }
 ```
+<!-- /runnable-test -->
 
 ### Parallel Waits
 

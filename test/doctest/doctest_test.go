@@ -31,6 +31,9 @@ func TestMarkdownDocumentation(t *testing.T) {
 		"../../docs/data-sources/object.md",
 		"../../docs/data-sources/yaml_split.md",
 		"../../docs/data-sources/yaml_scoped.md",
+		"../../docs/guides/field-ownership.md",
+		"../../docs/guides/crd-cr-management.md",
+		"../../docs/guides/wait-strategies.md",
 	}
 
 	// Extract all runnable examples

@@ -66,6 +66,7 @@ The `ignore_fields` attribute tells k8sconnect to release ownership of specific 
 
 ### Example: HPA-managed Deployment
 
+<!-- runnable-test: field-ownership-hpa -->
 ```terraform
 resource "k8sconnect_object" "app" {
   yaml_body = <<-YAML
@@ -87,6 +88,9 @@ resource "k8sconnect_object" "app" {
           containers:
           - name: nginx
             image: nginx:1.21
+            resources:
+              requests:
+                cpu: 100m
   YAML
 
   cluster_connection = local.cluster_connection
@@ -119,8 +123,10 @@ resource "k8sconnect_object" "hpa" {
   YAML
 
   cluster_connection = local.cluster_connection
+  depends_on = [k8sconnect_object.app]
 }
 ```
+<!-- /runnable-test -->
 
 **What happens:**
 1. k8sconnect creates the Deployment with `replicas: 3`

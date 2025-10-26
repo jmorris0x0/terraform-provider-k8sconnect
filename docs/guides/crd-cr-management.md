@@ -27,6 +27,7 @@ Retries "no matches for kind" errors: 100ms → 500ms → 1s → 2s → 5s → 1
 
 **Use when:** You have a few CRDs and CRs with no complex dependencies.
 
+<!-- runnable-test: crd-cr-auto-retry -->
 ```terraform
 # CRD Definition
 resource "k8sconnect_object" "widget_crd" {
@@ -80,6 +81,7 @@ resource "k8sconnect_object" "widget" {
   depends_on = [k8sconnect_object.widget_crd]
 }
 ```
+<!-- /runnable-test -->
 
 **What happens:**
 1. Terraform submits CRD
