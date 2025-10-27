@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2025-10-27
+
+### Fixed
+
+- **Fixed for_each replacement race condition timeout**
+  - When for_each keys change (e.g., `["old-key"]` → `["new-key"]`), Terraform runs Delete(old-key) and Create(new-key) in parallel
+  - If both map to the same Kubernetes object, Create() wins via Server-Side Apply, changing the ownership annotation
+  - Previously: Delete() would wait 5 minutes for an object that was already replaced, then timeout
+  - Now: Delete() continuously monitors ownership annotations during wait loop, exits gracefully in ~5 seconds when replacement detected
+  - This fix applies to any scenario where parallel operations target the same Kubernetes object
+- **Fixed namespace defaulting for namespace-scoped resources**
+  - Resources without explicit `metadata.namespace` now correctly infer the namespace from cluster connection
+
 ## [0.2.0] - 2025-10-27
 
 ### BREAKING CHANGES
