@@ -342,8 +342,35 @@ func (r *objectResource) Delete(ctx context.Context, req resource.DeleteRequest,
 		return
 	}
 
-	// 7. Wait for deletion with timeout
-	err = r.waitForDeletion(ctx, rc.Client, rc.GVR, rc.Object, timeout)
+	// 6a. Re-check ownership after delete to handle race with parallel SSA Apply
+	// When Terraform replaces a resource (e.g., for_each key change), Create() and Delete()
+	// run in parallel. If SSA Apply from Create() completes between our ownership check (step 5a)
+	// and the Delete() call above, the object will have a different terraform-id. In this case,
+	// skip waiting for deletion since the object is now managed by a different Terraform resource.
+	liveObj, err = rc.Client.Get(ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName())
+	if err == nil {
+		// Object still exists - check if it's been replaced
+		currentID := r.getOwnershipID(liveObj)
+		if currentID != "" && currentID != expectedID {
+			// Resource has been replaced by a different Terraform instance during deletion
+			tflog.Info(ctx, "Resource was replaced during deletion - skipping wait", map[string]interface{}{
+				"kind":        rc.Object.GetKind(),
+				"name":        rc.Object.GetName(),
+				"namespace":   rc.Object.GetNamespace(),
+				"expected_id": expectedID,
+				"current_id":  currentID,
+			})
+			return
+		}
+	} else if !errors.IsNotFound(err) {
+		// Unexpected error during post-delete check - log but continue
+		tflog.Warn(ctx, "Failed to verify deletion status, continuing with wait", map[string]interface{}{
+			"error": err.Error(),
+		})
+	}
+
+	// 7. Wait for deletion with timeout, continuing to check ownership on each iteration
+	err = r.waitForDeletion(ctx, rc.Client, rc.GVR, rc.Object, timeout, expectedID)
 	if err != nil {
 		if forceDestroy {
 			// Normal deletion timed out, NOW try force
