@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -71,6 +72,14 @@ func (r *objectResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 
 		// This is a real YAML parsing error
 		resp.Diagnostics.AddError("Invalid YAML", fmt.Sprintf("Failed to parse YAML: %s", err))
+		return
+	}
+
+	// Populate object_ref from parsed YAML (prevents "(known after apply)" noise)
+	// We know the identity at plan time, so set it explicitly to avoid diff noise
+	if err := r.setObjectRefFromDesiredObj(ctx, desiredObj, &plannedData); err != nil {
+		resp.Diagnostics.AddError("Failed to populate object_ref",
+			fmt.Sprintf("Failed to populate object_ref during plan: %s", err))
 		return
 	}
 
@@ -509,4 +518,36 @@ func addOwnershipTransitionWarning(resp *resource.ModifyPlanResponse, transition
 		"diagnostics_error_count": len(resp.Diagnostics.Errors()),
 		"diagnostics_warn_count":  len(resp.Diagnostics.Warnings()),
 	})
+}
+
+// setObjectRefFromDesiredObj populates object_ref from the parsed resource during plan phase
+// This prevents object_ref from showing as "(known after apply)" when only non-identity fields change
+func (r *objectResource) setObjectRefFromDesiredObj(ctx context.Context, obj *unstructured.Unstructured, data *objectResourceModel) error {
+	objRef := objectRefModel{
+		APIVersion: types.StringValue(obj.GetAPIVersion()),
+		Kind:       types.StringValue(obj.GetKind()),
+		Name:       types.StringValue(obj.GetName()),
+	}
+
+	// Namespace is optional (null for cluster-scoped resources)
+	if ns := obj.GetNamespace(); ns != "" {
+		objRef.Namespace = types.StringValue(ns)
+	} else {
+		objRef.Namespace = types.StringNull()
+	}
+
+	// Convert to types.Object
+	objRefValue, diags := types.ObjectValueFrom(ctx, map[string]attr.Type{
+		"api_version": types.StringType,
+		"kind":        types.StringType,
+		"name":        types.StringType,
+		"namespace":   types.StringType,
+	}, objRef)
+
+	if diags.HasError() {
+		return fmt.Errorf("failed to convert object_ref to types.Object: %v", diags)
+	}
+
+	data.ObjectRef = objRefValue
+	return nil
 }

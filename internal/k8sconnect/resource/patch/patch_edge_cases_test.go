@@ -2101,3 +2101,5 @@ YAML
 }
 `, namespace, cmName, namespace)
 }
+
+// TestAccPatchResource_SelfPatchingPrevention tests that you cannot patch a resource

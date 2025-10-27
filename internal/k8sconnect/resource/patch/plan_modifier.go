@@ -296,14 +296,6 @@ func (r *patchResource) mergeMaps(dst, src map[string]interface{}) {
 	}
 }
 
-// min returns the minimum of two integers
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // generateFieldManager returns the field manager name for this patch
 // During CREATE (plan phase), ID doesn't exist yet, so we use a placeholder
 // During UPDATE, we use the actual ID from state
