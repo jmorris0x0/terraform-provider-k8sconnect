@@ -172,6 +172,24 @@ func CheckConfigMapAnnotation(client kubernetes.Interface, namespace, name, anno
 	}
 }
 
+func CheckConfigMapCount(client kubernetes.Interface, namespace string, expectedCount int) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		list, err := client.CoreV1().ConfigMaps(namespace).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to list configmaps in namespace %s: %v", namespace, err)
+		}
+
+		actualCount := len(list.Items)
+		if actualCount != expectedCount {
+			return fmt.Errorf("expected %d configmap(s) in namespace %s, got %d", expectedCount, namespace, actualCount)
+		}
+
+		fmt.Printf("✅ Verified namespace %s has %d configmap(s)\n", namespace, actualCount)
+		return nil
+	}
+}
+
 func CheckPVCExists(client kubernetes.Interface, namespace, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()

@@ -1730,3 +1730,7 @@ YAML
 }
 `, namespace, pvcName, namespace, envLabel, storage)
 }
+
+// NOTE: for_each key change test removed - Terraform testing framework doesn't support for_each in test configurations
+// BUG #2 (Resource replacement deletion timeout) is tested via manual soak test in scenarios/kind-validation/
+// See SOAKTEST.md for test steps and expected behavior

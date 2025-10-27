@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -75,7 +76,31 @@ func (r *objectResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 	}
 
 	// Validate connection is ready for operations
-	if !r.isConnectionReady(plannedData.Cluster) {
+	connectionReady := r.isConnectionReady(plannedData.Cluster)
+
+	// Populate object_ref from parsed YAML (prevents "(known after apply)" noise)
+	// ONLY when connection is ready - during bootstrap we can't determine namespace defaults
+	if connectionReady {
+		if err := r.setObjectRefFromDesiredObj(ctx, desiredObj, &plannedData); err != nil {
+			// Check if this is a CRD-not-found error
+			if r.isCRDNotFoundError(err) {
+				// CRD doesn't exist yet - this is expected during bootstrap
+				// object_ref will remain as "(known after apply)" which is correct
+				tflog.Debug(ctx, "CRD not found during plan - object_ref will be determined during apply", map[string]interface{}{
+					"kind": desiredObj.GetKind(),
+					"name": desiredObj.GetName(),
+				})
+			} else {
+				resp.Diagnostics.AddError("Failed to populate object_ref",
+					fmt.Sprintf("Failed to populate object_ref during plan: %s", err))
+				return
+			}
+		}
+	}
+	// Note: When connection not ready (bootstrap), object_ref stays as "(known after apply)"
+	// This is correct - we genuinely can't determine namespace defaults without querying cluster
+
+	if !connectionReady {
 		// Connection has unknown values (bootstrap scenario) - set projection to unknown
 		// User can review yaml_body in plan output
 		r.setProjectionUnknown(ctx, &plannedData, resp,
@@ -509,4 +534,92 @@ func addOwnershipTransitionWarning(resp *resource.ModifyPlanResponse, transition
 		"diagnostics_error_count": len(resp.Diagnostics.Errors()),
 		"diagnostics_warn_count":  len(resp.Diagnostics.Warnings()),
 	})
+}
+
+// setObjectRefFromDesiredObj populates object_ref from the parsed resource during plan phase
+// This prevents object_ref from showing as "(known after apply)" when only non-identity fields change
+// IMPORTANT: Only call this when connection is ready - we need to query cluster for namespace scoping
+func (r *objectResource) setObjectRefFromDesiredObj(ctx context.Context, obj *unstructured.Unstructured, data *objectResourceModel) error {
+	objRef := objectRefModel{
+		APIVersion: types.StringValue(obj.GetAPIVersion()),
+		Kind:       types.StringValue(obj.GetKind()),
+		Name:       types.StringValue(obj.GetName()),
+	}
+
+	// Namespace handling:
+	// 1. Check hardcoded list of common cluster-scoped resources (fast path, covers 95% of cases)
+	// 2. For unknown resources: Query cluster to determine scope (handles custom resources)
+	// 3. For namespace-scoped resources:
+	//    - If namespace explicitly set in YAML, use it
+	//    - If empty, default to "default" (matches K8s/k8sclient behavior)
+	// 4. For cluster-scoped resources:
+	//    - Strip namespace from object (K8s ignores it anyway)
+	//    - Set object_ref.namespace to null (matches what K8s returns)
+
+	var isNamespaced bool
+
+	// Fast path: Use hardcoded list for common cluster-scoped resources
+	// This avoids discovery queries for standard Kubernetes resources and works during bootstrap
+	if k8sclient.IsClusterScopedResource(obj.GetAPIVersion(), obj.GetKind()) {
+		isNamespaced = false
+	} else {
+		// Unknown resource type - query the cluster
+		conn, err := r.convertObjectToConnectionModel(ctx, data.Cluster)
+		if err != nil {
+			return fmt.Errorf("failed to convert connection for namespace detection: %w", err)
+		}
+
+		client, err := r.clientGetter(conn)
+		if err != nil {
+			return fmt.Errorf("failed to create client for namespace detection: %w", err)
+		}
+
+		isNamespaced, err = client.IsResourceNamespaced(ctx, obj.GetAPIVersion(), obj.GetKind())
+		if err != nil {
+			// Return error as-is so caller can check if it's CRD-not-found
+			// This handles the case where a Custom Resource's CRD doesn't exist yet
+			return err
+		}
+	}
+
+	if isNamespaced {
+		// Namespace-scoped resource
+		ns := obj.GetNamespace()
+		if ns == "" {
+			// No explicit namespace -> K8s defaults to "default"
+			ns = "default"
+			obj.SetNamespace(ns)
+		}
+		objRef.Namespace = types.StringValue(ns)
+	} else {
+		// Cluster-scoped resource
+		originalNs := obj.GetNamespace()
+		if originalNs != "" {
+			// User specified namespace on cluster-scoped resource - this is invalid
+			// Kubernetes will ignore it, so we need to strip it and warn the user
+			tflog.Warn(ctx, "Namespace specified for cluster-scoped resource will be ignored by Kubernetes", map[string]interface{}{
+				"kind":      obj.GetKind(),
+				"name":      obj.GetName(),
+				"namespace": originalNs,
+			})
+		}
+		// Strip namespace field to match what K8s returns
+		obj.SetNamespace("")
+		objRef.Namespace = types.StringNull()
+	}
+
+	// Convert to types.Object
+	objRefValue, diags := types.ObjectValueFrom(ctx, map[string]attr.Type{
+		"api_version": types.StringType,
+		"kind":        types.StringType,
+		"name":        types.StringType,
+		"namespace":   types.StringType,
+	}, objRef)
+
+	if diags.HasError() {
+		return fmt.Errorf("failed to convert object_ref to types.Object: %v", diags)
+	}
+
+	data.ObjectRef = objRefValue
+	return nil
 }

@@ -1115,3 +1115,64 @@ YAML
 }
 `, namespace, cmName, namespace, cmName, namespace)
 }
+
+// TestAccPatchResource_ImportNotSupported verifies that attempting to import
+// a patch resource returns a clear error message explaining why import isn't supported
+func TestAccPatchResource_ImportNotSupported(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("import-test-ns-%d", time.Now().UnixNano()%1000000)
+	cmName := fmt.Sprintf("import-test-cm-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create namespace and ConfigMap with external field manager
+			{
+				Config: testAccPatchConfigEmptyWithNamespace(ns),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					createConfigMapWithFieldManager(t, k8sClient, ns, cmName, "kubectl", map[string]string{
+						"original": "value",
+					}),
+					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
+				),
+			},
+			// Step 2: Apply patch to the ConfigMap
+			{
+				Config: testAccPatchConfigBasic(ns, cmName),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_patch.test", "id"),
+				),
+			},
+			// Step 3: Try to import the patch - should fail with clear error
+			{
+				Config: testAccPatchConfigBasic(ns, cmName),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				ResourceName:      "k8sconnect_patch.test",
+				ImportState:       true,
+				ImportStateVerify: false,
+				ExpectError:       regexp.MustCompile("Import Not Supported|cannot be imported|partial ownership"),
+			},
+		},
+		CheckDestroy: resource.ComposeTestCheckFunc(
+			testhelpers.CheckConfigMapDestroy(k8sClient, ns, cmName),
+			testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+		),
+	})
+}

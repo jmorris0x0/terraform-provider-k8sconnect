@@ -296,8 +296,8 @@ func (r *objectResource) Delete(ctx context.Context, req resource.DeleteRequest,
 		forceDestroy = data.ForceDestroy.ValueBool()
 	}
 
-	// 5. Check if resource exists
-	_, err = rc.Client.Get(ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName())
+	// 5. Check if resource exists and verify ownership
+	liveObj, err := rc.Client.Get(ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName())
 	if err != nil {
 		if errors.IsNotFound(err) {
 			tflog.Info(ctx, "Resource already deleted")
@@ -310,6 +310,22 @@ func (r *objectResource) Delete(ctx context.Context, req resource.DeleteRequest,
 		} else {
 			resp.Diagnostics.AddError(title, detail)
 		}
+		return
+	}
+
+	// 5a. Verify ownership - if resource has different terraform-id, it's been replaced
+	existingID := r.getOwnershipID(liveObj)
+	expectedID := data.ID.ValueString()
+	if existingID != "" && existingID != expectedID {
+		// Resource exists but is owned by a different Terraform instance
+		// This happens when for_each key changes: new instance overwrites old via SSA
+		tflog.Info(ctx, "Resource has been replaced by different Terraform instance - skipping deletion", map[string]interface{}{
+			"kind":        rc.Object.GetKind(),
+			"name":        rc.Object.GetName(),
+			"namespace":   rc.Object.GetNamespace(),
+			"expected_id": expectedID,
+			"existing_id": existingID,
+		})
 		return
 	}
 
