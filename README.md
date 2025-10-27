@@ -297,12 +297,12 @@ k8sconnect uses **Server-Side Apply with Dry-Run** for every operation, giving y
 
 2. **Field validation** - Strict validation during plan catches typos and invalid fields before apply (`replica` vs `replicas`, `imagePullPolice` vs `imagePullPolicy`, etc.).
 
-3. **SSA-aware field ownership** - The `field_ownership` attribute tracks which controller owns each field. See when HPA takes over replicas, when webhooks modify annotations, or when another Terraform state conflicts with yours. When conflicts occur, warnings show exact `ignore_fields` configuration to resolve them. **→ [Field ownership guide](docs/guides/field-ownership.md)**
+3. **SSA-aware field ownership** - Field ownership is tracked internally using Kubernetes Server-Side Apply. When external controllers take ownership of fields (HPA taking replicas, webhooks modifying annotations, etc.), you'll see warnings during plan showing which fields changed ownership. When conflicts occur, warnings show exact `ignore_fields` configuration to resolve them. **→ [Field ownership guide](docs/guides/field-ownership.md)**
 
 4. **True drift detection** - Only diffs fields you actually manage. If a controller updates status or another field manager changes something, you'll see it clearly separated:
    - `yaml_body` diffs = Changes you made to your config
    - `managed_state_projection` diffs = External changes that will be corrected
-   - `field_ownership` diffs = Ownership changes between controllers
+   - Plan warnings = Ownership changes between controllers
 
 This provider combines Server-Side Apply field ownership tracking with dry-run projections during plan, enabling accurate diffs and multi-controller coexistence patterns via ignore_fields.
 

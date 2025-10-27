@@ -9,7 +9,7 @@
 
 ### The Field Ownership Feature
 
-ADR-005 established that we track field-level ownership from Kubernetes Server-Side Apply (SSA) managedFields and expose it to users via a `field_ownership` state attribute. This feature took hundreds of hours to build and provides critical visibility into which controller manages which fields.
+ADR-005 established that we track field-level ownership from Kubernetes Server-Side Apply (SSA) managedFields and expose it to users via a `field_ownership` state attribute. This feature was difficult to build and provides visibility into which controller manages which fields.
 
 **User Value:**
 - See ownership transitions in Terraform plan diffs (e.g., "kubectl-patch" → "k8sconnect")
@@ -44,7 +44,7 @@ field_ownership = {
 
 ### The Fundamental Conflict
 
-**Requirement 1:** Show ownership transitions (key feature, hundreds of hours invested)
+**Requirement 1:** Show ownership transitions (key feature)
 **Requirement 2:** No inconsistent plan errors (Terraform's contract)
 
 **Reality:** These conflict when tracking external managers whose ownership can change outside Terraform's control.
@@ -176,7 +176,9 @@ Field ownership tracking will be moved entirely to private state. The `field_own
 - Track all ownership (all managers) in private state
 - During plan: Compare previous ownership (private state) vs current ownership (from K8s)
 - Emit warnings when ownership changes detected
-- Update private state with current ownership after each plan/apply
+- Update private state with current ownership only during Create/Update operations (NOT during Read)
+  - This ensures we preserve "ownership at last apply" for transition detection
+  - If we updated during Read, both current and previous would match, missing transitions
 
 **Breaking Change:** Users referencing `field_ownership` in configs will need to remove those references. The ownership information will be visible only via plan warnings.
 
