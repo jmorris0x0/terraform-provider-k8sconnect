@@ -488,8 +488,8 @@ func addOwnershipTransitionWarning(resp *resource.ModifyPlanResponse, transition
 		details = append(details, fmt.Sprintf("  • %s: %s → %s", t.Path, t.PreviousOwner, t.CurrentOwner))
 	}
 
-	warningMessage := fmt.Sprintf("Field ownership changed during this apply:\n%s\n\n"+
-		"k8sconnect took ownership using force=true. "+
+	warningMessage := fmt.Sprintf("Field ownership will change if you apply:\n%s\n\n"+
+		"k8sconnect will take ownership using force=true. "+
 		"The previous controller may attempt to reclaim these fields.",
 		strings.Join(details, "\n"))
 
