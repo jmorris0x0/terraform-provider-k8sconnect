@@ -29,7 +29,7 @@ resource "aws_eks_node_group" "main" {
 
 # Connection can be reused across resources
 locals {
-  cluster_connection = {
+  cluster = {
     host                   = aws_eks_cluster.main.endpoint
     cluster_ca_certificate = aws_eks_cluster.main.certificate_authority[0].data
     exec = {
@@ -183,12 +183,12 @@ locals {
 
 resource "k8sconnect_object" "prod_app" {
   yaml_body          = file("app.yaml")
-  cluster_connection = local.prod_connection
+  cluster = local.prod_connection
 }
 
 resource "k8sconnect_object" "staging_app" {
   yaml_body          = file("app.yaml")
-  cluster_connection = local.staging_connection
+  cluster = local.staging_connection
 }
 ```
 
@@ -239,9 +239,9 @@ export KUBECONFIG=~/.kube/config
 terraform plan -generate-config-out=generated.tf
 ```
 
-This creates `generated.tf` with a complete resource block including `yaml_body` and `cluster_connection`. Review and move it to your main configuration.
+This creates `generated.tf` with a complete resource block including `yaml_body` and `cluster`. Review and move it to your main configuration.
 
-**Note**: The generated `cluster_connection` will have the full kubeconfig file inlined as a string. You'll want to replace it with `kubeconfig = file("~/.kube/config")` for cleaner code.
+**Note**: The generated `cluster` will have the full kubeconfig file inlined as a string. You'll want to replace it with `kubeconfig = file("~/.kube/config")` for cleaner code.
 
 #### 3. Import Blocks (Terraform 1.5+)
 
@@ -269,7 +269,7 @@ terraform apply  # Imports and reconciles in one command
 1. **Import reads from kubeconfig**: The import process uses your `KUBECONFIG` environment variable to connect to the cluster
 2. **Ownership takeover**: If the resource was created by kubectl or other tools, k8sconnect automatically takes ownership using Server-Side Apply with `force=true`
 3. **Adds resource to state**: The current state is captured (with server-added fields cleaned)
-4. **Configure for future operations**: After import, the `cluster_connection` in your resource definition is used for all subsequent operations
+4. **Configure for future operations**: After import, the `cluster` in your resource definition is used for all subsequent operations
 
 ### Prerequisites
 
@@ -376,7 +376,7 @@ resource "k8sconnect_object" "my_app" {
             image: nginx:1.25
   YAML
 
-  cluster_connection = {
+  cluster = {
     host                   = var.cluster_endpoint
     cluster_ca_certificate = var.cluster_ca_cert
     token                  = var.cluster_token
@@ -552,14 +552,14 @@ resource "k8sconnect_object" "api" {
 
 ### Working with Imported Resources
 
-After import, the resource is under Terraform management. Future operations will use the `cluster_connection` you configured:
+After import, the resource is under Terraform management. Future operations will use the `cluster` you configured:
 
 ```terraform
 resource "k8sconnect_object" "imported_app" {
   yaml_body = file("deployment.yaml")
 
   # Used for plan/apply operations after import
-  cluster_connection = {
+  cluster = {
     host                   = aws_eks_cluster.main.endpoint
     cluster_ca_certificate = aws_eks_cluster.main.certificate_authority[0].data
     exec = {

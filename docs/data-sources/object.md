@@ -54,7 +54,7 @@ data "k8sconnect_object" "aws_node" {
   name        = "aws-node"
   namespace   = "kube-system"
 
-  cluster_connection = {
+  cluster = {
     host                   = aws_eks_cluster.main.endpoint
     cluster_ca_certificate = aws_eks_cluster.main.certificate_authority[0].data
     exec = {

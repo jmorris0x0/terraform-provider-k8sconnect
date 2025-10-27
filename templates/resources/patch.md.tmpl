@@ -122,7 +122,7 @@ resource "k8sconnect_patch" "aws_node_env" {
   })
 
 
-  cluster_connection = {
+  cluster = {
     host                   = aws_eks_cluster.main.endpoint
     cluster_ca_certificate = aws_eks_cluster.main.certificate_authority[0].data
     exec = {

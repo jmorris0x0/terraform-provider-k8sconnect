@@ -25,7 +25,7 @@ resource "aws_eks_cluster" "main" {
 resource "k8sconnect_object" "cert_manager" {
   yaml_body = file("cert-manager.yaml")
 
-  cluster_connection = {
+  cluster = {
     host                   = aws_eks_cluster.main.endpoint
     cluster_ca_certificate = aws_eks_cluster.main.certificate_authority[0].data
     exec = {
@@ -41,12 +41,12 @@ That's it. The connection is inline—Terraform resolves the outputs, and everyt
 
 ## Authentication
 
-The provider requires no global configuration. Authentication is specified per-resource via the `cluster_connection` block, supporting three methods:
+The provider requires no global configuration. Authentication is specified per-resource via the `cluster` block, supporting three methods:
 
 ### Token Authentication
 
 ```terraform
-cluster_connection = {
+cluster = {
   host                   = "https://k8s.example.com"
   cluster_ca_certificate = file("ca.pem")
   token                  = var.cluster_token
@@ -56,7 +56,7 @@ cluster_connection = {
 ### Exec-based Authentication (AWS EKS, GKE, AKS)
 
 ```terraform
-cluster_connection = {
+cluster = {
   host                   = "https://k8s.example.com"
   cluster_ca_certificate = file("ca.pem")
   exec = {
@@ -71,13 +71,13 @@ cluster_connection = {
 
 ```terraform
 # From file
-cluster_connection = {
+cluster = {
   kubeconfig = file("~/.kube/config")
   context    = "production"  # optional
 }
 
 # From variable (CI-friendly)
-cluster_connection = {
+cluster = {
   kubeconfig = var.kubeconfig_content
 }
 ```
