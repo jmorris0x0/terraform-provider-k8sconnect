@@ -115,6 +115,13 @@ func (r *objectResource) loadConnectionFromData(
 	requireConnection bool,
 ) (auth.ClusterModel, error) {
 
+	// Handle deprecated cluster_connection -> cluster migration
+	// If cluster_connection is set, copy it to cluster (validator ensures only one is set)
+	if !data.ClusterConnection.IsNull() && !data.ClusterConnection.IsUnknown() {
+		data.Cluster = data.ClusterConnection
+		tflog.Debug(ctx, "Copied cluster_connection to cluster (deprecated field)")
+	}
+
 	// Connection is always required from the resource now
 	if data.Cluster.IsNull() || data.Cluster.IsUnknown() {
 		if requireConnection {

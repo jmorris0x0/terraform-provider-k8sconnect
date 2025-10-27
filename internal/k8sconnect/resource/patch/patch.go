@@ -24,6 +24,7 @@ var _ resource.ResourceWithConfigValidators = (*patchResource)(nil)
 var _ resource.ResourceWithImportState = (*patchResource)(nil)
 var _ resource.ResourceWithConfigure = (*patchResource)(nil)
 var _ resource.ResourceWithModifyPlan = (*patchResource)(nil)
+var _ resource.ResourceWithUpgradeState = (*patchResource)(nil)
 
 // Private state keys
 const (
@@ -39,12 +40,13 @@ type patchResource struct {
 }
 
 type patchResourceModel struct {
-	ID         types.String `tfsdk:"id"`
-	Target     types.Object `tfsdk:"target"`
-	Patch      types.String `tfsdk:"patch"`
-	JSONPatch  types.String `tfsdk:"json_patch"`
-	MergePatch types.String `tfsdk:"merge_patch"`
-	Cluster    types.Object `tfsdk:"cluster"`
+	ID                types.String `tfsdk:"id"`
+	Target            types.Object `tfsdk:"target"`
+	Patch             types.String `tfsdk:"patch"`
+	JSONPatch         types.String `tfsdk:"json_patch"`
+	MergePatch        types.String `tfsdk:"merge_patch"`
+	Cluster           types.Object `tfsdk:"cluster"`
+	ClusterConnection types.Object `tfsdk:"cluster_connection"` // Deprecated: use Cluster
 
 	// Computed fields
 
@@ -97,6 +99,7 @@ func (r *patchResource) Configure(ctx context.Context, req resource.ConfigureReq
 
 func (r *patchResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Version: 1,
 		MarkdownDescription: `Applies targeted patches to existing Kubernetes resources using Server-Side Apply.
 
 **IMPORTANT:** This resource forcefully takes ownership of fields from other controllers.
@@ -216,10 +219,16 @@ When you destroy a patch resource, ownership is released but patched values rema
 			},
 
 			"cluster": schema.SingleNestedAttribute{
-				Required: true,
+				Optional: true,
 				Description: "Kubernetes cluster connection for this specific patch. Can be different per-resource, enabling multi-cluster " +
 					"deployments without provider aliases. Supports inline credentials (token, exec, client certs) or kubeconfig.",
 				Attributes: auth.GetConnectionSchemaForResource(),
+			},
+			"cluster_connection": schema.SingleNestedAttribute{
+				Optional:           true,
+				DeprecationMessage: "Use 'cluster' instead. This attribute will be removed in a future version.",
+				Description:        "Deprecated: Use 'cluster' instead.",
+				Attributes:         auth.GetConnectionSchemaForResource(),
 			},
 
 			// Computed fields

@@ -166,6 +166,12 @@ func (r *waitResource) Update(ctx context.Context, req resource.UpdateRequest, r
 func (r *waitResource) buildWaitContext(ctx context.Context, data *waitResourceModel) (*waitContext, diag.Diagnostics) {
 	var diags diag.Diagnostics
 
+	// Handle deprecated cluster_connection -> cluster migration
+	if !data.ClusterConnection.IsNull() && !data.ClusterConnection.IsUnknown() {
+		data.Cluster = data.ClusterConnection
+		tflog.Debug(ctx, "Copied cluster_connection to cluster (deprecated field)")
+	}
+
 	// Parse object_ref
 	var objRef objectRefModel
 	diagsObjRef := data.ObjectRef.As(ctx, &objRef, basetypes.ObjectAsOptions{})

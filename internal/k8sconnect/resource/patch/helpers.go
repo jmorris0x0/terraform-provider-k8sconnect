@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -21,6 +22,13 @@ import (
 
 // setupClient creates a Kubernetes client from the patch resource's connection configuration
 func (r *patchResource) setupClient(ctx context.Context, data *patchResourceModel, diagnostics *diag.Diagnostics) (k8sclient.K8sClient, error) {
+	// Handle deprecated cluster_connection -> cluster migration
+	// If cluster_connection is set, copy it to cluster (validator ensures only one is set)
+	if !data.ClusterConnection.IsNull() && !data.ClusterConnection.IsUnknown() {
+		data.Cluster = data.ClusterConnection
+		tflog.Debug(ctx, "Copied cluster_connection to cluster (deprecated field)")
+	}
+
 	// Convert connection object to model
 	conn, err := auth.ObjectToConnectionModel(ctx, data.Cluster)
 	if err != nil {

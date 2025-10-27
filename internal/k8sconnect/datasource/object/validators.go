@@ -40,23 +40,45 @@ func (v *manifestDSClusterValidator) ValidateDataSource(ctx context.Context, req
 		return
 	}
 
-	// Skip validation for unknown connections (during planning)
-	if data.Cluster.IsUnknown() {
-		return
-	}
+	// Check that exactly one of cluster or cluster_connection is specified
+	clusterIsSet := !data.Cluster.IsNull() && !data.Cluster.IsUnknown()
+	clusterConnectionIsSet := !data.ClusterConnection.IsNull() && !data.ClusterConnection.IsUnknown()
 
-	// Check connection exists
-	if data.Cluster.IsNull() {
+	if !clusterIsSet && !clusterConnectionIsSet {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("cluster"),
 			"Missing Cluster Connection Configuration",
-			"cluster block is required.",
+			"Either 'cluster' or 'cluster_connection' (deprecated) is required.\n\n"+
+				"Specify how to connect to your Kubernetes cluster using one of these blocks:\n"+
+				"• 'cluster' - recommended\n"+
+				"• 'cluster_connection' - deprecated, will be removed in a future version",
 		)
 		return
 	}
 
+	if clusterIsSet && clusterConnectionIsSet {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("cluster"),
+			"Conflicting Configuration Blocks",
+			"Cannot specify both 'cluster' and 'cluster_connection'.\n\n"+
+				"Use only 'cluster' (recommended). The 'cluster_connection' attribute is deprecated and will be removed in a future version.",
+		)
+		return
+	}
+
+	// Use whichever is set for validation
+	clusterToValidate := data.Cluster
+	if clusterConnectionIsSet {
+		clusterToValidate = data.ClusterConnection
+	}
+
+	// Skip validation for unknown connections (during planning)
+	if clusterToValidate.IsUnknown() {
+		return
+	}
+
 	// Convert to connection model
-	connModel, err := auth.ObjectToConnectionModel(ctx, data.Cluster)
+	connModel, err := auth.ObjectToConnectionModel(ctx, clusterToValidate)
 	if err != nil {
 		// Unknown values during planning - skip validation
 		return
@@ -95,13 +117,19 @@ func (v *manifestDSExecAuthValidator) ValidateDataSource(ctx context.Context, re
 		return
 	}
 
+	// Determine which cluster config to use
+	clusterToValidate := data.Cluster
+	if !data.ClusterConnection.IsNull() && !data.ClusterConnection.IsUnknown() {
+		clusterToValidate = data.ClusterConnection
+	}
+
 	// If connection is unknown or null, skip validation
-	if data.Cluster.IsUnknown() || data.Cluster.IsNull() {
+	if clusterToValidate.IsUnknown() || clusterToValidate.IsNull() {
 		return
 	}
 
 	// Convert to connection model
-	connModel, err := auth.ObjectToConnectionModel(ctx, data.Cluster)
+	connModel, err := auth.ObjectToConnectionModel(ctx, clusterToValidate)
 	if err != nil {
 		// Unknown values during planning
 		return

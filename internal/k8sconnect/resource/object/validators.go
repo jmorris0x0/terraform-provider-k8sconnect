@@ -82,11 +82,11 @@ func (v *conflictingAttributesValidator) ValidateResource(ctx context.Context, r
 type requiredFieldsValidator struct{}
 
 func (v *requiredFieldsValidator) Description(ctx context.Context) string {
-	return "Ensures required fields yaml_body and cluster are specified"
+	return "Ensures required fields yaml_body and cluster (or cluster_connection) are specified"
 }
 
 func (v *requiredFieldsValidator) MarkdownDescription(ctx context.Context) string {
-	return "Ensures required fields `yaml_body` and `cluster` are specified"
+	return "Ensures required fields `yaml_body` and `cluster` (or deprecated `cluster_connection`) are specified"
 }
 
 func (v *requiredFieldsValidator) ValidateResource(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
@@ -130,13 +130,28 @@ func (v *requiredFieldsValidator) ValidateResource(ctx context.Context, req reso
 		}
 	}
 
-	// Note: cluster validation is handled by clusterConnectionValidator
-	// We just check that the block exists at all
-	if isClusterEmpty(data.Cluster) {
+	// Check cluster configuration - must specify exactly one of cluster or cluster_connection
+	clusterEmpty := isClusterEmpty(data.Cluster)
+	clusterConnectionEmpty := isClusterEmpty(data.ClusterConnection)
+
+	if clusterEmpty && clusterConnectionEmpty {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("cluster"),
 			"Missing Required Configuration Block",
-			"'cluster' block is required. It must specify how to connect to your Kubernetes cluster.",
+			"Either 'cluster' or 'cluster_connection' (deprecated) is required.\n\n"+
+				"Specify how to connect to your Kubernetes cluster using one of these blocks:\n"+
+				"• 'cluster' - recommended\n"+
+				"• 'cluster_connection' - deprecated, will be removed in a future version",
+		)
+		return
+	}
+
+	if !clusterEmpty && !clusterConnectionEmpty {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("cluster"),
+			"Conflicting Configuration Blocks",
+			"Cannot specify both 'cluster' and 'cluster_connection'.\n\n"+
+				"Use only 'cluster' (recommended). The 'cluster_connection' attribute is deprecated and will be removed in a future version.",
 		)
 	}
 }

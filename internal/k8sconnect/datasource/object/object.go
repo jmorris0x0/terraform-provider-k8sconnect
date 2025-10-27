@@ -24,11 +24,12 @@ type objectDataSource struct {
 }
 
 type objectDataSourceModel struct {
-	APIVersion types.String `tfsdk:"api_version"`
-	Kind       types.String `tfsdk:"kind"`
-	Name       types.String `tfsdk:"name"`
-	Namespace  types.String `tfsdk:"namespace"`
-	Cluster    types.Object `tfsdk:"cluster"`
+	APIVersion        types.String `tfsdk:"api_version"`
+	Kind              types.String `tfsdk:"kind"`
+	Name              types.String `tfsdk:"name"`
+	Namespace         types.String `tfsdk:"namespace"`
+	Cluster           types.Object `tfsdk:"cluster"`
+	ClusterConnection types.Object `tfsdk:"cluster_connection"` // Deprecated: use Cluster
 
 	// Outputs
 	Manifest types.String  `tfsdk:"manifest"`
@@ -84,9 +85,15 @@ func (d *objectDataSource) Schema(ctx context.Context, req datasource.SchemaRequ
 				Description: "Namespace of the resource (optional for cluster-scoped resources, defaults to 'default' for namespaced resources if not specified)",
 			},
 			"cluster": schema.SingleNestedAttribute{
-				Required:    true,
+				Optional:    true,
 				Description: "Cluster connection configuration",
 				Attributes:  auth.GetConnectionSchemaForDataSource(),
+			},
+			"cluster_connection": schema.SingleNestedAttribute{
+				Optional:           true,
+				DeprecationMessage: "Use 'cluster' instead. This attribute will be removed in a future version.",
+				Description:        "Deprecated: Use 'cluster' instead.",
+				Attributes:         auth.GetConnectionSchemaForDataSource(),
 			},
 			// Outputs
 			"manifest": schema.StringAttribute{
@@ -110,6 +117,12 @@ func (d *objectDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
 		return
+	}
+
+	// Handle deprecated cluster_connection -> cluster migration
+	if !data.ClusterConnection.IsNull() && !data.ClusterConnection.IsUnknown() {
+		data.Cluster = data.ClusterConnection
+		tflog.Debug(ctx, "Copied cluster_connection to cluster (deprecated field)")
 	}
 
 	// Convert connection using the auth package helper

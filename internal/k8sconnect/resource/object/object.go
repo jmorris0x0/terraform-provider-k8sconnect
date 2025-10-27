@@ -22,6 +22,7 @@ var _ resource.ResourceWithConfigValidators = (*objectResource)(nil)
 var _ resource.ResourceWithModifyPlan = (*objectResource)(nil)
 var _ resource.ResourceWithImportState = (*objectResource)(nil)
 var _ resource.ResourceWithConfigure = (*objectResource)(nil)
+var _ resource.ResourceWithUpgradeState = (*objectResource)(nil)
 
 // Private state keys
 const (
@@ -40,6 +41,7 @@ type objectResourceModel struct {
 	ID                     types.String `tfsdk:"id"`
 	YAMLBody               types.String `tfsdk:"yaml_body"`
 	Cluster                types.Object `tfsdk:"cluster"`
+	ClusterConnection      types.Object `tfsdk:"cluster_connection"` // Deprecated: use Cluster
 	DeleteProtection       types.Bool   `tfsdk:"delete_protection"`
 	DeleteTimeout          types.String `tfsdk:"delete_timeout"`
 	ForceDestroy           types.Bool   `tfsdk:"force_destroy"`
@@ -93,6 +95,7 @@ func (r *objectResource) Configure(ctx context.Context, req resource.ConfigureRe
 
 func (r *objectResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Version:     1,
 		Description: "Applies a single‑document Kubernetes YAML manifest to a cluster, with per‑resource inline or kubeconfig‑based connection settings.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -111,10 +114,16 @@ func (r *objectResource) Schema(ctx context.Context, req resource.SchemaRequest,
 				},
 			},
 			"cluster": schema.SingleNestedAttribute{
-				Required: true,
+				Optional: true,
 				Description: "Kubernetes cluster connection for this specific resource. Can be different per-resource, enabling multi-cluster " +
 					"deployments without provider aliases. Supports inline credentials (token, exec, client certs) or kubeconfig.",
 				Attributes: auth.GetConnectionSchemaForResource(),
+			},
+			"cluster_connection": schema.SingleNestedAttribute{
+				Optional:           true,
+				DeprecationMessage: "Use 'cluster' instead. This attribute will be removed in a future version.",
+				Description:        "Deprecated: Use 'cluster' instead.",
+				Attributes:         auth.GetConnectionSchemaForResource(),
 			},
 			"delete_protection": schema.BoolAttribute{
 				Optional:    true,

@@ -32,6 +32,13 @@ func (r *objectResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 		return
 	}
 
+	// Handle deprecated cluster_connection -> cluster migration
+	// If cluster_connection is set, copy it to cluster (validator ensures only one is set)
+	if !plannedData.ClusterConnection.IsNull() && !plannedData.ClusterConnection.IsUnknown() {
+		plannedData.Cluster = plannedData.ClusterConnection
+		tflog.Debug(ctx, "Copied cluster_connection to cluster (deprecated field)")
+	}
+
 	// ADR-010: Detect resource identity changes for UPDATE operations
 	// This must happen BEFORE dry-run to avoid wasting API calls when replacement is needed
 	if !req.State.Raw.IsNull() {

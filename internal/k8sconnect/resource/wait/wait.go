@@ -23,6 +23,7 @@ import (
 
 var _ resource.Resource = (*waitResource)(nil)
 var _ resource.ResourceWithConfigure = (*waitResource)(nil)
+var _ resource.ResourceWithUpgradeState = (*waitResource)(nil)
 
 // ClientGetter function type for dependency injection
 type ClientGetter func(auth.ClusterModel) (k8sclient.K8sClient, error)
@@ -33,11 +34,12 @@ type waitResource struct {
 }
 
 type waitResourceModel struct {
-	ID        types.String  `tfsdk:"id"`
-	ObjectRef types.Object  `tfsdk:"object_ref"`
-	Cluster   types.Object  `tfsdk:"cluster"`
-	WaitFor   types.Object  `tfsdk:"wait_for"`
-	Result    types.Dynamic `tfsdk:"result"`
+	ID                types.String  `tfsdk:"id"`
+	ObjectRef         types.Object  `tfsdk:"object_ref"`
+	Cluster           types.Object  `tfsdk:"cluster"`
+	ClusterConnection types.Object  `tfsdk:"cluster_connection"` // Deprecated: use Cluster
+	WaitFor           types.Object  `tfsdk:"wait_for"`
+	Result            types.Dynamic `tfsdk:"result"`
 }
 
 // objectRefModel defines the structure for referencing a Kubernetes object
@@ -95,6 +97,7 @@ func (r *waitResource) Configure(ctx context.Context, req resource.ConfigureRequ
 
 func (r *waitResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Version: 1,
 		Description: "Waits for a Kubernetes resource to reach a desired state. " +
 			"Use this resource to wait for resources created by k8sconnect_object without risking resource tainting on timeout. " +
 			"Follows the pattern: create resource -> wait for readiness -> use outputs.",
@@ -130,10 +133,16 @@ func (r *waitResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 				},
 			},
 			"cluster": schema.SingleNestedAttribute{
-				Required: true,
+				Optional: true,
 				Description: "Kubernetes cluster connection for accessing the resource. " +
 					"Should match the connection used by the k8sconnect_object resource.",
 				Attributes: auth.GetConnectionSchemaForResource(),
+			},
+			"cluster_connection": schema.SingleNestedAttribute{
+				Optional:           true,
+				DeprecationMessage: "Use 'cluster' instead. This attribute will be removed in a future version.",
+				Description:        "Deprecated: Use 'cluster' instead.",
+				Attributes:         auth.GetConnectionSchemaForResource(),
 			},
 			"wait_for": schema.SingleNestedAttribute{
 				Required:    true,

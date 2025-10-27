@@ -33,23 +33,52 @@ func (v Cluster) ValidateResource(ctx context.Context, req resource.ValidateConf
 		return
 	}
 
-	// Skip validation for unknown connections (during planning)
-	if conn.IsUnknown() {
-		return
-	}
+	// Also check for deprecated cluster_connection
+	var connDeprecated types.Object
+	diagsDeprecated := req.Config.GetAttribute(ctx, path.Root("cluster_connection"), &connDeprecated)
+	// Ignore errors here - cluster_connection might not exist in all resources
 
-	// Check connection exists
-	if conn.IsNull() {
+	// Determine which connection to validate
+	clusterIsSet := !conn.IsNull() && !conn.IsUnknown()
+	clusterConnectionIsSet := diagsDeprecated == nil && !connDeprecated.IsNull() && !connDeprecated.IsUnknown()
+
+	// Check that at least one is specified
+	if !clusterIsSet && !clusterConnectionIsSet {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("cluster"),
 			"Missing Cluster Connection Configuration",
-			"cluster block is required.",
+			"Either 'cluster' or 'cluster_connection' (deprecated) is required.\n\n"+
+				"Specify how to connect to your Kubernetes cluster using one of these blocks:\n"+
+				"• 'cluster' - recommended\n"+
+				"• 'cluster_connection' - deprecated, will be removed in a future version",
 		)
 		return
 	}
 
+	// Check that both aren't specified
+	if clusterIsSet && clusterConnectionIsSet {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("cluster"),
+			"Conflicting Configuration Blocks",
+			"Cannot specify both 'cluster' and 'cluster_connection'.\n\n"+
+				"Use only 'cluster' (recommended). The 'cluster_connection' attribute is deprecated and will be removed in a future version.",
+		)
+		return
+	}
+
+	// Use whichever is set for validation
+	connToValidate := conn
+	if clusterConnectionIsSet {
+		connToValidate = connDeprecated
+	}
+
+	// Skip validation for unknown connections (during planning)
+	if connToValidate.IsUnknown() {
+		return
+	}
+
 	// Convert to connection model
-	connModel, err := auth.ObjectToConnectionModel(ctx, conn)
+	connModel, err := auth.ObjectToConnectionModel(ctx, connToValidate)
 	if err != nil {
 		// Unknown values during planning - skip validation
 		return
@@ -88,13 +117,23 @@ func (v ExecAuth) ValidateResource(ctx context.Context, req resource.ValidateCon
 		return
 	}
 
+	// Also check for deprecated cluster_connection
+	var connDeprecated types.Object
+	diagsDeprecated := req.Config.GetAttribute(ctx, path.Root("cluster_connection"), &connDeprecated)
+
+	// Determine which connection to use
+	connToValidate := conn
+	if diagsDeprecated == nil && !connDeprecated.IsNull() && !connDeprecated.IsUnknown() {
+		connToValidate = connDeprecated
+	}
+
 	// If connection is unknown or null, skip validation
-	if conn.IsUnknown() || conn.IsNull() {
+	if connToValidate.IsUnknown() || connToValidate.IsNull() {
 		return
 	}
 
 	// Convert to connection model to access exec field
-	connModel, err := auth.ObjectToConnectionModel(ctx, conn)
+	connModel, err := auth.ObjectToConnectionModel(ctx, connToValidate)
 	if err != nil {
 		// If conversion fails, it might be due to unknown values during planning
 		return
