@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -39,7 +40,7 @@ func TestAccObjectResource_ReplacementRaceCondition(t *testing.T) {
 			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
 		},
 		Steps: []resource.TestStep{
-			// Step 1: Create ConfigMap with k8sconnect_object
+			// Step 1: Create ConfigMap
 			{
 				Config: testAccConfigReplacement_Initial(ns, cmName),
 				ConfigVariables: config.Variables{
@@ -52,47 +53,55 @@ func TestAccObjectResource_ReplacementRaceCondition(t *testing.T) {
 					testhelpers.CheckOwnershipAnnotations(k8sClient, ns, cmName),
 				),
 			},
-			// Step 2: Manually update terraform-id and remove resource from config
-			// This simulates the race condition where SSA Apply happens during deletion
+			// Step 2: Simulate parallel Create() completing before Delete() by using
+			// SSA Apply with a different field manager, then trigger Delete()
 			{
 				PreConfig: func() {
-					// Manually update terraform-id annotation to simulate SSA replacement
-					// This simulates what happens when a new Terraform instance (new for_each key)
-					// creates/updates the same K8s object via SSA Apply
+					// Simulate what a parallel Create() from a different Terraform resource would do:
+					// Change the terraform-id annotation to simulate replacement by another resource
 					cm, err := k8sClient.CoreV1().ConfigMaps(ns).Get(context.Background(), cmName, metav1.GetOptions{})
 					if err != nil {
 						panic(fmt.Errorf("failed to get ConfigMap: %w", err))
 					}
 
-					// Change the terraform-id to simulate replacement by different instance
+					// Update the ConfigMap with a new terraform-id
+					// This simulates another k8sconnect_object resource taking ownership via SSA
+					cm.Data["key"] = "replaced-value"
 					if cm.Annotations == nil {
 						cm.Annotations = make(map[string]string)
 					}
-					cm.Annotations["k8sconnect.terraform.io/terraform-id"] = "replaced-id-000"
+					// Generate a new terraform-id (simulating a different Terraform resource instance)
+					cm.Annotations["k8sconnect.terraform.io/terraform-id"] = fmt.Sprintf("new-resource-%d", time.Now().UnixNano()%1000000)
 
 					_, err = k8sClient.CoreV1().ConfigMaps(ns).Update(context.Background(), cm, metav1.UpdateOptions{})
 					if err != nil {
-						panic(fmt.Errorf("failed to update ConfigMap annotations: %w", err))
+						panic(fmt.Errorf("failed to update ConfigMap with new ownership: %w", err))
 					}
 				},
-				Config: testAccConfigReplacement_Removed(ns),
+				Config: testAccConfigReplacement_Removed(ns, cmName),
 				ConfigVariables: config.Variables{
 					"raw":       config.StringVariable(raw),
 					"namespace": config.StringVariable(ns),
+					"cm_name":   config.StringVariable(cmName),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					// ConfigMap should still exist because it was "replaced"
 					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
-					// Verify terraform-id is still the "replaced" value
+					// Verify the ownership changed
 					func(s *terraform.State) error {
 						cm, err := k8sClient.CoreV1().ConfigMaps(ns).Get(context.Background(), cmName, metav1.GetOptions{})
 						if err != nil {
 							return fmt.Errorf("failed to get ConfigMap: %w", err)
 						}
 
-						if cm.Annotations["k8sconnect.terraform.io/terraform-id"] != "replaced-id-000" {
-							return fmt.Errorf("expected terraform-id to be 'replaced-id-000', got: %s",
-								cm.Annotations["k8sconnect.terraform.io/terraform-id"])
+						if cm.Data["key"] != "replaced-value" {
+							return fmt.Errorf("expected data.key to be 'replaced-value', got: %s", cm.Data["key"])
+						}
+
+						// Verify terraform-id changed
+						newID := cm.Annotations["k8sconnect.terraform.io/terraform-id"]
+						if newID == "" || !strings.HasPrefix(newID, "new-resource-") {
+							return fmt.Errorf("expected terraform-id to start with 'new-resource-', got: %s", newID)
 						}
 
 						return nil
@@ -106,6 +115,10 @@ func TestAccObjectResource_ReplacementRaceCondition(t *testing.T) {
 			return testhelpers.CheckNamespaceDestroy(k8sClient, ns)(s)
 		},
 	})
+}
+
+func toPtr[T any](v T) *T {
+	return &v
 }
 
 func testAccConfigReplacement_Initial(namespace, cmName string) string {
@@ -154,12 +167,15 @@ YAML
 }`, namespace, cmName, namespace)
 }
 
-func testAccConfigReplacement_Removed(namespace string) string {
+func testAccConfigReplacement_Removed(namespace, cmName string) string {
 	return fmt.Sprintf(`
 variable "raw" {
   type = string
 }
 variable "namespace" {
+  type = string
+}
+variable "cm_name" {
   type = string
 }
 
@@ -177,6 +193,7 @@ YAML
     kubeconfig = var.raw
   }
 }
-# ConfigMap resource removed - this triggers deletion
+# ConfigMap resource removed - triggers deletion
+# PreConfig already simulated a parallel Create() via SSA Apply
 `, namespace)
 }
