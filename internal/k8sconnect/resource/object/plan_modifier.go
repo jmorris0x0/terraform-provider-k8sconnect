@@ -494,8 +494,8 @@ func addOwnershipTransitionWarning(resp *resource.ModifyPlanResponse, transition
 		strings.Join(details, "\n"))
 
 	tflog.Warn(context.Background(), "⚠️ DEBUG: addOwnershipTransitionWarning - ADDING WARNING TO DIAGNOSTICS", map[string]interface{}{
-		"warning_summary": "Field Ownership Transition",
-		"warning_detail":  warningMessage,
+		"warning_summary":  "Field Ownership Transition",
+		"warning_detail":   warningMessage,
 		"transition_count": len(transitions),
 	})
 
