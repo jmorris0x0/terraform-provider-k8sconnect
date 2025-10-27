@@ -34,12 +34,11 @@ type waitResource struct {
 }
 
 type waitResourceModel struct {
-	ID                types.String  `tfsdk:"id"`
-	ObjectRef         types.Object  `tfsdk:"object_ref"`
-	Cluster           types.Object  `tfsdk:"cluster"`
-	ClusterConnection types.Object  `tfsdk:"cluster_connection"` // Deprecated: use Cluster
-	WaitFor           types.Object  `tfsdk:"wait_for"`
-	Result            types.Dynamic `tfsdk:"result"`
+	ID        types.String  `tfsdk:"id"`
+	ObjectRef types.Object  `tfsdk:"object_ref"`
+	Cluster   types.Object  `tfsdk:"cluster"`
+	WaitFor   types.Object  `tfsdk:"wait_for"`
+	Result    types.Dynamic `tfsdk:"result"`
 }
 
 // objectRefModel defines the structure for referencing a Kubernetes object
@@ -133,16 +132,10 @@ func (r *waitResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 				},
 			},
 			"cluster": schema.SingleNestedAttribute{
-				Optional: true,
+				Required: true,
 				Description: "Kubernetes cluster connection for accessing the resource. " +
 					"Should match the connection used by the k8sconnect_object resource.",
 				Attributes: auth.GetConnectionSchemaForResource(),
-			},
-			"cluster_connection": schema.SingleNestedAttribute{
-				Optional:           true,
-				DeprecationMessage: "Use 'cluster' instead. This attribute will be removed in a future version.",
-				Description:        "Deprecated: Use 'cluster' instead.",
-				Attributes:         auth.GetConnectionSchemaForResource(),
 			},
 			"wait_for": schema.SingleNestedAttribute{
 				Required:    true,

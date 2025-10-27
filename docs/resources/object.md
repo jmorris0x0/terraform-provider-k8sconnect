@@ -197,12 +197,11 @@ resource "k8sconnect_object" "staging_app" {
 
 ### Required
 
+- `cluster` (Attributes) Kubernetes cluster connection for this specific resource. Can be different per-resource, enabling multi-cluster deployments without provider aliases. Supports inline credentials (token, exec, client certs) or kubeconfig. (see [below for nested schema](#nestedatt--cluster))
 - `yaml_body` (String) UTF-8 encoded, single-document Kubernetes YAML. Multi-doc files will fail validation.
 
 ### Optional
 
-- `cluster` (Attributes) Kubernetes cluster connection for this specific resource. Can be different per-resource, enabling multi-cluster deployments without provider aliases. Supports inline credentials (token, exec, client certs) or kubeconfig. (see [below for nested schema](#nestedatt--cluster))
-- `cluster_connection` (Attributes, Deprecated) Deprecated: Use 'cluster' instead. (see [below for nested schema](#nestedatt--cluster_connection))
 - `delete_protection` (Boolean) Prevent accidental deletion of the resource. If set to true, the resource cannot be deleted unless this field is set to false.
 - `delete_timeout` (String) How long to wait for a resource to be deleted before considering the deletion failed. Defaults to 300s (5 minutes).
 - `force_destroy` (Boolean) Force deletion by removing finalizers. **WARNING:** Unlike other providers, this REMOVES finalizers after timeout. May cause data loss and orphaned cloud resources. Consult documentation before enabling.
@@ -232,37 +231,6 @@ Optional:
 
 <a id="nestedatt--cluster--exec"></a>
 ### Nested Schema for `cluster.exec`
-
-Required:
-
-- `api_version` (String) API version to use when encoding the ExecCredentials resource.
-- `command` (String) Command to execute.
-
-Optional:
-
-- `args` (List of String) Arguments to pass when executing the plugin.
-- `env` (Map of String) Environment variables to set when executing the plugin.
-
-
-
-<a id="nestedatt--cluster_connection"></a>
-### Nested Schema for `cluster_connection`
-
-Optional:
-
-- `client_certificate` (String, Sensitive) Client certificate for TLS authentication. Accepts PEM format or base64-encoded PEM - automatically detected.
-- `client_key` (String, Sensitive) Client certificate key for TLS authentication. Accepts PEM format or base64-encoded PEM - automatically detected.
-- `cluster_ca_certificate` (String, Sensitive) Root certificate bundle for TLS authentication. Accepts PEM format or base64-encoded PEM - automatically detected.
-- `context` (String) Context to use from the kubeconfig. Optional when kubeconfig contains exactly one context (that context will be used automatically). Required when kubeconfig contains multiple contexts to prevent accidental connection to the wrong cluster. Error will list available contexts if not specified when required.
-- `exec` (Attributes, Sensitive) Configuration for exec-based authentication. (see [below for nested schema](#nestedatt--cluster_connection--exec))
-- `host` (String) The hostname (in form of URI) of the Kubernetes API server.
-- `insecure` (Boolean) Whether server should be accessed without verifying the TLS certificate.
-- `kubeconfig` (String, Sensitive) Raw kubeconfig file content.
-- `proxy_url` (String) URL of the proxy to use for requests.
-- `token` (String, Sensitive) Token to authenticate to the Kubernetes API server.
-
-<a id="nestedatt--cluster_connection--exec"></a>
-### Nested Schema for `cluster_connection.exec`
 
 Required:
 

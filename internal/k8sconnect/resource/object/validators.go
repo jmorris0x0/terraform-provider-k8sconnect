@@ -130,29 +130,16 @@ func (v *requiredFieldsValidator) ValidateResource(ctx context.Context, req reso
 		}
 	}
 
-	// Check cluster configuration - must specify exactly one of cluster or cluster_connection
+	// Check cluster configuration
 	clusterEmpty := isClusterEmpty(data.Cluster)
-	clusterConnectionEmpty := isClusterEmpty(data.ClusterConnection)
 
-	if clusterEmpty && clusterConnectionEmpty {
+	if clusterEmpty {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("cluster"),
 			"Missing Required Configuration Block",
-			"Either 'cluster' or 'cluster_connection' (deprecated) is required.\n\n"+
-				"Specify how to connect to your Kubernetes cluster using one of these blocks:\n"+
-				"• 'cluster' - recommended\n"+
-				"• 'cluster_connection' - deprecated, will be removed in a future version",
+			"cluster block is required.",
 		)
 		return
-	}
-
-	if !clusterEmpty && !clusterConnectionEmpty {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("cluster"),
-			"Conflicting Configuration Blocks",
-			"Cannot specify both 'cluster' and 'cluster_connection'.\n\n"+
-				"Use only 'cluster' (recommended). The 'cluster_connection' attribute is deprecated and will be removed in a future version.",
-		)
 	}
 }
 

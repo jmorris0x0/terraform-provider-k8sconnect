@@ -40,13 +40,12 @@ type patchResource struct {
 }
 
 type patchResourceModel struct {
-	ID                types.String `tfsdk:"id"`
-	Target            types.Object `tfsdk:"target"`
-	Patch             types.String `tfsdk:"patch"`
-	JSONPatch         types.String `tfsdk:"json_patch"`
-	MergePatch        types.String `tfsdk:"merge_patch"`
-	Cluster           types.Object `tfsdk:"cluster"`
-	ClusterConnection types.Object `tfsdk:"cluster_connection"` // Deprecated: use Cluster
+	ID         types.String `tfsdk:"id"`
+	Target     types.Object `tfsdk:"target"`
+	Patch      types.String `tfsdk:"patch"`
+	JSONPatch  types.String `tfsdk:"json_patch"`
+	MergePatch types.String `tfsdk:"merge_patch"`
+	Cluster    types.Object `tfsdk:"cluster"`
 
 	// Computed fields
 
@@ -219,16 +218,10 @@ When you destroy a patch resource, ownership is released but patched values rema
 			},
 
 			"cluster": schema.SingleNestedAttribute{
-				Optional: true,
+				Required: true,
 				Description: "Kubernetes cluster connection for this specific patch. Can be different per-resource, enabling multi-cluster " +
 					"deployments without provider aliases. Supports inline credentials (token, exec, client certs) or kubeconfig.",
 				Attributes: auth.GetConnectionSchemaForResource(),
-			},
-			"cluster_connection": schema.SingleNestedAttribute{
-				Optional:           true,
-				DeprecationMessage: "Use 'cluster' instead. This attribute will be removed in a future version.",
-				Description:        "Deprecated: Use 'cluster' instead.",
-				Attributes:         auth.GetConnectionSchemaForResource(),
 			},
 
 			// Computed fields
