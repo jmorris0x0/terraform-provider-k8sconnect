@@ -52,8 +52,6 @@ func (r *patchResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanR
 		// No patch content, set computed fields to unknown
 		plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
 		plannedData.ManagedFields = types.StringUnknown()
-		plannedData.FieldOwnership = types.MapUnknown(types.StringType)
-		plannedData.PreviousOwners = types.MapUnknown(types.StringType)
 		resp.Plan.Set(ctx, &plannedData)
 		return
 	}
@@ -64,8 +62,6 @@ func (r *patchResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanR
 			map[string]interface{}{"patch_preview": patchContent[:min(100, len(patchContent))]})
 		plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
 		plannedData.ManagedFields = types.StringUnknown()
-		plannedData.FieldOwnership = types.MapUnknown(types.StringType)
-		plannedData.PreviousOwners = types.MapUnknown(types.StringType)
 		resp.Plan.Set(ctx, &plannedData)
 		return
 	}
@@ -75,8 +71,6 @@ func (r *patchResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanR
 		tflog.Debug(ctx, "Connection has unknown values, skipping dry-run")
 		plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
 		plannedData.ManagedFields = types.StringUnknown()
-		plannedData.FieldOwnership = types.MapUnknown(types.StringType)
-		plannedData.PreviousOwners = types.MapUnknown(types.StringType)
 		resp.Plan.Set(ctx, &plannedData)
 		return
 	}
@@ -92,11 +86,6 @@ func (r *patchResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanR
 	// Save the modified plan
 	diags = resp.Plan.Set(ctx, &plannedData)
 	resp.Diagnostics.Append(diags...)
-
-	// Check field ownership conflicts for updates (warn about takeovers)
-	if !req.State.Raw.IsNull() {
-		r.checkPatchOwnershipConflicts(ctx, req, resp)
-	}
 }
 
 // checkDriftAndPreserveState compares projections and preserves state if no changes
@@ -147,8 +136,6 @@ func (r *patchResource) preservePatchInputAndState(ctx context.Context, stateDat
 	// Preserve computed attributes
 	plannedData.ManagedStateProjection = stateData.ManagedStateProjection
 	plannedData.ManagedFields = stateData.ManagedFields
-	plannedData.FieldOwnership = stateData.FieldOwnership
-	plannedData.PreviousOwners = stateData.PreviousOwners
 }
 
 // isConnectionReady checks if all connection fields are known (not computed)
@@ -256,117 +243,6 @@ func (r *patchResource) setupDryRunClient(ctx context.Context, plannedData *patc
 	return client, nil
 }
 
-// checkPatchOwnershipConflicts detects when fields managed by other controllers are being taken over
-// Adapted from manifest's ownership conflict detection
-func (r *patchResource) checkPatchOwnershipConflicts(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	// Get state and plan data
-	var stateData, planData patchResourceModel
-	diags := req.State.Get(ctx, &stateData)
-	resp.Diagnostics.Append(diags...)
-	diags = resp.Plan.Get(ctx, &planData)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	// Skip if we don't have field ownership in state
-	if stateData.FieldOwnership.IsNull() || planData.FieldOwnership.IsNull() {
-		return
-	}
-
-	// Convert ownership maps
-	var stateOwnership, planOwnership map[string]string
-	diags = stateData.FieldOwnership.ElementsAs(ctx, &stateOwnership, false)
-	if diags.HasError() {
-		return
-	}
-	diags = planData.FieldOwnership.ElementsAs(ctx, &planOwnership, false)
-	if diags.HasError() {
-		return
-	}
-
-	// Check for ownership changes (takeovers from other controllers)
-	// Only warn when ownership ACTUALLY changes, not on no-ops
-	var conflicts []fieldConflict
-	for path, planOwner := range planOwnership {
-		if stateOwner, existed := stateOwnership[path]; existed {
-			// Field existed before
-			if stateOwner != planOwner && stateOwner != r.generateFieldManager(planData) {
-				// Ownership changed from another controller
-				conflicts = append(conflicts, fieldConflict{
-					Path:         path,
-					CurrentOwner: stateOwner,
-					NewOwner:     planOwner,
-				})
-			}
-		}
-	}
-
-	// NOTE: We intentionally do NOT check previousOwners here.
-	// previousOwners persists in state forever and would cause warnings on every update.
-	// We only want to warn when ownership ACTUALLY changes (detected above).
-
-	if len(conflicts) > 0 {
-		r.addConflictWarning(resp, conflicts)
-	}
-}
-
-// fieldConflict represents a field ownership takeover
-type fieldConflict struct {
-	Path         string
-	CurrentOwner string
-	NewOwner     string
-}
-
-// addConflictWarning adds a warning about field ownership takeovers
-func (r *patchResource) addConflictWarning(resp *resource.ModifyPlanResponse, conflicts []fieldConflict) {
-	var conflictDetails []string
-	var conflictPaths []string
-	for _, c := range conflicts {
-		conflictDetails = append(conflictDetails, fmt.Sprintf("  - %s (managed by \"%s\")", c.Path, c.CurrentOwner))
-		conflictPaths = append(conflictPaths, c.Path)
-	}
-
-	ignoreFieldsSuggestion := formatIgnoreFieldsSuggestion(conflictPaths)
-
-	resp.Diagnostics.AddWarning(
-		"Field Ownership Takeover",
-		fmt.Sprintf("This patch will forcefully take ownership of fields managed by other controllers:\n%s\n\n"+
-			"These fields will be taken over with force=true. The other controllers may fight back for control.\n\n"+
-			"This is expected behavior for patches (force=true is always used), but be aware that:\n"+
-			"• External controllers may revert your changes\n"+
-			"• You may need to disable or reconfigure those controllers\n"+
-			"• Consider if k8sconnect_object with ignore_fields would be better for full lifecycle management\n\n"+
-			"If using k8sconnect_object instead, add this configuration to release ownership:\n\n%s",
-			strings.Join(conflictDetails, "\n"), ignoreFieldsSuggestion),
-	)
-}
-
-// formatIgnoreFieldsSuggestion creates a ready-to-use ignore_fields configuration from conflict paths
-func formatIgnoreFieldsSuggestion(paths []string) string {
-	if len(paths) == 0 {
-		return ""
-	}
-
-	if len(paths) == 1 {
-		return fmt.Sprintf("  ignore_fields = [\"%s\"]", paths[0])
-	}
-
-	// Multiple paths - format as multi-line for readability
-	var lines []string
-	lines = append(lines, "  ignore_fields = [")
-	for i, path := range paths {
-		if i < len(paths)-1 {
-			lines = append(lines, fmt.Sprintf("    \"%s\",", path))
-		} else {
-			lines = append(lines, fmt.Sprintf("    \"%s\"", path))
-		}
-	}
-	lines = append(lines, "  ]")
-	return strings.Join(lines, "\n")
-}
-
-// dryRunStrategicMergePatch performs a dry-run of a strategic merge patch using SSA
 func (r *patchResource) dryRunStrategicMergePatch(ctx context.Context, client k8sclient.K8sClient, currentObj *unstructured.Unstructured, patchContent string, fieldManager string) (*unstructured.Unstructured, error) {
 	// Parse patch content
 	var patchData map[string]interface{}
@@ -449,8 +325,6 @@ func (r *patchResource) generateFieldManager(data patchResourceModel) string {
 func setProjectionUnknown(data *patchResourceModel) {
 	data.ManagedStateProjection = types.MapUnknown(types.StringType)
 	data.ManagedFields = types.StringUnknown()
-	data.FieldOwnership = types.MapUnknown(types.StringType)
-	data.PreviousOwners = types.MapUnknown(types.StringType)
 }
 
 // validatePatchTarget gets and validates the target resource for patching
@@ -635,12 +509,12 @@ func (r *patchResource) handleStrategicMergeProjection(
 ) bool {
 	// For CREATE operations, calculate projection
 	if req.State.Raw.IsNull() {
-		return r.calculateCreateProjection(ctx, plannedData, patchedObj, fieldManager, resp)
+		return r.calculateCreateProjection(ctx, req, plannedData, patchedObj, fieldManager, resp)
 	}
 
 	// For UPDATE: always calculate new projection
 	// We'll compare projections later in checkDriftAndPreserveState to suppress formatting diffs
-	return r.calculateUpdateProjection(ctx, plannedData, patchedObj, fieldManager, resp)
+	return r.calculateUpdateProjection(ctx, req, plannedData, patchedObj, fieldManager, resp)
 }
 
 // handleNonSSAPatchState manages state for JSON/Merge patches (no SSA)
@@ -654,14 +528,13 @@ func (r *patchResource) handleNonSSAPatchState(
 	// We'll use semantic content comparison in checkDriftAndPreserveState
 	plannedData.ManagedStateProjection = types.MapNull(types.StringType) // Null for non-SSA
 	plannedData.ManagedFields = types.StringUnknown()
-	plannedData.FieldOwnership = types.MapUnknown(types.StringType)
-	plannedData.PreviousOwners = types.MapUnknown(types.StringType)
 	return true
 }
 
 // calculateProjectionFromDryRun calculates projection for CREATE or UPDATE operations
 func (r *patchResource) calculateProjectionFromDryRun(
 	ctx context.Context,
+	req resource.ModifyPlanRequest,
 	plannedData *patchResourceModel,
 	patchedObj *unstructured.Unstructured,
 	fieldManager string,
@@ -690,33 +563,40 @@ func (r *patchResource) calculateProjectionFromDryRun(
 		"field_count": len(projectionMap),
 	})
 
+	// Check for ownership transitions (only for UPDATE)
+	if operationType == "UPDATE" {
+		// Extract current ownership from patchedObj
+		currentOwnership := extractFieldOwnershipForManager(patchedObj, fieldManager)
+		r.checkOwnershipTransitions(ctx, req, resp, currentOwnership)
+	}
+
 	// Field ownership populated during apply
 	plannedData.ManagedFields = types.StringUnknown()
-	plannedData.FieldOwnership = types.MapUnknown(types.StringType)
-	plannedData.PreviousOwners = types.MapUnknown(types.StringType)
 	return true
 }
 
 // calculateCreateProjection calculates projection for CREATE operations
 func (r *patchResource) calculateCreateProjection(
 	ctx context.Context,
+	req resource.ModifyPlanRequest,
 	plannedData *patchResourceModel,
 	patchedObj *unstructured.Unstructured,
 	fieldManager string,
 	resp *resource.ModifyPlanResponse,
 ) bool {
-	return r.calculateProjectionFromDryRun(ctx, plannedData, patchedObj, fieldManager, "CREATE", resp)
+	return r.calculateProjectionFromDryRun(ctx, req, plannedData, patchedObj, fieldManager, "CREATE", resp)
 }
 
 // calculateUpdateProjection calculates projection for UPDATE operations with changed content
 func (r *patchResource) calculateUpdateProjection(
 	ctx context.Context,
+	req resource.ModifyPlanRequest,
 	plannedData *patchResourceModel,
 	patchedObj *unstructured.Unstructured,
 	fieldManager string,
 	resp *resource.ModifyPlanResponse,
 ) bool {
-	return r.calculateProjectionFromDryRun(ctx, plannedData, patchedObj, fieldManager, "UPDATE", resp)
+	return r.calculateProjectionFromDryRun(ctx, req, plannedData, patchedObj, fieldManager, "UPDATE", resp)
 }
 
 // patchContentEqual performs semantic comparison of patch content
@@ -772,4 +652,69 @@ func (r *patchResource) patchContentEqual(content1, content2 string, patchType s
 		// Unknown type, fallback to string comparison
 		return content1 == content2
 	}
+}
+
+// checkOwnershipTransitions compares previous vs current field ownership and warns about transitions
+func (r *patchResource) checkOwnershipTransitions(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse, currentOwnership map[string]string) {
+	// Get previous ownership from private state
+	previousOwnership := getFieldOwnershipFromPrivateState(ctx, req.Private)
+	if previousOwnership == nil {
+		// No previous ownership tracked - first apply
+		tflog.Debug(ctx, "No previous ownership in private state - skipping transition check")
+		return
+	}
+
+	// Find ownership transitions (fields that changed owner)
+	var transitions []patchOwnershipTransition
+	for path, currentOwner := range currentOwnership {
+		if previousOwner, existed := previousOwnership[path]; existed {
+			// Field existed before - check if owner changed
+			if previousOwner != currentOwner {
+				transitions = append(transitions, patchOwnershipTransition{
+					Path:          path,
+					PreviousOwner: previousOwner,
+					CurrentOwner:  currentOwner,
+				})
+			}
+		}
+	}
+
+	// Check for fields that were removed (released ownership)
+	for path, previousOwner := range previousOwnership {
+		if _, exists := currentOwnership[path]; !exists {
+			// Field was previously owned but is no longer in our ownership
+			tflog.Debug(ctx, "Patch field ownership released", map[string]interface{}{
+				"path":           path,
+				"previous_owner": previousOwner,
+			})
+		}
+	}
+
+	// Emit warnings for ownership transitions
+	if len(transitions) > 0 {
+		addPatchOwnershipTransitionWarning(resp, transitions)
+	}
+}
+
+// patchOwnershipTransition represents a field whose ownership changed
+type patchOwnershipTransition struct {
+	Path          string
+	PreviousOwner string
+	CurrentOwner  string
+}
+
+// addPatchOwnershipTransitionWarning emits a warning about field ownership transitions
+func addPatchOwnershipTransitionWarning(resp *resource.ModifyPlanResponse, transitions []patchOwnershipTransition) {
+	var details []string
+	for _, t := range transitions {
+		details = append(details, fmt.Sprintf("  • %s: %s → %s", t.Path, t.PreviousOwner, t.CurrentOwner))
+	}
+
+	resp.Diagnostics.AddWarning(
+		"Patch Field Ownership Transition",
+		fmt.Sprintf("Field ownership changed during this patch:\n%s\n\n"+
+			"This patch took ownership using force. "+
+			"The previous controller may attempt to reclaim these fields.",
+			strings.Join(details, "\n")),
+	)
 }

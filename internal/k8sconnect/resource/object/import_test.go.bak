@@ -267,6 +267,7 @@ func TestAccObjectResource_ImportWithOwnershipConflict(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckConfigMapExists(k8sClient, ns, configMapName),
+					resource.TestCheckResourceAttrSet("k8sconnect_object.test_import", "field_ownership.%"),
 					// Verify k8sconnect now owns the fields
 					testhelpers.CheckFieldManager(k8sClient, ns, "ConfigMap", configMapName, "k8sconnect"),
 				),

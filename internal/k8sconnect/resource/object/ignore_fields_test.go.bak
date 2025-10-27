@@ -57,6 +57,7 @@ func TestAccObjectResource_IgnoreFields(t *testing.T) {
 					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 					testhelpers.CheckDeploymentReplicaCount(k8sClientset, ns, deployName, 3),
 					// Verify we own spec.selector (but not spec.replicas which is ignored)
+					resource.TestCheckResourceAttr("k8sconnect_object.ignore_test", "field_ownership.spec.selector", "k8sconnect"),
 				),
 			},
 			// Step 2: Re-apply without changes - should show no drift
@@ -128,6 +129,7 @@ func TestAccObjectResource_IgnoreFieldsTransition(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					// We should have forced ownership back and reset replicas to 3
+					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.spec.replicas", "k8sconnect"),
 					testhelpers.CheckDeploymentReplicaCount(k8sClient.(*kubernetes.Clientset), ns, deployName, 3),
 				),
 			},
@@ -256,7 +258,10 @@ func TestAccObjectResource_IgnoreFieldsRemoveWhileOwned(t *testing.T) {
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
-				Check: resource.ComposeTestCheckFunc(),
+				Check: resource.ComposeTestCheckFunc(
+					// Verify field_ownership shows hpa-controller owns spec.replicas
+					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.spec.replicas", "hpa-controller"),
+				),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectEmptyPlan(),
@@ -271,6 +276,7 @@ func TestAccObjectResource_IgnoreFieldsRemoveWhileOwned(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					// We should have forced ownership back and reset replicas to 3
+					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.spec.replicas", "k8sconnect"),
 					testhelpers.CheckDeploymentReplicaCount(k8sClient.(*kubernetes.Clientset), ns, deployName, 3),
 				),
 			},
@@ -308,6 +314,8 @@ func TestAccObjectResource_IgnoreFieldsModifyList(t *testing.T) {
 					resource.TestCheckResourceAttrSet("k8sconnect_object.test", "id"),
 					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
 					resource.TestCheckResourceAttr("k8sconnect_object.test", "ignore_fields.#", "1"),
+					// Verify field_ownership includes key2 (but not key1 which is ignored)
+					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.data.key2", "k8sconnect"),
 				),
 			},
 			// Step 2: Use SSA to simulate external controller taking ownership of data.key2
@@ -329,6 +337,8 @@ func TestAccObjectResource_IgnoreFieldsModifyList(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("k8sconnect_object.test", "ignore_fields.#", "2"),
+					// Verify field_ownership shows key2 is owned by external-controller
+					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.data.key2", "external-controller"),
 				),
 			},
 			// Step 3: REMOVE one field from ignore list - should reclaim it
@@ -343,7 +353,10 @@ func TestAccObjectResource_IgnoreFieldsModifyList(t *testing.T) {
 					testhelpers.CheckConfigMapData(k8sClient, ns, cmName, map[string]string{
 						"key1": "value1",
 					}),
+					// Verify field_ownership shows k8sconnect owns key1 again
+					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.data.key1", "k8sconnect"),
 					// key2 should still be owned by external-controller
+					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.data.key2", "external-controller"),
 				),
 			},
 		},
@@ -399,7 +412,10 @@ func TestAccObjectResource_IgnoreFieldsModifyListError(t *testing.T) {
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
-				Check: resource.ComposeTestCheckFunc(),
+				Check: resource.ComposeTestCheckFunc(
+					// Verify field_ownership shows external-controller owns data.key2
+					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.data.key2", "external-controller"),
+				),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectEmptyPlan(),
@@ -414,6 +430,7 @@ func TestAccObjectResource_IgnoreFieldsModifyListError(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					// We should have forced ownership back and set key2 to expected value
+					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.data.key2", "k8sconnect"),
 					testhelpers.CheckConfigMapData(k8sClient, ns, cmName, map[string]string{
 						"key2": "value2",
 					}),
@@ -464,6 +481,8 @@ func TestAccObjectResource_IgnoreFieldsRemoveWhenOwned(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("k8sconnect_object.test", "ignore_fields.#", "0"),
 					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
+					// Verify field_ownership shows k8sconnect owns spec.replicas again
+					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.spec.replicas", "k8sconnect"),
 				),
 			},
 		},
@@ -926,6 +945,7 @@ func TestAccObjectResource_UpdateWithIgnoreFieldsChange(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					// Verify HPA owns replicas
+					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.spec.replicas", "hpa-controller"),
 					// Verify replicas is 5 (HPA's value)
 					testhelpers.CheckDeploymentReplicaCount(k8sClient.(*kubernetes.Clientset), ns, deployName, 5),
 				),
@@ -946,6 +966,7 @@ func TestAccObjectResource_UpdateWithIgnoreFieldsChange(t *testing.T) {
 					// Verify image was updated
 					testhelpers.CheckDeploymentImage(k8sClient.(*kubernetes.Clientset), ns, deployName, "nginx:1.22"),
 					// Verify replicas was reclaimed and reset to 3
+					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.spec.replicas", "k8sconnect"),
 					testhelpers.CheckDeploymentReplicaCount(k8sClient.(*kubernetes.Clientset), ns, deployName, 3),
 					// Verify ignore_fields is now empty
 					resource.TestCheckResourceAttr("k8sconnect_object.test", "ignore_fields.#", "0"),

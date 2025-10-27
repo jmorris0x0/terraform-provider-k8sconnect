@@ -310,64 +310,6 @@ func (r *objectResource) updateProjectionFromCurrent(ctx context.Context, data *
 	return nil
 }
 
-// updateFieldOwnershipData updates field ownership tracking data
-func (r *objectResource) updateFieldOwnershipData(ctx context.Context, data *objectResourceModel, currentObj *unstructured.Unstructured) {
-	// DEBUG: Log raw managedFields from actual apply/read
-	tflog.Debug(ctx, "=== ACTUAL APPLY/READ RAW MANAGEDFIELDS ===", map[string]interface{}{
-		"object_ref": fmt.Sprintf("%s/%s %s/%s", currentObj.GetAPIVersion(), currentObj.GetKind(), currentObj.GetNamespace(), currentObj.GetName()),
-	})
-	for i, mf := range currentObj.GetManagedFields() {
-		tflog.Debug(ctx, "ManagedFields entry", map[string]interface{}{
-			"index":     i,
-			"manager":   mf.Manager,
-			"operation": mf.Operation,
-			"time":      mf.Time,
-		})
-
-		// DEBUG: Log fieldsV1 content to see what fields each manager actually owns
-		if mf.FieldsV1 != nil {
-			tflog.Debug(ctx, "FieldsV1 content", map[string]interface{}{
-				"index":    i,
-				"manager":  mf.Manager,
-				"fieldsV1": string(mf.FieldsV1.Raw),
-			})
-		}
-	}
-
-	ownership := extractFieldOwnership(currentObj)
-
-	// Convert map[string]FieldOwnership to map[string]string (just manager names)
-	// Filter out status fields - they're always owned by controllers and provide no actionable information
-	ownershipMap := make(map[string]string, len(ownership))
-	for path, owner := range ownership {
-		// Skip status fields - they're read-only subresources managed by controllers
-		// (similar to how status is filtered in yaml.go during object cleanup)
-		if strings.HasPrefix(path, "status.") || path == "status" {
-			continue
-		}
-		ownershipMap[path] = owner.Manager
-	}
-
-	// DEBUG: Log the actual ownership map from the resource for debugging flaky tests
-	tflog.Debug(ctx, "APPLY/READ PHASE - Actual field ownership from cluster", map[string]interface{}{
-		"actual_ownership_map": ownershipMap,
-		"object_ref":           fmt.Sprintf("%s/%s %s/%s", currentObj.GetAPIVersion(), currentObj.GetKind(), currentObj.GetNamespace(), currentObj.GetName()),
-	})
-
-	// Convert to types.Map
-	mapValue, diags := types.MapValueFrom(ctx, types.StringType, ownershipMap)
-	if diags.HasError() {
-		tflog.Warn(ctx, "Failed to convert field ownership to map", map[string]interface{}{
-			"diagnostics": diags,
-		})
-		// Set empty map on error
-		emptyMap, _ := types.MapValueFrom(ctx, types.StringType, map[string]string{})
-		data.FieldOwnership = emptyMap
-	} else {
-		data.FieldOwnership = mapValue
-	}
-}
-
 // Error handling helpers
 func (r *objectResource) addFieldConflictError(resp interface{}, operation string, resourceDesc string) {
 	message := fmt.Sprintf("Another controller owns fields you're trying to set on %s. "+

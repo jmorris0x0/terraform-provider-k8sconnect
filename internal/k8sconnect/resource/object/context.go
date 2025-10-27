@@ -3,7 +3,6 @@ package object
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -200,34 +199,6 @@ func (r *objectResource) updateProjection(rc *ResourceContext) error {
 		"path_count": len(paths),
 		"map_size":   len(projectionMap),
 	})
-
-	// Update field ownership (existing code continues...)
-	ownership := extractFieldOwnership(currentObj)
-
-	// Convert map[string]FieldOwnership to map[string]string (just manager names)
-	// Filter out status fields - they're always owned by controllers and provide no actionable information
-	ownershipMap := make(map[string]string, len(ownership))
-	for path, owner := range ownership {
-		// Skip status fields - they're read-only subresources managed by controllers
-		// (similar to how status is filtered in yaml.go during object cleanup)
-		if strings.HasPrefix(path, "status.") || path == "status" {
-			continue
-		}
-		ownershipMap[path] = owner.Manager
-	}
-
-	// Convert to types.Map
-	mapValue, diags = types.MapValueFrom(rc.Ctx, types.StringType, ownershipMap)
-	if diags.HasError() {
-		tflog.Warn(rc.Ctx, "Failed to convert field ownership to map", map[string]interface{}{
-			"diagnostics": diags,
-		})
-		// Set empty map on error
-		emptyMap, _ := types.MapValueFrom(rc.Ctx, types.StringType, map[string]string{})
-		rc.Data.FieldOwnership = emptyMap
-	} else {
-		rc.Data.FieldOwnership = mapValue
-	}
 
 	// Clear ImportedWithoutAnnotations after first update (will be handled by Update function)
 

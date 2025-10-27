@@ -25,6 +25,11 @@ var _ resource.ResourceWithImportState = (*patchResource)(nil)
 var _ resource.ResourceWithConfigure = (*patchResource)(nil)
 var _ resource.ResourceWithModifyPlan = (*patchResource)(nil)
 
+// Private state keys
+const (
+	privateStateKeyOwnership = "field_ownership_v1"
+)
+
 // ClientGetter function type for dependency injection
 type ClientGetter func(auth.ClusterModel) (k8sclient.K8sClient, error)
 
@@ -45,8 +50,6 @@ type patchResourceModel struct {
 
 	ManagedStateProjection types.Map    `tfsdk:"managed_state_projection"`
 	ManagedFields          types.String `tfsdk:"managed_fields"`
-	FieldOwnership         types.Map    `tfsdk:"field_ownership"`
-	PreviousOwners         types.Map    `tfsdk:"previous_owners"`
 }
 
 type patchTargetModel struct {
@@ -231,21 +234,6 @@ When you destroy a patch resource, ownership is released but patched values rema
 			"managed_fields": schema.StringAttribute{
 				Computed:    true,
 				Description: "JSON representation of only the fields managed by this patch. Used for drift detection.",
-			},
-
-			"field_ownership": schema.MapAttribute{
-				Computed:    true,
-				ElementType: types.StringType,
-				Description: "Map of field paths to their current owner (field manager). Shows which controller owns each patched field. " +
-					"After patch application, patched fields should show this patch's field manager as owner.",
-			},
-
-			"previous_owners": schema.MapAttribute{
-				Computed:    true,
-				ElementType: types.StringType,
-				Description: "Map of field paths to their owners BEFORE this patch was applied. " +
-					"Useful for understanding which controllers were managing fields before takeover. " +
-					"Only populated during initial patch creation.",
 			},
 		},
 	}

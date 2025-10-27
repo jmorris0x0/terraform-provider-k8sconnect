@@ -2,6 +2,7 @@ package object
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -70,6 +71,14 @@ func (r *objectResource) Create(ctx context.Context, req resource.CreateRequest,
 			fmt.Sprintf("Failed to populate object_ref for %s: %s", formatResource(rc.Object), err.Error()))
 		return
 	}
+
+	// 8b. Track field ownership in private state
+	ownership := extractFieldOwnership(rc.Object)
+	ownershipMap := make(map[string]string, len(ownership))
+	for path, owner := range ownership {
+		ownershipMap[path] = owner.Manager
+	}
+	setFieldOwnershipInPrivateState(ctx, resp.Private, ownershipMap)
 
 	// 9. SAVE STATE after successful creation
 	diags = resp.State.Set(ctx, rc.Data)
@@ -164,10 +173,15 @@ func (r *objectResource) Read(ctx context.Context, req resource.ReadRequest, res
 		handleProjectionSuccess(ctx, hasPendingProjection, resp.Private, "during refresh")
 	}
 
-	// 6. Update field ownership
-	r.updateFieldOwnershipData(ctx, &data, currentObj)
+	// 5a. Track field ownership in private state
+	ownership := extractFieldOwnership(currentObj)
+	ownershipMap := make(map[string]string, len(ownership))
+	for path, owner := range ownership {
+		ownershipMap[path] = owner.Manager
+	}
+	setFieldOwnershipInPrivateState(ctx, resp.Private, ownershipMap)
 
-	// 7. Save refreshed state
+	// 6. Save refreshed state
 	diags = resp.State.Set(ctx, &data)
 	resp.Diagnostics.Append(diags...)
 }
@@ -234,6 +248,14 @@ func (r *objectResource) Update(ctx context.Context, req resource.UpdateRequest,
 	if checkImportedWithoutAnnotationsFlag(ctx, req.Private) {
 		clearImportedWithoutAnnotationsFlag(ctx, resp.Private)
 	}
+
+	// 7a. Track field ownership in private state
+	ownership := extractFieldOwnership(rc.Object)
+	ownershipMap := make(map[string]string, len(ownership))
+	for path, owner := range ownership {
+		ownershipMap[path] = owner.Manager
+	}
+	setFieldOwnershipInPrivateState(ctx, resp.Private, ownershipMap)
 
 	// 8. Save updated state
 	diags = resp.State.Set(ctx, &plan)
@@ -380,6 +402,44 @@ func clearImportedWithoutAnnotationsFlag(ctx context.Context, setter interface {
 	setter.SetKey(ctx, "imported_without_annotations", nil)
 }
 
+// getFieldOwnershipFromPrivateState retrieves field ownership map from private state
+func getFieldOwnershipFromPrivateState(ctx context.Context, getter interface {
+	GetKey(context.Context, string) ([]byte, diag.Diagnostics)
+}) map[string]string {
+	data, _ := getter.GetKey(ctx, privateStateKeyOwnership)
+	if data == nil {
+		return nil
+	}
+
+	var ownership map[string]string
+	if err := json.Unmarshal(data, &ownership); err != nil {
+		tflog.Warn(ctx, "Failed to unmarshal field ownership from private state", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return nil
+	}
+	return ownership
+}
+
+// setFieldOwnershipInPrivateState stores field ownership map in private state
+func setFieldOwnershipInPrivateState(ctx context.Context, setter interface {
+	SetKey(context.Context, string, []byte) diag.Diagnostics
+}, ownership map[string]string) {
+	if ownership == nil || len(ownership) == 0 {
+		setter.SetKey(ctx, privateStateKeyOwnership, nil)
+		return
+	}
+
+	data, err := json.Marshal(ownership)
+	if err != nil {
+		tflog.Warn(ctx, "Failed to marshal field ownership for private state", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return
+	}
+	setter.SetKey(ctx, privateStateKeyOwnership, data)
+}
+
 // handleProjectionSuccess handles successful projection recovery per ADR-006
 func handleProjectionSuccess(ctx context.Context, hasPendingProjection bool, privateSetter interface {
 	SetKey(context.Context, string, []byte) diag.Diagnostics
@@ -407,10 +467,9 @@ func handleProjectionFailure(
 		"error": err.Error(),
 	})
 
-	// Set empty projection and field ownership - both must be known for Terraform to save state
+	// Set empty projection - must be known for Terraform to save state
 	emptyMap, _ := types.MapValueFrom(ctx, types.StringType, map[string]string{})
 	rc.Data.ManagedStateProjection = emptyMap
-	rc.Data.FieldOwnership = emptyMap
 
 	// Save state with pending projection flag in Private state
 	setPendingProjectionFlag(ctx, privateSetter)

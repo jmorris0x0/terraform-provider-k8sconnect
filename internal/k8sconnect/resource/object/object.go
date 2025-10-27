@@ -23,6 +23,11 @@ var _ resource.ResourceWithModifyPlan = (*objectResource)(nil)
 var _ resource.ResourceWithImportState = (*objectResource)(nil)
 var _ resource.ResourceWithConfigure = (*objectResource)(nil)
 
+// Private state keys
+const (
+	privateStateKeyOwnership = "field_ownership_v1"
+)
+
 // ClientGetter function type for dependency injection
 type ClientGetter func(auth.ClusterModel) (k8sclient.K8sClient, error)
 
@@ -37,7 +42,6 @@ type objectResourceModel struct {
 	Cluster                types.Object `tfsdk:"cluster"`
 	DeleteProtection       types.Bool   `tfsdk:"delete_protection"`
 	DeleteTimeout          types.String `tfsdk:"delete_timeout"`
-	FieldOwnership         types.Map    `tfsdk:"field_ownership"`
 	ForceDestroy           types.Bool   `tfsdk:"force_destroy"`
 	IgnoreFields           types.List   `tfsdk:"ignore_fields"`
 	ManagedStateProjection types.Map    `tfsdk:"managed_state_projection"`
@@ -147,14 +151,6 @@ func (r *objectResource) Schema(ctx context.Context, req resource.SchemaRequest,
 				Validators: []validator.List{
 					listvalidator.ValueStringsAre(ignoreFieldsValidator{}),
 				},
-			},
-			"field_ownership": schema.MapAttribute{
-				Computed:    true,
-				ElementType: types.StringType,
-				Description: "Tracks which controller owns each managed field using Server-Side Apply field management. " +
-					"Shows as a map of 'field.path': 'controller-name'. Only appears in plan diffs when ownership actually changes " +
-					"(e.g., when HPA takes ownership of spec.replicas). Empty/hidden when ownership is unchanged. " +
-					"Critical for understanding SSA conflicts and knowing which controller controls what.",
 			},
 			"object_ref": schema.SingleNestedAttribute{
 				Computed: true,

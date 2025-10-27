@@ -22,14 +22,3 @@ resource "k8sconnect_patch" "coredns_label" {
 
   cluster = local.cluster
 }
-
-# Output the field ownership information
-output "field_ownership" {
-  value       = k8sconnect_patch.coredns_label.field_ownership
-  description = "Fields owned by this patch (using Server-Side Apply)"
-}
-
-output "previous_owners" {
-  value       = k8sconnect_patch.coredns_label.previous_owners
-  description = "Previous owners of the patched fields"
-}

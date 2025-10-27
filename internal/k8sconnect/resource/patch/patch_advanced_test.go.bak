@@ -447,6 +447,8 @@ func TestAccPatchResource_DeepNestedFieldExtraction(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					// Verify managed_fields is populated with nested structure
 					resource.TestCheckResourceAttrSet("k8sconnect_patch.test", "managed_fields"),
+					// Verify field_ownership shows nested paths
+					resource.TestCheckResourceAttrSet("k8sconnect_patch.test", "field_ownership.%"),
 				),
 			},
 		},
@@ -522,7 +524,8 @@ func TestAccPatchResource_DeepNestedOwnershipTransfer(t *testing.T) {
 					"raw": config.StringVariable(raw),
 				},
 				Check: resource.ComposeTestCheckFunc(
-				// Verify previous owner captured
+					// Verify previous owner captured
+					resource.TestCheckResourceAttrSet("k8sconnect_patch.test", "previous_owners.%"),
 				),
 			},
 			// Step 3: Destroy patch and verify ownership transfer

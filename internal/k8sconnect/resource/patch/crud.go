@@ -2,6 +2,7 @@ package patch
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -83,17 +84,7 @@ func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, 
 		return
 	}
 
-	// 7. Capture ownership BEFORE patching
-	patchContent := r.getPatchContent(data)
-	patchedFieldPaths, err := r.extractPatchFieldPaths(ctx, patchContent, r.determinePatchType(data))
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to Parse Patch",
-			fmt.Sprintf("Failed to parse patch for %s: %s", formatTarget(target), err.Error()))
-		return
-	}
-	previousOwners := fieldmanagement.ExtractFieldOwnershipForPaths(targetObj, patchedFieldPaths)
-
-	// 8. Apply patch using Server-Side Apply
+	// 7. Apply patch using Server-Side Apply
 	fieldManager := fmt.Sprintf("k8sconnect-patch-%s", data.ID.ValueString())
 	patchedObj, err := r.applyPatch(ctx, client, targetObj, data, fieldManager, gvr)
 	if err != nil {
@@ -119,20 +110,9 @@ func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, 
 	}
 	data.ManagedFields = types.StringValue(managedFields)
 
-	// 10. Extract field ownership (only for our manager)
+	// 10. Track field ownership in private state
 	fieldOwnership := extractFieldOwnershipForManager(patchedObj, fieldManager)
-	ownershipMap, diags := types.MapValueFrom(ctx, types.StringType, fieldOwnership)
-	resp.Diagnostics.Append(diags...)
-	if !resp.Diagnostics.HasError() {
-		data.FieldOwnership = ownershipMap
-	}
-
-	// 11. Store previous owners
-	previousOwnersMap, diags := types.MapValueFrom(ctx, types.StringType, previousOwners)
-	resp.Diagnostics.Append(diags...)
-	if !resp.Diagnostics.HasError() {
-		data.PreviousOwners = previousOwnersMap
-	}
+	setFieldOwnershipInPrivateState(ctx, resp.Private, fieldOwnership)
 
 	// 12. Save state
 	diags = resp.State.Set(ctx, &data)
@@ -272,15 +252,11 @@ func (r *patchResource) Read(ctx context.Context, req resource.ReadRequest, resp
 		data.ManagedFields = types.StringValue(currentManagedFields)
 	}
 
-	// 9. Update field ownership tracking (only for our manager)
+	// 8a. Track field ownership in private state
 	fieldOwnership := extractFieldOwnershipForManager(currentObj, fieldManager)
-	ownershipMap, diags := types.MapValueFrom(ctx, types.StringType, fieldOwnership)
-	resp.Diagnostics.Append(diags...)
-	if !resp.Diagnostics.HasError() {
-		data.FieldOwnership = ownershipMap
-	}
+	setFieldOwnershipInPrivateState(ctx, resp.Private, fieldOwnership)
 
-	// 10. Save refreshed state
+	// 9. Save refreshed state
 	diags = resp.State.Set(ctx, &data)
 	resp.Diagnostics.Append(diags...)
 
@@ -362,63 +338,13 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	// Calculate removed fields (fields in current but not in new)
 	removedFields := findRemovedFields(currentFieldPaths, newFieldPaths)
 
-	// If fields were removed, transfer ownership back to previous owners
+	// If fields were removed, they will become unmanaged (no longer patched by this resource)
+	// Note: Previous owner tracking was removed per ADR-020
 	if len(removedFields) > 0 {
-		tflog.Info(ctx, "Detected removed fields, transferring ownership back", map[string]interface{}{
+		tflog.Info(ctx, "Detected removed fields - they will become unmanaged", map[string]interface{}{
 			"target":        formatTarget(target),
 			"removed_count": len(removedFields),
 		})
-
-		// Get previous owners map
-		var previousOwnersMap map[string]string
-		if !state.PreviousOwners.IsNull() {
-			diags = state.PreviousOwners.ElementsAs(ctx, &previousOwnersMap, false)
-			if diags.HasError() {
-				tflog.Warn(ctx, "Failed to parse previous owners for removed fields", map[string]interface{}{
-					"error": diags.Errors(),
-				})
-			}
-		}
-
-		// Transfer removed fields back to their previous owners
-		if len(previousOwnersMap) > 0 {
-			err = r.transferRemovedFieldsBack(ctx, client, currentObj, gvr, removedFields, previousOwnersMap, fieldManager)
-			if err != nil {
-				resp.Diagnostics.AddWarning(
-					"Failed to Transfer Removed Fields",
-					fmt.Sprintf("Some fields were removed from the patch but could not be transferred back to their previous owners: %v\n\n"+
-						"These fields may become unmanaged.", err),
-				)
-			} else {
-				tflog.Info(ctx, "Successfully transferred removed fields back", map[string]interface{}{
-					"target": formatTarget(target),
-				})
-			}
-
-			// Surface any API warnings from transfer operation
-			surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
-
-			// CRITICAL: Refetch the resource to get updated managedFields after ownership transfer
-			// Without this, SSA will use stale ownership info and may delete transferred fields
-			_, currentObj, err = r.getTargetResource(ctx, client, target)
-			if err != nil {
-				resp.Diagnostics.AddError(
-					"Failed to Refetch Resource After Ownership Transfer",
-					fmt.Sprintf("Ownership was transferred but failed to refetch resource state: %v", err),
-				)
-				return
-			}
-
-			surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
-
-			tflog.Debug(ctx, "Refetched resource after ownership transfer", map[string]interface{}{
-				"target": formatTarget(target),
-			})
-		} else {
-			tflog.Warn(ctx, "No previous owners found for removed fields - they will become unmanaged", map[string]interface{}{
-				"removed_count": len(removedFields),
-			})
-		}
 	}
 
 	// 8. Re-apply updated patch
@@ -446,16 +372,11 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	}
 	plan.ManagedFields = types.StringValue(managedFields)
 
-	// 9. Update field ownership (only for our manager)
-	fieldOwnership := extractFieldOwnershipForManager(patchedObj, fieldManager)
-	ownershipMap, diags := types.MapValueFrom(ctx, types.StringType, fieldOwnership)
-	resp.Diagnostics.Append(diags...)
-	if !resp.Diagnostics.HasError() {
-		plan.FieldOwnership = ownershipMap
-	}
+	// 9. Preserve previous owners (only set during Create)
 
-	// 10. Preserve previous owners (only set during Create)
-	plan.PreviousOwners = state.PreviousOwners
+	// 10. Track field ownership in private state
+	fieldOwnership := extractFieldOwnershipForManager(patchedObj, fieldManager)
+	setFieldOwnershipInPrivateState(ctx, resp.Private, fieldOwnership)
 
 	// 11. Save updated state
 	diags = resp.State.Set(ctx, &plan)
@@ -503,101 +424,9 @@ func (r *patchResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 	// Surface any API warnings from get operation
 	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
 
-	// 5. Transfer ownership back to original owners (per-field clean handoff)
-	fieldManager := fmt.Sprintf("k8sconnect-patch-%s", data.ID.ValueString())
-
-	// Get previous owners to determine who to transfer back to
-	var previousOwnersMap map[string]string
-	if !data.PreviousOwners.IsNull() {
-		diags = data.PreviousOwners.ElementsAs(ctx, &previousOwnersMap, false)
-		if diags.HasError() {
-			tflog.Warn(ctx, "Failed to parse previous owners", map[string]interface{}{
-				"error": diags.Errors(),
-			})
-			previousOwnersMap = nil
-		}
-	}
-
-	// If we have previous owners, transfer ownership back per-field
-	if len(previousOwnersMap) > 0 {
-		// Get the GVR
-		gvr, _, err := r.getTargetResource(ctx, client, target)
-		if err != nil {
-			tflog.Warn(ctx, "Failed to get GVR for ownership transfer", map[string]interface{}{
-				"error": err.Error(),
-			})
-		} else {
-			// Surface any API warnings from get operation
-			surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
-			// Group fields by their previous owner
-			fieldsByOwner := groupFieldsByPreviousOwner(previousOwnersMap)
-
-			tflog.Info(ctx, "Transferring ownership back to original owners",
-				map[string]interface{}{
-					"target":      formatTarget(target),
-					"from":        fieldManager,
-					"owner_count": len(fieldsByOwner),
-					"note":        "Values remain unchanged, only ownership transfers",
-				})
-
-			// Transfer each group back to its original owner
-			// IMPORTANT: Refetch resource before each transfer to ensure idempotency
-			for owner, fields := range fieldsByOwner {
-				// Refetch current state to check ownership (idempotent retry)
-				_, currentObj, err := r.getTargetResource(ctx, client, target)
-				if err != nil {
-					tflog.Warn(ctx, "Failed to fetch resource for ownership transfer", map[string]interface{}{
-						"owner": owner,
-						"error": err.Error(),
-					})
-					continue
-				}
-
-				// Surface any API warnings from get operation
-				surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
-
-				// Filter fields to only transfer those currently owned by our patch manager
-				fieldsToTransfer := r.filterFieldsOwnedByManager(currentObj, fields, fieldManager)
-				if len(fieldsToTransfer) == 0 {
-					tflog.Debug(ctx, "No fields currently owned by this patch, skipping", map[string]interface{}{
-						"owner":        owner,
-						"total_fields": len(fields),
-					})
-					continue
-				}
-
-				err = r.transferOwnershipForFields(ctx, client, currentObj, gvr, fieldsToTransfer, owner)
-
-				// Surface any API warnings from transfer operation
-				surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
-
-				if err != nil {
-					tflog.Warn(ctx, "Failed to transfer ownership for some fields", map[string]interface{}{
-						"owner": owner,
-						"error": err.Error(),
-					})
-					// Continue with other owners
-				} else {
-					tflog.Debug(ctx, "Successfully transferred ownership", map[string]interface{}{
-						"owner":       owner,
-						"field_count": len(fieldsToTransfer),
-						"skipped":     len(fields) - len(fieldsToTransfer),
-					})
-				}
-			}
-		}
-	} else {
-		tflog.Warn(ctx, "No previous owners found - ownership will remain orphaned",
-			map[string]interface{}{
-				"target":        formatTarget(target),
-				"field_manager": fieldManager,
-				"note":          "Future patches may need force=true to reclaim these fields",
-			})
-	}
-
 	// That's it - state removed automatically by framework
 	// The patched values stay on the resource
-	// Ownership has been transferred back to the original owners (if found)
+	// Note: Previous owner tracking and transfer-back logic was removed per ADR-020
 }
 
 func (r *patchResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
@@ -836,4 +665,42 @@ func (r *patchResource) transferRemovedFieldsBack(ctx context.Context, client k8
 	}
 
 	return nil
+}
+
+// getFieldOwnershipFromPrivateState retrieves field ownership map from private state
+func getFieldOwnershipFromPrivateState(ctx context.Context, getter interface {
+	GetKey(context.Context, string) ([]byte, diag.Diagnostics)
+}) map[string]string {
+	data, _ := getter.GetKey(ctx, privateStateKeyOwnership)
+	if data == nil {
+		return nil
+	}
+
+	var ownership map[string]string
+	if err := json.Unmarshal(data, &ownership); err != nil {
+		tflog.Warn(ctx, "Failed to unmarshal field ownership from private state", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return nil
+	}
+	return ownership
+}
+
+// setFieldOwnershipInPrivateState stores field ownership map in private state
+func setFieldOwnershipInPrivateState(ctx context.Context, setter interface {
+	SetKey(context.Context, string, []byte) diag.Diagnostics
+}, ownership map[string]string) {
+	if ownership == nil || len(ownership) == 0 {
+		setter.SetKey(ctx, privateStateKeyOwnership, nil)
+		return
+	}
+
+	data, err := json.Marshal(ownership)
+	if err != nil {
+		tflog.Warn(ctx, "Failed to marshal field ownership for private state", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return
+	}
+	setter.SetKey(ctx, privateStateKeyOwnership, data)
 }

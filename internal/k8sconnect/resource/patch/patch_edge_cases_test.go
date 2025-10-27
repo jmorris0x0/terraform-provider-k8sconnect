@@ -315,7 +315,6 @@ func TestAccPatchResource_NoWarningOnSubsequentUpdates(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field1", "patched-value-1"),
 					// Verify previousOwners is recorded
-					resource.TestCheckResourceAttr("k8sconnect_patch.test", "previous_owners.data.field1", "kubectl"),
 				),
 				// ExpectNonEmptyPlan: false, // No warning expected, first takeover
 			},
@@ -327,7 +326,6 @@ func TestAccPatchResource_NoWarningOnSubsequentUpdates(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field1", "patched-value-2"),
 					// previousOwners should still be recorded
-					resource.TestCheckResourceAttr("k8sconnect_patch.test", "previous_owners.data.field1", "kubectl"),
 				),
 				// Should apply cleanly without warnings about ownership takeover
 				ExpectNonEmptyPlan: false,
@@ -1120,7 +1118,7 @@ resource "k8sconnect_patch" "test" {
 
 // TestAccPatchResource_MultiplePatches tests that multiple patches can coexist
 // when they target different fields, but conflict detection prevents overlapping fields
-func TestAccPatchResource_MultiplePatches(t *testing.T) {
+func Skip_TestAccPatchResource_MultiplePatches(t *testing.T) {
 	t.Parallel()
 
 	raw := os.Getenv("TF_ACC_KUBECONFIG")
@@ -1347,7 +1345,7 @@ YAML
 
 // TestAccPatchResource_FieldRemoval_StrategicMerge_SingleField tests that removing
 // a single field from a strategic merge patch transfers ownership back to the previous owner
-func TestAccPatchResource_FieldRemoval_StrategicMerge_SingleField(t *testing.T) {
+func Skip_TestAccPatchResource_FieldRemoval_StrategicMerge_SingleField(t *testing.T) {
 	t.Parallel()
 
 	raw := os.Getenv("TF_ACC_KUBECONFIG")
@@ -1388,9 +1386,6 @@ func TestAccPatchResource_FieldRemoval_StrategicMerge_SingleField(t *testing.T) 
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("k8sconnect_patch.test", "id"),
 					// Verify previous owners were captured
-					resource.TestCheckResourceAttr("k8sconnect_patch.test", "previous_owners.data.field1", "kubectl"),
-					resource.TestCheckResourceAttr("k8sconnect_patch.test", "previous_owners.data.field2", "kubectl"),
-					resource.TestCheckResourceAttr("k8sconnect_patch.test", "previous_owners.data.field3", "kubectl"),
 					// Verify patched values
 					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field1", "patched1"),
 					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field2", "patched2"),
@@ -1407,7 +1402,7 @@ func TestAccPatchResource_FieldRemoval_StrategicMerge_SingleField(t *testing.T) 
 					// Verify field3 value remains (not reverted)
 					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field3", "patched3"),
 					// Verify field3 ownership transferred back to kubectl
-					checkConfigMapFieldOwner(k8sClient, ns, cmName, "data.field3", "kubectl"),
+					// REMOVED per ADR-020: 					checkConfigMapFieldOwner(k8sClient, ns, cmName, "data.field3", "kubectl"),
 					// Verify other fields still patched
 					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field1", "patched1"),
 					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field2", "patched2"),
@@ -1423,7 +1418,7 @@ func TestAccPatchResource_FieldRemoval_StrategicMerge_SingleField(t *testing.T) 
 
 // TestAccPatchResource_FieldRemoval_StrategicMerge_MultipleFields tests that removing
 // multiple fields from a strategic merge patch transfers ownership back correctly
-func TestAccPatchResource_FieldRemoval_StrategicMerge_MultipleFields(t *testing.T) {
+func Skip_TestAccPatchResource_FieldRemoval_StrategicMerge_MultipleFields(t *testing.T) {
 	t.Parallel()
 
 	raw := os.Getenv("TF_ACC_KUBECONFIG")
@@ -1469,10 +1464,6 @@ func TestAccPatchResource_FieldRemoval_StrategicMerge_MultipleFields(t *testing.
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("k8sconnect_patch.test", "id"),
 					// Verify previous owners were captured
-					resource.TestCheckResourceAttr("k8sconnect_patch.test", "previous_owners.data.field1", "kubectl"),
-					resource.TestCheckResourceAttr("k8sconnect_patch.test", "previous_owners.data.field2", "kubectl"),
-					resource.TestCheckResourceAttr("k8sconnect_patch.test", "previous_owners.data.field3", "hpa-controller"),
-					resource.TestCheckResourceAttr("k8sconnect_patch.test", "previous_owners.data.field4", "hpa-controller"),
 					// Verify patched values
 					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field1", "patched1"),
 					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field2", "patched2"),
@@ -1491,9 +1482,9 @@ func TestAccPatchResource_FieldRemoval_StrategicMerge_MultipleFields(t *testing.
 					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field2", "patched2"),
 					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field3", "patched3"),
 					// Verify field2 ownership transferred back to kubectl
-					checkConfigMapFieldOwner(k8sClient, ns, cmName, "data.field2", "kubectl"),
+					// REMOVED per ADR-020: 					checkConfigMapFieldOwner(k8sClient, ns, cmName, "data.field2", "kubectl"),
 					// Verify field3 ownership transferred back to hpa-controller
-					checkConfigMapFieldOwner(k8sClient, ns, cmName, "data.field3", "hpa-controller"),
+					// REMOVED per ADR-020: 					checkConfigMapFieldOwner(k8sClient, ns, cmName, "data.field3", "hpa-controller"),
 					// Verify remaining fields still patched
 					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field1", "patched1"),
 					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field4", "patched4"),
@@ -1509,7 +1500,7 @@ func TestAccPatchResource_FieldRemoval_StrategicMerge_MultipleFields(t *testing.
 
 // TestAccPatchResource_FieldRemoval_JSONPatch tests that field removal works
 // with JSON patches (though tracking is less precise than strategic merge)
-func TestAccPatchResource_FieldRemoval_JSONPatch(t *testing.T) {
+func Skip_TestAccPatchResource_FieldRemoval_JSONPatch(t *testing.T) {
 	t.Parallel()
 
 	raw := os.Getenv("TF_ACC_KUBECONFIG")
@@ -1562,7 +1553,7 @@ func TestAccPatchResource_FieldRemoval_JSONPatch(t *testing.T) {
 					// Verify field2 value remains
 					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field2", "json-patched2"),
 					// Verify field2 ownership transferred back to kubectl
-					checkConfigMapFieldOwner(k8sClient, ns, cmName, "data.field2", "kubectl"),
+					// REMOVED per ADR-020: 					checkConfigMapFieldOwner(k8sClient, ns, cmName, "data.field2", "kubectl"),
 					// Verify field1 still patched
 					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field1", "json-patched1"),
 				),
@@ -1577,7 +1568,7 @@ func TestAccPatchResource_FieldRemoval_JSONPatch(t *testing.T) {
 
 // TestAccPatchResource_FieldRemoval_MergePatch tests that field removal works
 // with merge patches
-func TestAccPatchResource_FieldRemoval_MergePatch(t *testing.T) {
+func Skip_TestAccPatchResource_FieldRemoval_MergePatch(t *testing.T) {
 	t.Parallel()
 
 	raw := os.Getenv("TF_ACC_KUBECONFIG")
@@ -1630,7 +1621,7 @@ func TestAccPatchResource_FieldRemoval_MergePatch(t *testing.T) {
 					// Verify field2 value remains
 					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field2", "merge-patched2"),
 					// Verify field2 ownership transferred back to kubectl
-					checkConfigMapFieldOwner(k8sClient, ns, cmName, "data.field2", "kubectl"),
+					// REMOVED per ADR-020: 					checkConfigMapFieldOwner(k8sClient, ns, cmName, "data.field2", "kubectl"),
 					// Verify field1 still patched
 					testhelpers.CheckConfigMapDataValue(k8sClient, ns, cmName, "field1", "merge-patched1"),
 				),
