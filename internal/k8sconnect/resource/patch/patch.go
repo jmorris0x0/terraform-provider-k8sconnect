@@ -24,6 +24,7 @@ var _ resource.ResourceWithConfigValidators = (*patchResource)(nil)
 var _ resource.ResourceWithImportState = (*patchResource)(nil)
 var _ resource.ResourceWithConfigure = (*patchResource)(nil)
 var _ resource.ResourceWithModifyPlan = (*patchResource)(nil)
+var _ resource.ResourceWithUpgradeState = (*patchResource)(nil)
 
 // Private state keys
 const (
@@ -97,6 +98,7 @@ func (r *patchResource) Configure(ctx context.Context, req resource.ConfigureReq
 
 func (r *patchResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Version: 1,
 		MarkdownDescription: `Applies targeted patches to existing Kubernetes resources using Server-Side Apply.
 
 **IMPORTANT:** This resource forcefully takes ownership of fields from other controllers.

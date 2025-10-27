@@ -22,6 +22,7 @@ var _ resource.ResourceWithConfigValidators = (*objectResource)(nil)
 var _ resource.ResourceWithModifyPlan = (*objectResource)(nil)
 var _ resource.ResourceWithImportState = (*objectResource)(nil)
 var _ resource.ResourceWithConfigure = (*objectResource)(nil)
+var _ resource.ResourceWithUpgradeState = (*objectResource)(nil)
 
 // Private state keys
 const (
@@ -93,6 +94,7 @@ func (r *objectResource) Configure(ctx context.Context, req resource.ConfigureRe
 
 func (r *objectResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Version:     1,
 		Description: "Applies a single‑document Kubernetes YAML manifest to a cluster, with per‑resource inline or kubeconfig‑based connection settings.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
