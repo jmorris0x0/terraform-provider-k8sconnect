@@ -46,7 +46,7 @@ resource "aws_eks_node_group" "main" {
 
 # Connection can be reused across resources
 locals {
-  cluster_connection = {
+  cluster = {
     host                   = aws_eks_cluster.main.endpoint
     cluster_ca_certificate = aws_eks_cluster.main.certificate_authority[0].data
     exec = {
@@ -60,7 +60,7 @@ locals {
 # Deploy workloads immediately - no waiting for provider configuration!
 resource "k8sconnect_object" "app" {
   yaml_body          = file("deployment.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   # For EKS: ensure nodes are ready before deploying workloads
   depends_on = [aws_eks_node_group.main]
@@ -77,7 +77,7 @@ The provider supports three ways to connect to clusters:
 
 **Inline with token auth**
 ```hcl
-cluster_connection = {
+cluster = {
   host                   = "https://k8s.example.com"
   cluster_ca_certificate = file("ca.pem")
   token                  = var.cluster_token
@@ -86,7 +86,7 @@ cluster_connection = {
 
 **Inline with exec auth** (AWS EKS, GKE, etc.)
 ```hcl
-cluster_connection = {
+cluster = {
   host                   = "https://k8s.example.com"
   cluster_ca_certificate = file("ca.pem")
   exec = {
@@ -100,13 +100,13 @@ cluster_connection = {
 **kubeconfig**
 ```hcl
 # From file
-cluster_connection = {
+cluster = {
   kubeconfig = file("~/.kube/config")
   context    = "production"  # optional
 }
 
 # From variable (CI-friendly)
-cluster_connection = {
+cluster = {
   kubeconfig = var.kubeconfig_content
 }
 ```
@@ -136,12 +136,12 @@ locals {
 # Deploy to different clusters in one apply
 resource "k8sconnect_object" "prod_app" {
   yaml_body          = file("app.yaml")
-  cluster_connection = local.prod_connection
+  cluster = local.prod_connection
 }
 
 resource "k8sconnect_object" "staging_app" {
   yaml_body          = file("app.yaml")
-  cluster_connection = local.staging_connection
+  cluster = local.staging_connection
 }
 ```
 
@@ -163,7 +163,7 @@ resource "k8sconnect_object" "app" {
   
   yaml_body = each.value
   
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.kubeconfig
   }
 }
@@ -202,11 +202,11 @@ resource "k8sconnect_patch" "aws_node_config" {
     }
   })
 
-  cluster_connection = var.cluster_connection
+  cluster = var.cluster
 }
 ```
 
-Perfect for EKS/GKE defaults, Helm deployments, and operator-managed resources. On destroy, ownership transfers back cleanly—current values are left unchanged for safety.
+Perfect for EKS/GKE defaults, Helm deployments, and operator-managed resources. On destroy, ownership is released—current values are left unchanged for safety.
 
 **→ [Patch examples](examples/#patch-resource)** - Strategic Merge, JSON Patch, Merge Patch | **[Documentation](docs/resources/patch.md)**
 
@@ -235,7 +235,7 @@ resource "k8sconnect_object" "service" {
         app: myapp
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 # Wait for LoadBalancer IP to be assigned
@@ -247,7 +247,7 @@ resource "k8sconnect_wait" "service" {
     timeout = "5m"
   }
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 # Use the LoadBalancer IP immediately
@@ -262,7 +262,7 @@ resource "k8sconnect_object" "config" {
       service_url: "${k8sconnect_wait.service.result.status.loadBalancer.ingress[0].ip}:80"
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [k8sconnect_wait.service]
 }
 ```
@@ -297,12 +297,12 @@ k8sconnect uses **Server-Side Apply with Dry-Run** for every operation, giving y
 
 2. **Field validation** - Strict validation during plan catches typos and invalid fields before apply (`replica` vs `replicas`, `imagePullPolice` vs `imagePullPolicy`, etc.).
 
-3. **SSA-aware field ownership** - The `field_ownership` attribute tracks which controller owns each field. See when HPA takes over replicas, when webhooks modify annotations, or when another Terraform state conflicts with yours. When conflicts occur, warnings show exact `ignore_fields` configuration to resolve them. **→ [Field ownership guide](docs/guides/field-ownership.md)**
+3. **SSA-aware field ownership** - Field ownership is tracked internally using Kubernetes Server-Side Apply. When external controllers take ownership of fields (HPA taking replicas, webhooks modifying annotations, etc.), you'll see warnings during plan showing which fields changed ownership. When conflicts occur, warnings show exact `ignore_fields` configuration to resolve them. **→ [Field ownership guide](docs/guides/field-ownership.md)**
 
 4. **True drift detection** - Only diffs fields you actually manage. If a controller updates status or another field manager changes something, you'll see it clearly separated:
    - `yaml_body` diffs = Changes you made to your config
    - `managed_state_projection` diffs = External changes that will be corrected
-   - `field_ownership` diffs = Ownership changes between controllers
+   - Plan warnings = Ownership changes between controllers
 
 This provider combines Server-Side Apply field ownership tracking with dry-run projections during plan, enabling accurate diffs and multi-controller coexistence patterns via ignore_fields.
 
@@ -317,7 +317,7 @@ Connection credentials are stored in Terraform state. Mitigate by:
 *You should probably be doing these things regardless.*
 
 
-All `cluster_connection` fields are marked sensitive and won't appear in logs or plan output.
+All `cluster` fields are marked sensitive and won't appear in logs or plan output.
 
 ---
 

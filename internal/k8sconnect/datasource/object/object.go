@@ -24,11 +24,11 @@ type objectDataSource struct {
 }
 
 type objectDataSourceModel struct {
-	APIVersion        types.String `tfsdk:"api_version"`
-	Kind              types.String `tfsdk:"kind"`
-	Name              types.String `tfsdk:"name"`
-	Namespace         types.String `tfsdk:"namespace"`
-	ClusterConnection types.Object `tfsdk:"cluster_connection"`
+	APIVersion types.String `tfsdk:"api_version"`
+	Kind       types.String `tfsdk:"kind"`
+	Name       types.String `tfsdk:"name"`
+	Namespace  types.String `tfsdk:"namespace"`
+	Cluster    types.Object `tfsdk:"cluster"`
 
 	// Outputs
 	Manifest types.String  `tfsdk:"manifest"`
@@ -83,7 +83,7 @@ func (d *objectDataSource) Schema(ctx context.Context, req datasource.SchemaRequ
 				Optional:    true,
 				Description: "Namespace of the resource (optional for cluster-scoped resources, defaults to 'default' for namespaced resources if not specified)",
 			},
-			"cluster_connection": schema.SingleNestedAttribute{
+			"cluster": schema.SingleNestedAttribute{
 				Required:    true,
 				Description: "Cluster connection configuration",
 				Attributes:  auth.GetConnectionSchemaForDataSource(),
@@ -113,7 +113,7 @@ func (d *objectDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 	}
 
 	// Convert connection using the auth package helper
-	conn, err := auth.ObjectToConnectionModel(ctx, data.ClusterConnection)
+	conn, err := auth.ObjectToConnectionModel(ctx, data.Cluster)
 	if err != nil {
 		resp.Diagnostics.AddError("Invalid connection", err.Error())
 		return

@@ -58,11 +58,11 @@ resource "k8sconnect_object" "nginx" {
     # ...
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 ```
 
-**Changes**: HCL map → YAML, provider auth → inline `cluster_connection`
+**Changes**: HCL map → YAML, provider auth → inline `cluster`
 
 ### kubernetes_manifest (wait_for) → k8sconnect_wait
 
@@ -78,13 +78,13 @@ resource "kubernetes_manifest" "service" {
 # After (separate wait resource)
 resource "k8sconnect_object" "service" {
   yaml_body = file("service.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 resource "k8sconnect_wait" "service" {
   object_ref = k8sconnect_object.service.object_ref
   wait_for   = { field = "status.loadBalancer.ingress", timeout = "10m" }
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 # Access: k8sconnect_wait.service.result.status.loadBalancer.ingress[0].ip
@@ -115,7 +115,7 @@ resource "k8sconnect_object" "nginx" {
       replicas: 3
       # ...
   YAML
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 ```
 
@@ -138,7 +138,7 @@ kubectl get deployment nginx -n default -o yaml > nginx.yaml
 # 2. Create resource block
 resource "k8sconnect_object" "nginx" {
   yaml_body          = file("nginx.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 # 3. Import existing resource
@@ -191,7 +191,7 @@ import {
 
 resource "k8sconnect_object" "nginx" {
   yaml_body          = file("nginx.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 ```
 
@@ -251,12 +251,12 @@ resource "kubernetes_deployment" "app" {
 provider "k8sconnect" {}
 
 locals {
-  cluster_connection = { kubeconfig = file("~/.kube/config") }
+  cluster = { kubeconfig = file("~/.kube/config") }
 }
 
 resource "k8sconnect_object" "app" {
   yaml_body          = file("app.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 ```
 
@@ -270,7 +270,7 @@ provider "kubernetes" {
 
 # After: WORKS - inline connections
 locals {
-  cluster_connection = {
+  cluster = {
     host                   = aws_eks_cluster.main.endpoint
     cluster_ca_certificate = aws_eks_cluster.main.certificate_authority[0].data
     exec = {
@@ -283,7 +283,7 @@ locals {
 
 resource "k8sconnect_object" "app" {
   yaml_body          = file("app.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [aws_eks_node_group.main]
 }
 ```
@@ -309,7 +309,7 @@ resource "k8sconnect_object" "deployment" {
   YAML
 
   ignore_fields = ["spec.replicas"]  # Release to HPA
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 ```
 
@@ -329,12 +329,12 @@ resource "kubernetes_manifest" "widget" {
 # After: ONE apply (auto-retry)
 resource "k8sconnect_object" "widget_crd" {
   yaml_body          = file("widget-crd.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 resource "k8sconnect_object" "widget" {
   yaml_body          = file("widget.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [k8sconnect_object.widget_crd]
 }
 ```
@@ -356,12 +356,12 @@ locals {
 
 resource "k8sconnect_object" "prod_app" {
   yaml_body          = file("app.yaml")
-  cluster_connection = local.prod_connection
+  cluster = local.prod_connection
 }
 
 resource "k8sconnect_object" "staging_app" {
   yaml_body          = file("app.yaml")
-  cluster_connection = local.staging_connection
+  cluster = local.staging_connection
 }
 ```
 
@@ -371,7 +371,7 @@ resource "k8sconnect_object" "staging_app" {
 
 | Feature | Description | Example |
 |---------|-------------|---------|
-| **Inline connections** | Per-resource cluster connection | `cluster_connection = { kubeconfig = ... }` |
+| **Inline connections** | Per-resource cluster connection | `cluster = { kubeconfig = ... }` |
 | **Auto CRD retry** | CRD + CR in one apply | Zero config, just works |
 | **ignore_fields** | Release field ownership | `ignore_fields = ["spec.replicas"]` |
 | **Dry-run projection** | Accurate plan diffs | Shows K8s defaults before apply |
@@ -386,7 +386,7 @@ resource "k8sconnect_object" "staging_app" {
 | Typed resources (`kubernetes_deployment`) | Use `k8sconnect_object` with YAML |
 | `computed_fields` | Use `ignore_fields` instead |
 | `wait.condition` (inline) | Use separate `k8sconnect_wait` resource |
-| Provider-level auth | Use per-resource `cluster_connection` |
+| Provider-level auth | Use per-resource `cluster` |
 
 ## Common Challenges
 
@@ -411,7 +411,7 @@ resource "k8sconnect_object" "configs" {
     data = each.value
   })
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 ```
 

@@ -155,7 +155,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_object" "test_job" {
@@ -175,7 +175,7 @@ spec:
       restartPolicy: Never
   backoffLimit: 1
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 
@@ -185,7 +185,7 @@ resource "k8sconnect_wait" "field_wait" {
     field = "status.succeeded"
     timeout = "60s"
   }
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 `, namespace, jobName, namespace)
 }

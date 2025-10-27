@@ -26,7 +26,7 @@ MIIBtest
 )
 
 func TestCreateRESTConfig_InlineToken(t *testing.T) {
-	conn := ClusterConnectionModel{
+	conn := ClusterModel{
 		Host:                 types.StringValue("https://test.example.com"),
 		ClusterCACertificate: types.StringValue(base64.StdEncoding.EncodeToString([]byte(testCACert))),
 		Token:                types.StringValue("test-bearer-token"),
@@ -41,7 +41,7 @@ func TestCreateRESTConfig_InlineToken(t *testing.T) {
 }
 
 func TestCreateRESTConfig_InlineClientCert(t *testing.T) {
-	conn := ClusterConnectionModel{
+	conn := ClusterModel{
 		Host:                 types.StringValue("https://test.example.com"),
 		ClusterCACertificate: types.StringValue(base64.StdEncoding.EncodeToString([]byte(testCACert))),
 		ClientCertificate:    types.StringValue(base64.StdEncoding.EncodeToString([]byte(testClientCert))),
@@ -56,7 +56,7 @@ func TestCreateRESTConfig_InlineClientCert(t *testing.T) {
 }
 
 func TestCreateRESTConfig_InlineInsecure(t *testing.T) {
-	conn := ClusterConnectionModel{
+	conn := ClusterModel{
 		Host:     types.StringValue("https://test.example.com"),
 		Token:    types.StringValue("test-token"),
 		Insecure: types.BoolValue(true),
@@ -69,7 +69,7 @@ func TestCreateRESTConfig_InlineInsecure(t *testing.T) {
 }
 
 func TestCreateRESTConfig_InlineWithProxy(t *testing.T) {
-	conn := ClusterConnectionModel{
+	conn := ClusterModel{
 		Host:     types.StringValue("https://test.example.com"),
 		Token:    types.StringValue("test-token"),
 		ProxyURL: types.StringValue("http://proxy.example.com:8080"),
@@ -83,7 +83,7 @@ func TestCreateRESTConfig_InlineWithProxy(t *testing.T) {
 }
 
 func TestCreateRESTConfig_InlineExecAuth(t *testing.T) {
-	conn := ClusterConnectionModel{
+	conn := ClusterModel{
 		Host:                 types.StringValue("https://test.example.com"),
 		ClusterCACertificate: types.StringValue(base64.StdEncoding.EncodeToString([]byte(testCACert))),
 		Exec: &ExecAuthModel{
@@ -132,7 +132,7 @@ users:
   user:
     token: test-token`
 
-	conn := ClusterConnectionModel{
+	conn := ClusterModel{
 		Kubeconfig: types.StringValue(kubeconfig),
 	}
 
@@ -144,7 +144,7 @@ users:
 }
 
 func TestCreateRESTConfig_NoConnectionMethod(t *testing.T) {
-	conn := ClusterConnectionModel{
+	conn := ClusterModel{
 		// All connection methods are null
 	}
 
@@ -155,7 +155,7 @@ func TestCreateRESTConfig_NoConnectionMethod(t *testing.T) {
 }
 
 func TestCreateRESTConfig_InlineNoAuth(t *testing.T) {
-	conn := ClusterConnectionModel{
+	conn := ClusterModel{
 		Host:                 types.StringValue("https://test.example.com"),
 		ClusterCACertificate: types.StringValue(base64.StdEncoding.EncodeToString([]byte(testCACert))),
 		// No auth method provided
@@ -168,7 +168,7 @@ func TestCreateRESTConfig_InlineNoAuth(t *testing.T) {
 }
 
 func TestCreateRESTConfig_InlineNoCACert(t *testing.T) {
-	conn := ClusterConnectionModel{
+	conn := ClusterModel{
 		Host:  types.StringValue("https://test.example.com"),
 		Token: types.StringValue("test-token"),
 		// No CA cert and insecure not set
@@ -181,7 +181,7 @@ func TestCreateRESTConfig_InlineNoCACert(t *testing.T) {
 }
 
 func TestCreateRESTConfig_InvalidBase64(t *testing.T) {
-	conn := ClusterConnectionModel{
+	conn := ClusterModel{
 		Host:                 types.StringValue("https://test.example.com"),
 		ClusterCACertificate: types.StringValue("not-valid-base64!@#$"),
 		Token:                types.StringValue("test-token"),
@@ -194,7 +194,7 @@ func TestCreateRESTConfig_InvalidBase64(t *testing.T) {
 }
 
 func TestCreateRESTConfig_InvalidProxyURL(t *testing.T) {
-	conn := ClusterConnectionModel{
+	conn := ClusterModel{
 		Host:     types.StringValue("https://test.example.com"),
 		Token:    types.StringValue("test-token"),
 		ProxyURL: types.StringValue(":::invalid-url"),
@@ -210,7 +210,7 @@ func TestCreateRESTConfig_InvalidProxyURL(t *testing.T) {
 // Validation tests
 
 func TestValidateConnection_NoMode(t *testing.T) {
-	conn := ClusterConnectionModel{
+	conn := ClusterModel{
 		// All modes are null
 	}
 
@@ -221,7 +221,7 @@ func TestValidateConnection_NoMode(t *testing.T) {
 }
 
 func TestValidateConnection_MultipleModes(t *testing.T) {
-	conn := ClusterConnectionModel{
+	conn := ClusterModel{
 		Host:       types.StringValue("https://test.example.com"),
 		Kubeconfig: types.StringValue("/path/to/kubeconfig"),
 	}
@@ -233,7 +233,7 @@ func TestValidateConnection_MultipleModes(t *testing.T) {
 }
 
 func TestValidateConnection_InlineValid(t *testing.T) {
-	conn := ClusterConnectionModel{
+	conn := ClusterModel{
 		Host:                 types.StringValue("https://test.example.com"),
 		ClusterCACertificate: types.StringValue("base64-ca-cert"),
 		Token:                types.StringValue("test-token"),
@@ -245,7 +245,7 @@ func TestValidateConnection_InlineValid(t *testing.T) {
 }
 
 func TestValidateConnection_ExecMissingCommand(t *testing.T) {
-	conn := ClusterConnectionModel{
+	conn := ClusterModel{
 		Host:                 types.StringValue("https://test.example.com"),
 		ClusterCACertificate: types.StringValue("base64-ca-cert"),
 		Exec: &ExecAuthModel{
@@ -261,7 +261,7 @@ func TestValidateConnection_ExecMissingCommand(t *testing.T) {
 }
 
 func TestValidateConnection_ClientCertWithoutKey(t *testing.T) {
-	conn := ClusterConnectionModel{
+	conn := ClusterModel{
 		Host:                 types.StringValue("https://test.example.com"),
 		ClusterCACertificate: types.StringValue("base64-ca-cert"),
 		ClientCertificate:    types.StringValue("base64-cert"),
@@ -275,7 +275,7 @@ func TestValidateConnection_ClientCertWithoutKey(t *testing.T) {
 }
 
 func TestValidateConnection_ClientKeyWithoutCert(t *testing.T) {
-	conn := ClusterConnectionModel{
+	conn := ClusterModel{
 		Host:                 types.StringValue("https://test.example.com"),
 		ClusterCACertificate: types.StringValue("base64-ca-cert"),
 		ClientKey:            types.StringValue("base64-key"),
@@ -289,7 +289,7 @@ func TestValidateConnection_ClientKeyWithoutCert(t *testing.T) {
 }
 
 func TestValidateConnectionWithUnknowns_SkipsWhenUnknown(t *testing.T) {
-	conn := ClusterConnectionModel{
+	conn := ClusterModel{
 		Host:       types.StringUnknown(),
 		Kubeconfig: types.StringValue("/path/to/kubeconfig"),
 	}
@@ -321,12 +321,12 @@ foqjdF6yzToBQc8pTj3FnKqJrqVVxcx+DOQK8/cZ4r+yzfKKZGKV6u6P7rdpfWdQ
 
 	testCases := []struct {
 		name      string
-		conn      ClusterConnectionModel
+		conn      ClusterModel
 		checkFunc func(t *testing.T, config *rest.Config)
 	}{
 		{
 			name: "Direct PEM CA certificate",
-			conn: ClusterConnectionModel{
+			conn: ClusterModel{
 				Host:                 types.StringValue("https://test.example.com"),
 				ClusterCACertificate: types.StringValue(caCert),
 				Token:                types.StringValue("test-token"),
@@ -337,7 +337,7 @@ foqjdF6yzToBQc8pTj3FnKqJrqVVxcx+DOQK8/cZ4r+yzfKKZGKV6u6P7rdpfWdQ
 		},
 		{
 			name: "Base64-encoded PEM CA certificate",
-			conn: ClusterConnectionModel{
+			conn: ClusterModel{
 				Host:                 types.StringValue("https://test.example.com"),
 				ClusterCACertificate: types.StringValue(base64.StdEncoding.EncodeToString([]byte(caCert))),
 				Token:                types.StringValue("test-token"),
@@ -348,7 +348,7 @@ foqjdF6yzToBQc8pTj3FnKqJrqVVxcx+DOQK8/cZ4r+yzfKKZGKV6u6P7rdpfWdQ
 		},
 		{
 			name: "Direct PEM client certificates",
-			conn: ClusterConnectionModel{
+			conn: ClusterModel{
 				Host:                 types.StringValue("https://test.example.com"),
 				ClusterCACertificate: types.StringValue(caCert),
 				ClientCertificate:    types.StringValue(clientCert),
@@ -361,7 +361,7 @@ foqjdF6yzToBQc8pTj3FnKqJrqVVxcx+DOQK8/cZ4r+yzfKKZGKV6u6P7rdpfWdQ
 		},
 		{
 			name: "Base64-encoded client certificates",
-			conn: ClusterConnectionModel{
+			conn: ClusterModel{
 				Host:                 types.StringValue("https://test.example.com"),
 				ClusterCACertificate: types.StringValue(base64.StdEncoding.EncodeToString([]byte(caCert))),
 				ClientCertificate:    types.StringValue(base64.StdEncoding.EncodeToString([]byte(clientCert))),
@@ -374,7 +374,7 @@ foqjdF6yzToBQc8pTj3FnKqJrqVVxcx+DOQK8/cZ4r+yzfKKZGKV6u6P7rdpfWdQ
 		},
 		{
 			name: "Mixed encoding - direct PEM CA, base64 client certs",
-			conn: ClusterConnectionModel{
+			conn: ClusterModel{
 				Host:                 types.StringValue("https://test.example.com"),
 				ClusterCACertificate: types.StringValue(caCert),
 				ClientCertificate:    types.StringValue(base64.StdEncoding.EncodeToString([]byte(clientCert))),
@@ -388,7 +388,7 @@ foqjdF6yzToBQc8pTj3FnKqJrqVVxcx+DOQK8/cZ4r+yzfKKZGKV6u6P7rdpfWdQ
 		},
 		{
 			name: "PEM with whitespace",
-			conn: ClusterConnectionModel{
+			conn: ClusterModel{
 				Host:                 types.StringValue("https://test.example.com"),
 				ClusterCACertificate: types.StringValue("  \n" + caCert + "\n\t  "),
 				Token:                types.StringValue("test-token"),
@@ -411,12 +411,12 @@ foqjdF6yzToBQc8pTj3FnKqJrqVVxcx+DOQK8/cZ4r+yzfKKZGKV6u6P7rdpfWdQ
 func TestCreateRESTConfig_InvalidPEM(t *testing.T) {
 	testCases := []struct {
 		name          string
-		conn          ClusterConnectionModel
+		conn          ClusterModel
 		errorContains string
 	}{
 		{
 			name: "Invalid base64 CA certificate",
-			conn: ClusterConnectionModel{
+			conn: ClusterModel{
 				Host:                 types.StringValue("https://test.example.com"),
 				ClusterCACertificate: types.StringValue("not-valid-base64!@#$%"),
 				Token:                types.StringValue("test-token"),
@@ -425,7 +425,7 @@ func TestCreateRESTConfig_InvalidPEM(t *testing.T) {
 		},
 		{
 			name: "Valid base64 but not PEM",
-			conn: ClusterConnectionModel{
+			conn: ClusterModel{
 				Host:                 types.StringValue("https://test.example.com"),
 				ClusterCACertificate: types.StringValue(base64.StdEncoding.EncodeToString([]byte("not a certificate"))),
 				Token:                types.StringValue("test-token"),
@@ -434,7 +434,7 @@ func TestCreateRESTConfig_InvalidPEM(t *testing.T) {
 		},
 		{
 			name: "Invalid client certificate",
-			conn: ClusterConnectionModel{
+			conn: ClusterModel{
 				Host:                 types.StringValue("https://test.example.com"),
 				ClusterCACertificate: types.StringValue("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----"),
 				ClientCertificate:    types.StringValue("invalid-cert"),
@@ -444,7 +444,7 @@ func TestCreateRESTConfig_InvalidPEM(t *testing.T) {
 		},
 		{
 			name: "Invalid client key",
-			conn: ClusterConnectionModel{
+			conn: ClusterModel{
 				Host:                 types.StringValue("https://test.example.com"),
 				ClusterCACertificate: types.StringValue("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----"),
 				ClientCertificate:    types.StringValue("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----"),
@@ -478,7 +478,7 @@ users:
   user:
     token: test-token`
 
-	conn := ClusterConnectionModel{
+	conn := ClusterModel{
 		Kubeconfig: types.StringValue(kubeconfig),
 	}
 
@@ -517,7 +517,7 @@ users:
   user:
     token: dev-token`
 
-	conn := ClusterConnectionModel{
+	conn := ClusterModel{
 		Kubeconfig: types.StringValue(kubeconfig),
 		// Context not specified - should error
 	}
@@ -560,7 +560,7 @@ users:
   user:
     token: dev-token`
 
-	conn := ClusterConnectionModel{
+	conn := ClusterModel{
 		Kubeconfig: types.StringValue(kubeconfig),
 		Context:    types.StringValue("dev-context"),
 	}
@@ -589,7 +589,7 @@ users:
   user:
     token: test-token`
 
-	conn := ClusterConnectionModel{
+	conn := ClusterModel{
 		Kubeconfig: types.StringValue(kubeconfig),
 		Context:    types.StringValue("nonexistent-context"),
 	}
@@ -708,7 +708,7 @@ clusters: []`
 
 func TestCreateRESTConfig_KubeconfigFilePath(t *testing.T) {
 	// Test that file path gets caught with helpful error
-	conn := ClusterConnectionModel{
+	conn := ClusterModel{
 		Kubeconfig: types.StringValue("/home/user/.kube/config"),
 	}
 
@@ -721,7 +721,7 @@ func TestCreateRESTConfig_KubeconfigFilePath(t *testing.T) {
 
 func TestCreateRESTConfig_KubeconfigInvalidYAML(t *testing.T) {
 	// Test that invalid YAML gets caught with helpful error
-	conn := ClusterConnectionModel{
+	conn := ClusterModel{
 		Kubeconfig: types.StringValue("not-yaml-content"),
 	}
 

@@ -10,13 +10,13 @@ import (
 )
 
 // convertObjectToConnectionModel converts a Terraform object to our connection model
-func (r *objectResource) convertObjectToConnectionModel(ctx context.Context, obj basetypes.ObjectValue) (auth.ClusterConnectionModel, error) {
+func (r *objectResource) convertObjectToConnectionModel(ctx context.Context, obj basetypes.ObjectValue) (auth.ClusterModel, error) {
 	return auth.ObjectToConnectionModel(ctx, obj)
 }
 
 // convertConnectionToObject converts our connection model back to a Terraform object.
 // This is used when we need to store the connection in state.
-func (r *objectResource) convertConnectionToObject(ctx context.Context, conn auth.ClusterConnectionModel) (types.Object, error) {
+func (r *objectResource) convertConnectionToObject(ctx context.Context, conn auth.ClusterModel) (types.Object, error) {
 	return auth.ConnectionToObject(ctx, conn)
 }
 

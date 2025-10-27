@@ -69,7 +69,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_object" "pv" {
@@ -88,7 +88,7 @@ spec:
   hostPath:
     path: /tmp/%s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 
@@ -107,7 +107,7 @@ spec:
     requests:
       storage: 1Gi
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.pv]
 }
 
@@ -118,7 +118,7 @@ resource "k8sconnect_wait" "pvc_volume" {
     field = "spec.volumeName"  # Field is in .spec, NOT .status!
     timeout = "30s"
   }
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 # Use the volume name in an output (the failing use case from kind-validation)
@@ -181,7 +181,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_object" "svc" {
@@ -199,7 +199,7 @@ spec:
   - port: 80
     targetPort: 8080
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 
@@ -210,7 +210,7 @@ resource "k8sconnect_wait" "svc_ip" {
     field = "spec.clusterIP"  # Field is in .spec, NOT .status!
     timeout = "30s"
   }
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 # Use the cluster IP in an output
@@ -273,7 +273,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_object" "cm" {
@@ -286,7 +286,7 @@ metadata:
 data:
   key: value
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 
@@ -297,7 +297,7 @@ resource "k8sconnect_wait" "cm_uid" {
     field = "metadata.uid"  # Field is in .metadata, NOT .status!
     timeout = "30s"
   }
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 # Use the UID in an output
@@ -359,7 +359,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_object" "lb_svc" {
@@ -377,7 +377,7 @@ spec:
   - port: 9998
     targetPort: 8080
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
 }
 
@@ -388,7 +388,7 @@ resource "k8sconnect_wait" "lb_ingress" {
     field = "status.loadBalancer.ingress"
     timeout = "2m"
   }
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 `, namespace, svcName, namespace)
 }

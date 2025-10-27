@@ -1,7 +1,9 @@
 # ADR-011: Concise Diff Format for Plan Output
 
 ## Status
-Partially Implemented (2025-10-09)
+Superseded by ADR-020 (2025-10-26)
+
+**Note**: This ADR documents the evolution of field ownership display strategy. The final solution was to move `field_ownership` to private state with warnings (ADR-020), rather than improving the diff format. This ADR is preserved for historical context.
 
 ## Context
 
@@ -11,7 +13,7 @@ Partially Implemented (2025-10-09)
 
 **Realization**: Field ownership changes are **critical information** for SSA-aware infrastructure. If HPA takes over `spec.replicas`, users need to see that. Problem isn't *what* we show - it's *how verbose the format is*.
 
-## Implemented Solution: field_ownership Map Format
+## Attempted Solution: field_ownership Map Format
 
 Converted `field_ownership` from verbose JSON string to concise Map format. Terraform automatically hides unchanged keys.
 
@@ -21,6 +23,8 @@ Converted `field_ownership` from verbose JSON string to concise Map format. Terr
 **Enhancements**:
 - Preserve field_ownership from state during plan when `ignore_fields` unchanged (prevents "(known after apply)" noise)
 - Filter out `status.*` paths (always owned by K8s controllers, never by k8sconnect)
+
+**Ultimate outcome**: While this reduced verbosity, tracking external field ownership in public state created stability issues (flaky tests, inconsistent plan errors). The final solution was ADR-020: Move field_ownership to private state and emit warnings during plan instead.
 
 ## Rejected: yaml_body Sensitivity with YAML Fallback
 

@@ -3,7 +3,6 @@ package object
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -19,7 +18,7 @@ import (
 type ResourceContext struct {
 	Ctx                        context.Context
 	Data                       *objectResourceModel
-	Connection                 auth.ClusterConnectionModel
+	Connection                 auth.ClusterModel
 	Client                     k8sclient.K8sClient
 	Object                     *unstructured.Unstructured
 	GVR                        schema.GroupVersionResource
@@ -114,21 +113,21 @@ func (r *objectResource) loadConnectionFromData(
 	ctx context.Context,
 	data *objectResourceModel,
 	requireConnection bool,
-) (auth.ClusterConnectionModel, error) {
+) (auth.ClusterModel, error) {
 
 	// Connection is always required from the resource now
-	if data.ClusterConnection.IsNull() || data.ClusterConnection.IsUnknown() {
+	if data.Cluster.IsNull() || data.Cluster.IsUnknown() {
 		if requireConnection {
-			return auth.ClusterConnectionModel{}, fmt.Errorf(
-				"cluster_connection is required")
+			return auth.ClusterModel{}, fmt.Errorf(
+				"cluster is required")
 		}
-		return auth.ClusterConnectionModel{}, nil
+		return auth.ClusterModel{}, nil
 	}
 
 	// Convert the connection object to our model
-	conn, err := r.convertObjectToConnectionModel(ctx, data.ClusterConnection)
+	conn, err := r.convertObjectToConnectionModel(ctx, data.Cluster)
 	if err != nil {
-		return auth.ClusterConnectionModel{}, fmt.Errorf("invalid connection: %w", err)
+		return auth.ClusterModel{}, fmt.Errorf("invalid connection: %w", err)
 	}
 
 	return conn, nil
@@ -201,41 +200,13 @@ func (r *objectResource) updateProjection(rc *ResourceContext) error {
 		"map_size":   len(projectionMap),
 	})
 
-	// Update field ownership (existing code continues...)
-	ownership := extractFieldOwnership(currentObj)
-
-	// Convert map[string]FieldOwnership to map[string]string (just manager names)
-	// Filter out status fields - they're always owned by controllers and provide no actionable information
-	ownershipMap := make(map[string]string, len(ownership))
-	for path, owner := range ownership {
-		// Skip status fields - they're read-only subresources managed by controllers
-		// (similar to how status is filtered in yaml.go during object cleanup)
-		if strings.HasPrefix(path, "status.") || path == "status" {
-			continue
-		}
-		ownershipMap[path] = owner.Manager
-	}
-
-	// Convert to types.Map
-	mapValue, diags = types.MapValueFrom(rc.Ctx, types.StringType, ownershipMap)
-	if diags.HasError() {
-		tflog.Warn(rc.Ctx, "Failed to convert field ownership to map", map[string]interface{}{
-			"diagnostics": diags,
-		})
-		// Set empty map on error
-		emptyMap, _ := types.MapValueFrom(rc.Ctx, types.StringType, map[string]string{})
-		rc.Data.FieldOwnership = emptyMap
-	} else {
-		rc.Data.FieldOwnership = mapValue
-	}
-
 	// Clear ImportedWithoutAnnotations after first update (will be handled by Update function)
 
 	return nil
 }
 
 // isConnectionEmpty checks if connection is empty
-func (r *objectResource) isConnectionEmpty(conn auth.ClusterConnectionModel) bool {
+func (r *objectResource) isConnectionEmpty(conn auth.ClusterModel) bool {
 	return conn.Host.IsNull() &&
 		conn.Kubeconfig.IsNull() &&
 		conn.Kubeconfig.IsNull() &&

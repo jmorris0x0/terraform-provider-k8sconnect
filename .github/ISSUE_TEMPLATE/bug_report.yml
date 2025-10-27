@@ -43,7 +43,7 @@ body:
           name: nginx
         YAML
 
-          cluster_connection = {
+          cluster = {
             kubeconfig = file("~/.kube/config")
           }
         }

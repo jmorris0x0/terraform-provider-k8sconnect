@@ -73,7 +73,7 @@ resource "k8sconnect_object" "test_namespace" {
       name: %[4]s
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.kubeconfig
   }
 }
@@ -106,7 +106,7 @@ resource "k8sconnect_object" "test_crd" {
                     type: string
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.kubeconfig
   }
 }
@@ -123,7 +123,7 @@ resource "k8sconnect_object" "test_cr" {
       foo: bar
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.kubeconfig
   }
 
@@ -184,7 +184,7 @@ resource "k8sconnect_object" "test_namespace" {
       name: %s
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.kubeconfig
   }
 }
@@ -203,7 +203,7 @@ resource "k8sconnect_object" "test_invalid" {
       invalidField: invalid
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.kubeconfig
   }
 
@@ -305,7 +305,7 @@ resource "k8sconnect_object" "widget_namespace" {
       name: %[4]s
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.kubeconfig
   }
 }
@@ -337,7 +337,7 @@ resource "k8sconnect_object" "widget_crd" {
                     type: string
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.kubeconfig
   }
 
@@ -355,7 +355,7 @@ resource "k8sconnect_object" "widget_instance" {
       size: large
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.kubeconfig
   }
 

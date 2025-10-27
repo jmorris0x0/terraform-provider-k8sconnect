@@ -21,7 +21,7 @@ resource "k8sconnect_patch" "kube_dns_annotation" {
     }
   })
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 # Output the managed fields

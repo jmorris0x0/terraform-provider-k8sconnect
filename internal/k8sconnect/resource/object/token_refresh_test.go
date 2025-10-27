@@ -106,7 +106,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = local.exec_connection
+  cluster = local.exec_connection
 }
 
 resource "k8sconnect_object" "test_cm1" {
@@ -120,7 +120,7 @@ data:
   created: "first"
 YAML
 
-  cluster_connection = local.exec_connection
+  cluster = local.exec_connection
   depends_on = [k8sconnect_object.test_namespace]
 }
 
@@ -140,7 +140,7 @@ data:
   created: "second"
 YAML
 
-  cluster_connection = local.exec_connection
+  cluster = local.exec_connection
   depends_on = [time_sleep.wait_for_token_expiry]
 }
 `, namespace, cm1Name, namespace, cm2Name, namespace)

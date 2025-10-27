@@ -67,7 +67,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -75,7 +75,7 @@ YAML
 resource "k8sconnect_wait" "test" {
   object_ref = k8sconnect_object.test.object_ref
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -139,7 +139,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -147,7 +147,7 @@ YAML
 resource "k8sconnect_wait" "test" {
   object_ref = k8sconnect_object.test.object_ref
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -214,7 +214,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -243,7 +243,7 @@ spec:
         - containerPort: 80
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -253,7 +253,7 @@ YAML
 resource "k8sconnect_wait" "test" {
   object_ref = k8sconnect_object.test.object_ref
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -320,7 +320,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -349,7 +349,7 @@ spec:
         - containerPort: 80
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -359,7 +359,7 @@ YAML
 resource "k8sconnect_wait" "test" {
   object_ref = k8sconnect_object.test.object_ref
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -426,7 +426,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -442,7 +442,7 @@ data:
   test: value
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -452,7 +452,7 @@ YAML
 resource "k8sconnect_wait" "test" {
   object_ref = k8sconnect_object.test.object_ref
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -518,7 +518,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -541,7 +541,7 @@ spec:
     path: /tmp/%s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -563,7 +563,7 @@ spec:
       storage: 1Gi
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -574,7 +574,7 @@ YAML
 resource "k8sconnect_wait" "pvc" {
   object_ref = k8sconnect_object.pvc.object_ref
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -642,7 +642,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -671,7 +671,7 @@ spec:
         - containerPort: 80
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -681,7 +681,7 @@ YAML
 resource "k8sconnect_wait" "test" {
   object_ref = k8sconnect_object.test.object_ref
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -749,7 +749,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -779,7 +779,7 @@ spec:
         - containerPort: 80
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -789,7 +789,7 @@ YAML
 resource "k8sconnect_wait" "test" {
   object_ref = k8sconnect_object.test.object_ref
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -854,7 +854,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -882,7 +882,7 @@ spec:
         - containerPort: 80
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -892,7 +892,7 @@ YAML
 resource "k8sconnect_wait" "test" {
   object_ref = k8sconnect_object.test.object_ref
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -952,7 +952,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -968,7 +968,7 @@ data:
   test: value
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -978,7 +978,7 @@ YAML
 resource "k8sconnect_wait" "test" {
   object_ref = k8sconnect_object.test.object_ref
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 

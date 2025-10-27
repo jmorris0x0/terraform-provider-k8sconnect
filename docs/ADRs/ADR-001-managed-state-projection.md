@@ -153,7 +153,7 @@ storage: "5000Mi"     # "5Gi"
 #### Unknown Values During Planning
 When connection details depend on other resources:
 ```hcl
-cluster_connection = {
+cluster = {
   host = aws_eks_cluster.main.endpoint  # Unknown during plan
 }
 ```

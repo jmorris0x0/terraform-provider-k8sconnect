@@ -15,9 +15,9 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// ClusterConnectionModel represents the connection configuration for a Kubernetes cluster.
+// ClusterModel represents the connection configuration for a Kubernetes cluster.
 // This model is used by both the provider and resources to establish cluster connections.
-type ClusterConnectionModel struct {
+type ClusterModel struct {
 	Host                 types.String   `tfsdk:"host"`
 	ClusterCACertificate types.String   `tfsdk:"cluster_ca_certificate"`
 	Kubeconfig           types.String   `tfsdk:"kubeconfig"`
@@ -41,7 +41,7 @@ type ExecAuthModel struct {
 // CreateRESTConfig creates a Kubernetes REST config from the connection model.
 // It determines the appropriate method (inline or kubeconfig) and returns
 // a configured rest.Config ready for creating a Kubernetes client.
-func CreateRESTConfig(ctx context.Context, conn ClusterConnectionModel) (*rest.Config, error) {
+func CreateRESTConfig(ctx context.Context, conn ClusterModel) (*rest.Config, error) {
 	// Determine which connection method to use
 	if !conn.Host.IsNull() {
 		// Inline configuration
@@ -55,7 +55,7 @@ func CreateRESTConfig(ctx context.Context, conn ClusterConnectionModel) (*rest.C
 }
 
 // createInlineConfig creates a REST config from inline connection settings
-func createInlineConfig(conn ClusterConnectionModel) (*rest.Config, error) {
+func createInlineConfig(conn ClusterModel) (*rest.Config, error) {
 	config := &rest.Config{
 		Host: conn.Host.ValueString(),
 	}
@@ -82,7 +82,7 @@ func createInlineConfig(conn ClusterConnectionModel) (*rest.Config, error) {
 }
 
 // configureTLS handles all TLS configuration
-func configureTLS(config *rest.Config, conn ClusterConnectionModel) error {
+func configureTLS(config *rest.Config, conn ClusterModel) error {
 	// Handle insecure mode
 	if !conn.Insecure.IsNull() && conn.Insecure.ValueBool() {
 		config.TLSClientConfig.Insecure = true
@@ -104,7 +104,7 @@ func configureTLS(config *rest.Config, conn ClusterConnectionModel) error {
 }
 
 // configureAuth handles all authentication methods
-func configureAuth(config *rest.Config, conn ClusterConnectionModel) error {
+func configureAuth(config *rest.Config, conn ClusterModel) error {
 	authMethods := 0
 
 	// Token auth
@@ -135,7 +135,7 @@ func configureAuth(config *rest.Config, conn ClusterConnectionModel) error {
 }
 
 // configureClientCerts handles client certificate authentication
-func configureClientCerts(config *rest.Config, conn ClusterConnectionModel) error {
+func configureClientCerts(config *rest.Config, conn ClusterModel) error {
 	// Both must be present or both absent
 	hasCert := !conn.ClientCertificate.IsNull()
 	hasKey := !conn.ClientKey.IsNull()
@@ -166,7 +166,7 @@ func configureClientCerts(config *rest.Config, conn ClusterConnectionModel) erro
 }
 
 // configureExecAuth handles exec authentication
-func configureExecAuth(config *rest.Config, conn ClusterConnectionModel) error {
+func configureExecAuth(config *rest.Config, conn ClusterModel) error {
 	if conn.Exec == nil || conn.Exec.APIVersion.IsNull() {
 		return nil // No exec auth
 	}
@@ -202,7 +202,7 @@ func configureExecAuth(config *rest.Config, conn ClusterConnectionModel) error {
 }
 
 // configureProxy sets up proxy configuration
-func configureProxy(config *rest.Config, conn ClusterConnectionModel) error {
+func configureProxy(config *rest.Config, conn ClusterModel) error {
 	if !conn.ProxyURL.IsNull() {
 		proxyURL, err := url.Parse(conn.ProxyURL.ValueString())
 		if err != nil {
@@ -214,7 +214,7 @@ func configureProxy(config *rest.Config, conn ClusterConnectionModel) error {
 }
 
 // createKubeconfigConfig creates a REST config from kubeconfig data
-func createKubeconfigConfig(conn ClusterConnectionModel) (*rest.Config, error) {
+func createKubeconfigConfig(conn ClusterModel) (*rest.Config, error) {
 	kubeconfigContent := conn.Kubeconfig.ValueString()
 
 	// Validate kubeconfig content before parsing

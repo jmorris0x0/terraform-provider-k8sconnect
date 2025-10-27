@@ -6,7 +6,7 @@ import (
 )
 
 // ValidateConnection ensures exactly one connection mode is specified and all required fields are present.
-func ValidateConnection(ctx context.Context, conn ClusterConnectionModel) error {
+func ValidateConnection(ctx context.Context, conn ClusterModel) error {
 	// Validate connection modes
 	if err := validateConnectionModes(conn); err != nil {
 		return err
@@ -36,7 +36,7 @@ func ValidateConnection(ctx context.Context, conn ClusterConnectionModel) error 
 }
 
 // validateConnectionModes ensures exactly one connection mode is specified
-func validateConnectionModes(conn ClusterConnectionModel) error {
+func validateConnectionModes(conn ClusterModel) error {
 	modes := countActiveModes(conn)
 
 	if modes == 0 {
@@ -55,7 +55,7 @@ func validateConnectionModes(conn ClusterConnectionModel) error {
 }
 
 // countActiveModes counts how many connection modes are configured
-func countActiveModes(conn ClusterConnectionModel) int {
+func countActiveModes(conn ClusterModel) int {
 	modes := 0
 	if hasInlineMode(conn) {
 		modes++
@@ -67,12 +67,12 @@ func countActiveModes(conn ClusterConnectionModel) int {
 }
 
 // hasInlineMode checks if inline connection fields are present
-func hasInlineMode(conn ClusterConnectionModel) bool {
+func hasInlineMode(conn ClusterModel) bool {
 	return !conn.Host.IsNull() || !conn.ClusterCACertificate.IsNull()
 }
 
 // buildMultipleModeError creates error message for multiple modes
-func buildMultipleModeError(conn ClusterConnectionModel) string {
+func buildMultipleModeError(conn ClusterModel) string {
 	conflictingModes := []string{}
 	if hasInlineMode(conn) {
 		conflictingModes = append(conflictingModes, "inline (host + cluster_ca_certificate)")
@@ -89,7 +89,7 @@ func buildMultipleModeError(conn ClusterConnectionModel) string {
 }
 
 // validateInlineConnection validates inline connection requirements
-func validateInlineConnection(conn ClusterConnectionModel) error {
+func validateInlineConnection(conn ClusterModel) error {
 	// Check host is present
 	if conn.Host.IsNull() {
 		return fmt.Errorf("inline connection incomplete\n\n" +
@@ -119,7 +119,7 @@ func validateInlineConnection(conn ClusterConnectionModel) error {
 }
 
 // hasValidTLSConfig checks if TLS is properly configured (CA cert or insecure flag)
-func hasValidTLSConfig(conn ClusterConnectionModel) bool {
+func hasValidTLSConfig(conn ClusterModel) bool {
 	// Either have CA certificate OR insecure=true
 	hasCA := !conn.ClusterCACertificate.IsNull()
 	hasInsecure := !conn.Insecure.IsNull() && conn.Insecure.ValueBool()
@@ -127,19 +127,19 @@ func hasValidTLSConfig(conn ClusterConnectionModel) bool {
 }
 
 // hasAuthentication checks if any authentication method is configured
-func hasAuthentication(conn ClusterConnectionModel) bool {
+func hasAuthentication(conn ClusterModel) bool {
 	return !conn.Token.IsNull() ||
 		hasClientCertAuth(conn) ||
 		hasExecAuth(conn)
 }
 
 // hasClientCertAuth checks if client certificate authentication is configured
-func hasClientCertAuth(conn ClusterConnectionModel) bool {
+func hasClientCertAuth(conn ClusterModel) bool {
 	return !conn.ClientCertificate.IsNull() && !conn.ClientKey.IsNull()
 }
 
 // hasExecAuth checks if exec authentication is configured
-func hasExecAuth(conn ClusterConnectionModel) bool {
+func hasExecAuth(conn ClusterModel) bool {
 	return conn.Exec != nil && !conn.Exec.APIVersion.IsNull()
 }
 
@@ -174,7 +174,7 @@ func validateExecAuth(exec *ExecAuthModel) error {
 }
 
 // validateClientCertificates ensures client cert and key are provided together
-func validateClientCertificates(conn ClusterConnectionModel) error {
+func validateClientCertificates(conn ClusterModel) error {
 	hasCert := !conn.ClientCertificate.IsNull()
 	hasKey := !conn.ClientKey.IsNull()
 
@@ -188,7 +188,7 @@ func validateClientCertificates(conn ClusterConnectionModel) error {
 
 // ValidateConnectionWithUnknowns performs validation that's safe when values might be unknown.
 // This is used during Terraform plan phase when some values might not be computed yet.
-func ValidateConnectionWithUnknowns(ctx context.Context, conn ClusterConnectionModel) error {
+func ValidateConnectionWithUnknowns(ctx context.Context, conn ClusterModel) error {
 	// Skip validation if key fields are unknown
 	hasUnknownFields := conn.Host.IsUnknown() ||
 		conn.ClusterCACertificate.IsUnknown() ||

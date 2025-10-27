@@ -128,7 +128,7 @@ resource "k8sconnect_object" "namespace" {
       name: %[1]s
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -165,7 +165,7 @@ resource "k8sconnect_object" "crd" {
                   message: "replicas cannot exceed 10"
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -197,7 +197,7 @@ resource "k8sconnect_object" "namespace" {
       name: %[1]s
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -234,7 +234,7 @@ resource "k8sconnect_object" "crd" {
                   message: "replicas cannot exceed 10"
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -253,7 +253,7 @@ resource "k8sconnect_object" "widget" {
       replicas: 15
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -285,7 +285,7 @@ resource "k8sconnect_object" "namespace" {
       name: %[1]s
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -327,7 +327,7 @@ resource "k8sconnect_object" "crd" {
                   message: "replicas must be <= maxReplicas"
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -359,7 +359,7 @@ resource "k8sconnect_object" "namespace" {
       name: %[1]s
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -401,7 +401,7 @@ resource "k8sconnect_object" "crd" {
                   message: "replicas must be <= maxReplicas"
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -423,7 +423,7 @@ resource "k8sconnect_object" "gadget" {
       maxReplicas: 5
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 

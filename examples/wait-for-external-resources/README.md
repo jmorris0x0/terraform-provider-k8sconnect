@@ -76,13 +76,13 @@ resource "k8sconnect_wait" "metrics_server" {
     timeout   = "5m"
   }
 
-  cluster_connection = var.cluster_connection
+  cluster = var.cluster
 }
 
 # Create your HPA (only after metrics-server is ready)
 resource "k8sconnect_object" "my_hpa" {
   yaml_body = file("hpa.yaml")
-  cluster_connection = var.cluster_connection
+  cluster = var.cluster
 
   depends_on = [k8sconnect_wait.metrics_server]
 }
@@ -134,7 +134,7 @@ resource "k8sconnect_wait" "your_thing" {
     timeout   = "5m"
   }
 
-  cluster_connection = var.cluster_connection
+  cluster = var.cluster
 }
 ```
 

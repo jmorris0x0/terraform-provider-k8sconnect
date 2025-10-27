@@ -11,23 +11,23 @@ import (
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 )
 
-// ClusterConnection validates cluster connection configuration
+// Cluster validates cluster connection configuration
 // This is a generic resource-level validator that works with any resource
-// that has a cluster_connection attribute
-type ClusterConnection struct{}
+// that has a cluster attribute
+type Cluster struct{}
 
-func (v ClusterConnection) Description(ctx context.Context) string {
+func (v Cluster) Description(ctx context.Context) string {
 	return "Ensures exactly one cluster connection mode is specified: inline (host + cluster_ca_certificate or insecure) or kubeconfig"
 }
 
-func (v ClusterConnection) MarkdownDescription(ctx context.Context) string {
+func (v Cluster) MarkdownDescription(ctx context.Context) string {
 	return "Ensures exactly one cluster connection mode is specified: inline (`host` + `cluster_ca_certificate` or `insecure`), `kubeconfig`"
 }
 
-func (v ClusterConnection) ValidateResource(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
-	// Get cluster_connection attribute
+func (v Cluster) ValidateResource(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	// Get cluster attribute
 	var conn types.Object
-	diags := req.Config.GetAttribute(ctx, path.Root("cluster_connection"), &conn)
+	diags := req.Config.GetAttribute(ctx, path.Root("cluster"), &conn)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -41,9 +41,9 @@ func (v ClusterConnection) ValidateResource(ctx context.Context, req resource.Va
 	// Check connection exists
 	if conn.IsNull() {
 		resp.Diagnostics.AddAttributeError(
-			path.Root("cluster_connection"),
+			path.Root("cluster"),
 			"Missing Cluster Connection Configuration",
-			"cluster_connection block is required.",
+			"cluster block is required.",
 		)
 		return
 	}
@@ -59,7 +59,7 @@ func (v ClusterConnection) ValidateResource(ctx context.Context, req resource.Va
 	err = auth.ValidateConnectionWithUnknowns(ctx, connModel)
 	if err != nil {
 		resp.Diagnostics.AddAttributeError(
-			path.Root("cluster_connection"),
+			path.Root("cluster"),
 			"Invalid Cluster Connection Configuration",
 			err.Error(),
 		)
@@ -68,7 +68,7 @@ func (v ClusterConnection) ValidateResource(ctx context.Context, req resource.Va
 
 // ExecAuth validates exec authentication configuration
 // This is a generic resource-level validator that works with any resource
-// that has a cluster_connection.exec attribute
+// that has a cluster.exec attribute
 type ExecAuth struct{}
 
 func (v ExecAuth) Description(ctx context.Context) string {
@@ -80,9 +80,9 @@ func (v ExecAuth) MarkdownDescription(ctx context.Context) string {
 }
 
 func (v ExecAuth) ValidateResource(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
-	// Get cluster_connection attribute
+	// Get cluster attribute
 	var conn types.Object
-	diags := req.Config.GetAttribute(ctx, path.Root("cluster_connection"), &conn)
+	diags := req.Config.GetAttribute(ctx, path.Root("cluster"), &conn)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -106,7 +106,7 @@ func (v ExecAuth) ValidateResource(ctx context.Context, req resource.ValidateCon
 		// Only report if it's an exec-related error
 		if strings.Contains(err.Error(), "exec authentication") {
 			resp.Diagnostics.AddAttributeError(
-				path.Root("cluster_connection").AtName("exec"),
+				path.Root("cluster").AtName("exec"),
 				"Invalid Exec Authentication Configuration",
 				err.Error(),
 			)

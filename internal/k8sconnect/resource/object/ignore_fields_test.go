@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -58,7 +57,6 @@ func TestAccObjectResource_IgnoreFields(t *testing.T) {
 					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 					testhelpers.CheckDeploymentReplicaCount(k8sClientset, ns, deployName, 3),
 					// Verify we own spec.selector (but not spec.replicas which is ignored)
-					resource.TestCheckResourceAttr("k8sconnect_object.ignore_test", "field_ownership.spec.selector", "k8sconnect"),
 				),
 			},
 			// Step 2: Re-apply without changes - should show no drift
@@ -130,7 +128,6 @@ func TestAccObjectResource_IgnoreFieldsTransition(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					// We should have forced ownership back and reset replicas to 3
-					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.spec.replicas", "k8sconnect"),
 					testhelpers.CheckDeploymentReplicaCount(k8sClient.(*kubernetes.Clientset), ns, deployName, 3),
 				),
 			},
@@ -175,7 +172,7 @@ metadata:
   name: ${var.namespace}
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -204,7 +201,7 @@ spec:
         image: nginx:1.21
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -259,10 +256,7 @@ func TestAccObjectResource_IgnoreFieldsRemoveWhileOwned(t *testing.T) {
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
-				Check: resource.ComposeTestCheckFunc(
-					// Verify field_ownership shows hpa-controller owns spec.replicas
-					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.spec.replicas", "hpa-controller"),
-				),
+				Check: resource.ComposeTestCheckFunc(),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectEmptyPlan(),
@@ -277,7 +271,6 @@ func TestAccObjectResource_IgnoreFieldsRemoveWhileOwned(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					// We should have forced ownership back and reset replicas to 3
-					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.spec.replicas", "k8sconnect"),
 					testhelpers.CheckDeploymentReplicaCount(k8sClient.(*kubernetes.Clientset), ns, deployName, 3),
 				),
 			},
@@ -315,8 +308,6 @@ func TestAccObjectResource_IgnoreFieldsModifyList(t *testing.T) {
 					resource.TestCheckResourceAttrSet("k8sconnect_object.test", "id"),
 					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
 					resource.TestCheckResourceAttr("k8sconnect_object.test", "ignore_fields.#", "1"),
-					// Verify field_ownership includes key2 (but not key1 which is ignored)
-					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.data.key2", "k8sconnect"),
 				),
 			},
 			// Step 2: Use SSA to simulate external controller taking ownership of data.key2
@@ -338,8 +329,6 @@ func TestAccObjectResource_IgnoreFieldsModifyList(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("k8sconnect_object.test", "ignore_fields.#", "2"),
-					// Verify field_ownership shows key2 is owned by external-controller
-					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.data.key2", "external-controller"),
 				),
 			},
 			// Step 3: REMOVE one field from ignore list - should reclaim it
@@ -354,10 +343,7 @@ func TestAccObjectResource_IgnoreFieldsModifyList(t *testing.T) {
 					testhelpers.CheckConfigMapData(k8sClient, ns, cmName, map[string]string{
 						"key1": "value1",
 					}),
-					// Verify field_ownership shows k8sconnect owns key1 again
-					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.data.key1", "k8sconnect"),
 					// key2 should still be owned by external-controller
-					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.data.key2", "external-controller"),
 				),
 			},
 		},
@@ -413,10 +399,7 @@ func TestAccObjectResource_IgnoreFieldsModifyListError(t *testing.T) {
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
-				Check: resource.ComposeTestCheckFunc(
-					// Verify field_ownership shows external-controller owns data.key2
-					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.data.key2", "external-controller"),
-				),
+				Check: resource.ComposeTestCheckFunc(),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectEmptyPlan(),
@@ -431,7 +414,6 @@ func TestAccObjectResource_IgnoreFieldsModifyListError(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					// We should have forced ownership back and set key2 to expected value
-					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.data.key2", "k8sconnect"),
 					testhelpers.CheckConfigMapData(k8sClient, ns, cmName, map[string]string{
 						"key2": "value2",
 					}),
@@ -482,8 +464,6 @@ func TestAccObjectResource_IgnoreFieldsRemoveWhenOwned(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("k8sconnect_object.test", "ignore_fields.#", "0"),
 					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
-					// Verify field_ownership shows k8sconnect owns spec.replicas again
-					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.spec.replicas", "k8sconnect"),
 				),
 			},
 		},
@@ -509,7 +489,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -538,7 +518,7 @@ spec:
         image: nginx:1.21
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -570,7 +550,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -589,7 +569,7 @@ data:
   key2: value2
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -751,7 +731,7 @@ resource "k8sconnect_object" "test" {
 %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -827,7 +807,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -846,7 +826,7 @@ data:
   config: "replicas"
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -883,7 +863,7 @@ spec:
         image: nginx:1.21
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -946,7 +926,6 @@ func TestAccObjectResource_UpdateWithIgnoreFieldsChange(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					// Verify HPA owns replicas
-					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.spec.replicas", "hpa-controller"),
 					// Verify replicas is 5 (HPA's value)
 					testhelpers.CheckDeploymentReplicaCount(k8sClient.(*kubernetes.Clientset), ns, deployName, 5),
 				),
@@ -967,7 +946,6 @@ func TestAccObjectResource_UpdateWithIgnoreFieldsChange(t *testing.T) {
 					// Verify image was updated
 					testhelpers.CheckDeploymentImage(k8sClient.(*kubernetes.Clientset), ns, deployName, "nginx:1.22"),
 					// Verify replicas was reclaimed and reset to 3
-					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.spec.replicas", "k8sconnect"),
 					testhelpers.CheckDeploymentReplicaCount(k8sClient.(*kubernetes.Clientset), ns, deployName, 3),
 					// Verify ignore_fields is now empty
 					resource.TestCheckResourceAttr("k8sconnect_object.test", "ignore_fields.#", "0"),
@@ -1007,7 +985,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -1036,7 +1014,7 @@ spec:
         image: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -1069,27 +1047,12 @@ func TestAccObjectResource_IgnoreFieldsJSONPathPredicate(t *testing.T) {
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 	ssaClient := testhelpers.NewSSATestClient(t, raw)
 
-	// Detect environment and configure iterations to catch race condition
-	isCI := os.Getenv("CI") != ""
-	delayStr := os.Getenv("TEST_RACE_DELAY")
-	var delayMs int
-	if delayStr != "" {
-		var err error
-		delayMs, err = strconv.Atoi(delayStr)
-		if err != nil || delayMs <= 0 {
-			delayMs = 75 // Default to 75ms if invalid value
-		}
-	}
-
-	iterations := 5 // Default for CI
-	if !isCI {
-		iterations = 15 // More iterations needed locally due to faster machines
-		t.Logf("🏠 Running locally: using %d iterations to catch race condition (vs 5 in CI)", iterations)
-	}
-
-	if delayMs > 0 {
-		t.Logf("⏱️  Artificial delay enabled (TEST_RACE_DELAY=%d) to widen race window", delayMs)
-	}
+	// After fixing the shared ownership parsing bug, we no longer need many iterations
+	// to catch a race condition. The test is now deterministic - shared ownership is
+	// handled correctly regardless of managedFields array order. We keep 3 iterations
+	// to ensure the fix works across multiple kubectl-patch operations.
+	iterations := 3
+	t.Logf("Running %d patch-apply cycles to verify ownership handling", iterations)
 
 	// Build test steps: initial creation + multiple patch-apply cycles
 	testSteps := []resource.TestStep{
@@ -1110,9 +1073,9 @@ func TestAccObjectResource_IgnoreFieldsJSONPathPredicate(t *testing.T) {
 		},
 	}
 
-	// Add multiple kubectl patch → terraform apply cycles to catch race condition
+	// Add multiple kubectl patch → terraform apply cycles
 	testSteps = append(testSteps, generateIgnoreFieldsPatchApplyCycles(
-		t, ssaClient, k8sClient, ns, deployName, raw, iterations, delayMs)...)
+		t, ssaClient, k8sClient, ns, deployName, raw, iterations, 0)...)
 
 	// Final steps: verify no drift and test terraform update
 	testSteps = append(testSteps, []resource.TestStep{
@@ -1225,7 +1188,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -1259,7 +1222,7 @@ spec:
           value: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 

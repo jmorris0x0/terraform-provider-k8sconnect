@@ -205,7 +205,7 @@ resource "aws_eks_node_group" "main" {
 # The endpoint and certificate_authority are "known after apply"
 # The provider MUST handle this gracefully during bootstrap
 locals {
-  cluster_connection = {
+  cluster = {
     host                   = aws_eks_cluster.main.endpoint
     cluster_ca_certificate = aws_eks_cluster.main.certificate_authority[0].data
     exec = {
@@ -239,7 +239,7 @@ resource "k8sconnect_object" "namespace" {
         test: eks-bootstrap
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   # For EKS: ensure nodes are ready before deploying workloads
   depends_on = [
@@ -273,7 +273,7 @@ resource "k8sconnect_object" "test_deployment" {
             - containerPort: 80
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   depends_on = [k8sconnect_object.namespace]
 }
@@ -292,7 +292,7 @@ resource "k8sconnect_object" "test_configmap" {
       provider: k8sconnect
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   depends_on = [k8sconnect_object.namespace]
 }

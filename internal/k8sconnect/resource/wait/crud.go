@@ -18,12 +18,12 @@ import (
 
 // waitContext holds all the data needed for a wait operation
 type waitContext struct {
-	Data              *waitResourceModel
-	Client            k8sclient.K8sClient
-	GVR               schema.GroupVersionResource
-	ObjectRef         objectRefModel
-	WaitConfig        waitForModel
-	ClusterConnection auth.ClusterConnectionModel
+	Data       *waitResourceModel
+	Client     k8sclient.K8sClient
+	GVR        schema.GroupVersionResource
+	ObjectRef  objectRefModel
+	WaitConfig waitForModel
+	Cluster    auth.ClusterModel
 }
 
 func (r *waitResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -104,7 +104,7 @@ func (r *waitResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 	// Condition/rollout waits have null result per ADR-008
 	// Only refresh if connection is ready (all values known, not during bootstrap)
 	if !wc.WaitConfig.Field.IsNull() && wc.WaitConfig.Field.ValueString() != "" {
-		if r.isConnectionReady(data.ClusterConnection) {
+		if r.isConnectionReady(data.Cluster) {
 			if err := r.updateStatus(ctx, wc); err != nil {
 				tflog.Warn(ctx, "Failed to update result during Read", map[string]interface{}{
 					"error": err.Error(),
@@ -174,9 +174,9 @@ func (r *waitResource) buildWaitContext(ctx context.Context, data *waitResourceM
 		return nil, diags
 	}
 
-	// Parse cluster_connection
-	var connModel auth.ClusterConnectionModel
-	diagsConn := data.ClusterConnection.As(ctx, &connModel, basetypes.ObjectAsOptions{})
+	// Parse cluster
+	var connModel auth.ClusterModel
+	diagsConn := data.Cluster.As(ctx, &connModel, basetypes.ObjectAsOptions{})
 	diags.Append(diagsConn...)
 	if diags.HasError() {
 		return nil, diags
@@ -212,12 +212,12 @@ func (r *waitResource) buildWaitContext(ctx context.Context, data *waitResourceM
 	}
 
 	return &waitContext{
-		Data:              data,
-		Client:            client,
-		GVR:               gvr,
-		ObjectRef:         objRef,
-		WaitConfig:        waitConfig,
-		ClusterConnection: connModel,
+		Data:       data,
+		Client:     client,
+		GVR:        gvr,
+		ObjectRef:  objRef,
+		WaitConfig: waitConfig,
+		Cluster:    connModel,
 	}, diags
 }
 

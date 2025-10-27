@@ -93,7 +93,7 @@ resource "k8sconnect_object" "app" {
                 cpu: 100m
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   # Release ownership of replicas to HPA
   ignore_fields = ["spec.replicas"]
@@ -122,7 +122,7 @@ resource "k8sconnect_object" "hpa" {
             averageUtilization: 80
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on = [k8sconnect_object.app]
 }
 ```
@@ -151,7 +151,7 @@ resource "k8sconnect_object" "configmap" {
         setting = value
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   # External operator manages these fields
   ignore_fields = [
@@ -220,7 +220,7 @@ resource "k8sconnect_patch" "coredns_custom" {
         errors
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 ```
 
@@ -310,7 +310,7 @@ resource "k8sconnect_object" "app" {
   # HPA config: 2-10 replicas based on CPU > 80%
   ignore_fields = ["spec.replicas"]
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 ```
 
@@ -337,7 +337,7 @@ resource "k8sconnect_object" "service" {
         targetPort: 8080
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   # AWS Load Balancer Controller manages these annotations
   ignore_fields = [

@@ -25,7 +25,7 @@ var _ resource.Resource = (*waitResource)(nil)
 var _ resource.ResourceWithConfigure = (*waitResource)(nil)
 
 // ClientGetter function type for dependency injection
-type ClientGetter func(auth.ClusterConnectionModel) (k8sclient.K8sClient, error)
+type ClientGetter func(auth.ClusterModel) (k8sclient.K8sClient, error)
 
 type waitResource struct {
 	clientGetter  ClientGetter
@@ -33,11 +33,11 @@ type waitResource struct {
 }
 
 type waitResourceModel struct {
-	ID                types.String  `tfsdk:"id"`
-	ObjectRef         types.Object  `tfsdk:"object_ref"`
-	ClusterConnection types.Object  `tfsdk:"cluster_connection"`
-	WaitFor           types.Object  `tfsdk:"wait_for"`
-	Result            types.Dynamic `tfsdk:"result"`
+	ID        types.String  `tfsdk:"id"`
+	ObjectRef types.Object  `tfsdk:"object_ref"`
+	Cluster   types.Object  `tfsdk:"cluster"`
+	WaitFor   types.Object  `tfsdk:"wait_for"`
+	Result    types.Dynamic `tfsdk:"result"`
 }
 
 // objectRefModel defines the structure for referencing a Kubernetes object
@@ -88,7 +88,7 @@ func (r *waitResource) Configure(ctx context.Context, req resource.ConfigureRequ
 	r.clientFactory = clientFactory
 
 	// For backward compatibility, create a clientGetter that uses the factory
-	r.clientGetter = func(conn auth.ClusterConnectionModel) (k8sclient.K8sClient, error) {
+	r.clientGetter = func(conn auth.ClusterModel) (k8sclient.K8sClient, error) {
 		return r.clientFactory.GetClient(conn)
 	}
 }
@@ -129,7 +129,7 @@ func (r *waitResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 					},
 				},
 			},
-			"cluster_connection": schema.SingleNestedAttribute{
+			"cluster": schema.SingleNestedAttribute{
 				Required: true,
 				Description: "Kubernetes cluster connection for accessing the resource. " +
 					"Should match the connection used by the k8sconnect_object resource.",

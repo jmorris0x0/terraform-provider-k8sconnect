@@ -78,7 +78,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -94,7 +94,7 @@ data:
   key: value
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   
@@ -169,7 +169,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -185,7 +185,7 @@ data:
   owner: first
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   
@@ -215,7 +215,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -231,7 +231,7 @@ data:
   owner: first
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   
@@ -249,7 +249,7 @@ data:
   owner: second
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   
@@ -301,7 +301,7 @@ func TestAccObjectResource_OwnershipImport(t *testing.T) {
 				ImportStateId:     fmt.Sprintf("k3d-k8sconnect-test:%s:v1/ConfigMap:%s", ns, cmName),
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
-					"cluster_connection",
+					"cluster",
 					"yaml_body",
 					"managed_state_projection",
 					"delete_protection",
@@ -347,7 +347,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -363,7 +363,7 @@ data:
   key: value
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
   
@@ -495,7 +495,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -529,7 +529,7 @@ spec:
             memory: "64Mi"
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -560,7 +560,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -594,7 +594,7 @@ spec:
             memory: "64Mi"
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -632,7 +632,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_object" "deployment" {
@@ -662,7 +662,7 @@ spec:
             cpu: "100m"
             memory: "128Mi"
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 `, ns, deployName, ns)
 
@@ -680,7 +680,6 @@ YAML
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 					testhelpers.CheckDeploymentReplicaCount(k8sClientset, ns, deployName, 2),
-					resource.TestCheckResourceAttr("k8sconnect_object.deployment", "field_ownership.spec.replicas", "k8sconnect"),
 				),
 			},
 			// Step 2: External controller modifies replicas (simulating kubectl edit or HPA)
@@ -718,8 +717,6 @@ YAML
 				// This should succeed and forcibly take ownership back
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckDeploymentReplicaCount(k8sClientset, ns, deployName, 2),
-					// Critical: field_ownership should update to show k8sconnect owns it again
-					resource.TestCheckResourceAttr("k8sconnect_object.deployment", "field_ownership.spec.replicas", "k8sconnect"),
 				),
 			},
 		},
@@ -754,7 +751,7 @@ kind: Namespace
 metadata:
   name: %s
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 
 resource "k8sconnect_object" "deployment" {
@@ -787,7 +784,7 @@ spec:
             cpu: "50m"
             memory: "64Mi"
 YAML
-  cluster_connection = { kubeconfig = var.raw }
+  cluster = { kubeconfig = var.raw }
 }
 `, ns, deployName, ns)
 
@@ -842,9 +839,6 @@ YAML
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckDeploymentReplicaCount(k8sClientset, ns, deployName, 2),
 					// All fields should be owned by k8sconnect again
-					resource.TestCheckResourceAttr("k8sconnect_object.deployment", "field_ownership.spec.replicas", "k8sconnect"),
-					resource.TestCheckResourceAttr("k8sconnect_object.deployment", "field_ownership.spec.template.spec.containers[0].resources.limits.cpu", "k8sconnect"),
-					resource.TestCheckResourceAttr("k8sconnect_object.deployment", "field_ownership.spec.template.spec.containers[0].resources.limits.memory", "k8sconnect"),
 				),
 				// All conflicts should be detected and corrected (we always force ownership)
 			},

@@ -48,7 +48,7 @@ HZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
 	// For unit testing, we'll test our logic but may need to skip if cert validation is too strict
 	encodedCA := base64.StdEncoding.EncodeToString([]byte(testCAPEM))
 
-	conn := auth.ClusterConnectionModel{
+	conn := auth.ClusterModel{
 		Host:                 types.StringValue("https://test.example.com"),
 		ClusterCACertificate: types.StringValue(encodedCA),
 		Kubeconfig:           types.StringNull(),
@@ -82,7 +82,7 @@ HZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
 	}
 
 	// Test successful creation without exec
-	connNoExec := auth.ClusterConnectionModel{
+	connNoExec := auth.ClusterModel{
 		Host:                 types.StringValue("https://test.example.com"),
 		ClusterCACertificate: types.StringValue(encodedCA),
 		Token:                types.StringValue("test-token"),
@@ -95,7 +95,7 @@ HZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8QHZ8Q
 }
 
 func TestCreateRESTConfig_TokenAuth(t *testing.T) {
-	conn := auth.ClusterConnectionModel{
+	conn := auth.ClusterModel{
 		Host:                 types.StringValue("https://test.example.com"),
 		ClusterCACertificate: types.StringValue(base64.StdEncoding.EncodeToString([]byte(testCACert))),
 		Token:                types.StringValue("test-bearer-token"),
@@ -112,7 +112,7 @@ func TestCreateRESTConfig_TokenAuth(t *testing.T) {
 }
 
 func TestCreateRESTConfig_ClientCertAuth(t *testing.T) {
-	conn := auth.ClusterConnectionModel{
+	conn := auth.ClusterModel{
 		Host:                 types.StringValue("https://test.example.com"),
 		ClusterCACertificate: types.StringValue(base64.StdEncoding.EncodeToString([]byte(testCACert))),
 		ClientCertificate:    types.StringValue(base64.StdEncoding.EncodeToString([]byte(testClientCert))),
@@ -133,7 +133,7 @@ func TestCreateRESTConfig_ClientCertAuth(t *testing.T) {
 }
 
 func TestCreateRESTConfig_Insecure(t *testing.T) {
-	conn := auth.ClusterConnectionModel{
+	conn := auth.ClusterModel{
 		Host:     types.StringValue("https://test.example.com"),
 		Token:    types.StringValue("test-token"),
 		Insecure: types.BoolValue(true),
@@ -150,7 +150,7 @@ func TestCreateRESTConfig_Insecure(t *testing.T) {
 }
 
 func TestCreateRESTConfig_NoAuth(t *testing.T) {
-	conn := auth.ClusterConnectionModel{
+	conn := auth.ClusterModel{
 		Host:                 types.StringValue("https://test.example.com"),
 		ClusterCACertificate: types.StringValue(base64.StdEncoding.EncodeToString([]byte(testCACert))),
 	}

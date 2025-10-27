@@ -70,7 +70,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     host                   = var.host
     cluster_ca_certificate = var.ca
     token                  = var.token
@@ -136,7 +136,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     host                   = var.host
     cluster_ca_certificate = var.ca
     client_certificate     = var.cert
@@ -240,7 +240,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.kubeconfig
     context    = "context-a"
   }
@@ -255,7 +255,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.kubeconfig
     context    = "context-b"
   }
@@ -276,7 +276,7 @@ data:
   test: "multi-context"
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.kubeconfig
     context    = "context-a"
   }
@@ -297,7 +297,7 @@ data:
   test: "multi-context"
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.kubeconfig
     context    = "context-b"
   }

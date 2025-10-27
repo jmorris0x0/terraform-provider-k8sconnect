@@ -25,8 +25,13 @@ var _ resource.ResourceWithImportState = (*patchResource)(nil)
 var _ resource.ResourceWithConfigure = (*patchResource)(nil)
 var _ resource.ResourceWithModifyPlan = (*patchResource)(nil)
 
+// Private state keys
+const (
+	privateStateKeyOwnership = "field_ownership_v1"
+)
+
 // ClientGetter function type for dependency injection
-type ClientGetter func(auth.ClusterConnectionModel) (k8sclient.K8sClient, error)
+type ClientGetter func(auth.ClusterModel) (k8sclient.K8sClient, error)
 
 type patchResource struct {
 	clientGetter  ClientGetter
@@ -34,19 +39,17 @@ type patchResource struct {
 }
 
 type patchResourceModel struct {
-	ID                types.String `tfsdk:"id"`
-	Target            types.Object `tfsdk:"target"`
-	Patch             types.String `tfsdk:"patch"`
-	JSONPatch         types.String `tfsdk:"json_patch"`
-	MergePatch        types.String `tfsdk:"merge_patch"`
-	ClusterConnection types.Object `tfsdk:"cluster_connection"`
+	ID         types.String `tfsdk:"id"`
+	Target     types.Object `tfsdk:"target"`
+	Patch      types.String `tfsdk:"patch"`
+	JSONPatch  types.String `tfsdk:"json_patch"`
+	MergePatch types.String `tfsdk:"merge_patch"`
+	Cluster    types.Object `tfsdk:"cluster"`
 
 	// Computed fields
 
 	ManagedStateProjection types.Map    `tfsdk:"managed_state_projection"`
 	ManagedFields          types.String `tfsdk:"managed_fields"`
-	FieldOwnership         types.Map    `tfsdk:"field_ownership"`
-	PreviousOwners         types.Map    `tfsdk:"previous_owners"`
 }
 
 type patchTargetModel struct {
@@ -87,7 +90,7 @@ func (r *patchResource) Configure(ctx context.Context, req resource.ConfigureReq
 	r.clientFactory = clientFactory
 
 	// For backward compatibility, create a clientGetter that uses the factory
-	r.clientGetter = func(conn auth.ClusterConnectionModel) (k8sclient.K8sClient, error) {
+	r.clientGetter = func(conn auth.ClusterModel) (k8sclient.K8sClient, error) {
 		return r.clientFactory.GetClient(conn)
 	}
 }
@@ -212,7 +215,7 @@ When you destroy a patch resource, ownership is released but patched values rema
 				},
 			},
 
-			"cluster_connection": schema.SingleNestedAttribute{
+			"cluster": schema.SingleNestedAttribute{
 				Required: true,
 				Description: "Kubernetes cluster connection for this specific patch. Can be different per-resource, enabling multi-cluster " +
 					"deployments without provider aliases. Supports inline credentials (token, exec, client certs) or kubeconfig.",
@@ -231,21 +234,6 @@ When you destroy a patch resource, ownership is released but patched values rema
 			"managed_fields": schema.StringAttribute{
 				Computed:    true,
 				Description: "JSON representation of only the fields managed by this patch. Used for drift detection.",
-			},
-
-			"field_ownership": schema.MapAttribute{
-				Computed:    true,
-				ElementType: types.StringType,
-				Description: "Map of field paths to their current owner (field manager). Shows which controller owns each patched field. " +
-					"After patch application, patched fields should show this patch's field manager as owner.",
-			},
-
-			"previous_owners": schema.MapAttribute{
-				Computed:    true,
-				ElementType: types.StringType,
-				Description: "Map of field paths to their owners BEFORE this patch was applied. " +
-					"Useful for understanding which controllers were managing fields before takeover. " +
-					"Only populated during initial patch creation.",
 			},
 		},
 	}

@@ -139,16 +139,37 @@ func (r *objectResource) applyResourceWithConflictHandling(ctx context.Context, 
 	// Prepare the object to apply
 	objToApply := rc.Object.DeepCopy()
 
+	// DEBUG: Log ignore_fields configuration
+	ignoreFields := getIgnoreFields(ctx, data)
+	if len(ignoreFields) > 0 {
+		tflog.Debug(ctx, "=== APPLY PHASE - ignore_fields configuration ===", map[string]interface{}{
+			"operation":     operation,
+			"ignore_fields": ignoreFields,
+			"object_ref":    fmt.Sprintf("%s/%s %s/%s", objToApply.GetAPIVersion(), objToApply.GetKind(), objToApply.GetNamespace(), objToApply.GetName()),
+		})
+	}
+
 	// On Update, filter out ignored fields to release ownership to other controllers
 	// On Create, send everything to establish initial state
 	if operation == "Update" {
-		if ignoreFields := getIgnoreFields(ctx, data); ignoreFields != nil {
+		if ignoreFields != nil {
 			objToApply = removeFieldsFromObject(objToApply, ignoreFields)
 			tflog.Debug(ctx, "Filtered ignored fields from Apply patch", map[string]interface{}{
 				"ignored_fields": ignoreFields,
 			})
 		}
 	}
+
+	// DEBUG: Log what we're actually sending in SSA apply
+	pathsInApply := extractAllFieldsFromYAML(objToApply.Object, "")
+	tflog.Debug(ctx, "=== APPLY PHASE - Fields being sent in SSA Apply ===", map[string]interface{}{
+		"operation":     operation,
+		"force":         true,
+		"field_manager": "k8sconnect",
+		"paths_count":   len(pathsInApply),
+		"paths":         pathsInApply,
+		"object_ref":    fmt.Sprintf("%s/%s %s/%s", objToApply.GetAPIVersion(), objToApply.GetKind(), objToApply.GetNamespace(), objToApply.GetName()),
+	})
 
 	// Apply the resource with CRD retry (always force conflicts)
 	err := r.applyWithCRDRetry(ctx, rc.Client, objToApply, k8sclient.ApplyOptions{
@@ -158,6 +179,11 @@ func (r *objectResource) applyResourceWithConflictHandling(ctx context.Context, 
 	})
 
 	if err != nil {
+		tflog.Error(ctx, "=== APPLY PHASE - SSA Apply FAILED ===", map[string]interface{}{
+			"operation":  operation,
+			"error":      err.Error(),
+			"object_ref": fmt.Sprintf("%s/%s %s/%s", objToApply.GetAPIVersion(), objToApply.GetKind(), objToApply.GetNamespace(), objToApply.GetName()),
+		})
 		resourceDesc := formatResource(rc.Object)
 		if isFieldConflictError(err) {
 			r.addFieldConflictError(resp, operation, resourceDesc)
@@ -166,6 +192,11 @@ func (r *objectResource) applyResourceWithConflictHandling(ctx context.Context, 
 		}
 		return err
 	}
+
+	tflog.Debug(ctx, "=== APPLY PHASE - SSA Apply SUCCEEDED ===", map[string]interface{}{
+		"operation":  operation,
+		"object_ref": fmt.Sprintf("%s/%s %s/%s", objToApply.GetAPIVersion(), objToApply.GetKind(), objToApply.GetNamespace(), objToApply.GetName()),
+	})
 	return nil
 }
 
@@ -277,36 +308,6 @@ func (r *objectResource) updateProjectionFromCurrent(ctx context.Context, data *
 	})
 
 	return nil
-}
-
-// updateFieldOwnershipData updates field ownership tracking data
-func (r *objectResource) updateFieldOwnershipData(ctx context.Context, data *objectResourceModel, currentObj *unstructured.Unstructured) {
-	ownership := extractFieldOwnership(currentObj)
-
-	// Convert map[string]FieldOwnership to map[string]string (just manager names)
-	// Filter out status fields - they're always owned by controllers and provide no actionable information
-	ownershipMap := make(map[string]string, len(ownership))
-	for path, owner := range ownership {
-		// Skip status fields - they're read-only subresources managed by controllers
-		// (similar to how status is filtered in yaml.go during object cleanup)
-		if strings.HasPrefix(path, "status.") || path == "status" {
-			continue
-		}
-		ownershipMap[path] = owner.Manager
-	}
-
-	// Convert to types.Map
-	mapValue, diags := types.MapValueFrom(ctx, types.StringType, ownershipMap)
-	if diags.HasError() {
-		tflog.Warn(ctx, "Failed to convert field ownership to map", map[string]interface{}{
-			"diagnostics": diags,
-		})
-		// Set empty map on error
-		emptyMap, _ := types.MapValueFrom(ctx, types.StringType, map[string]string{})
-		data.FieldOwnership = emptyMap
-	} else {
-		data.FieldOwnership = mapValue
-	}
 }
 
 // Error handling helpers

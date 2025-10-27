@@ -10,11 +10,11 @@ import (
 )
 
 // ObjectToConnectionModel converts a Terraform object to our connection model
-func ObjectToConnectionModel(ctx context.Context, obj basetypes.ObjectValue) (ClusterConnectionModel, error) {
-	var conn ClusterConnectionModel
+func ObjectToConnectionModel(ctx context.Context, obj basetypes.ObjectValue) (ClusterModel, error) {
+	var conn ClusterModel
 
 	if obj.IsNull() || obj.IsUnknown() {
-		return conn, fmt.Errorf("cluster_connection is required")
+		return conn, fmt.Errorf("cluster is required")
 	}
 
 	attrs := obj.Attributes()
@@ -61,7 +61,7 @@ func ObjectToConnectionModel(ctx context.Context, obj basetypes.ObjectValue) (Cl
 }
 
 // ConnectionToObject converts our connection model back to a Terraform object
-func ConnectionToObject(ctx context.Context, conn ClusterConnectionModel) (types.Object, error) {
+func ConnectionToObject(ctx context.Context, conn ClusterModel) (types.Object, error) {
 	// Define the attribute types for the connection object
 	attrTypes := GetConnectionAttributeTypes()
 

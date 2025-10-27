@@ -72,19 +72,19 @@ func (p *k8sconnectProvider) Resources(ctx context.Context) []func() resource.Re
 	return []func() resource.Resource{
 		func() resource.Resource {
 			// For backward compatibility, wrap the new client factory to match old interface
-			return objectres.NewObjectResourceWithClientGetter(func(conn auth.ClusterConnectionModel) (k8sclient.K8sClient, error) {
+			return objectres.NewObjectResourceWithClientGetter(func(conn auth.ClusterModel) (k8sclient.K8sClient, error) {
 				return p.clientFactory.GetClient(conn)
 			})
 		},
 		func() resource.Resource {
 			// Patch resource using same client getter pattern
-			return patchres.NewPatchResourceWithClientGetter(func(conn auth.ClusterConnectionModel) (k8sclient.K8sClient, error) {
+			return patchres.NewPatchResourceWithClientGetter(func(conn auth.ClusterModel) (k8sclient.K8sClient, error) {
 				return p.clientFactory.GetClient(conn)
 			})
 		},
 		func() resource.Resource {
 			// Wait resource using same client getter pattern
-			return waitres.NewWaitResourceWithClientGetter(func(conn auth.ClusterConnectionModel) (k8sclient.K8sClient, error) {
+			return waitres.NewWaitResourceWithClientGetter(func(conn auth.ClusterModel) (k8sclient.K8sClient, error) {
 				return p.clientFactory.GetClient(conn)
 			})
 		},

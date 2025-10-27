@@ -59,7 +59,7 @@ resource "k8sconnect_object" "widget_crd" {
                     type: string
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 # Custom Resource - will auto-retry if CRD not ready
@@ -75,7 +75,7 @@ resource "k8sconnect_object" "widget" {
       color: blue
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   # Optional: explicit dependency (good practice but not required)
   depends_on = [k8sconnect_object.widget_crd]
@@ -107,7 +107,7 @@ resource "k8sconnect_object" "crds" {
   for_each = data.k8sconnect_yaml_scoped.operator.crds
 
   yaml_body          = each.value
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 # Stage 2: Cluster-scoped resources (Namespaces, ClusterRoles, etc.)
@@ -115,7 +115,7 @@ resource "k8sconnect_object" "cluster_scoped" {
   for_each = data.k8sconnect_yaml_scoped.operator.cluster_scoped
 
   yaml_body          = each.value
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   depends_on = [k8sconnect_object.crds]
 }
@@ -125,7 +125,7 @@ resource "k8sconnect_object" "namespaced" {
   for_each = data.k8sconnect_yaml_scoped.operator.namespaced
 
   yaml_body          = each.value
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   depends_on = [
     k8sconnect_object.crds,
@@ -156,18 +156,18 @@ resource "k8sconnect_object" "webhook_namespace" {
       name: webhook-system
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 resource "k8sconnect_object" "webhook_service" {
   yaml_body = file("${path.module}/webhook-service.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on = [k8sconnect_object.webhook_namespace]
 }
 
 resource "k8sconnect_object" "webhook_deployment" {
   yaml_body = file("${path.module}/webhook-deployment.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on = [k8sconnect_object.webhook_namespace]
 }
 
@@ -180,7 +180,7 @@ resource "k8sconnect_wait" "webhook" {
     timeout = "5m"
   }
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 # Stage 3: Deploy CRD (references webhook for validation)
@@ -220,7 +220,7 @@ resource "k8sconnect_object" "widget_crd" {
           conversionReviewVersions: ["v1"]
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [k8sconnect_wait.webhook]
 }
 
@@ -238,7 +238,7 @@ resource "k8sconnect_object" "widgets" {
       size: ${each.value.size}
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [k8sconnect_object.widget_crd]
 }
 ```
@@ -259,7 +259,7 @@ resource "k8sconnect_object" "operator_namespace" {
       name: cert-manager
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 resource "k8sconnect_object" "operator_rbac" {
@@ -270,7 +270,7 @@ resource "k8sconnect_object" "operator_rbac" {
   }
 
   yaml_body          = each.value
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [k8sconnect_object.operator_namespace]
 }
 
@@ -283,13 +283,13 @@ resource "k8sconnect_object" "crds" {
   for_each = data.k8sconnect_yaml_split.crds.documents
 
   yaml_body          = each.value
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 # Stage 3: Operator deployment
 resource "k8sconnect_object" "operator" {
   yaml_body          = file("${path.module}/cert-manager/deployment.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   depends_on = [
     k8sconnect_object.operator_rbac,
@@ -306,7 +306,7 @@ resource "k8sconnect_wait" "operator" {
     timeout = "5m"
   }
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 # Stage 5: Create custom resources (Certificate, Issuer, etc.)
@@ -328,7 +328,7 @@ resource "k8sconnect_object" "cluster_issuer" {
               class: nginx
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [k8sconnect_wait.operator]
 }
 ```
@@ -356,14 +356,14 @@ resource "k8sconnect_object" "crossplane_crds" {
   for_each = data.k8sconnect_yaml_scoped.crossplane.crds
 
   yaml_body          = each.value
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 resource "k8sconnect_object" "crossplane_system" {
   for_each = data.k8sconnect_yaml_scoped.crossplane.namespaced
 
   yaml_body          = each.value
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   depends_on = [k8sconnect_object.crossplane_crds]
 }
@@ -379,7 +379,7 @@ resource "k8sconnect_object" "aws_provider" {
       package: crossplane/provider-aws:v0.39.0
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [k8sconnect_object.crossplane_system]
 }
 
@@ -392,7 +392,7 @@ resource "k8sconnect_wait" "aws_provider" {
     timeout   = "10m"
   }
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 # Stage 4: Configure AWS provider credentials
@@ -411,7 +411,7 @@ resource "k8sconnect_object" "aws_provider_config" {
           key: credentials
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [k8sconnect_wait.aws_provider]
 }
 
@@ -435,7 +435,7 @@ resource "k8sconnect_object" "rds" {
         name: db-connection
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [k8sconnect_object.aws_provider_config]
 }
 ```
@@ -739,12 +739,12 @@ resource "kubernetes_manifest" "widget" {
 ```terraform
 resource "k8sconnect_object" "widget_crd" {
   yaml_body = file("crd.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 resource "k8sconnect_object" "widget" {
   yaml_body = file("cr.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on = [k8sconnect_object.widget_crd]
 }
 ```
@@ -770,12 +770,12 @@ resource "kubectl_manifest" "widget" {
 ```terraform
 resource "k8sconnect_object" "widget_crd" {
   yaml_body = file("crd.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 resource "k8sconnect_object" "widget" {
   yaml_body = file("cr.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on = [k8sconnect_object.widget_crd]
 }
 ```

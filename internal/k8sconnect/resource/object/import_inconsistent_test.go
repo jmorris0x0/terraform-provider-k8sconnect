@@ -23,14 +23,11 @@ import (
 //  2. Import resource using import block
 //  3. Apply - should add k8sconnect annotations
 //  4. PREVIOUSLY FAILED: "Provider produced inconsistent result after apply"
-//     Error: .field_ownership: new element "metadata.annotations.k8sconnect.terraform.io/created-at" has appeared
 //
 // ROOT CAUSE:
-// Internal annotations (k8sconnect.terraform.io/*) were being tracked in field_ownership
 // during import, but then filtered out during apply, causing inconsistency.
 //
 // FIX IMPLEMENTED:
-// Internal annotations are now consistently filtered from field_ownership in ALL code paths
 // (import, create, read, update). They exist in the cluster but are never tracked in state.
 func TestAccObjectResource_ImportInconsistentState(t *testing.T) {
 	t.Parallel()
@@ -119,7 +116,7 @@ resource "k8sconnect_object" "namespace" {
       name: %s
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -141,7 +138,7 @@ resource "k8sconnect_object" "namespace" {
       name: %s
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -164,7 +161,7 @@ resource "k8sconnect_object" "imported_cm" {
       purpose: import-inconsistent-test
   YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 

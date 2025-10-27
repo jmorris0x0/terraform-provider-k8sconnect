@@ -43,7 +43,7 @@ provider "kubectl" {
 provider "k8sconnect" {}
 # Local for the connection details
 locals {
-  cluster_connection = {
+  cluster = {
     host                   = kind_cluster.test.endpoint
     cluster_ca_certificate = base64encode(kind_cluster.test.cluster_ca_certificate)
     client_certificate     = base64encode(kind_cluster.test.client_certificate)
@@ -60,7 +60,7 @@ resource "k8sconnect_object" "namespace_k8sconnect" {
       labels:
         provider: k8sconnect
   YAML
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 resource "kubectl_manifest" "namespace_kubectl" {
   yaml_body = <<-YAML
@@ -95,12 +95,12 @@ locals {
 # Using k8sconnect - with inline cluster connection
 resource "k8sconnect_object" "nginx_deployment" {
   yaml_body          = local.deployment_k8sconnect
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [k8sconnect_object.namespace_k8sconnect]
 }
 resource "k8sconnect_object" "nginx_service" {
   yaml_body          = local.service_k8sconnect
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [k8sconnect_object.namespace_k8sconnect]
 }
 # Using kubectl provider - requires provider configuration

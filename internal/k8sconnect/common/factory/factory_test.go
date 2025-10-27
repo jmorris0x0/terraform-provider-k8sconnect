@@ -14,12 +14,12 @@ func TestCachedClientFactory_CacheKey(t *testing.T) {
 	factory := NewCachedClientFactory()
 
 	// Test that same connection generates same key
-	conn1 := auth.ClusterConnectionModel{
+	conn1 := auth.ClusterModel{
 		Host:  types.StringValue("https://k8s.example.com"),
 		Token: types.StringValue("test-token"),
 	}
 
-	conn2 := auth.ClusterConnectionModel{
+	conn2 := auth.ClusterModel{
 		Host:  types.StringValue("https://k8s.example.com"),
 		Token: types.StringValue("test-token"),
 	}
@@ -30,7 +30,7 @@ func TestCachedClientFactory_CacheKey(t *testing.T) {
 	assert.Equal(t, key1, key2, "Same connections should generate same cache key")
 
 	// Test that different connections generate different keys
-	conn3 := auth.ClusterConnectionModel{
+	conn3 := auth.ClusterModel{
 		Host:  types.StringValue("https://k8s.example.com"),
 		Token: types.StringValue("different-token"),
 	}
@@ -42,7 +42,7 @@ func TestCachedClientFactory_CacheKey(t *testing.T) {
 func TestCachedClientFactory_CacheKeyWithExec(t *testing.T) {
 	factory := NewCachedClientFactory()
 
-	conn1 := auth.ClusterConnectionModel{
+	conn1 := auth.ClusterModel{
 		Host: types.StringValue("https://k8s.example.com"),
 		Exec: &auth.ExecAuthModel{
 			APIVersion: types.StringValue("client.authentication.k8s.io/v1beta1"),
@@ -54,7 +54,7 @@ func TestCachedClientFactory_CacheKeyWithExec(t *testing.T) {
 		},
 	}
 
-	conn2 := auth.ClusterConnectionModel{
+	conn2 := auth.ClusterModel{
 		Host: types.StringValue("https://k8s.example.com"),
 		Exec: &auth.ExecAuthModel{
 			APIVersion: types.StringValue("client.authentication.k8s.io/v1beta1"),
@@ -88,7 +88,7 @@ func TestCachedClientFactory_GetClient_InvalidConnection(t *testing.T) {
 	factory := NewCachedClientFactory()
 
 	// Connection with no valid auth method
-	conn := auth.ClusterConnectionModel{
+	conn := auth.ClusterModel{
 		// Empty - should fail
 	}
 

@@ -81,7 +81,7 @@ metadata:
   name: %s
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 }
@@ -98,7 +98,7 @@ data:
   key2: value2
 YAML
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 
@@ -112,7 +112,7 @@ data "k8sconnect_object" "test" {
   name        = var.name
   namespace   = var.namespace
 
-  cluster_connection = {
+  cluster = {
     kubeconfig = var.raw
   }
 

@@ -73,7 +73,7 @@ func (r *objectResource) loadKubeconfig(ctx context.Context, resp *resource.Impo
 // Returns the client and true on success; nil and false on error
 func (r *objectResource) createImportClient(ctx context.Context, kubeconfigData []byte, kubeconfigPath, kubeContext string, resp *resource.ImportStateResponse) (k8sclient.K8sClient, bool) {
 	// Create temporary connection model for import
-	tempConn := auth.ClusterConnectionModel{
+	tempConn := auth.ClusterModel{
 		Kubeconfig: types.StringValue(string(kubeconfigData)),
 		Context:    types.StringValue(kubeContext),
 	}
@@ -245,7 +245,7 @@ func (r *objectResource) extractProjectionAndOwnership(ctx context.Context, live
 // Returns true on success; false on error
 func (r *objectResource) buildImportState(ctx context.Context, resourceID string, yamlBytes []byte, kubeconfigData []byte, kubeContext string, liveObj *unstructured.Unstructured, projectionMapValue, fieldOwnershipMap types.Map, kubeconfigPath string, namespace, name, kind string, paths []string, resp *resource.ImportStateResponse) bool {
 	// Create connection model for import - use the file contents, not the path
-	conn := auth.ClusterConnectionModel{
+	conn := auth.ClusterModel{
 		Host:                 types.StringNull(),
 		ClusterCACertificate: types.StringNull(),
 		Kubeconfig:           types.StringValue(string(kubeconfigData)), // Use contents, not path!
@@ -297,11 +297,10 @@ func (r *objectResource) buildImportState(ctx context.Context, resourceID string
 	importedData := objectResourceModel{
 		ID:                     types.StringValue(resourceID),
 		YAMLBody:               types.StringValue(string(yamlBytes)),
-		ClusterConnection:      connectionObj,
+		Cluster:                connectionObj,
 		DeleteProtection:       types.BoolValue(false),
 		IgnoreFields:           types.ListNull(types.StringType),
 		ManagedStateProjection: projectionMapValue,
-		FieldOwnership:         fieldOwnershipMap,
 		ObjectRef:              objRefValue,
 	}
 

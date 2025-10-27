@@ -17,7 +17,7 @@ import (
 // ConfigValidators implements resource.ResourceWithConfigValidators
 func (r *patchResource) ConfigValidators(ctx context.Context) []resource.ConfigValidator {
 	return []resource.ConfigValidator{
-		&validators.ClusterConnection{},
+		&validators.Cluster{},
 		&validators.ExecAuth{},
 	}
 }

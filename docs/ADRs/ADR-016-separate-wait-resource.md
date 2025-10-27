@@ -282,7 +282,7 @@ Follow the official kubernetes provider and accept tainting as expected behavior
 # Create PVC (no wait_for attribute)
 resource "k8sconnect_object" "pvc" {
   yaml_body = "..."  # PVC YAML
-  cluster_connection = var.cluster_connection
+  cluster = var.cluster
 }
 
 # Separate wait resource blocks on PVC being bound
@@ -298,7 +298,7 @@ resource "k8sconnect_wait" "pvc_ready" {
 resource "k8sconnect_object" "pod" {
   depends_on = [k8sconnect_wait.pvc_ready]
   yaml_body = "..."  # Pod YAML mounting the PVC
-  cluster_connection = var.cluster_connection
+  cluster = var.cluster
 }
 ```
 
@@ -316,7 +316,7 @@ The manifest resource has a computed output containing the minimum information n
 ```hcl
 # Computed output from k8sconnect_object.pvc
 resource_ref = {
-  cluster_connection = { ... }  # Auth credentials and endpoint
+  cluster = { ... }  # Auth credentials and endpoint
   api_version        = "v1"     # Resource identity
   kind               = "PersistentVolumeClaim"
   namespace          = "default"
@@ -422,7 +422,7 @@ When user retries after fixing the issue:
 ### New k8sconnect_wait Resource
 
 **Schema:**
-- `resource_ref` (required input) - object containing cluster_connection + resource identity (apiVersion, kind, namespace, name)
+- `resource_ref` (required input) - object containing cluster + resource identity (apiVersion, kind, namespace, name)
 - `wait_for` (required) - same structure as current wait_for attribute (field, field_value, condition, rollout, timeout)
 
 **CRUD Operations:**
@@ -563,7 +563,3 @@ Each wait resource blocks its dependent resources, creating explicit dependency 
 ### Internal ADRs
 - ADR-006: State Safety and Projection Recovery - similar use of private state flags for recovery
 - ADR-008: Selective Status Field Population Strategy - "You only get what you wait for" principle
-
-### Research Documents
-- `docs/wait-drift-analysis.md` - Analysis of drift detection requirements for wait resources
-- `docs/wait-drift-research-findings.md` - Confirmed Terraform behavior with depends_on and ignore_changes

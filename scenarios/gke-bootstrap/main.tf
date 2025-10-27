@@ -107,7 +107,7 @@ resource "google_container_node_pool" "main" {
 # The endpoint and ca_certificate are "known after apply"
 # The provider MUST handle this gracefully during bootstrap
 locals {
-  cluster_connection = {
+  cluster = {
     host                   = "https://${google_container_cluster.main.endpoint}"
     cluster_ca_certificate = google_container_cluster.main.master_auth[0].cluster_ca_certificate
     exec = {
@@ -138,7 +138,7 @@ resource "k8sconnect_object" "namespace" {
         test: gke-bootstrap
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   depends_on = [
     google_container_cluster.main,
@@ -171,7 +171,7 @@ resource "k8sconnect_object" "test_deployment" {
             - containerPort: 80
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   depends_on = [k8sconnect_object.namespace]
 }
@@ -190,7 +190,7 @@ resource "k8sconnect_object" "test_configmap" {
       provider: k8sconnect
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   depends_on = [k8sconnect_object.namespace]
 }
@@ -213,7 +213,7 @@ resource "k8sconnect_object" "test_pvc" {
       storageClassName: standard-rwo
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   depends_on = [k8sconnect_object.namespace]
 }

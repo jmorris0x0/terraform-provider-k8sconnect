@@ -10,7 +10,7 @@ resource "k8sconnect_object" "namespace" {
       name: example
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 # Create PVC using k3d's local-path storage class (dynamic provisioning)
@@ -33,7 +33,7 @@ resource "k8sconnect_object" "pvc" {
           storage: 1Gi
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [k8sconnect_object.namespace]
 }
 
@@ -74,7 +74,7 @@ resource "k8sconnect_object" "app" {
               claimName: data-claim
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [k8sconnect_object.pvc]
 }
 
@@ -84,7 +84,7 @@ resource "k8sconnect_object" "app" {
 resource "k8sconnect_wait" "app" {
   object_ref = k8sconnect_object.app.object_ref
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   wait_for = {
     condition = "Available"

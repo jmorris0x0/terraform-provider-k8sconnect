@@ -157,7 +157,7 @@ func writeTestFiles(t *testing.T, dir string, kubeconfig string) {
 
 	// Write locals.tf with cluster connection
 	locals := fmt.Sprintf(`locals {
-  cluster_connection = {
+  cluster = {
     kubeconfig = %q
   }
 }`, kubeconfig)
