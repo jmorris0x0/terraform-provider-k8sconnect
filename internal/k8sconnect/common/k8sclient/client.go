@@ -44,6 +44,10 @@ type K8sClient interface {
 	// Use this when you need the GVR but don't need the object yet (e.g., constructing watch/fetch queries).
 	DiscoverGVR(ctx context.Context, apiVersion, kind string) (schema.GroupVersionResource, error)
 
+	// IsResourceNamespaced checks if a resource is namespace-scoped or cluster-scoped.
+	// Returns true for namespace-scoped resources (like Pods, Services), false for cluster-scoped (like Namespaces, ClusterRoles).
+	IsResourceNamespaced(ctx context.Context, apiVersion, kind string) (bool, error)
+
 	Patch(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string, patchType types.PatchType, data []byte, options metav1.PatchOptions) (*unstructured.Unstructured, error)
 
 	// Watch returns a watcher that handles reconnection automatically
@@ -478,6 +482,56 @@ func (d *DynamicK8sClient) DiscoverGVR(ctx context.Context, apiVersion, kind str
 	})
 
 	return gvr, nil
+}
+
+// IsResourceNamespaced checks if a resource is namespace-scoped or cluster-scoped.
+// This follows the same logic as getResourceInterface() - querying the discovery API
+// to determine the resource's scope.
+func (d *DynamicK8sClient) IsResourceNamespaced(ctx context.Context, apiVersion, kind string) (bool, error) {
+	tflog.Debug(ctx, "Checking if resource is namespace-scoped", map[string]interface{}{
+		"apiVersion": apiVersion,
+		"kind":       kind,
+	})
+
+	// Get API resources for this group/version
+	var resourceList *metav1.APIResourceList
+	err := withRetry(ctx, DefaultRetryConfig, func() error {
+		var err error
+		resourceList, err = d.discovery.ServerResourcesForGroupVersion(apiVersion)
+		return err
+	})
+
+	if err != nil {
+		return false, fmt.Errorf("failed to get resource info for %s/%s: %w", apiVersion, kind, err)
+	}
+
+	// Find the resource and check if it's namespaced
+	for _, apiResource := range resourceList.APIResources {
+		if apiResource.Kind == kind {
+			tflog.Debug(ctx, "Found resource scope", map[string]interface{}{
+				"apiVersion": apiVersion,
+				"kind":       kind,
+				"namespaced": apiResource.Namespaced,
+				"resource":   apiResource.Name,
+			})
+			return apiResource.Namespaced, nil
+		}
+	}
+
+	// Build list of available kinds to help user
+	availableKinds := make([]string, 0, len(resourceList.APIResources))
+	for _, apiResource := range resourceList.APIResources {
+		if apiResource.Kind != "" {
+			availableKinds = append(availableKinds, apiResource.Kind)
+		}
+	}
+
+	gv, _ := schema.ParseGroupVersion(apiVersion)
+	return false, fmt.Errorf(
+		"kind %q not found in apiVersion %q\n\n"+
+			"Available kinds: %s\n\n"+
+			"Check spelling or try: kubectl api-resources --api-group=%s",
+		kind, apiVersion, strings.Join(availableKinds, ", "), gv.Group)
 }
 
 func (d *DynamicK8sClient) Patch(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string, patchType types.PatchType, data []byte, options metav1.PatchOptions) (*unstructured.Unstructured, error) {

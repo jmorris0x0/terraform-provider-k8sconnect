@@ -195,6 +195,12 @@ func (s *stubK8sClient) DiscoverGVR(ctx context.Context, apiVersion, kind string
 	}, nil
 }
 
+func (s *stubK8sClient) IsResourceNamespaced(ctx context.Context, apiVersion, kind string) (bool, error) {
+	// Use common hardcoded list with full apiVersion/kind matching
+	// Returns true for namespace-scoped, false for cluster-scoped
+	return !IsClusterScopedResource(apiVersion, kind), nil
+}
+
 func (s *stubK8sClient) Patch(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string, patchType types.PatchType, data []byte, options metav1.PatchOptions) (*unstructured.Unstructured, error) {
 	// For stub, just return success or configured response
 	return s.GetResponse, nil
