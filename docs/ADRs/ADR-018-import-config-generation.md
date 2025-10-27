@@ -2,9 +2,11 @@
 
 **Status:** Accepted - Feature Supported with Known Limitations
 **Date:** 2025-01-21
-**Updated:** 2025-01-23
+**Updated:** 2025-01-23, 2025-10-26 (field_ownership note)
 **Deciders:** Architecture Team
-**Related:** ADR-001 (Managed State Projection), ADR-005 (Field Ownership)
+**Related:** ADR-001 (Managed State Projection), ADR-005 (Field Ownership), ADR-020 (Field Ownership Display)
+
+**Note (2025-10-26)**: As of ADR-020, `field_ownership` was moved from public schema to private state. References to `field_ownership` in this ADR are historical and describe the schema at the time of testing. The testing results remain valid - Terraform correctly excludes all computed-only fields from generated config.
 
 ## Context
 
@@ -479,7 +481,8 @@ terraform plan -generate-config-out=generated.tf
 **Results**:
 - ✅ No crashes
 - ✅ Valid HCL generated
-- ✅ Computed fields (managed_state_projection, field_ownership, object_ref) **correctly excluded**
+- ✅ Computed fields (managed_state_projection, object_ref) **correctly excluded**
+  - Note: field_ownership was also excluded at time of testing; it's now in private state per ADR-020
 - ✅ Only yaml_body and cluster generated
 - ✅ yaml_body is clean (server fields removed)
 - ⚠️ cluster has kubeconfig inlined as multi-line string (expected limitation)

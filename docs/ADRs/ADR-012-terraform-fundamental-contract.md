@@ -70,7 +70,7 @@ When managed fields differ, user MUST be informed.
 
 **Acceptable when:**
 1. ✅ Infrastructure has explicit field ownership mechanism (K8s SSA)
-2. ✅ User can see ownership information (`field_ownership` attribute)
+2. ✅ User can see ownership information (warnings during plan showing ownership transitions)
 3. ✅ User can take ownership by explicitly specifying fields
 4. ✅ User can release ownership via `ignore_fields`
 5. ✅ Framework technically cannot support strict interpretation with clean UX

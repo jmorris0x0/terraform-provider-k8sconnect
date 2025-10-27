@@ -64,7 +64,7 @@ resource "k8sconnect_patch" "aws_node_proxy" {
 
   # Computed
   managed_fields   = (computed)  # Only patched fields
-  field_ownership  = (computed)  # Current ownership map
+  # Note: field_ownership tracked in private state (ADR-020)
   previous_owners  = (computed)  # Pre-patch ownership (for destroy)
 }
 ```

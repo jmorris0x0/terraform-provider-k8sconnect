@@ -22,10 +22,12 @@ Terraform still:
 
 But:
 - ❌ Excludes from drift detection (not in `managed_state_projection`)
-- ❌ Excludes from `field_ownership` computed attribute
+- ❌ Excludes from field ownership tracking (not tracked in private state)
 - ❌ Allows external controllers to take ownership without conflicts
 
-## Critical Implementation Detail: The 3-Hour Bug
+## Critical Implementation Detail: Consistency bug (Historical)
+
+**Note**: As of ADR-020, `field_ownership` was moved to private state, making this bug obsolete. This section is preserved for historical context.
 
 **Bug discovered**: `field_ownership` filtering MUST happen in **both** `ModifyPlan()` and `ModifyApply()`.
 
@@ -37,13 +39,11 @@ But:
 
 **Fix**: Any computed attribute depending on `ignore_fields` must apply identical filtering logic in both Plan and Apply phases. Implemented in plan_modifier.go and crud_operations.go.
 
-**Lesson**: This bug took 3 hours to find. Plan/Apply consistency is critical.
+**Lesson**: This bug was difficult to find. Plan/Apply consistency is critical.
 
 ## Test Coverage
 
 6 acceptance tests cover both SUCCESS and ERROR cases (basic happy path, add ignore_fields to resolve conflicts, remove when external owns [ERROR], modify list when we own [SUCCESS], remove from list when external owns [ERROR], remove when we still own [SUCCESS]).
-
-All tests verify `field_ownership` attribute to prevent regression of the Plan/Apply consistency bug.
 
 ## Alternatives Considered
 
