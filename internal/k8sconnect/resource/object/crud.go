@@ -73,11 +73,8 @@ func (r *objectResource) Create(ctx context.Context, req resource.CreateRequest,
 	}
 
 	// 8b. Track field ownership in private state
-	ownership := extractFieldOwnership(rc.Object)
-	ownershipMap := make(map[string]string, len(ownership))
-	for path, owner := range ownership {
-		ownershipMap[path] = owner.Manager
-	}
+	// Save ALL field ownership (not just k8sconnect) to detect ownership transitions
+	ownershipMap := extractAllFieldOwnership(rc.Object)
 	setFieldOwnershipInPrivateState(ctx, resp.Private, ownershipMap)
 
 	// 9. SAVE STATE after successful creation
@@ -173,13 +170,11 @@ func (r *objectResource) Read(ctx context.Context, req resource.ReadRequest, res
 		handleProjectionSuccess(ctx, hasPendingProjection, resp.Private, "during refresh")
 	}
 
-	// 5a. Track field ownership in private state
-	ownership := extractFieldOwnership(currentObj)
-	ownershipMap := make(map[string]string, len(ownership))
-	for path, owner := range ownership {
-		ownershipMap[path] = owner.Manager
-	}
-	setFieldOwnershipInPrivateState(ctx, resp.Private, ownershipMap)
+	// 5a. Field ownership tracking
+	// NOTE: We do NOT update field_ownership in private state during Read.
+	// Only Create/Update should save ownership, so we preserve "ownership at last apply"
+	// for ownership transition detection. If we updated here, the Plan phase would
+	// see current ownership (including drift) in both current and previous, missing transitions.
 
 	// 6. Save refreshed state
 	diags = resp.State.Set(ctx, &data)
@@ -250,11 +245,8 @@ func (r *objectResource) Update(ctx context.Context, req resource.UpdateRequest,
 	}
 
 	// 7a. Track field ownership in private state
-	ownership := extractFieldOwnership(rc.Object)
-	ownershipMap := make(map[string]string, len(ownership))
-	for path, owner := range ownership {
-		ownershipMap[path] = owner.Manager
-	}
+	// Save ALL field ownership (not just k8sconnect) to detect ownership transitions
+	ownershipMap := extractAllFieldOwnership(rc.Object)
 	setFieldOwnershipInPrivateState(ctx, resp.Private, ownershipMap)
 
 	// 8. Save updated state
@@ -408,8 +400,16 @@ func getFieldOwnershipFromPrivateState(ctx context.Context, getter interface {
 }) map[string]string {
 	data, _ := getter.GetKey(ctx, privateStateKeyOwnership)
 	if data == nil {
+		tflog.Debug(ctx, "⚠️ DEBUG: getFieldOwnershipFromPrivateState - NO DATA FOUND", map[string]interface{}{
+			"data": "nil",
+		})
 		return nil
 	}
+
+	tflog.Debug(ctx, "⚠️ DEBUG: getFieldOwnershipFromPrivateState - Raw data retrieved", map[string]interface{}{
+		"data_length": len(data),
+		"data_string": string(data),
+	})
 
 	var ownership map[string]string
 	if err := json.Unmarshal(data, &ownership); err != nil {
@@ -418,6 +418,12 @@ func getFieldOwnershipFromPrivateState(ctx context.Context, getter interface {
 		})
 		return nil
 	}
+
+	tflog.Debug(ctx, "⚠️ DEBUG: getFieldOwnershipFromPrivateState - Successfully retrieved ownership", map[string]interface{}{
+		"ownership_map": ownership,
+		"field_count":   len(ownership),
+	})
+
 	return ownership
 }
 
@@ -426,9 +432,17 @@ func setFieldOwnershipInPrivateState(ctx context.Context, setter interface {
 	SetKey(context.Context, string, []byte) diag.Diagnostics
 }, ownership map[string]string) {
 	if ownership == nil || len(ownership) == 0 {
+		tflog.Debug(ctx, "⚠️ DEBUG: setFieldOwnershipInPrivateState - Setting to nil (no ownership)", map[string]interface{}{
+			"ownership": "nil or empty",
+		})
 		setter.SetKey(ctx, privateStateKeyOwnership, nil)
 		return
 	}
+
+	tflog.Debug(ctx, "⚠️ DEBUG: setFieldOwnershipInPrivateState - Saving ownership to private state", map[string]interface{}{
+		"ownership_map": ownership,
+		"field_count":   len(ownership),
+	})
 
 	data, err := json.Marshal(ownership)
 	if err != nil {
@@ -437,6 +451,12 @@ func setFieldOwnershipInPrivateState(ctx context.Context, setter interface {
 		})
 		return
 	}
+
+	tflog.Debug(ctx, "⚠️ DEBUG: setFieldOwnershipInPrivateState - Marshaled data", map[string]interface{}{
+		"data_length": len(data),
+		"data_string": string(data),
+	})
+
 	setter.SetKey(ctx, privateStateKeyOwnership, data)
 }
 

@@ -15,8 +15,11 @@ import (
 
 // ModifyPlan implements resource.ResourceWithModifyPlan
 func (r *objectResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	tflog.Debug(ctx, "⚠️ DEBUG: ModifyPlan - START")
+
 	// Skip during destroy
 	if req.Plan.Raw.IsNull() {
+		tflog.Debug(ctx, "⚠️ DEBUG: ModifyPlan - Skipping: Plan is null (destroy operation)")
 		return
 	}
 
@@ -137,6 +140,10 @@ func (r *objectResource) checkDriftAndPreserveState(ctx context.Context, req res
 
 // executeDryRunAndProjection performs dry-run and calculates field projection
 func (r *objectResource) executeDryRunAndProjection(ctx context.Context, req resource.ModifyPlanRequest, plannedData *objectResourceModel, desiredObj *unstructured.Unstructured, resp *resource.ModifyPlanResponse) bool {
+	tflog.Debug(ctx, "⚠️ DEBUG: executeDryRunAndProjection - START", map[string]interface{}{
+		"object_ref": fmt.Sprintf("%s/%s %s/%s", desiredObj.GetAPIVersion(), desiredObj.GetKind(), desiredObj.GetNamespace(), desiredObj.GetName()),
+	})
+
 	// Setup client
 	client, err := r.setupDryRunClient(ctx, plannedData, resp)
 	if err != nil {
@@ -198,7 +205,16 @@ func (r *objectResource) setupDryRunClient(ctx context.Context, plannedData *obj
 
 // calculateProjection determines projection strategy and calculates projection
 func (r *objectResource) calculateProjection(ctx context.Context, req resource.ModifyPlanRequest, plannedData *objectResourceModel, desiredObj, dryRunResult *unstructured.Unstructured, client k8sclient.K8sClient, resp *resource.ModifyPlanResponse) bool {
+	tflog.Debug(ctx, "⚠️ DEBUG: calculateProjection - START", map[string]interface{}{
+		"object_ref": fmt.Sprintf("%s/%s %s/%s", desiredObj.GetAPIVersion(), desiredObj.GetKind(), desiredObj.GetNamespace(), desiredObj.GetName()),
+	})
+
 	isCreate := isCreateOperation(req)
+
+	tflog.Debug(ctx, "⚠️ DEBUG: calculateProjection - Operation type determined", map[string]interface{}{
+		"object_ref": fmt.Sprintf("%s/%s %s/%s", desiredObj.GetAPIVersion(), desiredObj.GetKind(), desiredObj.GetNamespace(), desiredObj.GetName()),
+		"is_create":  isCreate,
+	})
 
 	// CREATE operations: Use dry-run result to show accurate preview with K8s defaults
 	// This replaces the old behavior of setting projection to unknown
@@ -222,6 +238,10 @@ func (r *objectResource) calculateProjection(ctx context.Context, req resource.M
 	// We need to compare previous ownership (from private state) vs ACTUAL current ownership (from cluster)
 	// NOT predicted ownership (from dry-run with force=true)
 
+	tflog.Debug(ctx, "⚠️ DEBUG: calculateProjection - UPDATE operation, checking ownership transitions", map[string]interface{}{
+		"object_ref": fmt.Sprintf("%s/%s %s/%s", desiredObj.GetAPIVersion(), desiredObj.GetKind(), desiredObj.GetNamespace(), desiredObj.GetName()),
+	})
+
 	// Fetch actual current state from cluster to detect ownership transitions
 	gvr, err := client.DiscoverGVR(ctx, desiredObj.GetAPIVersion(), desiredObj.GetKind())
 	if err != nil {
@@ -237,14 +257,12 @@ func (r *objectResource) calculateProjection(ctx context.Context, req resource.M
 			})
 			// Continue without ownership transition check - not critical for plan
 		} else {
-			// Extract ACTUAL current ownership from cluster
-			actualOwnership := extractFieldOwnership(currentObj)
-			actualOwnershipMap := make(map[string]string)
-			for path, owner := range actualOwnership {
-				actualOwnershipMap[path] = owner.Manager
-			}
+			// Extract ACTUAL current ownership from cluster for ALL managers
+			// This is critical: we need to see ownership by external-operator, kubectl, etc.
+			// to detect transitions, not just k8sconnect-owned fields
+			actualOwnershipMap := extractAllFieldOwnership(currentObj)
 
-			tflog.Debug(ctx, "PLAN PHASE - Actual current field ownership from cluster", map[string]interface{}{
+			tflog.Debug(ctx, "PLAN PHASE - Actual current field ownership from cluster (ALL managers)", map[string]interface{}{
 				"actual_ownership_map": actualOwnershipMap,
 				"object_ref":           fmt.Sprintf("%s/%s %s/%s", desiredObj.GetAPIVersion(), desiredObj.GetKind(), desiredObj.GetNamespace(), desiredObj.GetName()),
 			})
@@ -385,13 +403,25 @@ func (r *objectResource) applyProjection(ctx context.Context, dryRunResult *unst
 
 // checkOwnershipTransitions compares previous vs current field ownership and warns about transitions
 func (r *objectResource) checkOwnershipTransitions(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse, currentOwnership map[string]string) {
+	tflog.Debug(ctx, "⚠️ DEBUG: checkOwnershipTransitions - START", map[string]interface{}{
+		"current_ownership_map": currentOwnership,
+		"current_field_count":   len(currentOwnership),
+	})
+
 	// Get previous ownership from private state
 	previousOwnership := getFieldOwnershipFromPrivateState(ctx, req.Private)
 	if previousOwnership == nil {
 		// No previous ownership tracked - first apply or imported resource
-		tflog.Debug(ctx, "No previous ownership in private state - skipping transition check")
+		tflog.Debug(ctx, "⚠️ DEBUG: checkOwnershipTransitions - No previous ownership in private state - skipping transition check")
 		return
 	}
+
+	tflog.Debug(ctx, "⚠️ DEBUG: checkOwnershipTransitions - Comparing ownership", map[string]interface{}{
+		"previous_ownership_map": previousOwnership,
+		"previous_field_count":   len(previousOwnership),
+		"current_ownership_map":  currentOwnership,
+		"current_field_count":    len(currentOwnership),
+	})
 
 	// Find ownership transitions (fields that changed owner)
 	var transitions []ownershipTransition
@@ -399,6 +429,11 @@ func (r *objectResource) checkOwnershipTransitions(ctx context.Context, req reso
 		if previousOwner, existed := previousOwnership[path]; existed {
 			// Field existed before - check if owner changed
 			if previousOwner != currentOwner {
+				tflog.Debug(ctx, "⚠️ DEBUG: checkOwnershipTransitions - TRANSITION DETECTED", map[string]interface{}{
+					"path":           path,
+					"previous_owner": previousOwner,
+					"current_owner":  currentOwner,
+				})
 				transitions = append(transitions, ownershipTransition{
 					Path:          path,
 					PreviousOwner: previousOwner,
@@ -425,7 +460,17 @@ func (r *objectResource) checkOwnershipTransitions(ctx context.Context, req reso
 
 	// Emit warnings for ownership transitions
 	if len(transitions) > 0 {
+		tflog.Debug(ctx, "⚠️ DEBUG: checkOwnershipTransitions - Calling addOwnershipTransitionWarning", map[string]interface{}{
+			"transition_count": len(transitions),
+			"transitions":      transitions,
+		})
 		addOwnershipTransitionWarning(resp, transitions)
+		tflog.Debug(ctx, "⚠️ DEBUG: checkOwnershipTransitions - Warning added to diagnostics")
+	} else {
+		tflog.Debug(ctx, "⚠️ DEBUG: checkOwnershipTransitions - NO TRANSITIONS FOUND", map[string]interface{}{
+			"previous_ownership_map": previousOwnership,
+			"current_ownership_map":  currentOwnership,
+		})
 	}
 }
 
@@ -443,11 +488,25 @@ func addOwnershipTransitionWarning(resp *resource.ModifyPlanResponse, transition
 		details = append(details, fmt.Sprintf("  • %s: %s → %s", t.Path, t.PreviousOwner, t.CurrentOwner))
 	}
 
+	warningMessage := fmt.Sprintf("Field ownership changed during this apply:\n%s\n\n"+
+		"k8sconnect took ownership using force=true. "+
+		"The previous controller may attempt to reclaim these fields.",
+		strings.Join(details, "\n"))
+
+	tflog.Warn(context.Background(), "⚠️ DEBUG: addOwnershipTransitionWarning - ADDING WARNING TO DIAGNOSTICS", map[string]interface{}{
+		"warning_summary": "Field Ownership Transition",
+		"warning_detail":  warningMessage,
+		"transition_count": len(transitions),
+	})
+
 	resp.Diagnostics.AddWarning(
 		"Field Ownership Transition",
-		fmt.Sprintf("Field ownership changed during this apply:\n%s\n\n"+
-			"k8sconnect took ownership using force=true. "+
-			"The previous controller may attempt to reclaim these fields.",
-			strings.Join(details, "\n")),
+		warningMessage,
 	)
+
+	tflog.Warn(context.Background(), "⚠️ DEBUG: addOwnershipTransitionWarning - WARNING ADDED", map[string]interface{}{
+		"diagnostics_has_error":   resp.Diagnostics.HasError(),
+		"diagnostics_error_count": len(resp.Diagnostics.Errors()),
+		"diagnostics_warn_count":  len(resp.Diagnostics.Warnings()),
+	})
 }

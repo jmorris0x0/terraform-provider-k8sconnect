@@ -209,6 +209,45 @@ func extractPathsFromFieldsV1Simple(fields map[string]interface{}, prefix string
 	return paths
 }
 
+// ExtractAllFieldOwnership extracts field ownership for ALL managers, not just k8sconnect
+// This is used for ownership transition detection to identify when external controllers
+// take ownership of fields from k8sconnect.
+//
+// Unlike ExtractFieldOwnershipMap which only tracks k8sconnect ownership,
+// this function returns ownership for all field managers to detect transitions.
+func ExtractAllFieldOwnership(obj *unstructured.Unstructured) map[string]string {
+	result := make(map[string]string)
+
+	// Process ALL managers, not just k8sconnect
+	for _, mf := range obj.GetManagedFields() {
+		if mf.FieldsV1 == nil {
+			continue
+		}
+
+		var fields map[string]interface{}
+		if err := json.Unmarshal(mf.FieldsV1.Raw, &fields); err != nil {
+			continue
+		}
+
+		// Extract paths owned by this manager
+		paths := extractPathsFromFieldsV1Simple(fields, "")
+		for _, path := range paths {
+			// Skip internal k8sconnect annotations
+			if strings.HasPrefix(path, "metadata.annotations.k8sconnect.terraform.io/") {
+				continue
+			}
+
+			// Record ownership for this manager
+			// If multiple managers own the same field (co-ownership with SSA),
+			// the last one wins. For ownership transition detection, we want
+			// to know who CURRENTLY owns the field.
+			result[path] = mf.Manager
+		}
+	}
+
+	return result
+}
+
 // ExtractFieldOwnershipForPaths extracts ownership info for specific field paths
 func ExtractFieldOwnershipForPaths(obj *unstructured.Unstructured, paths []string) map[string]string {
 	result := make(map[string]string)
