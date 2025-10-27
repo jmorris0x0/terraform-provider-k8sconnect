@@ -206,7 +206,7 @@ resource "k8sconnect_patch" "aws_node_config" {
 }
 ```
 
-Perfect for EKS/GKE defaults, Helm deployments, and operator-managed resources. On destroy, ownership transfers back cleanly—current values are left unchanged for safety.
+Perfect for EKS/GKE defaults, Helm deployments, and operator-managed resources. On destroy, ownership is released—current values are left unchanged for safety.
 
 **→ [Patch examples](examples/#patch-resource)** - Strategic Merge, JSON Patch, Merge Patch | **[Documentation](docs/resources/patch.md)**
 

@@ -7,21 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### BREAKING CHANGES
-
-- **Removed `field_ownership` and `previous_owners` computed attributes** from `k8sconnect_object` and `k8sconnect_patch` resources
-  - Field ownership tracking moved to private state to prevent "Provider produced inconsistent result" errors
-  - Ownership transitions are now displayed as **warnings during plan** instead of state diffs
-  - No migration required for configurations, but any references to `field_ownership` or `previous_owners` in outputs or data sources must be removed
-  - Note: `k8sconnect_patch` ownership transfer-back logic has been simplified - removed fields now become unmanaged rather than transferred back
-  - See ADR-020 for technical details
-
 ## [0.2.0] - 2025-10-27
 
 ### BREAKING CHANGES
-
+- **Removed `field_ownership` and `previous_owners` computed attributes** from `k8sconnect_object` and `k8sconnect_patch` resources
+  - Field ownership tracking moved to private state to prevent "Provider produced inconsistent result" errors
+  - Ownership transitions are now displayed as **warnings during plan** instead of state diffs
+  - Note: `k8sconnect_patch` ownership transfer-back logic has been simplified - removed fields now become unmanaged rather than transferred back
 - **Renamed `cluster_connection` to `cluster`** across all resources and data sources
-  - Affects: `k8sconnect_object`, `k8sconnect_patch`, `k8sconnect_wait`, and all data sources
   - **Migration required:** Replace `cluster_connection =` with `cluster =` in your Terraform configurations
 
 ## [0.1.7] - 2025-10-26
