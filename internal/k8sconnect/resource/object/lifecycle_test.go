@@ -1730,3 +1730,110 @@ YAML
 }
 `, namespace, pvcName, namespace, envLabel, storage)
 }
+
+// Test for_each key change (BUG #2: Resource replacement deletion timeout)
+// This test verifies that when for_each key changes, deletion doesn't timeout
+// Root cause: New instance overwrites old via SSA, old delete call tries to delete resource with different terraform-id
+func TestAccObjectResource_ForEachKeyChange(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("foreach-key-ns-%d", time.Now().UnixNano()%1000000)
+	configName := "cluster-config"
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create ConfigMap with for_each key "old"
+			{
+				Config: testAccManifestConfigForEachKeyChange(ns, configName, "old"),
+				ConfigVariables: config.Variables{
+					"raw":         config.StringVariable(raw),
+					"namespace":   config.StringVariable(ns),
+					"config_name": config.StringVariable(configName),
+					"key":         config.StringVariable("old"),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_object.test_config[\"old\"]", "id"),
+					testhelpers.CheckConfigMapExists(k8sClient, ns, configName),
+				),
+			},
+			// Step 2: Change for_each key to "new" - should NOT timeout during deletion
+			// Bug: Old instance deletion would timeout for 5 minutes because:
+			//   1. CREATE new["new"] succeeded, overwrote resource with new terraform-id via SSA
+			//   2. DELETE old["old"] tried to delete resource, but it has different terraform-id
+			//   3. Delete API call was no-op, waitForDeletion timed out after 5 minutes
+			// Fix: Check terraform-id before deleting, skip if it doesn't match (resource replaced)
+			{
+				Config: testAccManifestConfigForEachKeyChange(ns, configName, "new"),
+				ConfigVariables: config.Variables{
+					"raw":         config.StringVariable(raw),
+					"namespace":   config.StringVariable(ns),
+					"config_name": config.StringVariable(configName),
+					"key":         config.StringVariable("new"),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					// Verify new instance exists
+					resource.TestCheckResourceAttrSet("k8sconnect_object.test_config[\"new\"]", "id"),
+					testhelpers.CheckConfigMapExists(k8sClient, ns, configName),
+					// Verify only one ConfigMap exists (not two)
+					testhelpers.CheckConfigMapCount(k8sClient, ns, 1),
+				),
+			},
+		},
+		CheckDestroy: resource.ComposeTestCheckFunc(
+			testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+			testhelpers.CheckConfigMapDestroy(k8sClient, ns, configName),
+		),
+	})
+}
+
+func testAccManifestConfigForEachKeyChange(namespace, configName, key string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+variable "namespace" { type = string }
+variable "config_name" { type = string }
+variable "key" { type = string }
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+  cluster = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_object" "test_config" {
+  for_each = { (var.key) = "config_data" }
+
+  yaml_body = <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: %s
+  namespace: %s
+data:
+  key: ${each.value}
+  source: ${each.key}
+YAML
+
+  cluster = {
+    kubeconfig = var.raw
+  }
+
+  depends_on = [k8sconnect_object.namespace]
+}
+`, namespace, configName, namespace)
+}
