@@ -73,8 +73,8 @@ func (r *objectResource) forceDestroy(ctx context.Context, client k8sclient.K8sC
 			return fmt.Errorf("failed to re-delete object without finalizers: %w", err)
 		}
 
-		// Wait a bit more for the deletion
-		return r.waitForDeletion(ctx, client, gvr, obj, 30*time.Second)
+		// Wait a bit more for the deletion (no ownership check needed for force destroy)
+		return r.waitForDeletion(ctx, client, gvr, obj, 30*time.Second, "")
 	}
 
 	// Log what finalizers we're about to remove
@@ -101,8 +101,8 @@ func (r *objectResource) forceDestroy(ctx context.Context, client k8sclient.K8sC
 		return fmt.Errorf("failed to remove finalizers: %w", err)
 	}
 
-	// Wait for deletion to complete (should be quick now)
-	return r.waitForDeletion(ctx, client, gvr, obj, 60*time.Second)
+	// Wait for deletion to complete (should be quick now, no ownership check needed)
+	return r.waitForDeletion(ctx, client, gvr, obj, 60*time.Second, "")
 }
 
 // handleDeletionTimeout provides helpful guidance when normal deletion times out
@@ -234,7 +234,9 @@ func (r *objectResource) getDeleteTimeout(data objectResourceModel) time.Duratio
 }
 
 // waitForDeletion waits for a resource to be deleted from the cluster
-func (r *objectResource) waitForDeletion(ctx context.Context, client k8sclient.K8sClient, gvr k8sschema.GroupVersionResource, obj *unstructured.Unstructured, timeout time.Duration, ignoreFinalizers ...bool) error {
+// If expectedTerraformID is provided and non-empty, exits early if the object's
+// terraform-id annotation changes (indicating replacement by another Terraform resource)
+func (r *objectResource) waitForDeletion(ctx context.Context, client k8sclient.K8sClient, gvr k8sschema.GroupVersionResource, obj *unstructured.Unstructured, timeout time.Duration, expectedTerraformID string, ignoreFinalizers ...bool) error {
 	// If timeout is 0, skip waiting
 	if timeout == 0 {
 		return nil
@@ -257,7 +259,7 @@ func (r *objectResource) waitForDeletion(ctx context.Context, client k8sclient.K
 			return ctx.Err()
 		case <-ticker.C:
 			// Check if object still exists
-			_, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
+			liveObj, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
 			if err != nil {
 				if errors.IsNotFound(err) {
 					// Successfully deleted
@@ -270,6 +272,20 @@ func (r *objectResource) waitForDeletion(ctx context.Context, client k8sclient.K
 					"name":      obj.GetName(),
 					"namespace": obj.GetNamespace(),
 				})
+			} else if expectedTerraformID != "" {
+				// Object exists - check if it's been replaced by a different Terraform resource
+				currentID := r.getOwnershipID(liveObj)
+				if currentID != "" && currentID != expectedTerraformID {
+					// Resource has been replaced during deletion - exit gracefully
+					tflog.Info(ctx, "Resource was replaced during deletion wait - exiting early", map[string]interface{}{
+						"kind":        obj.GetKind(),
+						"name":        obj.GetName(),
+						"namespace":   obj.GetNamespace(),
+						"expected_id": expectedTerraformID,
+						"current_id":  currentID,
+					})
+					return nil
+				}
 			}
 
 			// Check if we've exceeded the timeout

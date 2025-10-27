@@ -244,11 +244,28 @@ func (r *objectResource) verifyOwnership(currentObj *unstructured.Unstructured, 
 	}
 
 	if currentID != expectedID {
-		resp.Diagnostics.AddError(
-			"Resource Ownership Conflict",
-			fmt.Sprintf("The %s '%s' is now managed by a different Terraform resource (ID: %s).",
-				obj.GetKind(), obj.GetName(), currentID),
-		)
+		var msg strings.Builder
+		msg.WriteString(fmt.Sprintf("The %s '%s' is managed by a different Terraform resource.\n\n",
+			obj.GetKind(), obj.GetName()))
+		msg.WriteString(fmt.Sprintf("Expected terraform-id: %s\n", expectedID))
+		msg.WriteString(fmt.Sprintf("Actual terraform-id:   %s\n\n", currentID))
+		msg.WriteString("This typically happens when:\n")
+		msg.WriteString("• Multiple Terraform states are managing the same Kubernetes object\n")
+		msg.WriteString("• A for_each key was changed, creating duplicate resource addresses\n")
+		msg.WriteString("• Someone manually created a duplicate resource in the configuration\n")
+		msg.WriteString("• Another tool (kubectl, helm, etc.) overwrote the ownership annotations\n\n")
+		msg.WriteString("To resolve:\n")
+		msg.WriteString("1. Check for duplicate resources in your Terraform configuration\n")
+		msg.WriteString("2. If refactoring for_each keys, use 'terraform state mv' to update addresses\n")
+		msg.WriteString("3. Ensure only one Terraform state manages this Kubernetes object\n")
+		nsFlag := ""
+		if obj.GetNamespace() != "" {
+			nsFlag = fmt.Sprintf(" -n %s", obj.GetNamespace())
+		}
+		msg.WriteString(fmt.Sprintf("4. Verify annotations: kubectl get %s %s%s -o yaml | grep terraform-id",
+			strings.ToLower(obj.GetKind()), obj.GetName(), nsFlag))
+
+		resp.Diagnostics.AddError("Resource Ownership Conflict", msg.String())
 		return fmt.Errorf("ownership conflict")
 	}
 	return nil
