@@ -20,7 +20,7 @@ data "k8sconnect_object" "kubernetes_api" {
   name        = "kubernetes"
   namespace   = "default"
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 # Use the .object attribute to access fields with dot notation
@@ -37,7 +37,7 @@ resource "k8sconnect_object" "api_endpoint_config" {
       endpoint: "https://${data.k8sconnect_object.kubernetes_api.object.spec.clusterIP}:${tostring(data.k8sconnect_object.kubernetes_api.object.spec.ports[0].port)}"
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 ```
 <!-- /runnable-test -->

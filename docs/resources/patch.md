@@ -54,7 +54,7 @@ resource "k8sconnect_patch" "coredns_label" {
     }
   })
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 ```
 <!-- /runnable-test -->
@@ -82,7 +82,7 @@ resource "k8sconnect_patch" "kubernetes_svc_label" {
     }
   ])
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 ```
 <!-- /runnable-test -->
@@ -110,7 +110,7 @@ resource "k8sconnect_patch" "kube_dns_annotation" {
     }
   })
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 ```
 <!-- /runnable-test -->

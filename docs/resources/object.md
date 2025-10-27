@@ -43,7 +43,7 @@ locals {
 # Deploy workloads immediately - no waiting for provider configuration!
 resource "k8sconnect_object" "app" {
   yaml_body          = file("deployment.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 
   # For EKS: ensure nodes are ready before deploying workloads
   depends_on = [aws_eks_node_group.main]
@@ -62,7 +62,7 @@ resource "k8sconnect_object" "namespace" {
       name: example
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 resource "k8sconnect_object" "deployment" {
@@ -87,7 +87,7 @@ resource "k8sconnect_object" "deployment" {
             image: nginx:1.21
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [k8sconnect_object.namespace]
 }
 ```
@@ -127,7 +127,7 @@ resource "k8sconnect_object" "app" {
   # Ignore spec.replicas because HPA will modify it
   ignore_fields = ["spec.replicas"]
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 resource "k8sconnect_object" "hpa" {
@@ -153,7 +153,7 @@ resource "k8sconnect_object" "hpa" {
             averageUtilization: 50
   YAML
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
   depends_on         = [k8sconnect_object.app]
 }
 ```
@@ -270,7 +270,7 @@ Traditional import command - requires writing resource configuration first:
 # 1. Write resource block
 resource "k8sconnect_object" "nginx" {
   yaml_body = file("nginx.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 
 # 2. Run import
@@ -315,7 +315,7 @@ import {
 
 resource "k8sconnect_object" "nginx" {
   yaml_body = file("nginx.yaml")
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 ```
 
@@ -606,7 +606,7 @@ resource "k8sconnect_object" "api" {
     "spec.ports[*].nodePort"
   ]
 
-  cluster_connection = local.cluster_connection
+  cluster = local.cluster
 }
 ```
 
