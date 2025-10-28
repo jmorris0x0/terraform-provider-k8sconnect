@@ -466,16 +466,6 @@ func (r *objectResource) ImportState(ctx context.Context, req resource.ImportSta
 // Format: context:namespace:kind:name (namespaced) or context:kind:name (cluster-scoped)
 // The kind field may optionally include apiVersion: apiVersion/kind
 func (r *objectResource) parseImportID(importID string) (context, namespace, apiVersion, kind, name string, err error) {
-	// First check for old slash-delimited format and provide migration guidance
-	if strings.Contains(importID, "/") && !strings.Contains(importID, ":") {
-		return "", "", "", "", "", fmt.Errorf(
-			"detected old slash-delimited format\n\n" +
-				"The import syntax has changed to use colons (:) as delimiters.\n" +
-				"Old format: context/namespace/kind/name\n" +
-				"New format: context:namespace:kind:name\n\n" +
-				"Please update your import command")
-	}
-
 	parts := strings.Split(importID, ":")
 
 	if len(parts) < 3 || len(parts) > 4 {

@@ -40,7 +40,7 @@ func (r *waitResource) waitForResource(ctx context.Context, client k8sclient.K8s
 			"name": obj.GetName(),
 		})
 		if err := r.waitForRollout(ctx, client, gvr, obj, timeout); err != nil {
-			return fmt.Errorf("rollout wait failed: %w", err)
+			return err
 		}
 		return nil
 	}
@@ -421,7 +421,7 @@ func (r *waitResource) watchForCondition(ctx context.Context, client k8sclient.K
 	defer watcher.Stop()
 
 	// Watch for events
-	return r.processWatchEvents(ctx, watcher, checker, conditionType, timeout)
+	return r.processWatchEvents(ctx, client, watcher, checker, conditionType, timeout)
 }
 
 // createWatchOptions creates watch options for the resource
@@ -432,7 +432,7 @@ func (r *waitResource) createWatchOptions(obj *unstructured.Unstructured) metav1
 }
 
 // processWatchEvents processes events from the watcher
-func (r *waitResource) processWatchEvents(ctx context.Context, watcher watch.Interface,
+func (r *waitResource) processWatchEvents(ctx context.Context, client k8sclient.K8sClient, watcher watch.Interface,
 	checker func(*unstructured.Unstructured) bool, conditionType string, timeout time.Duration) error {
 
 	timeoutCh := time.After(timeout)
@@ -444,7 +444,7 @@ func (r *waitResource) processWatchEvents(ctx context.Context, watcher watch.Int
 			return ctx.Err()
 
 		case <-timeoutCh:
-			return r.buildConditionTimeoutError(ctx, lastSeenObj, conditionType, timeout)
+			return r.buildConditionTimeoutError(ctx, client, lastSeenObj, conditionType, timeout)
 
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
@@ -504,7 +504,7 @@ func (r *waitResource) isWatchError(err error) bool {
 
 // buildConditionTimeoutError creates a detailed timeout error with current conditions
 // Following ADR-015: Actionable Error Messages and Diagnostic Context
-func (r *waitResource) buildConditionTimeoutError(ctx context.Context, obj *unstructured.Unstructured,
+func (r *waitResource) buildConditionTimeoutError(ctx context.Context, client k8sclient.K8sClient, obj *unstructured.Unstructured,
 	conditionType string, timeout time.Duration) error {
 
 	if obj == nil {
@@ -567,6 +567,18 @@ func (r *waitResource) buildConditionTimeoutError(ctx context.Context, obj *unst
 	}
 	errMsg += "  Conditions:\n"
 	errMsg += strings.Join(conditionDetails, "\n")
+
+	// Fetch and show pod issues for workload resources (same as rollout waits)
+	if r.isWorkloadResource(kind) {
+		podIssues := r.fetchPodIssues(ctx, client, obj)
+		if len(podIssues) > 0 {
+			errMsg += "\n  Pod Issues:\n"
+			for _, issue := range podIssues {
+				errMsg += fmt.Sprintf("    • %s\n", issue)
+			}
+		}
+	}
+
 	errMsg += "\n\n"
 
 	// WHY section
@@ -872,7 +884,7 @@ func (r *waitResource) waitWithCheck(ctx context.Context, client k8sclient.K8sCl
 			case <-timeoutCh:
 				// Get final status for error message
 				current, _ := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
-				return r.buildRolloutTimeoutError(current, obj, waitType, timeout)
+				return r.buildRolloutTimeoutError(ctx, client, current, obj, waitType, timeout)
 			case event, ok := <-watcher.ResultChan():
 				if !ok {
 					return fmt.Errorf("watch ended unexpectedly")
@@ -922,7 +934,7 @@ func (r *waitResource) pollWithCheck(ctx context.Context, client k8sclient.K8sCl
 		case <-ticker.C:
 			if time.Now().After(deadline) {
 				current, _ := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
-				return r.buildRolloutTimeoutError(current, obj, waitType, timeout)
+				return r.buildRolloutTimeoutError(ctx, client, current, obj, waitType, timeout)
 			}
 
 			current, err := client.Get(ctx, gvr, obj.GetNamespace(), obj.GetName())
@@ -972,7 +984,7 @@ func isEmptyValue(v interface{}) bool {
 }
 
 // buildRolloutTimeoutError creates a clean timeout error for rollout waits
-func (r *waitResource) buildRolloutTimeoutError(current, original *unstructured.Unstructured, waitType string, timeout time.Duration) error {
+func (r *waitResource) buildRolloutTimeoutError(ctx context.Context, client k8sclient.K8sClient, current, original *unstructured.Unstructured, waitType string, timeout time.Duration) error {
 	// Use current object if available, otherwise fall back to original
 	obj := current
 	if obj == nil {
@@ -1021,7 +1033,157 @@ func (r *waitResource) buildRolloutTimeoutError(current, original *unstructured.
 		}
 	}
 
+	// Fetch and show pod issues if any pods are failing
+	podIssues := r.fetchPodIssues(ctx, client, obj)
+	if len(podIssues) > 0 {
+		errMsg += "  Pod Issues:\n"
+		for _, issue := range podIssues {
+			errMsg += fmt.Sprintf("    • %s\n", issue)
+		}
+	}
+
 	return fmt.Errorf("%s", errMsg)
+}
+
+// fetchPodIssues fetches pods for a workload and extracts failure information
+func (r *waitResource) fetchPodIssues(ctx context.Context, client k8sclient.K8sClient, obj *unstructured.Unstructured) []string {
+	// Extract label selector from workload
+	selector := r.extractLabelSelector(obj)
+	if selector == "" {
+		return nil
+	}
+
+	// Construct GVR for pods (core v1)
+	podGVR := schema.GroupVersionResource{
+		Group:    "",
+		Version:  "v1",
+		Resource: "pods",
+	}
+
+	// List pods matching the selector (limit to 10 for efficiency, we only show 3 issues anyway)
+	pods, err := client.List(ctx, podGVR, obj.GetNamespace(), metav1.ListOptions{
+		LabelSelector: selector,
+		Limit:         10,
+	})
+	if err != nil {
+		tflog.Warn(ctx, "Failed to fetch pods for workload", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return nil
+	}
+
+	// Extract issues from pod statuses (limit to first 3 most relevant)
+	var issues []string
+	for _, pod := range pods.Items {
+		if len(issues) >= 3 {
+			break
+		}
+
+		podName := pod.GetName()
+		phase, _, _ := unstructured.NestedString(pod.Object, "status", "phase")
+
+		// Check container statuses
+		containerStatuses, found, _ := unstructured.NestedSlice(pod.Object, "status", "containerStatuses")
+		if !found || len(containerStatuses) == 0 {
+			// No container statuses yet - pod may be pending
+			if phase == "Pending" {
+				// Check for pending conditions
+				conditions, found, _ := unstructured.NestedSlice(pod.Object, "status", "conditions")
+				if found {
+					for _, cond := range conditions {
+						condMap, ok := cond.(map[string]interface{})
+						if !ok {
+							continue
+						}
+						condType, _ := condMap["type"].(string)
+						condStatus, _ := condMap["status"].(string)
+						reason, _ := condMap["reason"].(string)
+						message, _ := condMap["message"].(string)
+
+						if condType == "PodScheduled" && condStatus == "False" {
+							issues = append(issues, fmt.Sprintf("%s: %s - %s", podName, reason, message))
+							break
+						}
+					}
+				}
+			}
+			continue
+		}
+
+		// Check each container for issues
+		for _, cs := range containerStatuses {
+			csMap, ok := cs.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			containerName, _ := csMap["name"].(string)
+
+			// Check waiting state (ImagePullBackOff, CrashLoopBackOff, etc.)
+			if waiting, found, _ := unstructured.NestedMap(csMap, "state", "waiting"); found {
+				reason, _ := waiting["reason"].(string)
+				message, _ := waiting["message"].(string)
+
+				if reason != "" {
+					issue := fmt.Sprintf("%s/%s: %s", podName, containerName, reason)
+					if message != "" && len(message) < 100 {
+						issue += fmt.Sprintf(" - %s", message)
+					}
+					issues = append(issues, issue)
+					break // One issue per pod is enough
+				}
+			}
+
+			// Check terminated state (for crash details)
+			if terminated, found, _ := unstructured.NestedMap(csMap, "state", "terminated"); found {
+				reason, _ := terminated["reason"].(string)
+				exitCode, _ := terminated["exitCode"].(int64)
+				message, _ := terminated["message"].(string)
+
+				if reason == "Error" || exitCode != 0 {
+					issue := fmt.Sprintf("%s/%s: Terminated (exit %d)", podName, containerName, exitCode)
+					if message != "" && len(message) < 100 {
+						issue += fmt.Sprintf(" - %s", message)
+					}
+					issues = append(issues, issue)
+					break
+				}
+			}
+		}
+	}
+
+	return issues
+}
+
+// extractLabelSelector extracts the label selector for a workload
+func (r *waitResource) extractLabelSelector(obj *unstructured.Unstructured) string {
+	kind := obj.GetKind()
+
+	// For Deployment, StatefulSet, DaemonSet, ReplicaSet: use spec.selector.matchLabels
+	var matchLabels map[string]interface{}
+	var found bool
+	var err error
+
+	switch kind {
+	case "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet":
+		matchLabels, found, err = unstructured.NestedMap(obj.Object, "spec", "selector", "matchLabels")
+	default:
+		return ""
+	}
+
+	if err != nil || !found || len(matchLabels) == 0 {
+		return ""
+	}
+
+	// Convert matchLabels to selector string format
+	var parts []string
+	for k, v := range matchLabels {
+		if strVal, ok := v.(string); ok {
+			parts = append(parts, fmt.Sprintf("%s=%s", k, strVal))
+		}
+	}
+
+	return strings.Join(parts, ",")
 }
 
 // buildFieldTimeoutError creates a helpful timeout error for field existence waits

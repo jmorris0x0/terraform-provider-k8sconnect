@@ -59,15 +59,8 @@ func ClassifyError(err error, operation, resourceDesc string) (severity, title, 
 	case IsFieldValidationError(err):
 		fieldDetails := ExtractFieldValidationDetails(err)
 		return "error", fmt.Sprintf("%s: Field Validation Failed", operation),
-			fmt.Sprintf("Field validation failed for %s.\n\n"+
-				"%s\n\n"+
-				"Common causes:\n"+
-				"- Typo in field name (e.g., 'replica' instead of 'replicas')\n"+
-				"- Field doesn't exist in this Kubernetes version\n"+
-				"- Field is for a different resource type\n"+
-				"- Duplicate field in YAML\n\n"+
-				"Details: %v",
-				resourceDesc, fieldDetails, err)
+			fmt.Sprintf("Field validation failed for %s.\n\n%s",
+				resourceDesc, fieldDetails)
 
 	case errors.IsInvalid(err):
 
@@ -399,13 +392,16 @@ func IsCELValidationError(err error) bool {
 
 // ExtractFieldValidationDetails parses field validation error for user-friendly display
 // Handles both single and multiple field validation errors
+// Also handles wrapped errors where the StatusError is nested inside another error
 func ExtractFieldValidationDetails(err error) string {
-	statusErr, ok := err.(*errors.StatusError)
-	if !ok {
-		return "Unable to parse field validation error details"
+	// Try to get the message - either from StatusError or plain error
+	var msg string
+	if statusErr, ok := err.(*errors.StatusError); ok {
+		msg = statusErr.ErrStatus.Message
+	} else {
+		// Not a StatusError - try to extract from wrapped error message
+		msg = err.Error()
 	}
-
-	msg := statusErr.ErrStatus.Message
 
 	// Field validation errors can have several formats:
 	// 1. "unknown field \"spec.replica\""
@@ -472,8 +468,8 @@ func ExtractFieldValidationDetails(err error) string {
 		}
 	}
 
-	// Fallback: extract any useful information from the error
-	return fmt.Sprintf("Field validation failed.\n\nFull error: %s", msg)
+	// Fallback: couldn't parse structured details, show the full error
+	return fmt.Sprintf("Field validation failed. Check the error message below:\n\n%s", msg)
 }
 
 // ExtractCELValidationDetails parses CEL validation error for user-friendly display
