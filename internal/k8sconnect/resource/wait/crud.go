@@ -56,7 +56,7 @@ func (r *waitResource) Create(ctx context.Context, req resource.CreateRequest, r
 	if err := r.performWait(ctx, wc); err != nil {
 		resp.Diagnostics.AddError(
 			"Wait Operation Failed",
-			fmt.Sprintf("Failed to wait for %s: %s", formatObjectRef(wc.ObjectRef), err.Error()),
+			err.Error(),
 		)
 		return
 	}
@@ -145,7 +145,7 @@ func (r *waitResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	if err := r.performWait(ctx, wc); err != nil {
 		resp.Diagnostics.AddError(
 			"Wait Operation Failed",
-			fmt.Sprintf("Failed to wait for %s: %s", formatObjectRef(wc.ObjectRef), err.Error()),
+			err.Error(),
 		)
 		return
 	}
