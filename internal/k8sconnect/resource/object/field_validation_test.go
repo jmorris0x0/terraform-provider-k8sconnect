@@ -410,3 +410,215 @@ variable "namespace" {
 }
 `, namespace)
 }
+
+// TestAccObjectResource_FieldValidationError_ConversionError tests Issue #2
+// Conversion errors (like invalid CPU quantities) should show as "Field Validation Failed"
+// not "Kubernetes API Error"
+func TestAccObjectResource_FieldValidationError_ConversionError(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("field-conv-ns-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create namespace
+			{
+				Config: testAccObjectResourceFieldValidationNamespace(ns),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_object.namespace", "id"),
+				),
+			},
+			// Step 2: Try to create deployment with invalid CPU quantity
+			// Should show "Field Validation Failed" not "Kubernetes API Error"
+			{
+				Config: testAccObjectResourceFieldValidationConversionError(ns),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+				},
+				// Should show Field Validation Failed, not Kubernetes API Error
+				ExpectError: regexp.MustCompile("Field Validation Failed"),
+			},
+		},
+		CheckDestroy: resource.ComposeTestCheckFunc(
+			testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+		),
+	})
+}
+
+// TestAccObjectResource_FieldValidationError_InvalidEnum tests Issue #3
+// Invalid enum values (like imagePullPolicy) should show "Field Validation Failed"
+// with clear field path and supported values
+func TestAccObjectResource_FieldValidationError_InvalidEnum(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("field-enum-ns-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create namespace
+			{
+				Config: testAccObjectResourceFieldValidationNamespace(ns),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_object.namespace", "id"),
+				),
+			},
+			// Step 2: Try to create deployment with invalid enum value
+			// Should show "Field Validation Failed" with field path and supported values
+			{
+				Config: testAccObjectResourceFieldValidationInvalidEnum(ns),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+				},
+				// Should show Field Validation Failed with field path
+				ExpectError: regexp.MustCompile("(?s)Field Validation Failed.*imagePullPolicy"),
+			},
+		},
+		CheckDestroy: resource.ComposeTestCheckFunc(
+			testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+		),
+	})
+}
+
+func testAccObjectResourceFieldValidationConversionError(namespace string) string {
+	return fmt.Sprintf(`
+resource "k8sconnect_object" "namespace" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: %[1]s
+  YAML
+
+  cluster = {
+    kubeconfig = var.raw
+  }
+}
+
+# This should fail with Field Validation Failed (not Kubernetes API Error)
+# Invalid CPU quantity format
+resource "k8sconnect_object" "deployment" {
+  yaml_body = <<-YAML
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: test-deployment
+      namespace: %[1]s
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app: test
+      template:
+        metadata:
+          labels:
+            app: test
+        spec:
+          containers:
+          - name: nginx
+            image: nginx:1.27
+            resources:
+              requests:
+                cpu: "invalid-cpu-value"  # Invalid quantity format
+  YAML
+
+  cluster = {
+    kubeconfig = var.raw
+  }
+
+  depends_on = [k8sconnect_object.namespace]
+}
+
+variable "raw" {
+  type = string
+}
+
+variable "namespace" {
+  type = string
+}
+`, namespace)
+}
+
+func testAccObjectResourceFieldValidationInvalidEnum(namespace string) string {
+	return fmt.Sprintf(`
+resource "k8sconnect_object" "namespace" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: %[1]s
+  YAML
+
+  cluster = {
+    kubeconfig = var.raw
+  }
+}
+
+# This should fail with Field Validation Failed showing imagePullPolicy field
+# and supported values
+resource "k8sconnect_object" "deployment" {
+  yaml_body = <<-YAML
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: test-deployment
+      namespace: %[1]s
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app: test
+      template:
+        metadata:
+          labels:
+            app: test
+        spec:
+          containers:
+          - name: nginx
+            image: nginx:1.27
+            imagePullPolicy: InvalidPullPolicy  # Invalid enum value
+  YAML
+
+  cluster = {
+    kubeconfig = var.raw
+  }
+
+  depends_on = [k8sconnect_object.namespace]
+}
+
+variable "raw" {
+  type = string
+}
+
+variable "namespace" {
+  type = string
+}
+`, namespace)
+}

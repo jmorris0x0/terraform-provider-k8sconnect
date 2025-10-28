@@ -50,9 +50,14 @@ func (r *objectResource) checkResourceExistenceAndOwnership(ctx context.Context,
 			return nil
 		}
 
-		// Real error checking if resource exists
-		resp.Diagnostics.AddError("Existence Check Failed",
-			fmt.Sprintf("Failed to check if %s exists: %s", formatResource(rc.Object), err))
+		// Real error checking if resource exists - use error classification for better UX
+		resourceDesc := formatResource(rc.Object)
+		severity, title, detail := r.classifyK8sError(err, "Create", resourceDesc)
+		if severity == "warning" {
+			resp.Diagnostics.AddWarning(title, detail)
+		} else {
+			resp.Diagnostics.AddError(title, detail)
+		}
 		return err
 	}
 	return nil

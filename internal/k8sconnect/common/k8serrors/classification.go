@@ -63,9 +63,8 @@ func ClassifyError(err error, operation, resourceDesc string) (severity, title, 
 				resourceDesc, fieldDetails)
 
 	case errors.IsInvalid(err):
-
 		// Check if this is specifically an immutable field error
-		// IMPORTANT: Check this BEFORE CEL validation, since CEL immutability errors
+		// IMPORTANT: Check this FIRST, since CEL immutability errors
 		// (e.g., "may not change once set") match both IsCELValidationError and IsImmutableFieldError.
 		// Immutable is more specific, so it should take precedence.
 		if IsImmutableFieldError(err) {
@@ -85,6 +84,8 @@ func ClassifyError(err error, operation, resourceDesc string) (severity, title, 
 		}
 
 		// Check if this is specifically a CEL validation error
+		// IMPORTANT: Check this BEFORE generic field validation, since CEL errors
+		// also contain field-specific details but need special formatting
 		if IsCELValidationError(err) {
 			celDetails := ExtractCELValidationDetails(err)
 			return "error", fmt.Sprintf("%s: CEL Validation Failed", operation),
@@ -94,6 +95,16 @@ func ClassifyError(err error, operation, resourceDesc string) (severity, title, 
 					"Fix the field value to satisfy the validation rule or adjust the CRD validation rules.\n\n"+
 					"Details: %v",
 					resourceDesc, celDetails, err)
+		}
+
+		// Check if this IsInvalid error contains field-specific validation details
+		// (e.g., enum validation, type validation) - Issue #3
+		// This is more generic than CEL, so check it AFTER CEL validation
+		if IsInvalidWithFieldDetails(err) {
+			fieldDetails := ExtractInvalidFieldDetails(err)
+			return "error", fmt.Sprintf("%s: Field Validation Failed", operation),
+				fmt.Sprintf("Field validation failed for %s.\n\n%s",
+					resourceDesc, fieldDetails)
 		}
 
 		// Generic invalid resource error (for non-field-validation, non-CEL, and non-immutable errors)
@@ -121,6 +132,15 @@ func ClassifyError(err error, operation, resourceDesc string) (severity, title, 
 				resourceDesc)
 
 	default:
+		// Check if this is a conversion/schema validation error (Issue #2)
+		// These errors contain patterns like "failed to convert" or "quantities must match"
+		if IsConversionError(err) {
+			fieldDetails := ExtractConversionErrorDetails(err)
+			return "error", fmt.Sprintf("%s: Field Validation Failed", operation),
+				fmt.Sprintf("Field validation failed for %s.\n\n%s",
+					resourceDesc, fieldDetails)
+		}
+
 		return "error", fmt.Sprintf("%s: Kubernetes API Error", operation),
 			fmt.Sprintf("An unexpected error occurred while performing %s on %s. Details: %v",
 				operation, resourceDesc, err)
@@ -561,4 +581,111 @@ func ExtractCELValidationDetails(err error) string {
 
 	// Fallback: extract any useful information
 	return fmt.Sprintf("CEL validation rule failed.\n\nFull error: %s", msg)
+}
+
+// IsConversionError detects conversion/schema validation errors (Issue #2)
+// These errors occur when K8s cannot convert the object to the proper version
+// Often caused by invalid quantity formats, type mismatches, etc.
+func IsConversionError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errMsg := strings.ToLower(err.Error())
+
+	// Conversion error patterns
+	if strings.Contains(errMsg, "failed to convert") {
+		return true
+	}
+
+	// Schema validation patterns
+	if strings.Contains(errMsg, "quantities must match") {
+		return true
+	}
+
+	if strings.Contains(errMsg, "unable to convert unstructured object") {
+		return true
+	}
+
+	return false
+}
+
+// ExtractConversionErrorDetails extracts field-specific details from conversion errors
+func ExtractConversionErrorDetails(err error) string {
+	errMsg := err.Error()
+
+	// Try to extract the validation message (e.g., "quantities must match the regular expression...")
+	if idx := strings.Index(errMsg, "quantities must match"); idx != -1 {
+		validationMsg := errMsg[idx:]
+		// Clean up the message
+		validationMsg = strings.TrimSpace(validationMsg)
+
+		return fmt.Sprintf("Invalid quantity format.\n\n%s\n\nValid examples: \"100m\", \"1\", \"500m\", \"2.5\", \"1Gi\", \"512Mi\"", validationMsg)
+	}
+
+	// Try to extract other conversion patterns
+	if strings.Contains(errMsg, "failed to convert") {
+		// Try to find what field it's about
+		return fmt.Sprintf("Type conversion error.\n\nDetails: %s\n\nEnsure field values match the expected types (string, number, boolean, etc.)", errMsg)
+	}
+
+	// Fallback
+	return fmt.Sprintf("Schema validation error.\n\nDetails: %s", errMsg)
+}
+
+// IsInvalidWithFieldDetails checks if an IsInvalid error contains field-specific validation details (Issue #3)
+// These are Status 422 errors that show specific field paths and validation messages
+func IsInvalidWithFieldDetails(err error) bool {
+	if statusErr, ok := err.(*errors.StatusError); ok {
+		msg := statusErr.ErrStatus.Message
+
+		// Look for field-specific validation patterns
+		// Examples: "field: Unsupported value", "field: Required value", "field: Invalid value"
+		msgLower := strings.ToLower(msg)
+
+		if strings.Contains(msgLower, "unsupported value:") ||
+			strings.Contains(msgLower, "required value") ||
+			strings.Contains(msgLower, "must be") {
+			// Check if there's a field path (contains a dot or bracket indicating nested fields)
+			if strings.Contains(msg, ".") || strings.Contains(msg, "[") {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// ExtractInvalidFieldDetails extracts field-specific validation details from IsInvalid errors
+func ExtractInvalidFieldDetails(err error) string {
+	if statusErr, ok := err.(*errors.StatusError); ok {
+		msg := statusErr.ErrStatus.Message
+
+		// Try to parse field validation details
+		// Example: "Deployment.apps \"name\" is invalid: spec.template.spec.containers[0].imagePullPolicy: Unsupported value: \"Invalid\": supported values: \"Always\", \"IfNotPresent\", \"Never\""
+
+		// Find the field path and error details after "is invalid:"
+		if idx := strings.Index(msg, "is invalid:"); idx != -1 {
+			details := msg[idx+len("is invalid:"):]
+			details = strings.TrimSpace(details)
+
+			// Try to extract field path and validation message
+			// Format: "field.path: Error type: details"
+			parts := strings.SplitN(details, ":", 2)
+			if len(parts) >= 2 {
+				fieldPath := strings.TrimSpace(parts[0])
+				validationMsg := strings.TrimSpace(parts[1])
+
+				return fmt.Sprintf("Field: %s\n%s", fieldPath, validationMsg)
+			}
+
+			return details
+		}
+
+		// Fallback: return the full message
+		return msg
+	}
+
+	// Fallback for non-StatusError
+	return err.Error()
 }
