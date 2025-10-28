@@ -510,7 +510,9 @@ type ownershipTransition struct {
 func addOwnershipTransitionWarning(resp *resource.ModifyPlanResponse, transitions []ownershipTransition) {
 	var details []string
 	for _, t := range transitions {
-		details = append(details, fmt.Sprintf("  • %s: %s → %s", t.Path, t.PreviousOwner, t.CurrentOwner))
+		// Show the future transition: CurrentOwner → k8sconnect
+		// (k8sconnect will take ownership using force=true)
+		details = append(details, fmt.Sprintf("  • %s: %s → k8sconnect", t.Path, t.CurrentOwner))
 	}
 
 	warningMessage := fmt.Sprintf("Field ownership will change if you apply:\n%s\n\n"+

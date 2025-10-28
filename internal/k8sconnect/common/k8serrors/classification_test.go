@@ -229,7 +229,7 @@ func TestExtractFieldValidationDetails(t *testing.T) {
 					Message: `validation error occurred`,
 				},
 			},
-			expectedFields: []string{"Field validation failed", "Full error: validation error occurred"},
+			expectedFields: []string{"Field validation failed", "validation error occurred"},
 			expectCount:    false,
 		},
 	}
