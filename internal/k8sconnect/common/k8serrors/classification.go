@@ -63,17 +63,8 @@ func ClassifyError(err error, operation, resourceDesc string) (severity, title, 
 				resourceDesc, fieldDetails)
 
 	case errors.IsInvalid(err):
-		// Check if this IsInvalid error actually contains field-specific validation details
-		// If so, treat it as a field validation error for better UX (Issue #3)
-		if IsInvalidWithFieldDetails(err) {
-			fieldDetails := ExtractInvalidFieldDetails(err)
-			return "error", fmt.Sprintf("%s: Field Validation Failed", operation),
-				fmt.Sprintf("Field validation failed for %s.\n\n%s",
-					resourceDesc, fieldDetails)
-		}
-
 		// Check if this is specifically an immutable field error
-		// IMPORTANT: Check this BEFORE CEL validation, since CEL immutability errors
+		// IMPORTANT: Check this FIRST, since CEL immutability errors
 		// (e.g., "may not change once set") match both IsCELValidationError and IsImmutableFieldError.
 		// Immutable is more specific, so it should take precedence.
 		if IsImmutableFieldError(err) {
@@ -93,6 +84,8 @@ func ClassifyError(err error, operation, resourceDesc string) (severity, title, 
 		}
 
 		// Check if this is specifically a CEL validation error
+		// IMPORTANT: Check this BEFORE generic field validation, since CEL errors
+		// also contain field-specific details but need special formatting
 		if IsCELValidationError(err) {
 			celDetails := ExtractCELValidationDetails(err)
 			return "error", fmt.Sprintf("%s: CEL Validation Failed", operation),
@@ -102,6 +95,16 @@ func ClassifyError(err error, operation, resourceDesc string) (severity, title, 
 					"Fix the field value to satisfy the validation rule or adjust the CRD validation rules.\n\n"+
 					"Details: %v",
 					resourceDesc, celDetails, err)
+		}
+
+		// Check if this IsInvalid error contains field-specific validation details
+		// (e.g., enum validation, type validation) - Issue #3
+		// This is more generic than CEL, so check it AFTER CEL validation
+		if IsInvalidWithFieldDetails(err) {
+			fieldDetails := ExtractInvalidFieldDetails(err)
+			return "error", fmt.Sprintf("%s: Field Validation Failed", operation),
+				fmt.Sprintf("Field validation failed for %s.\n\n%s",
+					resourceDesc, fieldDetails)
 		}
 
 		// Generic invalid resource error (for non-field-validation, non-CEL, and non-immutable errors)
