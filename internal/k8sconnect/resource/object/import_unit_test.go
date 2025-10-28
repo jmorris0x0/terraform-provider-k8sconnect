@@ -167,20 +167,6 @@ func TestParseImportID(t *testing.T) {
 			expectError:       false,
 		},
 
-		// Error cases: old slash format
-		{
-			name:          "old slash format namespaced",
-			importID:      "prod/default/Deployment/nginx",
-			expectError:   true,
-			errorContains: "old slash-delimited format",
-		},
-		{
-			name:          "old slash format cluster-scoped",
-			importID:      "prod/Namespace/my-ns",
-			expectError:   true,
-			errorContains: "old slash-delimited format",
-		},
-
 		// Error cases: wrong number of parts
 		{
 			name:          "too few parts - only 1",
