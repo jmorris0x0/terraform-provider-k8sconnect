@@ -473,6 +473,121 @@ func TestAccObjectResource_FieldManagerConflict(t *testing.T) {
 	})
 }
 
+// TestAccObjectResource_SharedOwnershipNoValueChange verifies SSA co-ownership behavior when values match.
+// This test documents the Option A vs Option B decision from ADR-021.
+//
+// Scenario: HPA becomes co-owner of spec.replicas but applies the SAME value
+// Expected behavior with current implementation (Option B - metadata-based):
+//   - Detects manager list change ([k8sconnect] → [k8sconnect, hpa-controller])
+//   - May show warning about co-ownership (even though value matches)
+//
+// Expected behavior if we switch to Option A (value-based):
+//   - No warning (value unchanged, no actual drift)
+//   - Silent co-ownership acceptance
+//
+// This test will PASS with either approach, but documents the behavior difference.
+func TestAccObjectResource_SharedOwnershipNoValueChange(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("shared-owner-ns-%d", time.Now().UnixNano()%1000000)
+	deployName := fmt.Sprintf("shared-owner-deploy-%d", time.Now().UnixNano()%1000000)
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+	k8sClientset := k8sClient.(*kubernetes.Clientset)
+
+	// Create our minimal SSA test client from the helpers
+	ssaClient := testhelpers.NewSSATestClient(t, raw)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create deployment with Terraform (replicas: 2)
+			{
+				Config: testAccManifestConfig_SharedOwnership(ns, deployName, 2),
+				ConfigVariables: config.Variables{
+					"raw":         config.StringVariable(raw),
+					"namespace":   config.StringVariable(ns),
+					"deploy_name": config.StringVariable(deployName),
+					"replicas":    config.IntegerVariable(2),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
+					testhelpers.CheckDeploymentReplicaCount(k8sClientset, ns, deployName, 2),
+				),
+			},
+			// Step 2: HPA applies SAME VALUE (replicas: 2) - becomes co-owner
+			{
+				PreConfig: func() {
+					ctx := context.Background()
+
+					// HPA applies replicas: 2 (SAME VALUE as Terraform)
+					// This creates shared ownership: both k8sconnect and hpa-controller own spec.replicas
+					err := ssaClient.ApplyDeploymentReplicasSSA(ctx, ns, deployName, 2, "hpa-controller")
+					if err != nil {
+						t.Fatalf("Failed to apply with hpa-controller: %v", err)
+					}
+
+					// Give it a moment to process
+					time.Sleep(2 * time.Second)
+
+					// Verify co-ownership was established
+					deploy, err := k8sClientset.AppsV1().Deployments(ns).Get(ctx, deployName, metav1.GetOptions{})
+					if err != nil {
+						t.Fatalf("Failed to get deployment: %v", err)
+					}
+
+					t.Logf("ManagedFields after HPA SSA (same value):")
+					hasK8sconnect := false
+					hasHPA := false
+					for _, mf := range deploy.ManagedFields {
+						t.Logf("  Manager: %s, Operation: %s", mf.Manager, mf.Operation)
+						if mf.Manager == "k8sconnect" {
+							hasK8sconnect = true
+						}
+						if mf.Manager == "hpa-controller" {
+							hasHPA = true
+						}
+					}
+
+					if !hasK8sconnect {
+						t.Fatalf("k8sconnect not in managedFields - expected co-ownership")
+					}
+					if !hasHPA {
+						t.Fatalf("hpa-controller not in managedFields - expected co-ownership")
+					}
+
+					// Verify value is still 2 (unchanged)
+					if deploy.Spec.Replicas == nil || *deploy.Spec.Replicas != 2 {
+						t.Fatalf("Expected replicas to remain 2, got %v", deploy.Spec.Replicas)
+					}
+
+					t.Logf("✓ Co-ownership established: both k8sconnect and hpa-controller own spec.replicas")
+					t.Logf("✓ Value unchanged: replicas=2")
+				},
+				// Re-apply same config (no changes) - test if warning appears
+				Config: testAccManifestConfig_SharedOwnership(ns, deployName, 2),
+				ConfigVariables: config.Variables{
+					"raw":         config.StringVariable(raw),
+					"namespace":   config.StringVariable(ns),
+					"deploy_name": config.StringVariable(deployName),
+					"replicas":    config.IntegerVariable(2),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					// Value should remain 2
+					testhelpers.CheckDeploymentReplicaCount(k8sClientset, ns, deployName, 2),
+				),
+			},
+		},
+		CheckDestroy: testhelpers.CheckDeploymentDestroy(k8sClient, ns, deployName),
+	})
+}
+
 func testAccManifestConfig_FieldConflict(namespace, deployName string) string {
 	return fmt.Sprintf(`
 variable "raw" {
@@ -601,6 +716,74 @@ YAML
   depends_on = [k8sconnect_object.field_conflict_namespace]
 }
 `, namespace, deployName, namespace)
+}
+
+func testAccManifestConfig_SharedOwnership(namespace, deployName string, replicas int) string {
+	return fmt.Sprintf(`
+variable "raw" {
+  type = string
+}
+variable "namespace" {
+  type = string
+}
+variable "deploy_name" {
+  type = string
+}
+variable "replicas" {
+  type = number
+}
+
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "shared_owner_namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_object" "test_deployment" {
+  yaml_body = <<YAML
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  replicas: %d
+  selector:
+    matchLabels:
+      app: shared-owner-test
+  template:
+    metadata:
+      labels:
+        app: shared-owner-test
+    spec:
+      containers:
+      - name: nginx
+        image: public.ecr.aws/nginx/nginx:1.21
+        resources:
+          limits:
+            cpu: "100m"
+            memory: "128Mi"
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+YAML
+
+  cluster = {
+    kubeconfig = var.raw
+  }
+
+  depends_on = [k8sconnect_object.shared_owner_namespace]
+}
+`, namespace, deployName, namespace, replicas)
 }
 
 // TestAccObjectResource_DriftDetectionWithForceConflicts tests the scenario where:
