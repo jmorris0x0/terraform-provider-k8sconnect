@@ -182,9 +182,120 @@ Field ownership tracking will be moved entirely to private state. The `field_own
 
 **Breaking Change:** Users referencing `field_ownership` in configs will need to remove those references. The ownership information will be visible only via plan warnings.
 
+## Addendum: Clarification of Core Reasoning (2025-10-28)
+
+The decision to use private state was correct, but the original rationale in this ADR was incomplete. After implementing the `map[string][]string` refactor (fixing the "last manager wins" bug) and achieving test stability, we revisited whether private state was actually necessary.
+
+### The Architectural Principle
+
+**Core principle for robust provider design:**
+> Terraform state should only show drift that `terraform apply` can resolve.
+
+Private state upholds this principle. Computed attributes violate it (even if rarely).
+
+### The Design Requirement
+
+**We need TWO different datasets with different purposes:**
+
+1. **Comprehensive ownership tracking** - Track ownership of ALL fields (including fields we don't manage)
+   - Required to show meaningful transitions: `"hpa-controller" → "k8sconnect"`
+   - Must include external controllers, operator annotations, etc.
+   - Used for detecting when we TAKE ownership from another controller
+
+2. **Actionable presentation** - Show only transitions users can act on
+   - Filter to fields we actually manage (in yaml_body or previously managed)
+   - Suppress noise from external controller interactions
+
+### Why Computed Attributes Violate the Principle
+
+**In v0.1.7, we tracked ALL non-status fields as a computed attribute:**
+
+```go
+ownership := extractFieldOwnership(currentObj)  // ALL fields
+for path, owner := range ownership {
+    if strings.HasPrefix(path, "status.") || path == "status" {
+        continue  // Only filtering: status fields
+    }
+    ownershipMap[path] = owner.Manager  // Includes fields we DON'T manage!
+}
+data.FieldOwnership = mapValue  // Shows in Terraform diffs
+```
+
+**The edge case that violates the principle:**
+
+```diff
+~ resource "k8sconnect_object" "deployment" {
+    ~ field_ownership = {
+        ~ "metadata.annotations.operator-a/state" = "operator-a" → "operator-b"
+      }
+  }
+```
+
+- We don't manage `operator-a/state` (not in our yaml_body)
+- We can't resolve this drift (not our field)
+- `terraform apply` doesn't clear it (we don't control the field)
+- **Unresolvable drift**
+
+**Note:** This is rare in practice (external controllers typically avoid conflicts via naming conventions), but it's architecturally possible. For a provider aiming for robustness, any possibility of unresolvable drift is unacceptable.
+
+**With computed attributes, you CANNOT separate:**
+- **Data collection** (comprehensive - need all ownership for transition context)
+- **User presentation** (filtered - show only actionable changes)
+
+Both are merged into public state, and all changes show as drift.
+
+### Why Private State Is Correct
+
+**Private state + warnings enables separation of concerns:**
+
+1. **Private state stores comprehensive data:**
+   ```go
+   // Track ALL ownership (including fields we don't manage)
+   allOwnership := extractAllFieldOwnership(obj)
+   setFieldOwnershipInPrivateState(ctx, resp.Private, allOwnership)
+   ```
+
+2. **Warnings filter to actionable transitions:**
+   ```go
+   // Only warn about fields we manage or used to manage
+   if weManageField(path) || weUsedToManageField(path) {
+       emitOwnershipTransitionWarning(...)  // User sees this
+   } else {
+       // External controllers fighting - ignore silently
+   }
+   ```
+
+**Result:**
+- ✅ Full transition context preserved ("who we took it from")
+- ✅ No unresolvable drift (filtered warnings only)
+- ✅ Clean plan output (actionable signals only)
+
+### Correction to Original Reasoning
+
+**Original statement (line 52):**
+> "Terraform's rule: State must only track what you control. Tracking external ownership violates this."
+
+**This is incorrect.** Computed attributes regularly track external state:
+- `aws_instance.arn` - AWS controls this
+- `kubernetes_service.status.load_balancer.ingress` - K8s assigns this
+
+**Correct reasoning:**
+> "Computed attributes cannot separate comprehensive data collection from user-facing presentation. Private state enables tracking ALL ownership data (needed for transition detection) while emitting filtered, actionable warnings (needed for clean UX)."
+
+### Post-Refactor Confirmation
+
+After fixing the "last manager wins" bug with `map[string][]string` and achieving deterministic ordering, we confirmed that **private state was still the right choice** - not because of bugs (those are fixed), but because of the fundamental architectural principle.
+
+The bugs (flaky tests, non-deterministic ordering) created urgency during initial decision-making, but analysis afterward confirmed the decision was architecturally sound. Private state is the only approach that guarantees **zero unresolvable drift** while preserving comprehensive ownership tracking for transition detection.
+
+**Alternative considered:** Filter the computed attribute to only include fields we manage or used to manage. This would require storing historical ownership in private state anyway (to detect "used to manage"), resulting in maintaining both private state AND a computed attribute - more complexity than private state alone.
+
+**Trade-offs accepted:** Loss of `terraform state show` observability and non-standard warning UX are acceptable costs for upholding the principle that state drift must always be resolvable.
+
 ## Related Documentation
 
 - `docs/investigation/ssa-shared-ownership-evidence.md` - Complete evidence of shared ownership behavior
 - ADR-005 - Field Ownership Strategy (to be updated)
 - ADR-009 - User-Controlled Drift Exemption (uses field_ownership)
 - ADR-011 - Concise Diff Format (shows field_ownership examples)
+- ADR-021 - Ownership Transition Messaging (implements filtered warning system)
