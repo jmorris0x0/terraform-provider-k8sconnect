@@ -151,18 +151,12 @@ func extractFieldPathsFromMap(data map[string]interface{}, prefix string) []stri
 	return paths
 }
 
-// extractFieldOwnershipForManager extracts field ownership for a specific field manager
-func extractFieldOwnershipForManager(obj *unstructured.Unstructured, fieldManager string) map[string]string {
-	allOwnership := fieldmanagement.ExtractFieldOwnershipMap(obj)
-	ourOwnership := make(map[string]string)
-
-	for path, manager := range allOwnership {
-		if manager == fieldManager {
-			ourOwnership[path] = manager
-		}
-	}
-
-	return ourOwnership
+// extractFieldOwnershipForManager extracts field ownership for ALL managers
+// (not just the specified manager) to enable proper ownership transition detection.
+// This allows us to detect when external actors revert patches or take ownership.
+func extractFieldOwnershipForManager(obj *unstructured.Unstructured, fieldManager string) map[string][]string {
+	// Extract ownership for ALL managers, not just ours
+	return fieldmanagement.ExtractAllFieldOwnership(obj)
 }
 
 // applyPatch applies the patch to the target resource using the appropriate method based on patch type

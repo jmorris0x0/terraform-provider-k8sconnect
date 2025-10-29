@@ -214,9 +214,10 @@ func extractPathsFromFieldsV1Simple(fields map[string]interface{}, prefix string
 // take ownership of fields from k8sconnect.
 //
 // Unlike ExtractFieldOwnershipMap which only tracks k8sconnect ownership,
-// this function returns ownership for all field managers to detect transitions.
-func ExtractAllFieldOwnership(obj *unstructured.Unstructured) map[string]string {
-	result := make(map[string]string)
+// this function returns ALL managers for each field path to properly handle shared ownership.
+// When multiple managers co-own a field (via SSA), all of them are included in the slice.
+func ExtractAllFieldOwnership(obj *unstructured.Unstructured) map[string][]string {
+	result := make(map[string][]string)
 
 	// Process ALL managers, not just k8sconnect
 	for _, mf := range obj.GetManagedFields() {
@@ -237,11 +238,10 @@ func ExtractAllFieldOwnership(obj *unstructured.Unstructured) map[string]string 
 				continue
 			}
 
-			// Record ownership for this manager
+			// Append this manager to the ownership list for this path
 			// If multiple managers own the same field (co-ownership with SSA),
-			// the last one wins. For ownership transition detection, we want
-			// to know who CURRENTLY owns the field.
-			result[path] = mf.Manager
+			// all of them are included in the slice.
+			result[path] = append(result[path], mf.Manager)
 		}
 	}
 

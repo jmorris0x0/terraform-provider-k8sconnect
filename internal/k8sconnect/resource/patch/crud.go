@@ -471,18 +471,32 @@ func findRemovedFields(currentFields, newFields []string) []string {
 // getFieldOwnershipFromPrivateState retrieves field ownership map from private state
 func getFieldOwnershipFromPrivateState(ctx context.Context, getter interface {
 	GetKey(context.Context, string) ([]byte, diag.Diagnostics)
-}) map[string]string {
+}) map[string][]string {
 	data, _ := getter.GetKey(ctx, privateStateKeyOwnership)
 	if data == nil {
 		return nil
 	}
 
-	var ownership map[string]string
+	// Try new format first (map[string][]string)
+	var ownership map[string][]string
 	if err := json.Unmarshal(data, &ownership); err != nil {
-		tflog.Warn(ctx, "Failed to unmarshal field ownership from private state", map[string]interface{}{
-			"error": err.Error(),
-		})
-		return nil
+		// Fallback to old format (map[string]string) for backward compatibility
+		var oldOwnership map[string]string
+		if err := json.Unmarshal(data, &oldOwnership); err == nil {
+			// Silently migrate old format to new format
+			ownership = make(map[string][]string)
+			for path, manager := range oldOwnership {
+				ownership[path] = []string{manager}
+			}
+			tflog.Debug(ctx, "Migrated field ownership from old format (map[string]string) to new format (map[string][]string)", map[string]interface{}{
+				"field_count": len(ownership),
+			})
+		} else {
+			tflog.Warn(ctx, "Failed to unmarshal field ownership from private state", map[string]interface{}{
+				"error": err.Error(),
+			})
+			return nil
+		}
 	}
 	return ownership
 }
@@ -490,7 +504,7 @@ func getFieldOwnershipFromPrivateState(ctx context.Context, getter interface {
 // setFieldOwnershipInPrivateState stores field ownership map in private state
 func setFieldOwnershipInPrivateState(ctx context.Context, setter interface {
 	SetKey(context.Context, string, []byte) diag.Diagnostics
-}, ownership map[string]string) {
+}, ownership map[string][]string) {
 	if ownership == nil || len(ownership) == 0 {
 		setter.SetKey(ctx, privateStateKeyOwnership, nil)
 		return

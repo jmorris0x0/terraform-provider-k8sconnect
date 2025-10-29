@@ -135,3 +135,30 @@ func GenerateID() string {
 	}
 	return hex.EncodeToString(bytes)
 }
+
+// StringSliceContains checks if a string slice contains a specific item
+func StringSliceContains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
+}
+
+// StringSlicesEqual checks if two string slices contain the same elements (order-independent)
+func StringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	aMap := make(map[string]bool)
+	for _, item := range a {
+		aMap[item] = true
+	}
+	for _, item := range b {
+		if !aMap[item] {
+			return false
+		}
+	}
+	return true
+}

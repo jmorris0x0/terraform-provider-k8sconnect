@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
 
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/fieldmanagement"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
@@ -647,7 +648,7 @@ func (r *patchResource) patchContentEqual(content1, content2 string, patchType s
 }
 
 // checkOwnershipTransitions compares previous vs current field ownership and warns about transitions
-func (r *patchResource) checkOwnershipTransitions(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse, currentOwnership map[string]string) {
+func (r *patchResource) checkOwnershipTransitions(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse, currentOwnership map[string][]string) {
 	// Get previous ownership from private state
 	previousOwnership := getFieldOwnershipFromPrivateState(ctx, req.Private)
 	if previousOwnership == nil {
@@ -656,28 +657,28 @@ func (r *patchResource) checkOwnershipTransitions(ctx context.Context, req resou
 		return
 	}
 
-	// Find ownership transitions (fields that changed owner)
+	// Find ownership transitions (fields that changed owners)
 	var transitions []patchOwnershipTransition
-	for path, currentOwner := range currentOwnership {
-		if previousOwner, existed := previousOwnership[path]; existed {
-			// Field existed before - check if owner changed
-			if previousOwner != currentOwner {
-				transitions = append(transitions, patchOwnershipTransition{
-					Path:          path,
-					PreviousOwner: previousOwner,
-					CurrentOwner:  currentOwner,
-				})
-			}
+	for path, currentOwners := range currentOwnership {
+		previousOwners, existed := previousOwnership[path]
+
+		// Check if ownership list changed
+		if existed && !common.StringSlicesEqual(previousOwners, currentOwners) {
+			transitions = append(transitions, patchOwnershipTransition{
+				Path:           path,
+				PreviousOwners: previousOwners,
+				CurrentOwners:  currentOwners,
+			})
 		}
 	}
 
 	// Check for fields that were removed (released ownership)
-	for path, previousOwner := range previousOwnership {
+	for path, previousOwners := range previousOwnership {
 		if _, exists := currentOwnership[path]; !exists {
 			// Field was previously owned but is no longer in our ownership
 			tflog.Debug(ctx, "Patch field ownership released", map[string]interface{}{
-				"path":           path,
-				"previous_owner": previousOwner,
+				"path":            path,
+				"previous_owners": previousOwners,
 			})
 		}
 	}
@@ -690,16 +691,18 @@ func (r *patchResource) checkOwnershipTransitions(ctx context.Context, req resou
 
 // patchOwnershipTransition represents a field whose ownership changed
 type patchOwnershipTransition struct {
-	Path          string
-	PreviousOwner string
-	CurrentOwner  string
+	Path           string
+	PreviousOwners []string
+	CurrentOwners  []string
 }
 
 // addPatchOwnershipTransitionWarning emits a warning about field ownership transitions
 func addPatchOwnershipTransitionWarning(resp *resource.ModifyPlanResponse, transitions []patchOwnershipTransition) {
 	var details []string
 	for _, t := range transitions {
-		details = append(details, fmt.Sprintf("  • %s: %s → %s", t.Path, t.PreviousOwner, t.CurrentOwner))
+		prevOwners := strings.Join(t.PreviousOwners, ", ")
+		currOwners := strings.Join(t.CurrentOwners, ", ")
+		details = append(details, fmt.Sprintf("  • %s: [%s] → [%s]", t.Path, prevOwners, currOwners))
 	}
 
 	resp.Diagnostics.AddWarning(

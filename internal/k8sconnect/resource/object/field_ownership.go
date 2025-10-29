@@ -22,6 +22,6 @@ func extractFieldOwnership(obj *unstructured.Unstructured) map[string]FieldOwner
 
 // extractAllFieldOwnership extracts ownership for ALL managers (not just k8sconnect)
 // This is used for ownership transition detection
-func extractAllFieldOwnership(obj *unstructured.Unstructured) map[string]string {
+func extractAllFieldOwnership(obj *unstructured.Unstructured) map[string][]string {
 	return fieldmanagement.ExtractAllFieldOwnership(obj)
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -427,7 +428,7 @@ func (r *objectResource) applyProjection(ctx context.Context, dryRunResult *unst
 }
 
 // checkOwnershipTransitions compares previous vs current field ownership and warns about transitions
-func (r *objectResource) checkOwnershipTransitions(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse, currentOwnership map[string]string) {
+func (r *objectResource) checkOwnershipTransitions(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse, currentOwnership map[string][]string) {
 	tflog.Debug(ctx, "⚠️ DEBUG: checkOwnershipTransitions - START", map[string]interface{}{
 		"current_ownership_map": currentOwnership,
 		"current_field_count":   len(currentOwnership),
@@ -450,34 +451,42 @@ func (r *objectResource) checkOwnershipTransitions(ctx context.Context, req reso
 
 	// Find ownership transitions (fields that changed owner)
 	var transitions []ownershipTransition
-	for path, currentOwner := range currentOwnership {
-		if previousOwner, existed := previousOwnership[path]; existed {
-			// Field existed before - check if owner changed
-			if previousOwner != currentOwner {
-				tflog.Debug(ctx, "⚠️ DEBUG: checkOwnershipTransitions - TRANSITION DETECTED", map[string]interface{}{
-					"path":           path,
-					"previous_owner": previousOwner,
-					"current_owner":  currentOwner,
-				})
-				transitions = append(transitions, ownershipTransition{
-					Path:          path,
-					PreviousOwner: previousOwner,
-					CurrentOwner:  currentOwner,
-				})
-			}
+
+	// Check all paths in current ownership
+	for path, currentOwners := range currentOwnership {
+		previousOwners, existed := previousOwnership[path]
+
+		// Check if k8sconnect ownership status changed
+		prevOwnedByUs := existed && common.StringSliceContains(previousOwners, "k8sconnect")
+		nowOwnedByUs := common.StringSliceContains(currentOwners, "k8sconnect")
+
+		// If our ownership status changed, or if the list of co-owners changed, record transition
+		if prevOwnedByUs != nowOwnedByUs || (existed && !common.StringSlicesEqual(previousOwners, currentOwners)) {
+			tflog.Debug(ctx, "⚠️ DEBUG: checkOwnershipTransitions - TRANSITION DETECTED", map[string]interface{}{
+				"path":             path,
+				"previous_owners":  previousOwners,
+				"current_owners":   currentOwners,
+				"prev_owned_by_us": prevOwnedByUs,
+				"now_owned_by_us":  nowOwnedByUs,
+			})
+			transitions = append(transitions, ownershipTransition{
+				Path:           path,
+				PreviousOwners: previousOwners,
+				CurrentOwners:  currentOwners,
+			})
 		}
 	}
 
 	// Check for fields that were removed (in previousOwnership but not in currentOwnership)
 	// This can happen when ignore_fields changes or fields are removed from YAML
-	for path, previousOwner := range previousOwnership {
+	for path, previousOwners := range previousOwnership {
 		if _, exists := currentOwnership[path]; !exists {
-			// Field was previously owned but is no longer in our ownership
+			// Field was previously owned but is no longer tracked
 			// Only report if it was previously owned by k8sconnect
-			if previousOwner == "k8sconnect" {
+			if common.StringSliceContains(previousOwners, "k8sconnect") {
 				tflog.Debug(ctx, "Field ownership released", map[string]interface{}{
-					"path":           path,
-					"previous_owner": previousOwner,
+					"path":            path,
+					"previous_owners": previousOwners,
 				})
 			}
 		}
@@ -501,23 +510,30 @@ func (r *objectResource) checkOwnershipTransitions(ctx context.Context, req reso
 
 // ownershipTransition represents a field whose ownership changed
 type ownershipTransition struct {
-	Path          string
-	PreviousOwner string
-	CurrentOwner  string
+	Path           string
+	PreviousOwners []string
+	CurrentOwners  []string
 }
 
 // addOwnershipTransitionWarning emits a warning about field ownership transitions
 func addOwnershipTransitionWarning(resp *resource.ModifyPlanResponse, transitions []ownershipTransition) {
 	var details []string
 	for _, t := range transitions {
-		// Show the future transition: CurrentOwner → k8sconnect
-		// (k8sconnect will take ownership using force=true)
-		details = append(details, fmt.Sprintf("  • %s: %s → k8sconnect", t.Path, t.CurrentOwner))
+		// Format the transition showing all managers
+		prevStr := strings.Join(t.PreviousOwners, ", ")
+		if prevStr == "" {
+			prevStr = "(none)"
+		}
+		currStr := strings.Join(t.CurrentOwners, ", ")
+
+		// Show the future transition
+		// k8sconnect will take ownership using force=true during apply
+		details = append(details, fmt.Sprintf("  • %s: [%s] → [%s]", t.Path, prevStr, currStr))
 	}
 
 	warningMessage := fmt.Sprintf("Field ownership will change if you apply:\n%s\n\n"+
-		"k8sconnect will take ownership using force=true. "+
-		"The previous controller may attempt to reclaim these fields.",
+		"k8sconnect will take or maintain ownership using force=true. "+
+		"Other controllers may attempt to reclaim these fields, causing drift.",
 		strings.Join(details, "\n"))
 
 	tflog.Warn(context.Background(), "⚠️ DEBUG: addOwnershipTransitionWarning - ADDING WARNING TO DIAGNOSTICS", map[string]interface{}{
