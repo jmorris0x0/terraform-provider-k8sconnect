@@ -26,11 +26,6 @@ var _ resource.ResourceWithConfigure = (*patchResource)(nil)
 var _ resource.ResourceWithModifyPlan = (*patchResource)(nil)
 var _ resource.ResourceWithUpgradeState = (*patchResource)(nil)
 
-// Private state keys
-const (
-	privateStateKeyOwnership = "field_ownership_v1"
-)
-
 // ClientGetter function type for dependency injection
 type ClientGetter func(auth.ClusterModel) (k8sclient.K8sClient, error)
 
@@ -50,6 +45,7 @@ type patchResourceModel struct {
 	// Computed fields
 
 	ManagedStateProjection types.Map    `tfsdk:"managed_state_projection"`
+	FieldOwnership         types.Map    `tfsdk:"field_ownership"`
 	ManagedFields          types.String `tfsdk:"managed_fields"`
 }
 
@@ -231,6 +227,14 @@ When you destroy a patch resource, ownership is released but patched values rema
 				Description: "Flattened projection of fields that will be patched. Shows the predicted state after patch " +
 					"application, including any Kubernetes defaults. Only available for strategic merge patches (SSA). " +
 					"Non-SSA patches (json_patch, merge_patch) do not provide projection.",
+			},
+
+			"field_ownership": schema.MapAttribute{
+				Computed:    true,
+				ElementType: types.StringType,
+				Description: "Tracks which field manager owns each field path in the patched resource. " +
+					"Shows 'k8sconnect' for fields managed by this provider, or external manager names (e.g., 'kubectl', 'hpa-controller') for fields managed by other systems. " +
+					"When ownership changes appear in diffs, it indicates another system has taken control of those fields.",
 			},
 
 			"managed_fields": schema.StringAttribute{

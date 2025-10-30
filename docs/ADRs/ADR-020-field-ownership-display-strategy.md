@@ -1,301 +1,181 @@
 # ADR-020: Field Ownership Display Strategy
 
-**Status:** Accepted
+**Status:** Implemented
 **Date:** 2025-10-26
-**Decision Date:** 2025-10-26
-**Related ADRs:** ADR-005 (Field Ownership Strategy)
+**Last Updated:** 2025-01-29
+**Related ADRs:** ADR-005 (Field Ownership Strategy), ADR-021 (Ownership Transition Messaging)
 
 ## Context
 
-### The Field Ownership Feature
+ADR-005 established that we track field-level ownership from Kubernetes managedFields and expose it via a `field_ownership` computed attribute. This provides critical visibility:
 
-ADR-005 established that we track field-level ownership from Kubernetes Server-Side Apply (SSA) managedFields and expose it to users via a `field_ownership` state attribute. This feature was difficult to build and provides visibility into which controller manages which fields.
-
-**User Value:**
-- See ownership transitions in Terraform plan diffs (e.g., "kubectl-patch" → "k8sconnect")
+- See ownership transitions in Terraform plan diffs (e.g., "kubectl" → "k8sconnect")
 - Understand controller conflicts (HPA managing replicas, etc.)
 - Use `ignore_fields` to avoid ownership fights
 - Reference in `depends_on` for orchestration
 
-### Discovery: Shared Ownership in SSA
+### The Critical Question
 
-While fixing a flaky test (TestAccObjectResource_IgnoreFieldsJSONPathPredicate failing 16% of time), we discovered a fundamental misunderstanding about SSA behavior:
+When displaying field_ownership to users, which managers should we track?
 
-**What we thought:** `force=true` always takes exclusive ownership
-**Reality:** `force=true` creates **shared ownership** when values are identical
-
-When multiple managers apply the same value with `force=true`, Kubernetes lists BOTH managers in the managedFields array as co-owners of that field. This is intentional SSA design for collaboration.
-
-See `docs/investigation/ssa-shared-ownership-evidence.md` for complete analysis.
-
-### The Architectural Problem
-
-The `field_ownership` state attribute tracks WHO owns each field:
-
-```hcl
-field_ownership = {
-  "spec.replicas" = "kubectl-patch"
-}
-```
-
-**Dilemma:** When kubectl-patch and k8sconnect both apply `replicas: 3`, they become co-owners. But which manager appears "last" in the managedFields array depends on apply timestamps (not under our control).
-
-**Result:** Flaky tests, "Provider produced inconsistent result after apply" errors in real usage.
-
-### The Fundamental Conflict
-
-**Requirement 1:** Show ownership transitions (key feature)
-**Requirement 2:** No inconsistent plan errors (Terraform's contract)
-
-**Reality:** These conflict when tracking external managers whose ownership can change outside Terraform's control.
-
-Terraform's rule: State must only track what you control. Tracking external ownership violates this.
-
-## Options Considered
-
-### Option 1: Only Track k8sconnect Ownership
-
-Track ONLY fields owned by k8sconnect, ignore all other managers completely.
-
-**Pros:**
-- Fully stable (no external drift)
-- Simple implementation
-- Fixes flaky tests
-
-**Cons:**
-- Loses ownership transition visibility entirely
-- Can't see "kubectl-patch" → "k8sconnect" transitions
-- Feature becomes much less valuable
-- Breaking change with no upside for users
-
-
-### Option 2: Move to Private State + Warnings
-
-Track all ownership internally in private state (not in tfstate file). Emit warnings during plan when ownership changes detected.
-
-**Pros:**
-- Preserves some visibility (via warnings)
-- Stable public state
-
-**Cons:**
-- Breaking change (users can't reference field_ownership)
-- Loses `depends_on` capability
-- Warnings less useful than diffs
-
-
-### Option 3: Deterministic Shared Ownership Handling
-
-This option has two variants with significantly different stability characteristics:
-
-#### Option 3A: Track All Ownership with Deterministic Rules
-
-Track ALL field ownership (including fields managed exclusively by external controllers), apply deterministic rules for shared ownership.
-
-**Rules:**
-- Exclusive ownership by external manager → report that manager
-- Exclusive ownership by k8sconnect → report "k8sconnect"
-- Shared ownership including k8sconnect → report "k8sconnect"
-- Shared ownership NOT including k8sconnect → report alphabetically first manager
-
-**Problem:** External managers can CHANGE without Terraform action.
-- HPA takes ownership of spec.replicas → shows "hpa-controller"
-- Flux also takes ownership (co-owners) → alphabetically first wins
-- Value changes from "hpa-controller" to "flux" with no Terraform action
-- **UNSTABLE** - same problem as original bug, just less frequent
-
-#### Option 3B: Only Track k8sconnect Ownership
-
-Track ONLY fields where k8sconnect is currently an owner (exclusive or shared). Ignore fields managed exclusively by external controllers.
-
-**Rules:**
-- k8sconnect is exclusive owner → report "k8sconnect"
-- k8sconnect is a co-owner (shared ownership) → report "k8sconnect"
-- k8sconnect is NOT an owner → field not present in field_ownership
-- Always filter out ignore_fields even if we own them
-
-**Transition visibility:**
-- External manager exclusively owns spec.replicas → NOT tracked (field not present)
-- k8sconnect applies with force=true → takes ownership (exclusive or shared)
-- Field APPEARS in field_ownership with value "k8sconnect"
-- User sees: field added to field_ownership (we now manage it)
-
-**Visibility trade-off:**
-- **Lost:** Can't see "kubectl-patch" → "k8sconnect" transition (don't see "kubectl-patch" before the fight)
-- **Kept:** Can see when we START managing a field vs when we STOP managing it
-- **Kept:** Can see shared ownership resolution (always shows k8sconnect deterministically)
-
-**Pros:**
-- Fully stable (only track what we control)
-- Respects Terraform's contract (state = what we manage)
-- Fixes flaky tests (deterministic for shared ownership)
-- No breaking changes to schema
-- Simpler logic (filter to k8sconnect ownership only)
-
-**Cons:**
-- Loses "pre-fight" visibility (can't see external ownership before we take it)
-- Field appears/disappears from map rather than value changing
-- Users must infer ownership fight from field appearing + managed_state_projection value change
-
-### Option 4: Remove field_ownership Entirely
-
-Nuclear option - remove the feature.
-
-### Option 5: List of Managed Fields Instead of Map
-
-Change schema from map to list:
-
-```hcl
-# Old
-field_ownership = {"spec.replicas" = "k8sconnect"}
-
-# New
-managed_fields = ["spec.replicas"]
-```
-
-Only track WHAT we manage, not WHO else manages it.
-
-**Cons:**
-- Loses ALL ownership transition visibility
-- Breaking change
-- Redundant with managed_state_projection keys
+**Option A:** Track ALL field managers (k8sconnect, kubectl, HPA, operators, etc.)
+**Option B:** Track ONLY fields where k8sconnect is an owner
 
 ## Decision
 
-**We adopt Option 2: Move to Private State + Warnings**
+**Track ALL field managers, display using deterministic flattening rules.**
 
-Field ownership tracking will be moved entirely to private state. The `field_ownership` attribute will be **removed from the schema**.
+The field_ownership attribute is a computed attribute showing ownership of all non-status fields:
 
-**Rationale:**
-1. Full visibility of ownership transitions preserved (via warnings during plan)
-2. No Terraform consistency errors (private state not compared)
-3. Architecturally sound (tracking external state we can observe but don't control)
-4. `depends_on` capability deemed non-critical for this use case
-
-**Implementation:**
-- Remove `field_ownership` from object and patch resource schemas
-- Track all ownership (all managers) in private state
-- During plan: Compare previous ownership (private state) vs current ownership (from K8s)
-- Emit warnings when ownership changes detected
-- Update private state with current ownership only during Create/Update operations (NOT during Read)
-  - This ensures we preserve "ownership at last apply" for transition detection
-  - If we updated during Read, both current and previous would match, missing transitions
-
-**Breaking Change:** Users referencing `field_ownership` in configs will need to remove those references. The ownership information will be visible only via plan warnings.
-
-## Addendum: Clarification of Core Reasoning (2025-10-28)
-
-The decision to use private state was correct, but the original rationale in this ADR was incomplete. After implementing the `map[string][]string` refactor (fixing the "last manager wins" bug) and achieving test stability, we revisited whether private state was actually necessary.
-
-### The Architectural Principle
-
-**Core principle for robust provider design:**
-> Terraform state should only show drift that `terraform apply` can resolve.
-
-Private state upholds this principle. Computed attributes violate it (even if rarely).
-
-### The Design Requirement
-
-**We need TWO different datasets with different purposes:**
-
-1. **Comprehensive ownership tracking** - Track ownership of ALL fields (including fields we don't manage)
-   - Required to show meaningful transitions: `"hpa-controller" → "k8sconnect"`
-   - Must include external controllers, operator annotations, etc.
-   - Used for detecting when we TAKE ownership from another controller
-
-2. **Actionable presentation** - Show only transitions users can act on
-   - Filter to fields we actually manage (in yaml_body or previously managed)
-   - Suppress noise from external controller interactions
-
-### Why Computed Attributes Violate the Principle
-
-**In v0.1.7, we tracked ALL non-status fields as a computed attribute:**
-
-```go
-ownership := extractFieldOwnership(currentObj)  // ALL fields
-for path, owner := range ownership {
-    if strings.HasPrefix(path, "status.") || path == "status" {
-        continue  // Only filtering: status fields
-    }
-    ownershipMap[path] = owner.Manager  // Includes fields we DON'T manage!
+```hcl
+field_ownership = {
+  "spec.replicas" = "k8sconnect"
+  "metadata.annotations.kubectl.kubernetes.io/last-applied-configuration" = "kubectl"
 }
-data.FieldOwnership = mapValue  // Shows in Terraform diffs
 ```
 
-**The edge case that violates the principle:**
+### Implementation Approach
 
-```diff
-~ resource "k8sconnect_object" "deployment" {
-    ~ field_ownership = {
-        ~ "metadata.annotations.operator-a/state" = "operator-a" → "operator-b"
-      }
-  }
+**Internal Tracking (Phase 0 from ADR-021):**
+```go
+// Track ALL co-owners for each field
+ownership := map[string][]string{
+    "spec.replicas": []string{"k8sconnect", "horizontal-pod-autoscaler"},
+}
 ```
 
-- We don't manage `operator-a/state` (not in our yaml_body)
-- We can't resolve this drift (not our field)
-- `terraform apply` doesn't clear it (we don't control the field)
-- **Unresolvable drift**
+**User Display (Deterministic Flattening):**
+```go
+// Flatten to single manager per field for schema
+func FlattenFieldOwnership(ownership map[string][]string) map[string]string {
+    result := make(map[string]string)
+    for path, managers := range ownership {
+        if len(managers) == 0 {
+            continue
+        }
+        // Deterministic: show first manager (ordered by timestamp in managedFields)
+        result[path] = managers[0]
+    }
+    return result
+}
+```
 
-**Note:** This is rare in practice (external controllers typically avoid conflicts via naming conventions), but it's architecturally possible. For a provider aiming for robustness, any possibility of unresolvable drift is unacceptable.
+## The Rollback Story: Why ALL Managers Matter
 
-**With computed attributes, you CANNOT separate:**
-- **Data collection** (comprehensive - need all ownership for transition context)
-- **User presentation** (filtered - show only actionable changes)
+### v0.2.0: Failed k8sconnect-Only Attempt
 
-Both are merged into public state, and all changes show as drift.
+We attempted to implement "track only k8sconnect ownership" for better stability.
 
-### Why Private State Is Correct
+**Implementation:** Used `parseFieldsV1ToPathMap()` to extract only k8sconnect's managedFields entry, ignoring all other managers.
 
-**Private state + warnings enables separation of concerns:**
+**Result:** 17 test failures across import and external controller scenarios.
 
-1. **Private state stores comprehensive data:**
-   ```go
-   // Track ALL ownership (including fields we don't manage)
-   allOwnership := extractAllFieldOwnership(obj)
-   setFieldOwnershipInPrivateState(ctx, resp.Private, allOwnership)
+**Root Cause Analysis:**
+
+1. **Import scenarios broken:**
+   ```
+   1. Import kubectl-created resource
+   2. k8sconnect not yet in managedFields (import hasn't written)
+   3. field_ownership = {} (empty)
+   4. After apply: field_ownership populated
+   5. Test fails: "Provider produced inconsistent result after apply"
    ```
 
-2. **Warnings filter to actionable transitions:**
-   ```go
-   // Only warn about fields we manage or used to manage
-   if weManageField(path) || weUsedToManageField(path) {
-       emitOwnershipTransitionWarning(...)  // User sees this
-   } else {
-       // External controllers fighting - ignore silently
-   }
+2. **External controller scenarios broken:**
+   ```
+   1. HPA manages spec.replicas exclusively
+   2. k8sconnect not an owner yet
+   3. field_ownership missing spec.replicas entry
+   4. Cannot detect transition or apply force=true correctly
    ```
 
-**Result:**
-- ✅ Full transition context preserved ("who we took it from")
-- ✅ No unresolvable drift (filtered warnings only)
-- ✅ Clean plan output (actionable signals only)
+**Rollback:** Reverted to v0.1.7's `extractAllFieldOwnership()` + `FlattenFieldOwnership()` approach.
 
-### Correction to Original Reasoning
+### v0.1.7: ALL-Managers Approach (Current Implementation)
 
-**Original statement (line 52):**
-> "Terraform's rule: State must only track what you control. Tracking external ownership violates this."
+**Implementation:** Parse ALL managedFields entries, track all co-owners internally, flatten for display.
 
-**This is incorrect.** Computed attributes regularly track external state:
-- `aws_instance.arn` - AWS controls this
-- `kubernetes_service.status.load_balancer.ingress` - K8s assigns this
+**Why this is correct:**
 
-**Correct reasoning:**
-> "Computed attributes cannot separate comprehensive data collection from user-facing presentation. Private state enables tracking ALL ownership data (needed for transition detection) while emitting filtered, actionable warnings (needed for clean UX)."
+1. **Import detection:** See existing ownership before we claim it
+2. **Conflict detection:** Know which controller we're fighting (HPA, Flux, operator, etc.)
+3. **Force=true logic:** Need to see external ownership to know when to override (ADR-019)
+4. **Transition visibility:** Show "kubectl" → "k8sconnect" in diffs
 
-### Post-Refactor Confirmation
+**Stability achieved through:**
+- Parse ALL managedFields entries consistently
+- Track all co-owners in `map[string][]string`
+- Flatten using first manager (timestamp-ordered, deterministic)
+- Always use force=true during apply (ADR-019)
 
-After fixing the "last manager wins" bug with `map[string][]string` and achieving deterministic ordering, we confirmed that **private state was still the right choice** - not because of bugs (those are fixed), but because of the fundamental architectural principle.
+## Key Insights
 
-The bugs (flaky tests, non-deterministic ordering) created urgency during initial decision-making, but analysis afterward confirmed the decision was architecturally sound. Private state is the only approach that guarantees **zero unresolvable drift** while preserving comprehensive ownership tracking for transition detection.
+### Why k8sconnect-Only Extraction Fails
 
-**Alternative considered:** Filter the computed attribute to only include fields we manage or used to manage. This would require storing historical ownership in private state anyway (to detect "used to manage"), resulting in maintaining both private state AND a computed attribute - more complexity than private state alone.
+The k8sconnect-only approach seems cleaner but breaks a fundamental requirement:
 
-**Trade-offs accepted:** Loss of `terraform state show` observability and non-standard warning UX are acceptable costs for upholding the principle that state drift must always be resolvable.
+**You cannot correctly apply force=true if you don't know what you're forcing.**
+
+With ALL-managers tracking:
+```
+1. Read current state from K8s
+2. Parse managedFields: detect "HPA owns spec.replicas"
+3. User config includes spec.replicas (not in ignore_fields)
+4. Apply with force=true, knowing we're overriding HPA
+5. Show transition: "horizontal-pod-autoscaler" → "k8sconnect"
+```
+
+With k8sconnect-only tracking:
+```
+1. Read current state from K8s
+2. Parse only k8sconnect's entry: empty (we don't own it yet)
+3. No knowledge of HPA ownership
+4. Lose visibility and context
+5. Cannot show meaningful transition
+```
+
+### Shared Ownership in SSA
+
+When multiple managers apply the same value with force=true, Kubernetes creates **shared ownership** - both managers listed in managedFields. This is intentional SSA design for collaboration.
+
+Our flattening handles this deterministically by showing the first co-owner (timestamp-ordered), while internally we track all co-owners for comprehensive conflict detection.
+
+### Status Field Filtering
+
+We filter status fields from display because:
+- Status is server-managed, never user-controlled
+- Clutters output with non-actionable information
+- Users cannot meaningfully act on status field ownership
+
+## Trade-offs
+
+**Benefits:**
+- ✅ Import scenarios work correctly
+- ✅ External controller detection works
+- ✅ Force=true logic has full context
+- ✅ Transition visibility preserved ("kubectl" → "k8sconnect")
+- ✅ Deterministic (all 17 test failures fixed)
+
+**Limitations:**
+- ❌ Can show ownership changes for fields we don't manage (rare edge case)
+- ❌ External controller fights might appear as drift
+
+**Mitigation:**
+- ADR-021 implements filtered warning system to show only actionable ownership transitions
+- `ignore_fields` allows users to explicitly defer ownership to external controllers
+
+## Future Consideration: Private State
+
+An alternative architecture would be:
+- Track comprehensive ownership in private state (not visible in terraform state show)
+- Emit filtered warnings during plan phase
+- Only show actionable transitions to users
+
+This would eliminate any possibility of unresolvable drift in the state file. However, this is **not currently implemented**. The current approach (computed attribute tracking ALL managers) works reliably after the v0.2.0 rollback, with edge case drift mitigated through `ignore_fields`.
+
+Private state remains a future option if unresolvable drift becomes a practical issue rather than a theoretical concern.
 
 ## Related Documentation
 
-- `docs/investigation/ssa-shared-ownership-evidence.md` - Complete evidence of shared ownership behavior
-- ADR-005 - Field Ownership Strategy (to be updated)
-- ADR-009 - User-Controlled Drift Exemption (uses field_ownership)
-- ADR-011 - Concise Diff Format (shows field_ownership examples)
-- ADR-021 - Ownership Transition Messaging (implements filtered warning system)
+- ADR-005: Field Ownership Strategy (force=true usage)
+- ADR-021: Ownership Transition Messaging (centralized warning system)

@@ -10,8 +10,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/fieldmanagement"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -50,6 +51,7 @@ func (r *objectResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 	if yamlStr == "" {
 		// Mark computed fields as unknown
 		plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
+		plannedData.FieldOwnership = types.MapUnknown(types.StringType)
 
 		// Save the plan with unknown computed fields
 		diags = resp.Plan.Set(ctx, &plannedData)
@@ -64,6 +66,7 @@ func (r *objectResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 			// During plan with interpolations to computed values, we can't parse/validate
 			// Mark computed fields as unknown
 			plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
+			plannedData.FieldOwnership = types.MapUnknown(types.StringType)
 
 			// Save the plan with unknown computed fields
 			diags = resp.Plan.Set(ctx, &plannedData)
@@ -125,10 +128,11 @@ func (r *objectResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 // setProjectionUnknown sets projection to unknown and saves plan
 //
 // When we can't perform dry-run to predict the result, we set
-// managed_state_projection to unknown.
+// managed_state_projection and field_ownership to unknown.
 func (r *objectResource) setProjectionUnknown(ctx context.Context, plannedData *objectResourceModel, resp *resource.ModifyPlanResponse, reason string) {
 	tflog.Debug(ctx, reason)
 	plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
+	plannedData.FieldOwnership = types.MapUnknown(types.StringType)
 	diags := resp.Plan.Set(ctx, plannedData)
 	resp.Diagnostics.Append(diags...)
 }
@@ -155,6 +159,14 @@ func (r *objectResource) checkDriftAndPreserveState(ctx context.Context, req res
 
 				// Preserve object_ref since resource identity hasn't changed
 				plannedData.ObjectRef = stateData.ObjectRef
+
+				// Only preserve field_ownership if ignore_fields hasn't changed
+				// When ignore_fields changes, field_ownership will change even if projection doesn't
+				ignoreFieldsChanged := !stateData.IgnoreFields.Equal(plannedData.IgnoreFields)
+				if !ignoreFieldsChanged {
+					plannedData.FieldOwnership = stateData.FieldOwnership
+				}
+				// else: leave field_ownership as predicted from dry-run (already set in applyProjection)
 
 				// Note: ImportedWithoutAnnotations is now in private state, not model
 				// But still allow terraform-specific settings to update
@@ -257,7 +269,7 @@ func (r *objectResource) calculateProjection(ctx context.Context, req resource.M
 		}
 
 		// Project the dry-run result to show what will be created
-		return r.applyProjection(ctx, dryRunResult, paths, plannedData, resp)
+		return r.applyProjection(ctx, dryRunResult, paths, plannedData, isCreate, resp)
 	}
 
 	// UPDATE operations: Check for ownership transitions BEFORE dry-run
@@ -303,7 +315,7 @@ func (r *objectResource) calculateProjection(ctx context.Context, req resource.M
 	paths := extractOwnedPaths(ctx, dryRunResult.GetManagedFields(), desiredObj.Object)
 
 	// Apply projection
-	return r.applyProjection(ctx, dryRunResult, paths, plannedData, resp)
+	return r.applyProjection(ctx, dryRunResult, paths, plannedData, isCreate, resp)
 }
 
 // performDryRun executes the dry-run against k8s
@@ -388,7 +400,7 @@ func (r *objectResource) performDryRun(ctx context.Context, client k8sclient.K8s
 }
 
 // applyProjection projects fields and updates plan
-func (r *objectResource) applyProjection(ctx context.Context, dryRunResult *unstructured.Unstructured, paths []string, plannedData *objectResourceModel, resp *resource.ModifyPlanResponse) bool {
+func (r *objectResource) applyProjection(ctx context.Context, dryRunResult *unstructured.Unstructured, paths []string, plannedData *objectResourceModel, isCreate bool, resp *resource.ModifyPlanResponse) bool {
 	// Apply ignore_fields filtering if specified
 	if ignoreFields := getIgnoreFields(ctx, plannedData); ignoreFields != nil {
 		paths = filterIgnoredPaths(paths, ignoreFields, dryRunResult.Object)
@@ -419,12 +431,107 @@ func (r *objectResource) applyProjection(ctx context.Context, dryRunResult *unst
 
 	// Update the plan with projection
 	plannedData.ManagedStateProjection = mapValue
+
 	tflog.Debug(ctx, "Dry-run projection complete", map[string]interface{}{
 		"path_count": len(paths),
 		"map_size":   len(projectionMap),
 	})
 
+	// Handle field_ownership based on operation type
+	if isCreate {
+		// For CREATE: Set field_ownership to unknown (will be populated after apply)
+		// We can't accurately predict field_ownership for CREATE because k8sconnect
+		// annotations haven't been added yet
+		plannedData.FieldOwnership = types.MapUnknown(types.StringType)
+		tflog.Debug(ctx, "Set field_ownership to unknown for CREATE operation")
+	} else {
+		// For UPDATE: Compute field_ownership from dry-run result
+		// This is a core feature: predicting exact field ownership using force=true dry-run
+
+		// Extract ALL ownership from dry-run (kubectl, hpa-controller, etc.) not just k8sconnect
+		// This is CRITICAL for ADR-019 override to work when k8sconnect doesn't own fields yet
+		// (e.g., after import where kubectl owns everything, or ignore_fields modifications
+		// where external controllers took ownership). v0.1.7 used ExtractFieldOwnershipMap
+		// which iterated over ALL managers, not just k8sconnect.
+		allOwnership := extractAllFieldOwnership(dryRunResult)
+		ownershipMap := fieldmanagement.FlattenFieldOwnership(allOwnership)
+
+		// ADR-019: Override predicted ownership for fields we're applying with force=true
+		// Kubernetes dry-run doesn't predict force=true ownership takeover, so we must
+		// explicitly recognize that fields we apply with force=true WILL be owned by k8sconnect
+		// after the actual apply, regardless of what dry-run's managedFields suggest.
+		//
+		// Why this is needed: Dry-run shows current ownership state, not post-force ownership.
+		// When we apply with force=true, we WILL take ownership, but dry-run doesn't reflect this.
+		// This causes "Provider produced inconsistent result" errors when prediction doesn't match
+		// actual post-apply ownership.
+
+		// Extract fields that k8sconnect is sending (from dry-run's k8sconnect manager entry)
+		fieldsWeAreSending := make(map[string]bool)
+		for _, mf := range dryRunResult.GetManagedFields() {
+			if mf.Manager == "k8sconnect" && mf.FieldsV1 != nil {
+				// Parse k8sconnect's FieldsV1 to get the paths we're sending
+				k8sconnectOwnership := parseFieldsV1ToPathMap([]metav1.ManagedFieldsEntry{mf}, dryRunResult.Object)
+				for path := range k8sconnectOwnership {
+					fieldsWeAreSending[path] = true
+				}
+				break
+			}
+		}
+
+		overrideCount := 0
+		for path, currentOwner := range ownershipMap {
+			// Only override if we're actually sending this field
+			if fieldsWeAreSending[path] && currentOwner != "k8sconnect" {
+				ownershipMap[path] = "k8sconnect"
+				overrideCount++
+			}
+		}
+
+		if overrideCount > 0 {
+			tflog.Info(ctx, "Applied force=true ownership prediction overrides", map[string]interface{}{
+				"override_count": overrideCount,
+			})
+		}
+
+		// Filter out status fields - they are not preserved during Apply operations
+		// Also filter out K8s system annotations that appear/change unpredictably
+		for path := range ownershipMap {
+			if strings.HasPrefix(path, "status.") || path == "status" {
+				delete(ownershipMap, path)
+			}
+			// Filter K8s system annotations to avoid plan/apply inconsistencies
+			if fieldmanagement.IsKubernetesSystemAnnotation(path) {
+				delete(ownershipMap, path)
+			}
+		}
+
+		// NOTE: We do NOT filter out ignore_fields from field_ownership
+		// Users need visibility into who owns ignored fields
+
+		// Set field_ownership to predicted value from dry-run
+		predictedFieldOwnership, diags := types.MapValueFrom(ctx, types.StringType, ownershipMap)
+		if !diags.HasError() {
+			plannedData.FieldOwnership = predictedFieldOwnership
+			tflog.Debug(ctx, "Set field_ownership from dry-run prediction", map[string]interface{}{
+				"field_count": len(ownershipMap),
+			})
+		} else {
+			// If conversion fails, mark as unknown
+			plannedData.FieldOwnership = types.MapUnknown(types.StringType)
+		}
+	}
+
 	return true
+}
+
+// extractFieldOwnershipMap extracts field ownership from object and flattens to map[string]string
+func extractFieldOwnershipMap(ctx context.Context, obj *unstructured.Unstructured) map[string]string {
+	// Extract all field ownership
+	ownership := extractAllFieldOwnership(obj)
+
+	// Flatten using the common logic
+	return fieldmanagement.FlattenFieldOwnership(ownership)
 }
 
 // checkOwnershipTransitions compares previous vs current field ownership and warns about transitions
@@ -434,41 +541,75 @@ func (r *objectResource) checkOwnershipTransitions(ctx context.Context, req reso
 		"current_field_count":   len(currentOwnership),
 	})
 
-	// Get previous ownership from private state
-	previousOwnership := getFieldOwnershipFromPrivateState(ctx, req.Private)
-	if previousOwnership == nil {
-		// No previous ownership tracked - first apply or imported resource
-		tflog.Debug(ctx, "⚠️ DEBUG: checkOwnershipTransitions - No previous ownership in private state - skipping transition check")
+	// Skip if no state (first apply)
+	if req.State.Raw.IsNull() {
+		tflog.Debug(ctx, "⚠️ DEBUG: checkOwnershipTransitions - No state yet - skipping transition check")
 		return
 	}
 
+	// Get previous ownership from state attribute
+	var stateData objectResourceModel
+	diags := req.State.Get(ctx, &stateData)
+	if diags.HasError() {
+		// Error reading state
+		tflog.Warn(ctx, "⚠️ DEBUG: Failed to read state - skipping transition check", map[string]interface{}{
+			"diagnostics": diags,
+		})
+		return
+	}
+
+	// Extract previous ownership map from state
+	var previousOwnershipFlat map[string]string
+	if !stateData.FieldOwnership.IsNull() && !stateData.FieldOwnership.IsUnknown() {
+		d := stateData.FieldOwnership.ElementsAs(ctx, &previousOwnershipFlat, false)
+		if d.HasError() {
+			tflog.Warn(ctx, "Failed to extract previous field ownership from state", map[string]interface{}{
+				"diagnostics": d,
+			})
+			return
+		}
+	}
+
+	if previousOwnershipFlat == nil || len(previousOwnershipFlat) == 0 {
+		// No previous ownership tracked - first apply or imported resource
+		tflog.Debug(ctx, "⚠️ DEBUG: checkOwnershipTransitions - No previous ownership in state - skipping transition check")
+		return
+	}
+
+	// Flatten current ownership for comparison
+	currentOwnershipFlat := fieldmanagement.FlattenFieldOwnership(currentOwnership)
+
 	tflog.Debug(ctx, "⚠️ DEBUG: checkOwnershipTransitions - Comparing ownership", map[string]interface{}{
-		"previous_ownership_map": previousOwnership,
-		"previous_field_count":   len(previousOwnership),
-		"current_ownership_map":  currentOwnership,
-		"current_field_count":    len(currentOwnership),
+		"previous_ownership_map": previousOwnershipFlat,
+		"previous_field_count":   len(previousOwnershipFlat),
+		"current_ownership_map":  currentOwnershipFlat,
+		"current_field_count":    len(currentOwnershipFlat),
 	})
 
 	// Find ownership transitions (fields that changed owner)
 	var transitions []ownershipTransition
 
 	// Check all paths in current ownership
-	for path, currentOwners := range currentOwnership {
-		previousOwners, existed := previousOwnership[path]
+	for path, currentOwner := range currentOwnershipFlat {
+		previousOwner, existed := previousOwnershipFlat[path]
 
-		// Check if k8sconnect ownership status changed
-		prevOwnedByUs := existed && common.StringSliceContains(previousOwners, "k8sconnect")
-		nowOwnedByUs := common.StringSliceContains(currentOwners, "k8sconnect")
-
-		// If our ownership status changed, or if the list of co-owners changed, record transition
-		if prevOwnedByUs != nowOwnedByUs || (existed && !common.StringSlicesEqual(previousOwners, currentOwners)) {
+		// If ownership changed, record transition
+		if !existed || previousOwner != currentOwner {
 			tflog.Debug(ctx, "⚠️ DEBUG: checkOwnershipTransitions - TRANSITION DETECTED", map[string]interface{}{
-				"path":             path,
-				"previous_owners":  previousOwners,
-				"current_owners":   currentOwners,
-				"prev_owned_by_us": prevOwnedByUs,
-				"now_owned_by_us":  nowOwnedByUs,
+				"path":            path,
+				"previous_owner":  previousOwner,
+				"current_owner":   currentOwner,
+				"prev_owned_by_us": existed && previousOwner == "k8sconnect",
+				"now_owned_by_us":  currentOwner == "k8sconnect",
 			})
+
+			// Build owner lists for the transition message (backward compatibility)
+			previousOwners := []string{}
+			if existed {
+				previousOwners = append(previousOwners, previousOwner)
+			}
+			currentOwners := []string{currentOwner}
+
 			transitions = append(transitions, ownershipTransition{
 				Path:           path,
 				PreviousOwners: previousOwners,
@@ -477,16 +618,16 @@ func (r *objectResource) checkOwnershipTransitions(ctx context.Context, req reso
 		}
 	}
 
-	// Check for fields that were removed (in previousOwnership but not in currentOwnership)
+	// Check for fields that were removed (in previousOwnershipFlat but not in currentOwnershipFlat)
 	// This can happen when ignore_fields changes or fields are removed from YAML
-	for path, previousOwners := range previousOwnership {
-		if _, exists := currentOwnership[path]; !exists {
+	for path, previousOwner := range previousOwnershipFlat {
+		if _, exists := currentOwnershipFlat[path]; !exists {
 			// Field was previously owned but is no longer tracked
 			// Only report if it was previously owned by k8sconnect
-			if common.StringSliceContains(previousOwners, "k8sconnect") {
+			if previousOwner == "k8sconnect" {
 				tflog.Debug(ctx, "Field ownership released", map[string]interface{}{
-					"path":            path,
-					"previous_owners": previousOwners,
+					"path":           path,
+					"previous_owner": previousOwner,
 				})
 			}
 		}
@@ -502,8 +643,8 @@ func (r *objectResource) checkOwnershipTransitions(ctx context.Context, req reso
 		tflog.Debug(ctx, "⚠️ DEBUG: checkOwnershipTransitions - Warning added to diagnostics")
 	} else {
 		tflog.Debug(ctx, "⚠️ DEBUG: checkOwnershipTransitions - NO TRANSITIONS FOUND", map[string]interface{}{
-			"previous_ownership_map": previousOwnership,
-			"current_ownership_map":  currentOwnership,
+			"previous_ownership_map": previousOwnershipFlat,
+			"current_ownership_map":  currentOwnershipFlat,
 		})
 	}
 }

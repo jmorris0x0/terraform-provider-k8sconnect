@@ -1,4 +1,4 @@
-package object
+package patch
 
 import (
 	"context"
@@ -33,28 +33,56 @@ func extractAllFieldOwnership(obj *unstructured.Unstructured) map[string][]strin
 
 // updateFieldOwnershipData updates the field_ownership attribute in the resource model
 // It extracts, filters, flattens, and sets ownership data for clean UX
-// NOTE: This function does NOT filter out ignore_fields from field_ownership.
-// Users need visibility into who owns ignored fields. Filtering only status fields
-// ensures consistency between plan and apply phases.
-func updateFieldOwnershipData(ctx context.Context, data *objectResourceModel, currentObj *unstructured.Unstructured) {
+// For patch resources, we need to normalize the field manager name since it changes
+// between plan (k8sconnect-patch-temp) and apply (k8sconnect-patch-{id})
+func updateFieldOwnershipData(ctx context.Context, data *patchResourceModel, currentObj *unstructured.Unstructured, fieldManager string) {
 	// Extract ALL field ownership (map[string][]string)
 	ownership := extractAllFieldOwnership(currentObj)
 
-	// Filter out unwanted fields
+	// Apply filtering first, then flatten
 	filteredOwnership := make(map[string][]string)
 	for path, managers := range ownership {
-		// Skip status fields - they're always owned by controllers and provide no actionable information
+		// Filter: Skip status fields
 		if strings.HasPrefix(path, "status.") || path == "status" {
 			continue
 		}
 
-		// Skip K8s system annotations that are added/updated unpredictably by controllers
+		// Filter: Skip K8s system annotations that are added/updated unpredictably by controllers
 		// These cause plan/apply inconsistencies because they appear after our dry-run prediction
 		if fieldmanagement.IsKubernetesSystemAnnotation(path) {
 			continue
 		}
 
-		filteredOwnership[path] = managers
+		// Filter: Only include fields owned by THIS patch's field manager
+		// During CREATE plan, fieldManager is "k8sconnect-patch-temp"
+		// During CREATE apply, fieldManager is "k8sconnect-patch-{id}"
+		// We need to accept both to prevent inconsistencies
+		hasOurManager := false
+		ourManagers := make([]string, 0)
+		for _, m := range managers {
+			// Match exact field manager (works for UPDATE and CREATE apply)
+			// OR match temp placeholder (works for CREATE plan)
+			if m == fieldManager || m == "k8sconnect-patch-temp" {
+				hasOurManager = true
+				ourManagers = append(ourManagers, m)
+			}
+		}
+
+		if !hasOurManager {
+			continue
+		}
+
+		// Normalize field manager names to prevent plan/apply inconsistencies
+		// Replace k8sconnect-patch-temp or k8sconnect-patch-{id} with generic "k8sconnect-patch"
+		normalizedManagers := make([]string, 0, len(ourManagers))
+		for _, m := range ourManagers {
+			if strings.HasPrefix(m, "k8sconnect-patch-") {
+				normalizedManagers = append(normalizedManagers, "k8sconnect-patch")
+			} else {
+				normalizedManagers = append(normalizedManagers, m)
+			}
+		}
+		filteredOwnership[path] = normalizedManagers
 	}
 
 	// Flatten using the common logic
@@ -72,27 +100,4 @@ func updateFieldOwnershipData(ctx context.Context, data *objectResourceModel, cu
 	} else {
 		data.FieldOwnership = mapValue
 	}
-}
-
-// isInIgnoreFields checks if a field path matches any pattern in ignore_fields
-func isInIgnoreFields(ctx context.Context, path string, ignoreFields types.List) bool {
-	if ignoreFields.IsNull() || ignoreFields.IsUnknown() {
-		return false
-	}
-
-	var patterns []string
-	diags := ignoreFields.ElementsAs(ctx, &patterns, false)
-	if diags.HasError() || len(patterns) == 0 {
-		return false
-	}
-
-	for _, pattern := range patterns {
-		// Exact match
-		if path == pattern {
-			return true
-		}
-		// TODO: Add JSONPath predicate matching if needed
-		// For now, exact match is sufficient
-	}
-	return false
 }
