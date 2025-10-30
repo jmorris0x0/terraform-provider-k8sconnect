@@ -475,4 +475,3 @@ func findRemovedFields(currentFields, newFields []string) []string {
 
 	return removed
 }
-

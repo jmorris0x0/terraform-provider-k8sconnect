@@ -12,7 +12,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/fieldmanagement"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -160,10 +159,14 @@ func (r *objectResource) checkDriftAndPreserveState(ctx context.Context, req res
 				// Preserve object_ref since resource identity hasn't changed
 				plannedData.ObjectRef = stateData.ObjectRef
 
-				// Only preserve field_ownership if ignore_fields hasn't changed
-				// When ignore_fields changes, field_ownership will change even if projection doesn't
+				// Only preserve field_ownership if BOTH:
+				// 1. ignore_fields hasn't changed
+				// 2. field_ownership hasn't changed (no ownership transitions)
+				// When either changes, we must show the predicted field_ownership from dry-run
 				ignoreFieldsChanged := !stateData.IgnoreFields.Equal(plannedData.IgnoreFields)
-				if !ignoreFieldsChanged {
+				hasOwnershipTransition := detectOwnershipManagerTransition(ctx, stateData.FieldOwnership, plannedData.FieldOwnership)
+
+				if !ignoreFieldsChanged && !hasOwnershipTransition {
 					plannedData.FieldOwnership = stateData.FieldOwnership
 				}
 				// else: leave field_ownership as predicted from dry-run (already set in applyProjection)
@@ -466,27 +469,49 @@ func (r *objectResource) applyProjection(ctx context.Context, dryRunResult *unst
 		// This causes "Provider produced inconsistent result" errors when prediction doesn't match
 		// actual post-apply ownership.
 
-		// Extract fields that k8sconnect is sending (from dry-run's k8sconnect manager entry)
+		// Convert paths to map for efficient lookup
+		// The 'paths' variable contains ALL fields we're managing from yaml_body (after ignore_fields filtering)
+		// This works for both:
+		// - First apply after import (k8sconnect not in managedFields yet)
+		// - Drift reclaim (k8sconnect already in managedFields)
 		fieldsWeAreSending := make(map[string]bool)
-		for _, mf := range dryRunResult.GetManagedFields() {
-			if mf.Manager == "k8sconnect" && mf.FieldsV1 != nil {
-				// Parse k8sconnect's FieldsV1 to get the paths we're sending
-				k8sconnectOwnership := parseFieldsV1ToPathMap([]metav1.ManagedFieldsEntry{mf}, dryRunResult.Object)
-				for path := range k8sconnectOwnership {
-					fieldsWeAreSending[path] = true
-				}
-				break
-			}
+		for _, path := range paths {
+			fieldsWeAreSending[path] = true
 		}
+
+		// DEBUG: Log what we're working with
+		pathsList := make([]string, 0, len(fieldsWeAreSending))
+		for p := range fieldsWeAreSending {
+			pathsList = append(pathsList, p)
+		}
+		tflog.Debug(ctx, "Fields we're sending (paths)", map[string]interface{}{
+			"paths": pathsList,
+		})
+
+		ownershipList := make([]string, 0, len(ownershipMap))
+		for p, owner := range ownershipMap {
+			ownershipList = append(ownershipList, fmt.Sprintf("%s=%s", p, owner))
+		}
+		tflog.Debug(ctx, "Current ownership from dry-run", map[string]interface{}{
+			"ownership": ownershipList,
+		})
 
 		overrideCount := 0
 		for path, currentOwner := range ownershipMap {
 			// Only override if we're actually sending this field
 			if fieldsWeAreSending[path] && currentOwner != "k8sconnect" {
+				tflog.Debug(ctx, "Overriding ownership", map[string]interface{}{
+					"path": path,
+					"from": currentOwner,
+					"to":   "k8sconnect",
+				})
 				ownershipMap[path] = "k8sconnect"
 				overrideCount++
 			}
 		}
+
+		// Note: Parent field removal happens automatically in extractFieldOwnershipMap()
+		// No need to do it again here
 
 		if overrideCount > 0 {
 			tflog.Info(ctx, "Applied force=true ownership prediction overrides", map[string]interface{}{
@@ -531,7 +556,85 @@ func extractFieldOwnershipMap(ctx context.Context, obj *unstructured.Unstructure
 	ownership := extractAllFieldOwnership(obj)
 
 	// Flatten using the common logic
-	return fieldmanagement.FlattenFieldOwnership(ownership)
+	ownershipFlat := fieldmanagement.FlattenFieldOwnership(ownership)
+
+	// Remove parent field entries when child fields exist
+	// Example: If "data.owner" exists, remove "data" from ownership map
+	// This prevents parent ownership from overriding child ownership in the final map
+	ownershipFlat = removeParentFieldsFromOwnership(ownershipFlat)
+
+	return ownershipFlat
+}
+
+// detectOwnershipManagerTransition returns true if any field that exists in BOTH
+// state and plan has a different manager (ownership transition).
+// This is different from just new fields being added - we only care about manager
+// changes on existing fields (e.g., kubectl → k8sconnect).
+func detectOwnershipManagerTransition(ctx context.Context, stateOwnership, planOwnership types.Map) bool {
+	// If either is null/unknown, no transition to detect
+	if stateOwnership.IsNull() || stateOwnership.IsUnknown() ||
+		planOwnership.IsNull() || planOwnership.IsUnknown() {
+		return false
+	}
+
+	// Extract to Go maps
+	var stateMap map[string]string
+	var planMap map[string]string
+
+	diagsState := stateOwnership.ElementsAs(ctx, &stateMap, false)
+	if diagsState.HasError() {
+		return false
+	}
+
+	diagsPlan := planOwnership.ElementsAs(ctx, &planMap, false)
+	if diagsPlan.HasError() {
+		return false
+	}
+
+	// Check if any field that exists in BOTH has a different manager
+	for field, stateManager := range stateMap {
+		if planManager, existsInPlan := planMap[field]; existsInPlan {
+			if stateManager != planManager {
+				// Manager changed on existing field - this is a transition
+				tflog.Debug(ctx, "Detected ownership manager transition", map[string]interface{}{
+					"field":       field,
+					"old_manager": stateManager,
+					"new_manager": planManager,
+				})
+				return true
+			}
+		}
+	}
+
+	// No transitions detected
+	return false
+}
+
+// removeParentFieldsFromOwnership removes parent field entries when child fields are present
+// Example: If ownership has both "data" and "data.owner", remove "data"
+func removeParentFieldsFromOwnership(ownership map[string]string) map[string]string {
+	result := make(map[string]string)
+
+	// First, copy all entries
+	for path, owner := range ownership {
+		result[path] = owner
+	}
+
+	// For each field, check if there are child fields
+	// If so, remove the parent field
+	for path := range ownership {
+		parts := strings.Split(path, ".")
+		// Check all parent paths
+		for i := 1; i < len(parts); i++ {
+			parentPath := strings.Join(parts[:i], ".")
+			// If parent exists in map, remove it (child takes precedence)
+			if _, hasParent := result[parentPath]; hasParent {
+				delete(result, parentPath)
+			}
+		}
+	}
+
+	return result
 }
 
 // checkOwnershipTransitions compares previous vs current field ownership and warns about transitions
@@ -596,9 +699,9 @@ func (r *objectResource) checkOwnershipTransitions(ctx context.Context, req reso
 		// If ownership changed, record transition
 		if !existed || previousOwner != currentOwner {
 			tflog.Debug(ctx, "⚠️ DEBUG: checkOwnershipTransitions - TRANSITION DETECTED", map[string]interface{}{
-				"path":            path,
-				"previous_owner":  previousOwner,
-				"current_owner":   currentOwner,
+				"path":             path,
+				"previous_owner":   previousOwner,
+				"current_owner":    currentOwner,
 				"prev_owned_by_us": existed && previousOwner == "k8sconnect",
 				"now_owned_by_us":  currentOwner == "k8sconnect",
 			})

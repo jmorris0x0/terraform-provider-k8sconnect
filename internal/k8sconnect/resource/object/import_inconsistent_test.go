@@ -73,7 +73,9 @@ func TestAccObjectResource_ImportInconsistentState(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					// After import + apply, resource should be in state
 					resource.TestCheckResourceAttrSet("k8sconnect_object.imported_cm", "id"),
-					resource.TestCheckResourceAttr("k8sconnect_object.imported_cm", "yaml_body",
+					// Use semantic YAML comparison instead of byte-for-byte string matching
+					// to handle YAML field ordering differences from Go map iteration
+					testhelpers.CheckYAMLSemanticEquality("k8sconnect_object.imported_cm", "yaml_body",
 						testAccYAMLBody(configMapName, ns)),
 					testhelpers.CheckConfigMapExists(k8sClient, ns, configMapName),
 					// After apply, should now be managed by k8sconnect with annotations

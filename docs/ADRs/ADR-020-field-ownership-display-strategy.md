@@ -23,16 +23,33 @@ When displaying field_ownership to users, which managers should we track?
 
 ## Decision
 
-**Track ALL field managers, display using deterministic flattening rules.**
+**Track ownership for fields in `managed_state_projection` only.**
 
-The field_ownership attribute is a computed attribute showing ownership of all non-status fields:
+### Critical Architectural Constraint
 
+**field_ownership is bounded by managed_state_projection**. Since managed_state_projection contains fields based on yaml_body (what we want to manage), field_ownership shows managers for those fields.
+
+**This enables ownership transition visibility:**
 ```hcl
+# Before kubectl scales deployment
 field_ownership = {
   "spec.replicas" = "k8sconnect"
-  "metadata.annotations.kubectl.kubernetes.io/last-applied-configuration" = "kubectl"
+}
+
+# After kubectl scale (drift)
+field_ownership = {
+  "spec.replicas" = "kube-controller-manager" -> "k8sconnect"  # Transition visible!
 }
 ```
+
+**What you WILL see:**
+- ✅ Ownership transitions for fields in yaml_body (drift detection)
+- ✅ Who currently owns each managed field (external controllers can take ownership)
+- ✅ Who will own after apply (typically k8sconnect with force=true)
+
+**What you will NOT see:**
+- ❌ Fields added by external controllers that aren't in yaml_body
+- ❌ Status fields (filtered regardless)
 
 ### Implementation Approach
 
@@ -164,16 +181,13 @@ We filter status fields from display because:
 - ADR-021 implements filtered warning system to show only actionable ownership transitions
 - `ignore_fields` allows users to explicitly defer ownership to external controllers
 
-## Future Consideration: Private State
+## Implementation: Computed Attribute
 
-An alternative architecture would be:
-- Track comprehensive ownership in private state (not visible in terraform state show)
-- Emit filtered warnings during plan phase
-- Only show actionable transitions to users
+field_ownership is tracked as a computed attribute (visible in `terraform state show`). Internally, we track all co-owners per field using `map[string][]string` to properly handle SSA shared ownership scenarios where multiple managers co-own the same field.
 
-This would eliminate any possibility of unresolvable drift in the state file. However, this is **not currently implemented**. The current approach (computed attribute tracking ALL managers) works reliably after the v0.2.0 rollback, with edge case drift mitigated through `ignore_fields`.
+**Scope:** Tracking is limited to fields in `managed_state_projection` - we do not track ownership for fields we don't manage.
 
-Private state remains a future option if unresolvable drift becomes a practical issue rather than a theoretical concern.
+**Note:** v0.2.0-v0.2.2 briefly moved field_ownership to private state. This was rolled back in v0.2.3 due to test failures.
 
 ## Related Documentation
 
