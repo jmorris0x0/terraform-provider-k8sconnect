@@ -22,6 +22,7 @@ import (
 // This is the core feature of field_ownership - showing "who owns it now" vs "who will own it after apply"
 //
 // Test scenarios:
+//
 //  1. Import kubectl-created resource → k8sconnect takes ownership
 //     Plan MUST show: field_ownership["data.foo"] = "kubectl-create" -> "k8sconnect"
 //

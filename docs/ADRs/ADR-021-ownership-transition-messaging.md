@@ -2,8 +2,8 @@
 
 **Status:** In Progress
 **Date:** 2025-10-28
-**Decision Date:** TBD (awaiting Option A vs B decision)
-**Last Updated:** 2025-01-29
+**Decision Date:** 2025-01-30 (Option A: Value-Based Detection)
+**Last Updated:** 2025-01-30
 **Related ADRs:** ADR-005 (Field Ownership Strategy), ADR-020 (Field Ownership Display Strategy)
 
 ## Summary
@@ -12,14 +12,15 @@ This ADR defines a systematic approach to ownership transition messaging using a
 
 **Completed:**
 - ✅ **Phase 0: Data Structure Foundation** - Refactored ownership tracking from `map[string]string` to `map[string][]string` to properly handle SSA shared ownership. Eliminates "last manager wins" bug. All tests passing (2025-10-28).
+- ✅ **Phase 1: Option A/B Decision** - Decided on Option A (value-based detection) for `external_changed` dimension (2025-01-30).
 
 **Current State:**
 - Ownership warnings are ad-hoc (scattered across resource implementations, no centralized logic)
-- Data structure (`map[string][]string`) can support either Option A or B
+- Data structure (`map[string][]string`) supports the chosen approach
 - The 16-row classification system described below is PLANNED, not yet implemented
 
 **Next Steps:**
-1. Decide Option A (value-based) vs Option B (metadata-based) for `external_changed` detection
+1. ✅ ~~Decide Option A (value-based) vs Option B (metadata-based) for `external_changed` detection~~ **DECIDED: Option A**
 2. Implement centralized classification module with 16-row table
 3. Integrate into both resources (object, patch)
 4. Add provider-level verbosity configuration
@@ -367,25 +368,30 @@ func TestClassifyConflict(t *testing.T) {
 
 Every possible ownership transition has a corresponding unit test verifying the correct conflict classification.
 
-## Open Question: Defining external_changed for Shared Ownership
+## Decision: Option A (Value-Based Detection) for external_changed
 
-**Update (2025-10-28):** The data structure refactor (Phase 0) is complete. We now properly track all field managers in `map[string][]string`, eliminating the "last manager wins" bug. This provides the foundation to implement either Option A or Option B accurately. The question below remains: which approach should we take?
+**Update (2025-01-30):** ✅ **DECIDED - Option A (Value-Based Detection)**
 
-### The Critical Ambiguity
+After comprehensive analysis of shared ownership scenarios, false positive/negative rates, UX implications, and implementation complexity, we have decided to use **Option A: Value-Based Detection**.
 
-The boolean `external_changed` can be defined two ways:
+### The Decision
 
-**Option A: Value-Based Detection**
-```
-external_changed = (current field value != previous state field value)
-```
+The boolean `external_changed` is defined as:
 
-**Option B: Metadata-Based Detection**
-```
-external_changed = (current managers != previous managers) OR (current value != previous value)
+```go
+external_changed = (currentFieldValue != previousStateValue)
 ```
 
-The difference matters for **shared ownership scenarios**.
+**NOT:**
+```go
+external_changed = (currentManagers != previousManagers) OR (currentValue != previousValue)
+```
+
+This means `external_changed` is TRUE only when the field **value** actually changed, ignoring changes to the manager metadata when values match.
+
+### Why Option A?
+
+The critical ambiguity was whether to warn when external controllers become co-owners (even if value matches) versus only warning when values actually diverge.
 
 ### Shared Ownership Scenarios
 
@@ -424,32 +430,68 @@ T:   User runs: kubectl patch deployment foo -p '{"spec":{"template":{"spec":{"c
 With Option A: `external_changed=false` → Row 12 (silent) ✓
 With Option B: `external_changed=true` → Row 13 (warning) - **FALSE POSITIVE**
 
-### Analysis of Each Approach
+### Rationale for Choosing Option A
 
-**Option A: Value-Based (Recommended)**
+After comprehensive scenario analysis documented below, we chose **Option A (Value-Based Detection)** for the following reasons:
+
+**1. Low False Positives**
+- Doesn't warn on benign shared ownership (HPA becoming co-owner when value matches)
+- Doesn't warn on one-time kubectl operations with matching values
+- Supports GitOps dual-management patterns (Terraform + ArgoCD applying same config)
+- Doesn't warn on normal Kubernetes self-healing operations
+
+**2. High Actionability**
+- Message shows actual value change: "spec.replicas: 5 → 3"
+- User can see the problem and make informed decision
+- Clear cause-and-effect relationship
+- Aligns with Terraform's value-based drift detection mental model
+
+**3. Better User Experience**
+- Warnings only appear when there's real drift requiring user action
+- No "crying wolf" on every plan when values match
+- Clear, predictable behavior: "warn when values don't match"
+- No confusing warnings about "drift" when values are actually correct
+
+**4. Simpler Implementation**
+- Just compare field values (already have both objects)
+- No need to maintain manager list history complexity
+- Fewer edge cases and conditions to handle
+- Lower maintenance burden
+
+**5. Acceptable Trade-Off**
+- We give up: Early warning when HPA becomes co-owner (before it scales)
+- This is acceptable because:
+  - No actionable decision until HPA actually scales
+  - User can't meaningfully respond to "HPA is managing this" when values match
+  - When drift occurs, warning clearly identifies HPA as the cause
+  - In practice, HPA will scale within minutes/hours if there's a problem
+
+### Analysis of Both Approaches (Historical Context)
+
+**Option A: Value-Based**
 
 Pros:
-- **Only warns on actual drift** (value mismatches)
-- **Low false positives** (doesn't warn on benign shared ownership)
-- **Simple to implement** (compare field values)
-- **Actionable** (user sees: "field changed from X to Y")
-- **No controller list maintenance needed**
+- Only warns on actual drift (value mismatches)
+- Low false positives (doesn't warn on benign shared ownership)
+- Simple to implement (compare field values)
+- Actionable (user sees: "field changed from X to Y")
+- No controller list maintenance needed
 
 Cons:
-- **Doesn't warn early about HPA** (only warns when HPA actually scales, not when it becomes co-owner)
-- **Misses potential future conflicts** (HPA is active but values match today, might drift tomorrow)
+- Doesn't warn early about HPA (only warns when HPA actually scales, not when it becomes co-owner)
+- Misses potential future conflicts (HPA is active but values match today, might drift tomorrow)
 
-**Option B: Metadata-Based**
+**Option B: Metadata-Based** (Rejected)
 
 Pros:
-- **Early warning about active controllers** (warns when HPA becomes co-owner)
-- **Catches potential conflicts** before values diverge
+- Early warning about active controllers (warns when HPA becomes co-owner)
+- Catches potential conflicts before values diverge
 
 Cons:
-- **False positives** (warns on one-time kubectl operations)
-- **Noisy** (warns even when values match and there's no actual problem)
-- **Less actionable** ("New manager appeared" - so what?)
-- **Harder to understand** ("Why is it warning? The value is correct!")
+- False positives (warns on one-time kubectl operations)
+- Noisy (warns even when values match and there's no actual problem)
+- Less actionable ("New manager appeared" - so what?)
+- Harder to understand ("Why is it warning? The value is correct!")
 
 ### Hybrid Approach Considered
 
@@ -491,7 +533,9 @@ But this:
   - When values diverge: "field changed, conflict detected" ✓
   - When values match: Acceptable pattern (both applying same config)
 
-### Tentative Recommendation: Option A (Value-Based)
+### Final Decision: Option A (Value-Based)
+
+✅ **DECIDED (2025-01-30)**
 
 Define `external_changed` as:
 ```go
@@ -509,9 +553,9 @@ external_changed = (currentValue != previousStateValue)
 - User can't act on "HPA is now co-owner" without drift
 - When drift occurs, message clearly identifies HPA as the modifier
 
-### Alternative: Well-Known Controllers Detection
+### Alternative Considered: Well-Known Controllers Detection (Rejected)
 
-We could use metadata-based detection ONLY for known controllers:
+We considered using metadata-based detection ONLY for known controllers:
 
 ```go
 knownControllers := []string{
@@ -537,15 +581,17 @@ This gives early warnings for controllers, but ignores one-time kubectl operatio
 - What about custom operators? (Can't know all manager names)
 - More complexity, fragile
 
-**Verdict:** Not worth the complexity and maintenance burden.
+**Verdict:** Not worth the complexity and maintenance burden. **Rejected in favor of pure value-based detection.**
 
-### Decision Needed
+### Decision Impact
 
-**Question for discussion:** Should we use value-based or metadata-based detection for `external_changed`?
+✅ **DECIDED: Value-Based Detection (Option A)**
 
-Current recommendation: **Value-based** for the reasons above.
-
-If we want awareness of shared ownership creation, we should handle it separately (not as part of the conflict warning system), possibly as an optional diagnostic or debug feature.
+This decision means:
+- `external_changed = (currentValue != previousStateValue)` for all fields
+- No special handling for known controllers
+- Warnings only when values actually diverge
+- Shared ownership awareness is left for future optional diagnostic features
 
 ### Implementation Progress
 
@@ -621,14 +667,16 @@ The code now has the **data infrastructure** to implement either Option A or Opt
    - No centralized 16-row classification system yet
    - Simple ownership change detection without systematic categorization
 
-**Next Decision Required:**
+**Decision Complete (2025-01-30):**
 
-With the data structure foundation complete, the next step is to:
-1. **Decide** Option A (value-based) vs Option B (metadata-based) for `external_changed` detection
+✅ Phase 1 is now complete. We have decided on **Option A (value-based detection)** for `external_changed`.
+
+With both the data structure foundation and the architectural decision complete, the next steps are:
+1. ✅ ~~**Decide** Option A (value-based) vs Option B (metadata-based) for `external_changed` detection~~ **DECIDED: Option A**
 2. **Implement** centralized classification module with 16-row table
 3. **Replace** ad-hoc warnings with systematic categorization
 
-The data structure refactor makes EITHER approach feasible with good accuracy.
+The data structure refactor and Option A decision provide a clear path forward for implementation.
 
 ## Rationale
 
@@ -704,10 +752,10 @@ The data structure refactor makes EITHER approach feasible with good accuracy.
 - ✅ Update ownership transition detection to compare manager lists
 - ✅ All tests passing (unit + acceptance)
 
-**Phase 1:** Decide Option A vs Option B (IN PROGRESS)
-- Decide: Value-based (A) or Metadata-based (B) detection for `external_changed`
-- Create test cases for shared ownership scenarios (HPA co-owner, kubectl co-owner)
-- Implement chosen detection strategy
+**Phase 1:** ✅ **COMPLETED (2025-01-30)** - Decide Option A vs Option B
+- ✅ Decided: Value-based (Option A) detection for `external_changed`
+- ✅ Documented rationale and scenario analysis in ADR
+- Next: Implement value comparison logic in Phase 2/3
 
 **Phase 2:** Implement centralized classification module
 - Create `internal/k8sconnect/common/ownership/` module

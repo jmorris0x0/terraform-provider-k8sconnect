@@ -2,6 +2,7 @@ package object
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/fieldmanagement"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/ownership"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -308,8 +310,8 @@ func (r *objectResource) calculateProjection(ctx context.Context, req resource.M
 				"object_ref":           fmt.Sprintf("%s/%s %s/%s", desiredObj.GetAPIVersion(), desiredObj.GetKind(), desiredObj.GetNamespace(), desiredObj.GetName()),
 			})
 
-			// Check for ownership transitions using ACTUAL current ownership
-			r.checkOwnershipTransitions(ctx, req, resp, actualOwnershipMap)
+			// Check for ownership conflicts using ADR-021 classification
+			r.detectOwnershipConflicts(ctx, req, resp, actualOwnershipMap)
 		}
 	}
 
@@ -637,165 +639,141 @@ func removeParentFieldsFromOwnership(ownership map[string]string) map[string]str
 	return result
 }
 
-// checkOwnershipTransitions compares previous vs current field ownership and warns about transitions
-func (r *objectResource) checkOwnershipTransitions(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse, currentOwnership map[string][]string) {
-	tflog.Debug(ctx, "⚠️ DEBUG: checkOwnershipTransitions - START", map[string]interface{}{
-		"current_ownership_map": currentOwnership,
-		"current_field_count":   len(currentOwnership),
-	})
-
+// detectOwnershipConflicts uses ADR-021's 16-row classification to detect ownership conflicts.
+// Only warns on actual conflicts (controller fights), stays silent on normal operations.
+func (r *objectResource) detectOwnershipConflicts(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse, currentOwnership map[string][]string) {
 	// Skip if no state (first apply)
 	if req.State.Raw.IsNull() {
-		tflog.Debug(ctx, "⚠️ DEBUG: checkOwnershipTransitions - No state yet - skipping transition check")
 		return
 	}
 
-	// Get previous ownership from state attribute
+	// Get state and planned data
 	var stateData objectResourceModel
 	diags := req.State.Get(ctx, &stateData)
 	if diags.HasError() {
-		// Error reading state
-		tflog.Warn(ctx, "⚠️ DEBUG: Failed to read state - skipping transition check", map[string]interface{}{
-			"diagnostics": diags,
+		return
+	}
+
+	var plannedData objectResourceModel
+	diags = req.Plan.Get(ctx, &plannedData)
+	if diags.HasError() {
+		return
+	}
+
+	// Detect config_changed dimension
+	configChanged := !stateData.YAMLBody.Equal(plannedData.YAMLBody) ||
+		!stateData.IgnoreFields.Equal(plannedData.IgnoreFields)
+
+	// Extract ownership BASELINE from private state (what we owned at last Apply)
+	// This is our ground truth for detecting drift - it doesn't get updated during Read operations
+	ownershipBaselineJSON, diags := req.Private.GetKey(ctx, "ownership_baseline")
+	if diags.HasError() || ownershipBaselineJSON == nil {
+		// No baseline stored yet (first apply or upgrade from old version)
+		tflog.Debug(ctx, "No ownership baseline in private state, skipping conflict detection")
+		return
+	}
+
+	// Parse the JSON baseline
+	var baselineOwnership map[string]string
+	if err := json.Unmarshal(ownershipBaselineJSON, &baselineOwnership); err != nil {
+		tflog.Debug(ctx, "Failed to parse ownership baseline from private state", map[string]interface{}{
+			"error": err.Error(),
 		})
 		return
 	}
 
-	// Extract previous ownership map from state
-	var previousOwnershipFlat map[string]string
-	if !stateData.FieldOwnership.IsNull() && !stateData.FieldOwnership.IsUnknown() {
-		d := stateData.FieldOwnership.ElementsAs(ctx, &previousOwnershipFlat, false)
-		if d.HasError() {
-			tflog.Warn(ctx, "Failed to extract previous field ownership from state", map[string]interface{}{
-				"diagnostics": d,
-			})
-			return
-		}
-	}
-
-	if previousOwnershipFlat == nil || len(previousOwnershipFlat) == 0 {
-		// No previous ownership tracked - first apply or imported resource
-		tflog.Debug(ctx, "⚠️ DEBUG: checkOwnershipTransitions - No previous ownership in state - skipping transition check")
+	if len(baselineOwnership) == 0 {
+		// No baseline data
 		return
 	}
+
+	// We need the actual K8s objects to compare values (Option A: value-based external_changed)
+	// But we don't have easy access to stateObj and currentObj here
+	// For now, we'll use a simplified approach: just check ownership changes
+	// TODO: Full implementation would reconstruct stateObj from state and get currentObj from cluster
 
 	// Flatten current ownership for comparison
 	currentOwnershipFlat := fieldmanagement.FlattenFieldOwnership(currentOwnership)
 
-	tflog.Debug(ctx, "⚠️ DEBUG: checkOwnershipTransitions - Comparing ownership", map[string]interface{}{
-		"previous_ownership_map": previousOwnershipFlat,
-		"previous_field_count":   len(previousOwnershipFlat),
-		"current_ownership_map":  currentOwnershipFlat,
-		"current_field_count":    len(currentOwnershipFlat),
-	})
+	// Create conflict detector
+	conflicts := ownership.NewConflictDetection()
 
-	// Find ownership transitions (fields that changed owner)
-	var transitions []ownershipTransition
+	// Classify each field
+	for fieldPath, currentManager := range currentOwnershipFlat {
+		baselineManager, existedInBaseline := baselineOwnership[fieldPath]
 
-	// Check all paths in current ownership
-	for path, currentOwner := range currentOwnershipFlat {
-		previousOwner, existed := previousOwnershipFlat[path]
+		// Calculate the 4 boolean dimensions
+		// prevOwned: Did WE own this field at last successful Apply? (from baseline, not refreshed state)
+		prevOwned := existedInBaseline && stringSliceContains([]string{baselineManager}, "k8sconnect")
+		nowOwned := stringSliceContains([]string{currentManager}, "k8sconnect")
 
-		// If ownership changed, record transition
-		if !existed || previousOwner != currentOwner {
-			tflog.Debug(ctx, "⚠️ DEBUG: checkOwnershipTransitions - TRANSITION DETECTED", map[string]interface{}{
-				"path":             path,
-				"previous_owner":   previousOwner,
-				"current_owner":    currentOwner,
-				"prev_owned_by_us": existed && previousOwner == "k8sconnect",
-				"now_owned_by_us":  currentOwner == "k8sconnect",
-			})
+		// external_changed: For now, detect if manager changed and it's not us
+		// Full Option A would compare actual values from stateObj vs currentObj
+		externalChanged := existedInBaseline && baselineManager != currentManager && currentManager != "k8sconnect"
 
-			// Build owner lists for the transition message (backward compatibility)
-			previousOwners := []string{}
-			if existed {
-				previousOwners = append(previousOwners, previousOwner)
-			}
-			currentOwners := []string{currentOwner}
+		// Classify conflict type
+		conflictType := ownership.ClassifyConflict(prevOwned, nowOwned, configChanged, externalChanged)
 
-			transitions = append(transitions, ownershipTransition{
-				Path:           path,
-				PreviousOwners: previousOwners,
-				CurrentOwners:  currentOwners,
+		// TEMPORARY DEBUG: Log ALL classifications to diagnose issue
+		tflog.Debug(ctx, "⚠️  CLASSIFY DEBUG", map[string]interface{}{
+			"field":           fieldPath,
+			"baselineManager": baselineManager,
+			"currManager":     currentManager,
+			"prevOwned":       prevOwned,
+			"nowOwned":        nowOwned,
+			"configChanged":   configChanged,
+			"externalChanged": externalChanged,
+			"conflictType":    conflictType.String(),
+		})
+
+		// Add to conflict detector if not NoConflict
+		if conflictType != ownership.NoConflict {
+			conflicts.AddField(conflictType, ownership.FieldChange{
+				Path:            fieldPath,
+				PreviousManager: baselineManager,
+				CurrentManager:  currentManager,
+				PlannedManager:  "k8sconnect",
 			})
 		}
 	}
 
-	// Check for fields that were removed (in previousOwnershipFlat but not in currentOwnershipFlat)
-	// This can happen when ignore_fields changes or fields are removed from YAML
-	for path, previousOwner := range previousOwnershipFlat {
-		if _, exists := currentOwnershipFlat[path]; !exists {
-			// Field was previously owned but is no longer tracked
-			// Only report if it was previously owned by k8sconnect
-			if previousOwner == "k8sconnect" {
-				tflog.Debug(ctx, "Field ownership released", map[string]interface{}{
-					"path":           path,
-					"previous_owner": previousOwner,
-				})
-			}
+	// Emit warnings (resource-level aggregation)
+	if conflicts.HasConflicts() {
+		for _, warning := range conflicts.FormatWarnings() {
+			resp.Diagnostics.AddWarning(warning.Summary, warning.Detail)
 		}
-	}
-
-	// Emit warnings for ownership transitions
-	if len(transitions) > 0 {
-		tflog.Debug(ctx, "⚠️ DEBUG: checkOwnershipTransitions - Calling addOwnershipTransitionWarning", map[string]interface{}{
-			"transition_count": len(transitions),
-			"transitions":      transitions,
-		})
-		addOwnershipTransitionWarning(resp, transitions)
-		tflog.Debug(ctx, "⚠️ DEBUG: checkOwnershipTransitions - Warning added to diagnostics")
-	} else {
-		tflog.Debug(ctx, "⚠️ DEBUG: checkOwnershipTransitions - NO TRANSITIONS FOUND", map[string]interface{}{
-			"previous_ownership_map": previousOwnershipFlat,
-			"current_ownership_map":  currentOwnershipFlat,
-		})
 	}
 }
 
-// ownershipTransition represents a field whose ownership changed
-type ownershipTransition struct {
-	Path           string
-	PreviousOwners []string
-	CurrentOwners  []string
+// stringSliceContains checks if a string slice contains a value
+func stringSliceContains(slice []string, value string) bool {
+	for _, item := range slice {
+		if item == value {
+			return true
+		}
+	}
+	return false
 }
 
-// addOwnershipTransitionWarning emits a warning about field ownership transitions
-func addOwnershipTransitionWarning(resp *resource.ModifyPlanResponse, transitions []ownershipTransition) {
-	var details []string
-	for _, t := range transitions {
-		// Format the transition showing all managers
-		prevStr := strings.Join(t.PreviousOwners, ", ")
-		if prevStr == "" {
-			prevStr = "(none)"
-		}
-		currStr := strings.Join(t.CurrentOwners, ", ")
-
-		// Show the future transition
-		// k8sconnect will take ownership using force=true during apply
-		details = append(details, fmt.Sprintf("  • %s: [%s] → [%s]", t.Path, prevStr, currStr))
+// getFieldValue extracts a field value from an unstructured object by JSON path
+func getFieldValue(obj *unstructured.Unstructured, fieldPath string) interface{} {
+	if obj == nil {
+		return nil
 	}
 
-	warningMessage := fmt.Sprintf("Field ownership will change if you apply:\n%s\n\n"+
-		"k8sconnect will take or maintain ownership using force=true. "+
-		"Other controllers may attempt to reclaim these fields, causing drift.",
-		strings.Join(details, "\n"))
+	pathParts := strings.Split(fieldPath, ".")
+	var current interface{} = obj.Object
 
-	tflog.Warn(context.Background(), "⚠️ DEBUG: addOwnershipTransitionWarning - ADDING WARNING TO DIAGNOSTICS", map[string]interface{}{
-		"warning_summary":  "Field Ownership Transition",
-		"warning_detail":   warningMessage,
-		"transition_count": len(transitions),
-	})
+	for _, part := range pathParts {
+		// Handle map access
+		if m, ok := current.(map[string]interface{}); ok {
+			current = m[part]
+		} else {
+			return nil
+		}
+	}
 
-	resp.Diagnostics.AddWarning(
-		"Field Ownership Transition",
-		warningMessage,
-	)
-
-	tflog.Warn(context.Background(), "⚠️ DEBUG: addOwnershipTransitionWarning - WARNING ADDED", map[string]interface{}{
-		"diagnostics_has_error":   resp.Diagnostics.HasError(),
-		"diagnostics_error_count": len(resp.Diagnostics.Errors()),
-		"diagnostics_warn_count":  len(resp.Diagnostics.Warnings()),
-	})
+	return current
 }
 
 // setObjectRefFromDesiredObj populates object_ref from the parsed resource during plan phase

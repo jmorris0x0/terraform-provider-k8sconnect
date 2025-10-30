@@ -74,6 +74,9 @@ func (r *objectResource) Create(ctx context.Context, req resource.CreateRequest,
 	// 8b. Update field_ownership attribute in state
 	updateFieldOwnershipData(ctx, rc.Data, rc.Object)
 
+	// 8c. Save ownership baseline to private state for drift detection (ADR-021)
+	saveOwnershipBaseline(ctx, resp.Private, rc.Object)
+
 	// 9. SAVE STATE after successful creation
 	diags = resp.State.Set(ctx, rc.Data)
 	resp.Diagnostics.Append(diags...)
@@ -253,6 +256,9 @@ func (r *objectResource) Update(ctx context.Context, req resource.UpdateRequest,
 
 	// 7. Update field_ownership attribute in state
 	updateFieldOwnershipData(ctx, &plan, rc.Object)
+
+	// 7b. Save ownership baseline to private state for drift detection (ADR-021)
+	saveOwnershipBaseline(ctx, resp.Private, rc.Object)
 
 	// 8. Save updated state
 	diags = resp.State.Set(ctx, &plan)

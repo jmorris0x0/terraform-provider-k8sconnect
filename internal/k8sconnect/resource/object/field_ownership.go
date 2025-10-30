@@ -2,8 +2,10 @@ package object
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -95,4 +97,45 @@ func isInIgnoreFields(ctx context.Context, path string, ignoreFields types.List)
 		// For now, exact match is sufficient
 	}
 	return false
+}
+
+// saveOwnershipBaseline extracts ownership information from a K8s object
+// and saves it to private state as a JSON-serialized baseline for drift detection (ADR-021).
+// This baseline represents "what we owned at last Apply" and is NOT updated during Read operations.
+func saveOwnershipBaseline(ctx context.Context, privateState interface {
+	SetKey(context.Context, string, []byte) diag.Diagnostics
+}, obj *unstructured.Unstructured) {
+	// Extract ALL field ownership (map[string][]string)
+	ownership := extractAllFieldOwnership(obj)
+
+	// Flatten to map[string]string (first manager only, for simplicity)
+	// This is sufficient for drift detection - we just need to know who owned what
+	baselineOwnership := make(map[string]string)
+	for path, managers := range ownership {
+		if len(managers) > 0 {
+			baselineOwnership[path] = managers[0] // Take first manager
+		}
+	}
+
+	// Serialize to JSON
+	baselineJSON, err := json.Marshal(baselineOwnership)
+	if err != nil {
+		tflog.Warn(ctx, "Failed to serialize ownership baseline", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	// Save to private state
+	diags := privateState.SetKey(ctx, "ownership_baseline", baselineJSON)
+	if diags.HasError() {
+		tflog.Warn(ctx, "Failed to save ownership baseline to private state", map[string]interface{}{
+			"diagnostics": diags,
+		})
+		return
+	}
+
+	tflog.Debug(ctx, "Saved ownership baseline to private state", map[string]interface{}{
+		"field_count": len(baselineOwnership),
+	})
 }
