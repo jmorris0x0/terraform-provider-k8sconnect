@@ -51,7 +51,6 @@ func (r *patchResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanR
 	if patchContent == "" {
 		// No patch content, set computed fields to unknown
 		plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
-		plannedData.RawManagedFields = types.StringUnknown()
 		resp.Plan.Set(ctx, &plannedData)
 		return
 	}
@@ -61,7 +60,6 @@ func (r *patchResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanR
 		tflog.Debug(ctx, "Patch contains interpolations, skipping dry-run",
 			map[string]interface{}{"patch_preview": patchContent[:min(100, len(patchContent))]})
 		plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
-		plannedData.RawManagedFields = types.StringUnknown()
 		resp.Plan.Set(ctx, &plannedData)
 		return
 	}
@@ -70,7 +68,6 @@ func (r *patchResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanR
 	if !r.isConnectionReady(plannedData.Cluster) {
 		tflog.Debug(ctx, "Connection has unknown values, skipping dry-run")
 		plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
-		plannedData.RawManagedFields = types.StringUnknown()
 		resp.Plan.Set(ctx, &plannedData)
 		return
 	}
@@ -135,7 +132,6 @@ func (r *patchResource) preservePatchInputAndState(ctx context.Context, stateDat
 
 	// Preserve computed attributes
 	plannedData.ManagedStateProjection = stateData.ManagedStateProjection
-	plannedData.RawManagedFields = stateData.RawManagedFields
 	plannedData.ManagedFields = stateData.ManagedFields
 }
 
@@ -317,7 +313,6 @@ func (r *patchResource) generateFieldManager(data patchResourceModel) string {
 // setProjectionUnknown sets all projection-related fields to unknown
 func setProjectionUnknown(data *patchResourceModel) {
 	data.ManagedStateProjection = types.MapUnknown(types.StringType)
-	data.RawManagedFields = types.StringUnknown()
 	data.ManagedFields = types.MapUnknown(types.StringType)
 }
 
@@ -521,7 +516,6 @@ func (r *patchResource) handleNonSSAPatchState(
 	// Non-SSA patches don't support projection - always set to null
 	// We'll use semantic content comparison in checkDriftAndPreserveState
 	plannedData.ManagedStateProjection = types.MapNull(types.StringType) // Null for non-SSA
-	plannedData.RawManagedFields = types.StringUnknown()
 	plannedData.ManagedFields = types.MapUnknown(types.StringType)
 	return true
 }
@@ -570,7 +564,6 @@ func (r *patchResource) calculateProjectionFromDryRun(
 	// This is a core feature: predicting exact field ownership using force=true dry-run
 	updateManagedFieldsData(ctx, plannedData, patchedObj, fieldManager)
 
-	plannedData.RawManagedFields = types.StringUnknown()
 	return true
 }
 

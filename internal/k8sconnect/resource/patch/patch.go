@@ -43,9 +43,8 @@ type patchResourceModel struct {
 
 	// Computed fields
 
-	ManagedStateProjection types.Map    `tfsdk:"managed_state_projection"`
-	ManagedFields         types.Map    `tfsdk:"managed_fields"`
-	RawManagedFields          types.String `tfsdk:"raw_managed_fields"`
+	ManagedStateProjection types.Map `tfsdk:"managed_state_projection"`
+	ManagedFields          types.Map `tfsdk:"managed_fields"`
 }
 
 type patchTargetModel struct {
@@ -93,7 +92,7 @@ func (r *patchResource) Configure(ctx context.Context, req resource.ConfigureReq
 
 func (r *patchResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Version: 1,
+		Version: 2,
 		MarkdownDescription: `Applies targeted patches to existing Kubernetes resources using Server-Side Apply.
 
 **IMPORTANT:** This resource forcefully takes ownership of fields from other controllers.
@@ -232,13 +231,8 @@ When you destroy a patch resource, ownership is released but patched values rema
 				Computed:    true,
 				ElementType: types.StringType,
 				Description: "Tracks which field manager owns each field path in the patched resource. " +
-					"Shows 'k8sconnect' for fields managed by this provider, or external manager names (e.g., 'kubectl', 'hpa-controller') for fields managed by other systems. " +
+					"Shows 'k8sconnect' for fields managed by this provider, or external manager names (e.g., 'kubectl', 'hpa-controller') for files managed by other systems. " +
 					"When ownership changes appear in diffs, it indicates another system has taken control of those fields.",
-			},
-
-			"raw_managed_fields": schema.StringAttribute{
-				Computed:    true,
-				Description: "JSON representation of only the fields managed by this patch. Used for drift detection.",
 			},
 		},
 	}

@@ -97,17 +97,7 @@ func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, 
 		"field_manager": fieldManager,
 	})
 
-	// 9. Store ONLY patched fields
-	managedFields, err := fieldmanagement.ExtractManagedFieldsForManager(patchedObj, fieldManager)
-	if err != nil {
-		resp.Diagnostics.AddWarning("Failed to Extract Managed Fields",
-			fmt.Sprintf("Failed to extract managed fields for %s (field manager: %s): %s",
-				formatTarget(target), fieldManager, err.Error()))
-		managedFields = "{}"
-	}
-	data.RawManagedFields = types.StringValue(managedFields)
-
-	// 10. Update managed_fields attribute in state
+	// 9. Update managed_fields attribute in state
 	updateManagedFieldsData(ctx, &data, patchedObj, fieldManager)
 
 	// 12. Save state
@@ -233,22 +223,7 @@ func (r *patchResource) Read(ctx context.Context, req resource.ReadRequest, resp
 		surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
 	}
 
-	// 7. Extract ONLY fields we patched (using our field manager)
-	currentManagedFields, err := fieldmanagement.ExtractManagedFieldsForManager(currentObj, fieldManager)
-	if err != nil {
-		tflog.Warn(ctx, "Failed to extract managed fields during read", map[string]interface{}{
-			"error": err.Error(),
-		})
-		currentManagedFields = "{}"
-	}
-
-	// 8. Update managed fields in state
-	if currentManagedFields != data.RawManagedFields.ValueString() {
-		tflog.Debug(ctx, "Managed fields changed (ownership or structure drift)")
-		data.RawManagedFields = types.StringValue(currentManagedFields)
-	}
-
-	// 8. Update managed_fields attribute in state
+	// 7. Update managed_fields attribute in state
 	updateManagedFieldsData(ctx, &data, currentObj, fieldManager)
 
 	// 9. Save refreshed state
@@ -305,44 +280,8 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	// Surface any API warnings from get operation
 	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
 
-	// 7. CRITICAL: Detect removed fields and transfer ownership back
+	// 7. Re-apply updated patch
 	fieldManager := fmt.Sprintf("k8sconnect-patch-%s", plan.ID.ValueString())
-
-	// Extract current fields from state's managed_fields
-	var currentFieldPaths []string
-	if !state.RawManagedFields.IsNull() && state.RawManagedFields.ValueString() != "" && state.RawManagedFields.ValueString() != "{}" {
-		var err error
-		currentFieldPaths, err = fieldmanagement.ExtractFieldPathsFromManagedFieldsJSON(state.RawManagedFields.ValueString())
-		if err != nil {
-			tflog.Warn(ctx, "Failed to extract current field paths from managed_fields", map[string]interface{}{
-				"error": err.Error(),
-			})
-		}
-	}
-
-	// Extract new fields from plan's patch content
-	newPatchContent := r.getPatchContent(plan)
-	newPatchType := r.determinePatchType(plan)
-	newFieldPaths, err := r.extractPatchFieldPaths(ctx, newPatchContent, newPatchType)
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to Parse New Patch Content",
-			fmt.Sprintf("Failed to parse new patch content for %s: %s", formatTarget(target), err.Error()))
-		return
-	}
-
-	// Calculate removed fields (fields in current but not in new)
-	removedFields := findRemovedFields(currentFieldPaths, newFieldPaths)
-
-	// If fields were removed, they will become unmanaged (no longer patched by this resource)
-	// Note: Previous owner tracking was removed per ADR-020
-	if len(removedFields) > 0 {
-		tflog.Info(ctx, "Detected removed fields - they will become unmanaged", map[string]interface{}{
-			"target":        formatTarget(target),
-			"removed_count": len(removedFields),
-		})
-	}
-
-	// 8. Re-apply updated patch
 	patchedObj, err := r.applyPatch(ctx, client, currentObj, plan, fieldManager, gvr)
 	if err != nil {
 		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Update Patch", formatTarget(target))
@@ -369,19 +308,7 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 		"has_managed_fields": len(patchedObj.GetManagedFields()) > 0,
 	})
 
-	// 8b. Update managed fields
-	managedFields, err := fieldmanagement.ExtractManagedFieldsForManager(patchedObj, fieldManager)
-	if err != nil {
-		resp.Diagnostics.AddWarning("Failed to Extract Managed Fields",
-			fmt.Sprintf("Failed to extract managed fields for %s (field manager: %s): %s",
-				formatTarget(target), fieldManager, err.Error()))
-		managedFields = "{}"
-	}
-	plan.RawManagedFields = types.StringValue(managedFields)
-
-	// 9. Preserve previous owners (only set during Create)
-
-	// 10. Update managed_fields attribute in state
+	// 8b. Update managed_fields attribute in state
 	updateManagedFieldsData(ctx, &plan, patchedObj, fieldManager)
 
 	// 11. Save updated state
