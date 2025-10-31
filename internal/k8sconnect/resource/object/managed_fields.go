@@ -8,7 +8,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/fieldmanagement"
@@ -17,22 +16,6 @@ import (
 // Type alias for compatibility
 type ManagedFields = fieldmanagement.ManagedFields
 
-// parseFieldsV1ToPathMap is a wrapper for the common implementation
-func parseFieldsV1ToPathMap(managedFields []metav1.ManagedFieldsEntry, userJSON map[string]interface{}) map[string]ManagedFields {
-	return fieldmanagement.ParseFieldsV1ToPathMap(managedFields, userJSON)
-}
-
-// extractManagedFields returns ownership info for ALL fields
-func extractManagedFields(obj *unstructured.Unstructured) map[string]ManagedFields {
-	return fieldmanagement.ExtractManagedFields(obj)
-}
-
-// extractAllManagedFields extracts ownership for ALL managers (not just k8sconnect)
-// This is used for ownership transition detection
-func extractAllManagedFields(obj *unstructured.Unstructured) map[string][]string {
-	return fieldmanagement.ExtractAllManagedFields(obj)
-}
-
 // updateManagedFieldsData updates the managed_fields attribute in the resource model
 // It extracts, filters, flattens, and sets ownership data for clean UX
 // NOTE: This function does NOT filter out ignore_fields from managed_fields.
@@ -40,7 +23,7 @@ func extractAllManagedFields(obj *unstructured.Unstructured) map[string][]string
 // ensures consistency between plan and apply phases.
 func updateManagedFieldsData(ctx context.Context, data *objectResourceModel, currentObj *unstructured.Unstructured) {
 	// Extract ALL field ownership (map[string][]string)
-	ownership := extractAllManagedFields(currentObj)
+	ownership := fieldmanagement.ExtractAllManagedFields(currentObj)
 
 	// Filter out unwanted fields
 	filteredOwnership := make(map[string][]string)
@@ -83,7 +66,7 @@ func saveOwnershipBaseline(ctx context.Context, privateState interface {
 	SetKey(context.Context, string, []byte) diag.Diagnostics
 }, obj *unstructured.Unstructured, ignoreFields []string) {
 	// Extract ALL field ownership (map[string][]string)
-	ownership := extractAllManagedFields(obj)
+	ownership := fieldmanagement.ExtractAllManagedFields(obj)
 
 	// Flatten to map[string]string (first manager only, for simplicity)
 	// This is sufficient for drift detection - we just need to know who owned what

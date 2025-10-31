@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/factory"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/fieldmanagement"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/ownership"
@@ -228,19 +229,10 @@ func (r *objectResource) executeDryRunAndProjection(ctx context.Context, req res
 
 // setupDryRunClient creates the k8s client for dry-run
 func (r *objectResource) setupDryRunClient(ctx context.Context, plannedData *objectResourceModel, resp *resource.ModifyPlanResponse) (k8sclient.K8sClient, error) {
-	// Convert connection
-	conn, err := r.convertObjectToConnectionModel(ctx, plannedData.Cluster)
+	client, err := factory.SetupClient(ctx, plannedData.Cluster, r.clientGetter)
 	if err != nil {
 		r.setProjectionUnknown(ctx, plannedData, resp,
-			fmt.Sprintf("Skipping dry-run due to connection conversion error: %s", err))
-		return nil, err
-	}
-
-	// Create client
-	client, err := r.clientGetter(conn)
-	if err != nil {
-		r.setProjectionUnknown(ctx, plannedData, resp,
-			fmt.Sprintf("Skipping dry-run due to client creation error: %s", err))
+			fmt.Sprintf("Skipping dry-run due to client setup error: %s", err))
 		return nil, err
 	}
 
@@ -304,7 +296,7 @@ func (r *objectResource) calculateProjection(ctx context.Context, req resource.M
 			// Extract ACTUAL current ownership from cluster for ALL managers
 			// This is critical: we need to see ownership by external-operator, kubectl, etc.
 			// to detect transitions, not just k8sconnect-owned fields
-			actualOwnershipMap := extractAllManagedFields(currentObj)
+			actualOwnershipMap := fieldmanagement.ExtractAllManagedFields(currentObj)
 
 			tflog.Debug(ctx, "PLAN PHASE - Actual current field ownership from cluster (ALL managers)", map[string]interface{}{
 				"actual_ownership_map": actualOwnershipMap,
@@ -343,7 +335,7 @@ func (r *objectResource) performDryRun(ctx context.Context, client k8sclient.K8s
 	})
 
 	// Surface any API warnings from dry-run operation
-	surfaceK8sWarnings(ctx, client, desiredObj, &resp.Diagnostics)
+	k8sclient.SurfaceK8sWarningsWithIdentity(ctx, client, desiredObj, &resp.Diagnostics)
 
 	if err != nil {
 		// ADR-017: Check if this is a field validation error (typos, unknown fields, etc.)
@@ -460,7 +452,7 @@ func (r *objectResource) applyProjection(ctx context.Context, dryRunResult *unst
 		// (e.g., after import where kubectl owns everything, or ignore_fields modifications
 		// where external controllers took ownership). v0.1.7 used ExtractManagedFieldsMap
 		// which iterated over ALL managers, not just k8sconnect.
-		allOwnership := extractAllManagedFields(dryRunResult)
+		allOwnership := fieldmanagement.ExtractAllManagedFields(dryRunResult)
 		ownershipMap := fieldmanagement.FlattenManagedFields(allOwnership)
 
 		// ADR-019: Override predicted ownership for fields we're applying with force=true
@@ -557,7 +549,7 @@ func (r *objectResource) applyProjection(ctx context.Context, dryRunResult *unst
 // extractManagedFieldsMap extracts field ownership from object and flattens to map[string]string
 func extractManagedFieldsMap(ctx context.Context, obj *unstructured.Unstructured) map[string]string {
 	// Extract all field ownership
-	ownership := extractAllManagedFields(obj)
+	ownership := fieldmanagement.ExtractAllManagedFields(obj)
 
 	// Flatten using the common logic
 	ownershipFlat := fieldmanagement.FlattenManagedFields(ownership)
