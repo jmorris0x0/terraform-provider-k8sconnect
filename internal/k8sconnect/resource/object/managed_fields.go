@@ -76,29 +76,6 @@ func updateManagedFieldsData(ctx context.Context, data *objectResourceModel, cur
 	}
 }
 
-// isInIgnoreFields checks if a field path matches any pattern in ignore_fields
-func isInIgnoreFields(ctx context.Context, path string, ignoreFields types.List) bool {
-	if ignoreFields.IsNull() || ignoreFields.IsUnknown() {
-		return false
-	}
-
-	var patterns []string
-	diags := ignoreFields.ElementsAs(ctx, &patterns, false)
-	if diags.HasError() || len(patterns) == 0 {
-		return false
-	}
-
-	for _, pattern := range patterns {
-		// Exact match
-		if path == pattern {
-			return true
-		}
-		// TODO: Add JSONPath predicate matching if needed
-		// For now, exact match is sufficient
-	}
-	return false
-}
-
 // saveOwnershipBaseline extracts ownership information from a K8s object
 // and saves it to private state as a JSON-serialized baseline for drift detection (ADR-021).
 // This baseline represents "what we owned at last Apply" and is NOT updated during Read operations.

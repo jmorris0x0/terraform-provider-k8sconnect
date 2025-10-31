@@ -22,7 +22,6 @@ var _ resource.ResourceWithConfigValidators = (*objectResource)(nil)
 var _ resource.ResourceWithModifyPlan = (*objectResource)(nil)
 var _ resource.ResourceWithImportState = (*objectResource)(nil)
 var _ resource.ResourceWithConfigure = (*objectResource)(nil)
-var _ resource.ResourceWithUpgradeState = (*objectResource)(nil)
 
 // ClientGetter function type for dependency injection
 type ClientGetter func(auth.ClusterModel) (k8sclient.K8sClient, error)
