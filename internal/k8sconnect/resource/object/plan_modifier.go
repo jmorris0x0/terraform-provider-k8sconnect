@@ -14,6 +14,7 @@ import (
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/fieldmanagement"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/ownership"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -311,7 +312,8 @@ func (r *objectResource) calculateProjection(ctx context.Context, req resource.M
 			})
 
 			// Check for ownership conflicts using ADR-021 classification
-			r.detectOwnershipConflicts(ctx, req, resp, actualOwnershipMap)
+			// Pass nil for stateObj - function will parse from state
+			r.detectOwnershipConflicts(ctx, req, resp, actualOwnershipMap, nil, currentObj, desiredObj)
 		}
 	}
 
@@ -641,7 +643,8 @@ func removeParentFieldsFromOwnership(ownership map[string]string) map[string]str
 
 // detectOwnershipConflicts uses ADR-021's 16-row classification to detect ownership conflicts.
 // Only warns on actual conflicts (controller fights), stays silent on normal operations.
-func (r *objectResource) detectOwnershipConflicts(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse, currentOwnership map[string][]string) {
+// Accepts optional stateObj, currentObj, and desiredObj for extracting field values in warnings.
+func (r *objectResource) detectOwnershipConflicts(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse, currentOwnership map[string][]string, stateObj, currentObj, desiredObj *unstructured.Unstructured) {
 	// Skip if no state (first apply)
 	if req.State.Raw.IsNull() {
 		return
@@ -663,6 +666,12 @@ func (r *objectResource) detectOwnershipConflicts(ctx context.Context, req resou
 	// Detect config_changed dimension
 	configChanged := !stateData.YAMLBody.Equal(plannedData.YAMLBody) ||
 		!stateData.IgnoreFields.Equal(plannedData.IgnoreFields)
+
+	tflog.Debug(ctx, "🔍 CONFIG CHANGED", map[string]interface{}{
+		"configChanged":       configChanged,
+		"yamlBodyChanged":     !stateData.YAMLBody.Equal(plannedData.YAMLBody),
+		"ignoreFieldsChanged": !stateData.IgnoreFields.Equal(plannedData.IgnoreFields),
+	})
 
 	// Extract ownership BASELINE from private state (what we owned at last Apply)
 	// This is our ground truth for detecting drift - it doesn't get updated during Read operations
@@ -687,13 +696,56 @@ func (r *objectResource) detectOwnershipConflicts(ctx context.Context, req resou
 		return
 	}
 
-	// We need the actual K8s objects to compare values (Option A: value-based external_changed)
-	// But we don't have easy access to stateObj and currentObj here
-	// For now, we'll use a simplified approach: just check ownership changes
-	// TODO: Full implementation would reconstruct stateObj from state and get currentObj from cluster
+	// Parse stateObj from state yaml_body if not provided
+	// This gives us the previous values for comparison
+	if stateObj == nil {
+		stateYAML := stateData.YAMLBody.ValueString()
+		if stateYAML != "" {
+			var err error
+			stateObj, err = r.parseYAML(stateYAML)
+			if err != nil {
+				tflog.Debug(ctx, "Failed to parse state yaml_body for value extraction", map[string]interface{}{
+					"error": err.Error(),
+				})
+				stateObj = nil
+			}
+		}
+	}
 
 	// Flatten current ownership for comparison
 	currentOwnershipFlat := fieldmanagement.FlattenFieldOwnership(currentOwnership)
+
+	// Build map of fields we're sending in yaml_body (minus ignore_fields)
+	// This is CRITICAL for calculating nowOwned: with force=true, we WILL own any field we send
+	fieldsSendingMap := make(map[string]bool)
+
+	// Parse yaml_body to extract fields we're applying
+	yamlStr := plannedData.YAMLBody.ValueString()
+	if yamlStr != "" {
+		desiredObj, err := r.parseYAML(yamlStr)
+		if err == nil {
+			// Get all field paths from desired object (use empty managedFields to extract all)
+			allPaths := extractOwnedPaths(ctx, []metav1.ManagedFieldsEntry{}, desiredObj.Object)
+
+			// Filter out ignore_fields
+			ignoreFields := getIgnoreFields(ctx, &plannedData)
+			var pathsToSend []string
+			if ignoreFields != nil {
+				pathsToSend = filterIgnoredPaths(allPaths, ignoreFields, desiredObj.Object)
+			} else {
+				pathsToSend = allPaths
+			}
+
+			// Build map for fast lookup
+			for _, path := range pathsToSend {
+				fieldsSendingMap[path] = true
+			}
+
+			tflog.Debug(ctx, "Detected fields we're sending in yaml_body", map[string]interface{}{
+				"field_count": len(fieldsSendingMap),
+			})
+		}
+	}
 
 	// Create conflict detector
 	conflicts := ownership.NewConflictDetection()
@@ -705,35 +757,56 @@ func (r *objectResource) detectOwnershipConflicts(ctx context.Context, req resou
 		// Calculate the 4 boolean dimensions
 		// prevOwned: Did WE own this field at last successful Apply? (from baseline, not refreshed state)
 		prevOwned := existedInBaseline && stringSliceContains([]string{baselineManager}, "k8sconnect")
-		nowOwned := stringSliceContains([]string{currentManager}, "k8sconnect")
 
-		// external_changed: For now, detect if manager changed and it's not us
-		// Full Option A would compare actual values from stateObj vs currentObj
-		externalChanged := existedInBaseline && baselineManager != currentManager && currentManager != "k8sconnect"
+		// nowOwned: Will we own this field after apply?
+		// With force=true SSA: we WILL own any field we send, OR we keep owning fields we already own
+		// This is the KEY fix: check if we're sending the field, not just current ownership
+		nowOwned := fieldsSendingMap[fieldPath] || stringSliceContains([]string{currentManager}, "k8sconnect")
+
+		// external_changed: Did an external manager modify/own this field?
+		// Case 1: Field was in baseline and manager changed to someone else
+		// Case 2: Field is NEW to us (not in baseline) but external already owns it (e.g., was in ignore_fields)
+		externalChanged := (existedInBaseline && baselineManager != currentManager && currentManager != "k8sconnect") ||
+			(!existedInBaseline && currentManager != "k8sconnect" && currentManager != "")
 
 		// Classify conflict type
 		conflictType := ownership.ClassifyConflict(prevOwned, nowOwned, configChanged, externalChanged)
 
-		// TEMPORARY DEBUG: Log ALL classifications to diagnose issue
-		tflog.Debug(ctx, "⚠️  CLASSIFY DEBUG", map[string]interface{}{
+		// DEBUG: Log classification for ALL fields
+		tflog.Debug(ctx, "🔍 CLASSIFY FIELD", map[string]interface{}{
 			"field":           fieldPath,
-			"baselineManager": baselineManager,
-			"currManager":     currentManager,
 			"prevOwned":       prevOwned,
 			"nowOwned":        nowOwned,
 			"configChanged":   configChanged,
 			"externalChanged": externalChanged,
 			"conflictType":    conflictType.String(),
+			"baselineManager": baselineManager,
+			"currentManager":  currentManager,
+			"inBaseline":      existedInBaseline,
+			"sendingField":    fieldsSendingMap[fieldPath],
 		})
 
 		// Add to conflict detector if not NoConflict
 		if conflictType != ownership.NoConflict {
-			conflicts.AddField(conflictType, ownership.FieldChange{
+			fieldChange := ownership.FieldChange{
 				Path:            fieldPath,
 				PreviousManager: baselineManager,
 				CurrentManager:  currentManager,
 				PlannedManager:  "k8sconnect",
-			})
+			}
+
+			// Extract field values if objects are available
+			if stateObj != nil {
+				fieldChange.PreviousValue = getFieldValue(stateObj, fieldPath)
+			}
+			if currentObj != nil {
+				fieldChange.CurrentValue = getFieldValue(currentObj, fieldPath)
+			}
+			if desiredObj != nil {
+				fieldChange.PlannedValue = getFieldValue(desiredObj, fieldPath)
+			}
+
+			conflicts.AddField(conflictType, fieldChange)
 		}
 	}
 

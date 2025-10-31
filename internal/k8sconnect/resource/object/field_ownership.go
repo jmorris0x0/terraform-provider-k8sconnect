@@ -104,14 +104,19 @@ func isInIgnoreFields(ctx context.Context, path string, ignoreFields types.List)
 // This baseline represents "what we owned at last Apply" and is NOT updated during Read operations.
 func saveOwnershipBaseline(ctx context.Context, privateState interface {
 	SetKey(context.Context, string, []byte) diag.Diagnostics
-}, obj *unstructured.Unstructured) {
+}, obj *unstructured.Unstructured, ignoreFields []string) {
 	// Extract ALL field ownership (map[string][]string)
 	ownership := extractAllFieldOwnership(obj)
 
 	// Flatten to map[string]string (first manager only, for simplicity)
 	// This is sufficient for drift detection - we just need to know who owned what
+	// IMPORTANT: Filter out ignored fields before saving to baseline (ADR-021 fix)
 	baselineOwnership := make(map[string]string)
 	for path, managers := range ownership {
+		// Skip fields that are currently in ignore_fields
+		if stringSliceContains(ignoreFields, path) {
+			continue
+		}
 		if len(managers) > 0 {
 			baselineOwnership[path] = managers[0] // Take first manager
 		}
