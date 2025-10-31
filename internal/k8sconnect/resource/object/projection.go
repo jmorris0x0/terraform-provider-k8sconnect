@@ -573,89 +573,115 @@ func navigateToResolvedPath(obj map[string]interface{}, path string) (interface{
 		return obj, true
 	}
 
-	// Parse the path segment by segment, handling both dots and array indices
 	current := interface{}(obj)
 	remaining := path
 
 	for remaining != "" {
-		// Find the next segment (either before a dot or before an array selector)
-		dotIdx := strings.Index(remaining, ".")
-		bracketIdx := strings.Index(remaining, "[")
+		segment, arrayIndex, nextRemaining := parseNextPathSegment(remaining)
 
-		var segment string
-		var nextIdx int
-
-		if dotIdx == -1 && bracketIdx == -1 {
-			// Last segment
-			segment = remaining
-			remaining = ""
-		} else if dotIdx == -1 {
-			// Only bracket found
-			segment = remaining[:bracketIdx]
-			nextIdx = bracketIdx
-		} else if bracketIdx == -1 {
-			// Only dot found
-			segment = remaining[:dotIdx]
-			nextIdx = dotIdx + 1
-		} else if bracketIdx < dotIdx {
-			// Bracket comes first
-			segment = remaining[:bracketIdx]
-			nextIdx = bracketIdx
-		} else {
-			// Dot comes first
-			segment = remaining[:dotIdx]
-			nextIdx = dotIdx + 1
-		}
-
-		// Navigate through the segment if it's not empty
+		// Navigate through the field segment if present
 		if segment != "" {
-			currentMap, ok := current.(map[string]interface{})
+			var ok bool
+			current, ok = navigateToMapField(current, segment)
 			if !ok {
 				return nil, false
 			}
-			next, exists := currentMap[segment]
-			if !exists {
-				return nil, false
-			}
-			current = next
 		}
 
-		// Handle array selector if present
-		if bracketIdx != -1 && (dotIdx == -1 || bracketIdx < dotIdx) {
-			// Extract the array index
-			closeBracket := strings.Index(remaining[bracketIdx:], "]")
-			if closeBracket == -1 {
+		// Navigate through array index if present
+		if arrayIndex != -1 {
+			var ok bool
+			current, ok = navigateToArrayIndex(current, arrayIndex)
+			if !ok {
 				return nil, false
-			}
-			closeBracket += bracketIdx
-
-			indexStr := remaining[bracketIdx+1 : closeBracket]
-			var index int
-			if _, err := fmt.Sscanf(indexStr, "%d", &index); err != nil {
-				return nil, false
-			}
-
-			// Navigate into array
-			arraySlice, ok := current.([]interface{})
-			if !ok || index < 0 || index >= len(arraySlice) {
-				return nil, false
-			}
-			current = arraySlice[index]
-
-			nextIdx = closeBracket + 1
-			if nextIdx < len(remaining) && remaining[nextIdx] == '.' {
-				nextIdx++
 			}
 		}
 
-		if nextIdx >= len(remaining) {
-			remaining = ""
-		} else {
-			remaining = remaining[nextIdx:]
-		}
+		remaining = nextRemaining
 	}
 
 	return current, true
+}
+
+// parseNextPathSegment extracts the next field segment and optional array index from a path
+// Returns: (segment, arrayIndex, remaining)
+// arrayIndex is -1 if no array selector present
+func parseNextPathSegment(path string) (string, int, string) {
+	dotIdx := strings.Index(path, ".")
+	bracketIdx := strings.Index(path, "[")
+
+	if dotIdx == -1 && bracketIdx == -1 {
+		// Last segment, no array selector
+		return path, -1, ""
+	}
+
+	if bracketIdx == -1 {
+		// Only dot found - segment ends at dot
+		segment := path[:dotIdx]
+		return segment, -1, path[dotIdx+1:]
+	}
+
+	if dotIdx == -1 || bracketIdx < dotIdx {
+		// Bracket comes before dot (or no dot) - extract array index
+		segment := path[:bracketIdx]
+		arrayIndex, remaining := extractArrayIndex(path[bracketIdx:])
+		return segment, arrayIndex, remaining
+	}
+
+	// Dot comes first
+	segment := path[:dotIdx]
+	return segment, -1, path[dotIdx+1:]
+}
+
+// extractArrayIndex extracts array index from "[N]..." format
+// Returns: (index, remaining path after bracket)
+func extractArrayIndex(path string) (int, string) {
+	closeBracket := strings.Index(path, "]")
+	if closeBracket == -1 {
+		return -1, ""
+	}
+
+	indexStr := path[1:closeBracket]
+	var index int
+	if _, err := fmt.Sscanf(indexStr, "%d", &index); err != nil {
+		return -1, ""
+	}
+
+	// Skip the ']' and any following '.'
+	nextIdx := closeBracket + 1
+	if nextIdx < len(path) && path[nextIdx] == '.' {
+		nextIdx++
+	}
+
+	if nextIdx >= len(path) {
+		return index, ""
+	}
+	return index, path[nextIdx:]
+}
+
+// navigateToMapField navigates from current value to a named field
+func navigateToMapField(current interface{}, fieldName string) (interface{}, bool) {
+	currentMap, ok := current.(map[string]interface{})
+	if !ok {
+		return nil, false
+	}
+
+	next, exists := currentMap[fieldName]
+	if !exists {
+		return nil, false
+	}
+
+	return next, true
+}
+
+// navigateToArrayIndex navigates from current value into an array at specific index
+func navigateToArrayIndex(current interface{}, index int) (interface{}, bool) {
+	arraySlice, ok := current.([]interface{})
+	if !ok || index < 0 || index >= len(arraySlice) {
+		return nil, false
+	}
+
+	return arraySlice[index], true
 }
 
 // navigateToPath walks through the object following a dotted path
