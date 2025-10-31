@@ -586,7 +586,7 @@ func TestAccObjectResource_NodePortNoDrift(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create LoadBalancer service with field ownership
 			{
-				Config: testAccServiceWithFieldOwnership(ns, svcName),
+				Config: testAccServiceWithManagedFields(ns, svcName),
 				ConfigVariables: config.Variables{
 					"raw":       config.StringVariable(raw),
 					"namespace": config.StringVariable(ns),
@@ -597,7 +597,7 @@ func TestAccObjectResource_NodePortNoDrift(t *testing.T) {
 			},
 			// Step 2: Verify refresh doesn't show nodePort drift
 			{
-				Config: testAccServiceWithFieldOwnership(ns, svcName),
+				Config: testAccServiceWithManagedFields(ns, svcName),
 				ConfigVariables: config.Variables{
 					"raw":       config.StringVariable(raw),
 					"namespace": config.StringVariable(ns),
@@ -610,7 +610,7 @@ func TestAccObjectResource_NodePortNoDrift(t *testing.T) {
 	})
 }
 
-func testAccServiceWithFieldOwnership(namespace, name string) string {
+func testAccServiceWithManagedFields(namespace, name string) string {
 	return fmt.Sprintf(`
 variable "raw" {
   type = string

@@ -18,7 +18,7 @@ func (r *objectResource) UpgradeState(ctx context.Context) map[int64]resource.St
 		// State version 0 -> 1: v0.1.7 -> v0.2.0
 		// Breaking changes:
 		// - Renamed cluster_connection to cluster
-		// - Removed field_ownership (moved to private state)
+		// - Removed managed_fields (moved to private state)
 		0: {
 			PriorSchema: nil, // Framework will use raw state
 			StateUpgrader: func(ctx context.Context, req resource.UpgradeStateRequest, resp *resource.UpgradeStateResponse) {
@@ -41,10 +41,10 @@ func (r *objectResource) UpgradeState(ctx context.Context) map[int64]resource.St
 					tflog.Debug(ctx, "Migrated cluster_connection to cluster")
 				}
 
-				// 2. Remove field_ownership (now tracked in private state)
-				if _, ok := rawState["field_ownership"]; ok {
-					delete(rawState, "field_ownership")
-					tflog.Debug(ctx, "Removed field_ownership from state (now in private state)")
+				// 2. Remove managed_fields (now tracked in private state)
+				if _, ok := rawState["managed_fields"]; ok {
+					delete(rawState, "managed_fields")
+					tflog.Debug(ctx, "Removed managed_fields from state (now in private state)")
 				}
 
 				// 3. object_ref.namespace: null -> "default" fix (from BUG #1)

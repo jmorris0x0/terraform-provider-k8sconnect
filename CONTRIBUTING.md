@@ -314,7 +314,7 @@ Other ADRs document specific features like CRD retry, immutable resources, ident
   - `plan_modifier.go` - ModifyPlan with dry-run
   - `crud.go` - CRUD operations
   - `projection.go` - Field filtering
-  - `field_ownership.go` - Parse managedFields
+  - `managed_fields.go` - Parse managedFields
   - `identity_changes.go` - Detect identity changes
 
 - **Client/Auth**: `internal/k8sconnect/common/`

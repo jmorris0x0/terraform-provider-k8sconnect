@@ -222,7 +222,7 @@ prod:v1/Namespace:my-namespace
 When importing resources created by kubectl or other tools, k8sconnect automatically takes ownership using Server-Side Apply with `force=true`. You'll see a warning during import:
 
 ```
-Warning: Field Ownership Override
+Warning: Managed Fields Override
 
 Forcing ownership of fields managed by other controllers:
   - spec.replicas (managed by "kubectl-client-side-apply")
@@ -432,7 +432,7 @@ cp terraform.tfstate terraform.tfstate.backup
 
 - [k8sconnect_object resource](../resources/object.md) - Primary resource reference
 - [CRD + CR Management guide](crd-cr-management.md) - Auto-retry details
-- [Field Ownership guide](field-ownership.md) - ignore_fields usage
+- [Managed Fields guide](field-ownership.md) - ignore_fields usage
 - [Bootstrap Patterns guide](bootstrap-patterns.md) - Single-apply bootstrapping
 
 ## Summary

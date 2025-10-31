@@ -193,39 +193,39 @@ func TestAddPatchOwnershipTransitionWarning(t *testing.T) {
 			name: "single transition",
 			transitions: []patchOwnershipTransition{
 				{
-					Path:          "spec.replicas",
-					PreviousOwner: "kubectl",
-					CurrentOwner:  "k8sconnect-patch-123",
+					Path:           "spec.replicas",
+					PreviousOwners: []string{"kubectl"},
+					CurrentOwners:  []string{"k8sconnect-patch-123"},
 				},
 			},
 			wantSummary: "Patch Field Ownership Transition",
 			wantDetailsContain: []string{
 				"spec.replicas",
-				"kubectl",
-				"k8sconnect-patch-123",
-				"kubectl → k8sconnect-patch-123",
+				"[kubectl]",
+				"[k8sconnect-patch-123]",
 			},
 		},
 		{
 			name: "multiple transitions",
 			transitions: []patchOwnershipTransition{
 				{
-					Path:          "spec.replicas",
-					PreviousOwner: "hpa-controller",
-					CurrentOwner:  "k8sconnect-patch-123",
+					Path:           "spec.replicas",
+					PreviousOwners: []string{"hpa-controller"},
+					CurrentOwners:  []string{"k8sconnect-patch-123"},
 				},
 				{
-					Path:          "data.key1",
-					PreviousOwner: "kubectl",
-					CurrentOwner:  "k8sconnect-patch-123",
+					Path:           "data.key1",
+					PreviousOwners: []string{"kubectl"},
+					CurrentOwners:  []string{"k8sconnect-patch-123"},
 				},
 			},
 			wantSummary: "Patch Field Ownership Transition",
 			wantDetailsContain: []string{
 				"spec.replicas",
-				"hpa-controller → k8sconnect-patch-123",
+				"[hpa-controller]",
+				"[k8sconnect-patch-123]",
 				"data.key1",
-				"kubectl → k8sconnect-patch-123",
+				"[kubectl]",
 				"force",
 			},
 		},
@@ -233,9 +233,9 @@ func TestAddPatchOwnershipTransitionWarning(t *testing.T) {
 			name: "transition from server",
 			transitions: []patchOwnershipTransition{
 				{
-					Path:          "metadata.managedFields",
-					PreviousOwner: "kube-apiserver",
-					CurrentOwner:  "k8sconnect-patch-xyz",
+					Path:           "metadata.managedFields",
+					PreviousOwners: []string{"kube-apiserver"},
+					CurrentOwners:  []string{"k8sconnect-patch-xyz"},
 				},
 			},
 			wantSummary: "Patch Field Ownership Transition",
@@ -308,8 +308,8 @@ func TestCheckOwnershipTransitions_NoPreviousOwnership(t *testing.T) {
 	}
 
 	// Current ownership (first apply)
-	currentOwnership := map[string]string{
-		"data.key1": "k8sconnect-patch-123",
+	currentOwnership := map[string][]string{
+		"data.key1": {"k8sconnect-patch-123"},
 	}
 
 	// Should return early with no warnings (no previous state to compare)
@@ -321,10 +321,10 @@ func TestCheckOwnershipTransitions_NoPreviousOwnership(t *testing.T) {
 	}
 }
 
-// Test helper: Mock getFieldOwnershipFromPrivateState for unit testing
+// Test helper: Mock getManagedFieldsFromPrivateState for unit testing
 // Note: In actual implementation, this function reads from req.Private
 // For unit tests, we'll test checkOwnershipTransitions behavior when
-// getFieldOwnershipFromPrivateState returns nil vs non-nil
+// getManagedFieldsFromPrivateState returns nil vs non-nil
 
 // Test 3.2: checkOwnershipTransitions with field ownership transitions
 // This test verifies the LOGIC of transition detection, not the full integration
@@ -339,7 +339,7 @@ func TestCheckOwnershipTransitions_TransitionDetection(t *testing.T) {
 	// - Current apply: patch takes ownership back with force
 	// - Expected: Transition warning emitted
 
-	// Note: Full implementation requires mocking getFieldOwnershipFromPrivateState
+	// Note: Full implementation requires mocking getManagedFieldsFromPrivateState
 	// which reads from terraform private state. This is better tested via
 	// acceptance tests that exercise the full state lifecycle.
 

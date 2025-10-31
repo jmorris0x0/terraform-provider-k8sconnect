@@ -15,6 +15,7 @@ import (
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/fieldmanagement"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 )
 
@@ -187,7 +188,7 @@ func (r *objectResource) fetchImportResource(ctx context.Context, client k8sclie
 }
 
 // extractProjectionAndOwnership extracts YAML, projection, and ownership from imported resource
-// Returns yamlBytes, projectionMap, fieldOwnershipMap, paths, and true on success; empty values and false on error
+// Returns yamlBytes, projectionMap, managedFieldsMap, paths, and true on success; empty values and false on error
 func (r *objectResource) extractProjectionAndOwnership(ctx context.Context, liveObj *unstructured.Unstructured, resp *resource.ImportStateResponse) ([]byte, types.Map, types.Map, []string, bool) {
 	// Convert to YAML for state
 	yamlBytes, err := r.objectToYAML(liveObj)
@@ -223,27 +224,36 @@ func (r *objectResource) extractProjectionAndOwnership(ctx context.Context, live
 		projectionMapValue, _ = types.MapValueFrom(ctx, types.StringType, map[string]string{})
 	}
 
-	// Extract field ownership from the imported object
-	ownership := extractFieldOwnership(liveObj)
-	ownershipMap := make(map[string]string, len(ownership))
-	for path, owner := range ownership {
-		ownershipMap[path] = owner.Manager
+	// Extract field ownership from the imported object using the new flattening approach
+	ownership := extractAllManagedFields(liveObj)
+
+	// Filter out status fields - they're always owned by controllers and provide no actionable information
+	filteredOwnership := make(map[string][]string)
+	for path, managers := range ownership {
+		if strings.HasPrefix(path, "status.") || path == "status" {
+			continue
+		}
+		filteredOwnership[path] = managers
 	}
-	fieldOwnershipMap, ownershipDiags := types.MapValueFrom(ctx, types.StringType, ownershipMap)
+
+	// Flatten using the common logic
+	ownershipMap := fieldmanagement.FlattenManagedFields(filteredOwnership)
+
+	managedFieldsMap, ownershipDiags := types.MapValueFrom(ctx, types.StringType, ownershipMap)
 	if ownershipDiags.HasError() {
 		tflog.Warn(ctx, "Failed to convert field ownership during import", map[string]interface{}{
 			"diagnostics": ownershipDiags,
 		})
 		// Set empty map on error
-		fieldOwnershipMap, _ = types.MapValueFrom(ctx, types.StringType, map[string]string{})
+		managedFieldsMap, _ = types.MapValueFrom(ctx, types.StringType, map[string]string{})
 	}
 
-	return yamlBytes, projectionMapValue, fieldOwnershipMap, paths, true
+	return yamlBytes, projectionMapValue, managedFieldsMap, paths, true
 }
 
 // buildImportState builds the final import state and sets it on the response
 // Returns true on success; false on error
-func (r *objectResource) buildImportState(ctx context.Context, resourceID string, yamlBytes []byte, kubeconfigData []byte, kubeContext string, liveObj *unstructured.Unstructured, projectionMapValue, fieldOwnershipMap types.Map, kubeconfigPath string, namespace, name, kind string, paths []string, resp *resource.ImportStateResponse) bool {
+func (r *objectResource) buildImportState(ctx context.Context, resourceID string, yamlBytes []byte, kubeconfigData []byte, kubeContext string, liveObj *unstructured.Unstructured, projectionMapValue, managedFieldsMap types.Map, kubeconfigPath string, namespace, name, kind string, paths []string, resp *resource.ImportStateResponse) bool {
 	// Create connection model for import - use the file contents, not the path
 	conn := auth.ClusterModel{
 		Host:                 types.StringNull(),
@@ -301,6 +311,7 @@ func (r *objectResource) buildImportState(ctx context.Context, resourceID string
 		DeleteProtection:       types.BoolValue(false),
 		IgnoreFields:           types.ListNull(types.StringType),
 		ManagedStateProjection: projectionMapValue,
+		ManagedFields:          managedFieldsMap,
 		ObjectRef:              objRefValue,
 	}
 
@@ -451,13 +462,13 @@ func (r *objectResource) ImportState(ctx context.Context, req resource.ImportSta
 	}
 
 	// Extract YAML, projection, and ownership
-	yamlBytes, projectionMapValue, fieldOwnershipMap, paths, ok := r.extractProjectionAndOwnership(ctx, liveObj, resp)
+	yamlBytes, projectionMapValue, managedFieldsMap, paths, ok := r.extractProjectionAndOwnership(ctx, liveObj, resp)
 	if !ok {
 		return
 	}
 
 	// Build and set final import state
-	if !r.buildImportState(ctx, resourceID, yamlBytes, kubeconfigData, kubeContext, liveObj, projectionMapValue, fieldOwnershipMap, kubeconfigPath, namespace, name, kind, paths, resp) {
+	if !r.buildImportState(ctx, resourceID, yamlBytes, kubeconfigData, kubeContext, liveObj, projectionMapValue, managedFieldsMap, kubeconfigPath, namespace, name, kind, paths, resp) {
 		return
 	}
 }

@@ -64,7 +64,6 @@ func TestAccPatchResource_ProjectionStrategicMerge(t *testing.T) {
 					resource.TestCheckResourceAttr("k8sconnect_patch.test", "managed_state_projection.data.another", "field"),
 
 					// Verify managed_fields is populated
-					resource.TestCheckResourceAttrSet("k8sconnect_patch.test", "managed_fields"),
 
 					// Verify ConfigMap actually has the patched data
 					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),

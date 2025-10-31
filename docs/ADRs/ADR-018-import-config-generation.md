@@ -2,11 +2,11 @@
 
 **Status:** Accepted - Feature Supported with Known Limitations
 **Date:** 2025-01-21
-**Updated:** 2025-01-23, 2025-10-26 (field_ownership note)
+**Updated:** 2025-01-23, 2025-10-26 (managed_fields note)
 **Deciders:** Architecture Team
-**Related:** ADR-001 (Managed State Projection), ADR-005 (Field Ownership), ADR-020 (Field Ownership Display)
+**Related:** ADR-001 (Managed State Projection), ADR-005 (Managed Fields), ADR-020 (Managed Fields Display)
 
-**Note (2025-10-26)**: As of ADR-020, `field_ownership` was moved from public schema to private state. References to `field_ownership` in this ADR are historical and describe the schema at the time of testing. The testing results remain valid - Terraform correctly excludes all computed-only fields from generated config.
+**Note (2025-10-26)**: As of ADR-020, `managed_fields` was moved from public schema to private state. References to `managed_fields` in this ADR are historical and describe the schema at the time of testing. The testing results remain valid - Terraform correctly excludes all computed-only fields from generated config.
 
 ## Context
 
@@ -374,7 +374,7 @@ sed -i 's|kubeconfig = <<-EOT.*EOT|kubeconfig = file("~/.kube/config")|' generat
   ElementType: types.StringType,
 }
 
-"field_ownership": schema.MapAttribute{
+"managed_fields": schema.MapAttribute{
   Computed:    true,  // No Optional - computed only
   ElementType: types.StringType,
 }
@@ -382,7 +382,7 @@ sed -i 's|kubeconfig = <<-EOT.*EOT|kubeconfig = file("~/.kube/config")|' generat
 
 **What's in state after import**:
 - `managed_state_projection`: 100+ key-value pairs (`"spec.replicas": "3"`)
-- `field_ownership`: 100+ key-value pairs (`"spec.replicas": "k8sconnect"`)
+- `managed_fields`: 100+ key-value pairs (`"spec.replicas": "k8sconnect"`)
 - `object_ref`: Nested object with apiVersion/kind/name/namespace
 
 ### Unknown Behavior
@@ -416,7 +416,7 @@ resource "k8sconnect_object" "nginx" {
     # ... 100+ more lines
   }
 
-  field_ownership = {
+  managed_fields = {
     "metadata.name" = "k8sconnect"
     "spec.replicas" = "k8sconnect"
     # ... 100+ more lines
@@ -482,7 +482,7 @@ terraform plan -generate-config-out=generated.tf
 - ✅ No crashes
 - ✅ Valid HCL generated
 - ✅ Computed fields (managed_state_projection, object_ref) **correctly excluded**
-  - Note: field_ownership was also excluded at time of testing; it's now in private state per ADR-020
+  - Note: managed_fields was also excluded at time of testing; it's now in private state per ADR-020
 - ✅ Only yaml_body and cluster generated
 - ✅ yaml_body is clean (server fields removed)
 - ⚠️ cluster has kubeconfig inlined as multi-line string (expected limitation)
@@ -648,7 +648,7 @@ cleanImportedYAML(liveObj)
 ## Related Work
 
 - **ADR-001**: Managed State Projection - explains why we track fields
-- **ADR-005**: Field Ownership - managedFields parsing is unaffected
+- **ADR-005**: Managed Fields - managedFields parsing is unaffected
 - **Terraform Issue #33438**: Provider influence over config generation (open)
 - **Terraform 1.5 Announcement**: Config generation feature launch
 

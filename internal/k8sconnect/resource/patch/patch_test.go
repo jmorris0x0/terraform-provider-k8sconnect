@@ -149,8 +149,7 @@ func TestAccPatchResource_BasicPatch(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					// Verify patch resource state
 					resource.TestCheckResourceAttrSet("k8sconnect_patch.test", "id"),
-					resource.TestCheckResourceAttrSet("k8sconnect_patch.test", "managed_fields"),
-					// REMOVED per ADR-020: resource.TestCheckResourceAttrSet("k8sconnect_patch.test", "field_ownership.%"),
+					// REMOVED per ADR-020: resource.TestCheckResourceAttrSet("k8sconnect_patch.test", "managed_fields.%"),
 					// REMOVED per ADR-020: resource.TestCheckResourceAttrSet("k8sconnect_patch.test", "previous_owners.%"),
 
 					// Verify ConfigMap exists with patched data

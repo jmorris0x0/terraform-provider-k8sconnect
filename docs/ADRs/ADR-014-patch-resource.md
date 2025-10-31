@@ -25,7 +25,7 @@ Accepted - Implemented (2025-10-11)
 
 **1. External Resources Only** - Patches are STRICTLY for resources NOT managed by `k8sconnect_object` in this state. Critical safety mechanism: `isManagedByThisState()` checks for k8sconnect annotations and field managers to prevent self-patching.
 
-**2. Per-Field Ownership Transfer on Destroy** - When destroyed:
+**2. Per-Managed Fields Transfer on Destroy** - When destroyed:
 - Parse `previous_owners` map to group fields by their original controller
 - Transfer each field group back to its specific previous owner using SSA
 - Patched values remain in place
@@ -64,7 +64,7 @@ resource "k8sconnect_patch" "aws_node_proxy" {
 
   # Computed
   managed_fields   = (computed)  # Only patched fields
-  # Note: field_ownership tracked in private state (ADR-020)
+  # Note: managed_fields tracked in private state (ADR-020)
   previous_owners  = (computed)  # Pre-patch ownership (for destroy)
 }
 ```
@@ -124,7 +124,7 @@ resource "k8sconnect_patch" "aws_node_proxy" {
 
 ## Relationship to Other ADRs
 
-**ADR-005: Field Ownership Strategy** - Foundation for patch resource. Reuses field manager concepts, `managedFields` parsing, and ownership detection logic.
+**ADR-005: Managed Fields Strategy** - Foundation for patch resource. Reuses field manager concepts, `managedFields` parsing, and ownership detection logic.
 
 **ADR-009: User-Controlled Drift Exemption** - Complementary: Use `ignore_fields` when you own the resource but want to allow external changes. Use `patch` when you don't own the resource but need to modify it.
 

@@ -2,7 +2,6 @@ package patch
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -98,19 +97,8 @@ func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, 
 		"field_manager": fieldManager,
 	})
 
-	// 9. Store ONLY patched fields
-	managedFields, err := fieldmanagement.ExtractManagedFieldsForManager(patchedObj, fieldManager)
-	if err != nil {
-		resp.Diagnostics.AddWarning("Failed to Extract Managed Fields",
-			fmt.Sprintf("Failed to extract managed fields for %s (field manager: %s): %s",
-				formatTarget(target), fieldManager, err.Error()))
-		managedFields = "{}"
-	}
-	data.ManagedFields = types.StringValue(managedFields)
-
-	// 10. Track field ownership in private state
-	fieldOwnership := extractFieldOwnershipForManager(patchedObj, fieldManager)
-	setFieldOwnershipInPrivateState(ctx, resp.Private, fieldOwnership)
+	// 9. Update managed_fields attribute in state
+	updateManagedFieldsData(ctx, &data, patchedObj, fieldManager)
 
 	// 12. Save state
 	diags = resp.State.Set(ctx, &data)
@@ -171,7 +159,7 @@ func (r *patchResource) Read(ctx context.Context, req resource.ReadRequest, resp
 		patchContent := r.getPatchContent(data)
 		patchType := r.determinePatchType(data)
 		patchedFieldPaths, _ := r.extractPatchFieldPaths(ctx, patchContent, patchType)
-		currentOwnership := fieldmanagement.ExtractFieldOwnershipForPaths(currentObj, patchedFieldPaths)
+		currentOwnership := fieldmanagement.ExtractManagedFieldsForPaths(currentObj, patchedFieldPaths)
 
 		// Format drifted fields with ownership info (limit to first 5 for readability)
 		var fieldDetails []string
@@ -235,24 +223,8 @@ func (r *patchResource) Read(ctx context.Context, req resource.ReadRequest, resp
 		surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
 	}
 
-	// 7. Extract ONLY fields we patched (using our field manager)
-	currentManagedFields, err := fieldmanagement.ExtractManagedFieldsForManager(currentObj, fieldManager)
-	if err != nil {
-		tflog.Warn(ctx, "Failed to extract managed fields during read", map[string]interface{}{
-			"error": err.Error(),
-		})
-		currentManagedFields = "{}"
-	}
-
-	// 8. Update managed fields in state
-	if currentManagedFields != data.ManagedFields.ValueString() {
-		tflog.Debug(ctx, "Managed fields changed (ownership or structure drift)")
-		data.ManagedFields = types.StringValue(currentManagedFields)
-	}
-
-	// 8a. Track field ownership in private state
-	fieldOwnership := extractFieldOwnershipForManager(currentObj, fieldManager)
-	setFieldOwnershipInPrivateState(ctx, resp.Private, fieldOwnership)
+	// 7. Update managed_fields attribute in state
+	updateManagedFieldsData(ctx, &data, currentObj, fieldManager)
 
 	// 9. Save refreshed state
 	diags = resp.State.Set(ctx, &data)
@@ -308,44 +280,8 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	// Surface any API warnings from get operation
 	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
 
-	// 7. CRITICAL: Detect removed fields and transfer ownership back
+	// 7. Re-apply updated patch
 	fieldManager := fmt.Sprintf("k8sconnect-patch-%s", plan.ID.ValueString())
-
-	// Extract current fields from state's managed_fields
-	var currentFieldPaths []string
-	if !state.ManagedFields.IsNull() && state.ManagedFields.ValueString() != "" && state.ManagedFields.ValueString() != "{}" {
-		var err error
-		currentFieldPaths, err = fieldmanagement.ExtractFieldPathsFromManagedFieldsJSON(state.ManagedFields.ValueString())
-		if err != nil {
-			tflog.Warn(ctx, "Failed to extract current field paths from managed_fields", map[string]interface{}{
-				"error": err.Error(),
-			})
-		}
-	}
-
-	// Extract new fields from plan's patch content
-	newPatchContent := r.getPatchContent(plan)
-	newPatchType := r.determinePatchType(plan)
-	newFieldPaths, err := r.extractPatchFieldPaths(ctx, newPatchContent, newPatchType)
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to Parse New Patch Content",
-			fmt.Sprintf("Failed to parse new patch content for %s: %s", formatTarget(target), err.Error()))
-		return
-	}
-
-	// Calculate removed fields (fields in current but not in new)
-	removedFields := findRemovedFields(currentFieldPaths, newFieldPaths)
-
-	// If fields were removed, they will become unmanaged (no longer patched by this resource)
-	// Note: Previous owner tracking was removed per ADR-020
-	if len(removedFields) > 0 {
-		tflog.Info(ctx, "Detected removed fields - they will become unmanaged", map[string]interface{}{
-			"target":        formatTarget(target),
-			"removed_count": len(removedFields),
-		})
-	}
-
-	// 8. Re-apply updated patch
 	patchedObj, err := r.applyPatch(ctx, client, currentObj, plan, fieldManager, gvr)
 	if err != nil {
 		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Update Patch", formatTarget(target))
@@ -360,21 +296,20 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 		"field_manager": fieldManager,
 	})
 
-	// 8. Update managed fields
-	managedFields, err := fieldmanagement.ExtractManagedFieldsForManager(patchedObj, fieldManager)
+	// 8a. Fetch fresh object with updated managedFields after patch
+	freshObj, err := client.Get(ctx, gvr, currentObj.GetNamespace(), currentObj.GetName())
 	if err != nil {
-		resp.Diagnostics.AddWarning("Failed to Extract Managed Fields",
-			fmt.Sprintf("Failed to extract managed fields for %s (field manager: %s): %s",
-				formatTarget(target), fieldManager, err.Error()))
-		managedFields = "{}"
+		resp.Diagnostics.AddError("Failed to read resource after patch",
+			fmt.Sprintf("Failed to read %s after patch: %s", formatTarget(target), err.Error()))
+		return
 	}
-	plan.ManagedFields = types.StringValue(managedFields)
+	patchedObj = freshObj
+	tflog.Debug(ctx, "Fetched fresh object after patch for managedFields", map[string]interface{}{
+		"has_managed_fields": len(patchedObj.GetManagedFields()) > 0,
+	})
 
-	// 9. Preserve previous owners (only set during Create)
-
-	// 10. Track field ownership in private state
-	fieldOwnership := extractFieldOwnershipForManager(patchedObj, fieldManager)
-	setFieldOwnershipInPrivateState(ctx, resp.Private, fieldOwnership)
+	// 8b. Update managed_fields attribute in state
+	updateManagedFieldsData(ctx, &plan, patchedObj, fieldManager)
 
 	// 11. Save updated state
 	diags = resp.State.Set(ctx, &plan)
@@ -466,42 +401,4 @@ func findRemovedFields(currentFields, newFields []string) []string {
 	}
 
 	return removed
-}
-
-// getFieldOwnershipFromPrivateState retrieves field ownership map from private state
-func getFieldOwnershipFromPrivateState(ctx context.Context, getter interface {
-	GetKey(context.Context, string) ([]byte, diag.Diagnostics)
-}) map[string]string {
-	data, _ := getter.GetKey(ctx, privateStateKeyOwnership)
-	if data == nil {
-		return nil
-	}
-
-	var ownership map[string]string
-	if err := json.Unmarshal(data, &ownership); err != nil {
-		tflog.Warn(ctx, "Failed to unmarshal field ownership from private state", map[string]interface{}{
-			"error": err.Error(),
-		})
-		return nil
-	}
-	return ownership
-}
-
-// setFieldOwnershipInPrivateState stores field ownership map in private state
-func setFieldOwnershipInPrivateState(ctx context.Context, setter interface {
-	SetKey(context.Context, string, []byte) diag.Diagnostics
-}, ownership map[string]string) {
-	if ownership == nil || len(ownership) == 0 {
-		setter.SetKey(ctx, privateStateKeyOwnership, nil)
-		return
-	}
-
-	data, err := json.Marshal(ownership)
-	if err != nil {
-		tflog.Warn(ctx, "Failed to marshal field ownership for private state", map[string]interface{}{
-			"error": err.Error(),
-		})
-		return
-	}
-	setter.SetKey(ctx, privateStateKeyOwnership, data)
 }

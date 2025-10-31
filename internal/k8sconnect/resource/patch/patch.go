@@ -24,12 +24,6 @@ var _ resource.ResourceWithConfigValidators = (*patchResource)(nil)
 var _ resource.ResourceWithImportState = (*patchResource)(nil)
 var _ resource.ResourceWithConfigure = (*patchResource)(nil)
 var _ resource.ResourceWithModifyPlan = (*patchResource)(nil)
-var _ resource.ResourceWithUpgradeState = (*patchResource)(nil)
-
-// Private state keys
-const (
-	privateStateKeyOwnership = "field_ownership_v1"
-)
 
 // ClientGetter function type for dependency injection
 type ClientGetter func(auth.ClusterModel) (k8sclient.K8sClient, error)
@@ -49,8 +43,8 @@ type patchResourceModel struct {
 
 	// Computed fields
 
-	ManagedStateProjection types.Map    `tfsdk:"managed_state_projection"`
-	ManagedFields          types.String `tfsdk:"managed_fields"`
+	ManagedStateProjection types.Map `tfsdk:"managed_state_projection"`
+	ManagedFields          types.Map `tfsdk:"managed_fields"`
 }
 
 type patchTargetModel struct {
@@ -98,7 +92,7 @@ func (r *patchResource) Configure(ctx context.Context, req resource.ConfigureReq
 
 func (r *patchResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Version: 1,
+		Version: 2,
 		MarkdownDescription: `Applies targeted patches to existing Kubernetes resources using Server-Side Apply.
 
 **IMPORTANT:** This resource forcefully takes ownership of fields from other controllers.
@@ -233,9 +227,12 @@ When you destroy a patch resource, ownership is released but patched values rema
 					"Non-SSA patches (json_patch, merge_patch) do not provide projection.",
 			},
 
-			"managed_fields": schema.StringAttribute{
+			"managed_fields": schema.MapAttribute{
 				Computed:    true,
-				Description: "JSON representation of only the fields managed by this patch. Used for drift detection.",
+				ElementType: types.StringType,
+				Description: "Tracks which field manager owns each field path in the patched resource. " +
+					"Shows 'k8sconnect' for fields managed by this provider, or external manager names (e.g., 'kubectl', 'hpa-controller') for files managed by other systems. " +
+					"When ownership changes appear in diffs, it indicates another system has taken control of those fields.",
 			},
 		},
 	}

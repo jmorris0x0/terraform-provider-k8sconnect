@@ -1,7 +1,13 @@
-# ADR-005: Field Ownership Strategy for Drift Prevention
+# ADR-005: Managed Fields Strategy for Drift Prevention
 
 ## Status
 Accepted
+
+**Scope:** This ADR covers how we use SSA field ownership to determine which fields to include in `managed_state_projection` (our filtered view of K8s state for drift detection). For how we display field ownership information to users, see ADR-020.
+
+**Related ADRs:**
+- ADR-020: Managed Fields Display Strategy (managed_fields computed attribute)
+- ADR-021: Ownership Transition Messaging (centralized warning system)
 
 ## Context
 
@@ -56,7 +62,7 @@ This same problem exists for ANY field that ANY controller might add:
 **Option 3: Accept the Drift** - Store dry-run prediction without updating after apply.
 - Rejected: Shows false drift, misses normalization ("1Gi" → "1073741824"), fundamentally broken UX
 
-**Option 4: SSA Field Ownership Tracking (Chosen)** - Only track fields owned by our fieldManager.
+**Option 4: SSA Managed Fields Tracking (Chosen)** - Only track fields owned by our fieldManager.
 - Accepted: Only solution that maintains clean diffs, works universally, and eliminates false positives
 
 ## How It Works
@@ -85,7 +91,7 @@ Kubernetes `managedFields` is an **array** where each field manager has a separa
 
 **When it happens**: SSA creates shared ownership when multiple managers apply identical values to the same field. The `force=true` flag only takes exclusive ownership when values **differ**. When values match, all appliers become co-owners.
 
-**Parsing implication**: Naively iterating the array and overwriting ownership creates a "last-one-wins" bug. Correct parsing must accumulate all managers for each field path. For Terraform consistency, we report "k8sconnect" if we're one of the co-owners (even if not the only owner), since our plan predicted we'd own the field.
+**Parsing implication**: Naively iterating the array and overwriting ownership creates a "last-one-wins" bug. Correct parsing must accumulate **all** managers for each field path. We track shared ownership using `map[string][]string` (field path → list of all co-owners), enabling accurate detection of whether we're an owner, exclusive owner, or one of multiple co-owners.
 
 **Key lesson**: SSA ownership is more nuanced than "apply with force=true → you own it". Identical values create collaboration, different values create takeover.
 
