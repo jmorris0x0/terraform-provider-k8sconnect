@@ -15,6 +15,7 @@ import (
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/fieldmanagement"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 )
 
@@ -223,12 +224,21 @@ func (r *objectResource) extractProjectionAndOwnership(ctx context.Context, live
 		projectionMapValue, _ = types.MapValueFrom(ctx, types.StringType, map[string]string{})
 	}
 
-	// Extract field ownership from the imported object
-	ownership := extractFieldOwnership(liveObj)
-	ownershipMap := make(map[string]string, len(ownership))
-	for path, owner := range ownership {
-		ownershipMap[path] = owner.Manager
+	// Extract field ownership from the imported object using the new flattening approach
+	ownership := extractAllFieldOwnership(liveObj)
+
+	// Filter out status fields - they're always owned by controllers and provide no actionable information
+	filteredOwnership := make(map[string][]string)
+	for path, managers := range ownership {
+		if strings.HasPrefix(path, "status.") || path == "status" {
+			continue
+		}
+		filteredOwnership[path] = managers
 	}
+
+	// Flatten using the common logic
+	ownershipMap := fieldmanagement.FlattenFieldOwnership(filteredOwnership)
+
 	fieldOwnershipMap, ownershipDiags := types.MapValueFrom(ctx, types.StringType, ownershipMap)
 	if ownershipDiags.HasError() {
 		tflog.Warn(ctx, "Failed to convert field ownership during import", map[string]interface{}{
@@ -301,6 +311,7 @@ func (r *objectResource) buildImportState(ctx context.Context, resourceID string
 		DeleteProtection:       types.BoolValue(false),
 		IgnoreFields:           types.ListNull(types.StringType),
 		ManagedStateProjection: projectionMapValue,
+		FieldOwnership:         fieldOwnershipMap,
 		ObjectRef:              objRefValue,
 	}
 

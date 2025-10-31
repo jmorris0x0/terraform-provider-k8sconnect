@@ -2,7 +2,6 @@ package patch
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -108,9 +107,8 @@ func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, 
 	}
 	data.ManagedFields = types.StringValue(managedFields)
 
-	// 10. Track field ownership in private state
-	fieldOwnership := extractFieldOwnershipForManager(patchedObj, fieldManager)
-	setFieldOwnershipInPrivateState(ctx, resp.Private, fieldOwnership)
+	// 10. Update field_ownership attribute in state
+	updateFieldOwnershipData(ctx, &data, patchedObj, fieldManager)
 
 	// 12. Save state
 	diags = resp.State.Set(ctx, &data)
@@ -250,9 +248,8 @@ func (r *patchResource) Read(ctx context.Context, req resource.ReadRequest, resp
 		data.ManagedFields = types.StringValue(currentManagedFields)
 	}
 
-	// 8a. Track field ownership in private state
-	fieldOwnership := extractFieldOwnershipForManager(currentObj, fieldManager)
-	setFieldOwnershipInPrivateState(ctx, resp.Private, fieldOwnership)
+	// 8. Update field_ownership attribute in state
+	updateFieldOwnershipData(ctx, &data, currentObj, fieldManager)
 
 	// 9. Save refreshed state
 	diags = resp.State.Set(ctx, &data)
@@ -360,7 +357,19 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 		"field_manager": fieldManager,
 	})
 
-	// 8. Update managed fields
+	// 8a. Fetch fresh object with updated managedFields after patch
+	freshObj, err := client.Get(ctx, gvr, currentObj.GetNamespace(), currentObj.GetName())
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to read resource after patch",
+			fmt.Sprintf("Failed to read %s after patch: %s", formatTarget(target), err.Error()))
+		return
+	}
+	patchedObj = freshObj
+	tflog.Debug(ctx, "Fetched fresh object after patch for managedFields", map[string]interface{}{
+		"has_managed_fields": len(patchedObj.GetManagedFields()) > 0,
+	})
+
+	// 8b. Update managed fields
 	managedFields, err := fieldmanagement.ExtractManagedFieldsForManager(patchedObj, fieldManager)
 	if err != nil {
 		resp.Diagnostics.AddWarning("Failed to Extract Managed Fields",
@@ -372,9 +381,8 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 
 	// 9. Preserve previous owners (only set during Create)
 
-	// 10. Track field ownership in private state
-	fieldOwnership := extractFieldOwnershipForManager(patchedObj, fieldManager)
-	setFieldOwnershipInPrivateState(ctx, resp.Private, fieldOwnership)
+	// 10. Update field_ownership attribute in state
+	updateFieldOwnershipData(ctx, &plan, patchedObj, fieldManager)
 
 	// 11. Save updated state
 	diags = resp.State.Set(ctx, &plan)
@@ -466,56 +474,4 @@ func findRemovedFields(currentFields, newFields []string) []string {
 	}
 
 	return removed
-}
-
-// getFieldOwnershipFromPrivateState retrieves field ownership map from private state
-func getFieldOwnershipFromPrivateState(ctx context.Context, getter interface {
-	GetKey(context.Context, string) ([]byte, diag.Diagnostics)
-}) map[string][]string {
-	data, _ := getter.GetKey(ctx, privateStateKeyOwnership)
-	if data == nil {
-		return nil
-	}
-
-	// Try new format first (map[string][]string)
-	var ownership map[string][]string
-	if err := json.Unmarshal(data, &ownership); err != nil {
-		// Fallback to old format (map[string]string) for backward compatibility
-		var oldOwnership map[string]string
-		if err := json.Unmarshal(data, &oldOwnership); err == nil {
-			// Silently migrate old format to new format
-			ownership = make(map[string][]string)
-			for path, manager := range oldOwnership {
-				ownership[path] = []string{manager}
-			}
-			tflog.Debug(ctx, "Migrated field ownership from old format (map[string]string) to new format (map[string][]string)", map[string]interface{}{
-				"field_count": len(ownership),
-			})
-		} else {
-			tflog.Warn(ctx, "Failed to unmarshal field ownership from private state", map[string]interface{}{
-				"error": err.Error(),
-			})
-			return nil
-		}
-	}
-	return ownership
-}
-
-// setFieldOwnershipInPrivateState stores field ownership map in private state
-func setFieldOwnershipInPrivateState(ctx context.Context, setter interface {
-	SetKey(context.Context, string, []byte) diag.Diagnostics
-}, ownership map[string][]string) {
-	if ownership == nil || len(ownership) == 0 {
-		setter.SetKey(ctx, privateStateKeyOwnership, nil)
-		return
-	}
-
-	data, err := json.Marshal(ownership)
-	if err != nil {
-		tflog.Warn(ctx, "Failed to marshal field ownership for private state", map[string]interface{}{
-			"error": err.Error(),
-		})
-		return
-	}
-	setter.SetKey(ctx, privateStateKeyOwnership, data)
 }

@@ -2,7 +2,6 @@ package object
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -72,10 +71,12 @@ func (r *objectResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	// 8b. Track field ownership in private state
-	// Save ALL field ownership (not just k8sconnect) to detect ownership transitions
-	ownershipMap := extractAllFieldOwnership(rc.Object)
-	setFieldOwnershipInPrivateState(ctx, resp.Private, ownershipMap)
+	// 8b. Update field_ownership attribute in state
+	updateFieldOwnershipData(ctx, rc.Data, rc.Object)
+
+	// 8c. Save ownership baseline to private state for drift detection (ADR-021)
+	ignoreFields := getIgnoreFields(ctx, rc.Data)
+	saveOwnershipBaseline(ctx, resp.Private, rc.Object, ignoreFields)
 
 	// 9. SAVE STATE after successful creation
 	diags = resp.State.Set(ctx, rc.Data)
@@ -159,6 +160,7 @@ func (r *objectResource) Read(ctx context.Context, req resource.ReadRequest, res
 			})
 			emptyMap, _ := types.MapValueFrom(ctx, types.StringType, map[string]string{})
 			data.ManagedStateProjection = emptyMap
+			data.FieldOwnership = emptyMap
 			setPendingProjectionFlag(ctx, resp.Private)
 		} else {
 			resp.Diagnostics.AddError("Projection Failed",
@@ -170,13 +172,10 @@ func (r *objectResource) Read(ctx context.Context, req resource.ReadRequest, res
 		handleProjectionSuccess(ctx, hasPendingProjection, resp.Private, "during refresh")
 	}
 
-	// 5a. Field ownership tracking
-	// NOTE: We do NOT update field_ownership in private state during Read.
-	// Only Create/Update should save ownership, so we preserve "ownership at last apply"
-	// for ownership transition detection. If we updated here, the Plan phase would
-	// see current ownership (including drift) in both current and previous, missing transitions.
+	// 6. Update field ownership
+	updateFieldOwnershipData(ctx, &data, currentObj)
 
-	// 6. Save refreshed state
+	// 7. Save refreshed state
 	diags = resp.State.Set(ctx, &data)
 	resp.Diagnostics.Append(diags...)
 }
@@ -223,6 +222,18 @@ func (r *objectResource) Update(ctx context.Context, req resource.UpdateRequest,
 		"namespace": rc.Object.GetNamespace(),
 	})
 
+	// 4b. Fetch fresh object with updated managedFields after apply
+	updatedObj, err := rc.Client.Get(ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName())
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to read resource after update",
+			fmt.Sprintf("Failed to read %s after update: %s", formatResource(rc.Object), err.Error()))
+		return
+	}
+	rc.Object = updatedObj
+	tflog.Debug(ctx, "Fetched fresh object after update for managedFields", map[string]interface{}{
+		"has_managed_fields": len(rc.Object.GetManagedFields()) > 0,
+	})
+
 	// 5. Update projection (with recovery logic - ADR-006)
 	if err := r.updateProjection(rc); err != nil {
 		handleProjectionFailure(ctx, rc, resp.Private, &resp.State, &resp.Diagnostics, "updated", err)
@@ -244,10 +255,12 @@ func (r *objectResource) Update(ctx context.Context, req resource.UpdateRequest,
 		clearImportedWithoutAnnotationsFlag(ctx, resp.Private)
 	}
 
-	// 7a. Track field ownership in private state
-	// Save ALL field ownership (not just k8sconnect) to detect ownership transitions
-	ownershipMap := extractAllFieldOwnership(rc.Object)
-	setFieldOwnershipInPrivateState(ctx, resp.Private, ownershipMap)
+	// 7. Update field_ownership attribute in state
+	updateFieldOwnershipData(ctx, &plan, rc.Object)
+
+	// 7b. Save ownership baseline to private state for drift detection (ADR-021)
+	ignoreFields := getIgnoreFields(ctx, &plan)
+	saveOwnershipBaseline(ctx, resp.Private, rc.Object, ignoreFields)
 
 	// 8. Save updated state
 	diags = resp.State.Set(ctx, &plan)
@@ -437,86 +450,6 @@ func clearImportedWithoutAnnotationsFlag(ctx context.Context, setter interface {
 	setter.SetKey(ctx, "imported_without_annotations", nil)
 }
 
-// getFieldOwnershipFromPrivateState retrieves field ownership map from private state
-func getFieldOwnershipFromPrivateState(ctx context.Context, getter interface {
-	GetKey(context.Context, string) ([]byte, diag.Diagnostics)
-}) map[string][]string {
-	data, _ := getter.GetKey(ctx, privateStateKeyOwnership)
-	if data == nil {
-		tflog.Debug(ctx, "⚠️ DEBUG: getFieldOwnershipFromPrivateState - NO DATA FOUND", map[string]interface{}{
-			"data": "nil",
-		})
-		return nil
-	}
-
-	tflog.Debug(ctx, "⚠️ DEBUG: getFieldOwnershipFromPrivateState - Raw data retrieved", map[string]interface{}{
-		"data_length": len(data),
-		"data_string": string(data),
-	})
-
-	// Try new format first (map[string][]string)
-	var ownership map[string][]string
-	if err := json.Unmarshal(data, &ownership); err != nil {
-		// Fallback to old format (map[string]string) for backward compatibility
-		var oldOwnership map[string]string
-		if err := json.Unmarshal(data, &oldOwnership); err == nil {
-			// Silently migrate old format to new format
-			ownership = make(map[string][]string)
-			for path, manager := range oldOwnership {
-				ownership[path] = []string{manager}
-			}
-			tflog.Debug(ctx, "Migrated field ownership from old format (map[string]string) to new format (map[string][]string)", map[string]interface{}{
-				"field_count": len(ownership),
-			})
-		} else {
-			tflog.Warn(ctx, "Failed to unmarshal field ownership from private state", map[string]interface{}{
-				"error": err.Error(),
-			})
-			return nil
-		}
-	}
-
-	tflog.Debug(ctx, "⚠️ DEBUG: getFieldOwnershipFromPrivateState - Successfully retrieved ownership", map[string]interface{}{
-		"ownership_map": ownership,
-		"field_count":   len(ownership),
-	})
-
-	return ownership
-}
-
-// setFieldOwnershipInPrivateState stores field ownership map in private state
-func setFieldOwnershipInPrivateState(ctx context.Context, setter interface {
-	SetKey(context.Context, string, []byte) diag.Diagnostics
-}, ownership map[string][]string) {
-	if ownership == nil || len(ownership) == 0 {
-		tflog.Debug(ctx, "⚠️ DEBUG: setFieldOwnershipInPrivateState - Setting to nil (no ownership)", map[string]interface{}{
-			"ownership": "nil or empty",
-		})
-		setter.SetKey(ctx, privateStateKeyOwnership, nil)
-		return
-	}
-
-	tflog.Debug(ctx, "⚠️ DEBUG: setFieldOwnershipInPrivateState - Saving ownership to private state", map[string]interface{}{
-		"ownership_map": ownership,
-		"field_count":   len(ownership),
-	})
-
-	data, err := json.Marshal(ownership)
-	if err != nil {
-		tflog.Warn(ctx, "Failed to marshal field ownership for private state", map[string]interface{}{
-			"error": err.Error(),
-		})
-		return
-	}
-
-	tflog.Debug(ctx, "⚠️ DEBUG: setFieldOwnershipInPrivateState - Marshaled data", map[string]interface{}{
-		"data_length": len(data),
-		"data_string": string(data),
-	})
-
-	setter.SetKey(ctx, privateStateKeyOwnership, data)
-}
-
 // handleProjectionSuccess handles successful projection recovery per ADR-006
 func handleProjectionSuccess(ctx context.Context, hasPendingProjection bool, privateSetter interface {
 	SetKey(context.Context, string, []byte) diag.Diagnostics
@@ -544,9 +477,10 @@ func handleProjectionFailure(
 		"error": err.Error(),
 	})
 
-	// Set empty projection - must be known for Terraform to save state
+	// Set empty projection and field ownership - both must be known for Terraform to save state
 	emptyMap, _ := types.MapValueFrom(ctx, types.StringType, map[string]string{})
 	rc.Data.ManagedStateProjection = emptyMap
+	rc.Data.FieldOwnership = emptyMap
 
 	// Save state with pending projection flag in Private state
 	setPendingProjectionFlag(ctx, privateSetter)

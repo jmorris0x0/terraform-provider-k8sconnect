@@ -15,7 +15,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
 
-	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/fieldmanagement"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
@@ -137,6 +136,7 @@ func (r *patchResource) preservePatchInputAndState(ctx context.Context, stateDat
 	// Preserve computed attributes
 	plannedData.ManagedStateProjection = stateData.ManagedStateProjection
 	plannedData.ManagedFields = stateData.ManagedFields
+	plannedData.FieldOwnership = stateData.FieldOwnership
 }
 
 // isConnectionReady checks if all connection fields are known (not computed)
@@ -318,6 +318,7 @@ func (r *patchResource) generateFieldManager(data patchResourceModel) string {
 func setProjectionUnknown(data *patchResourceModel) {
 	data.ManagedStateProjection = types.MapUnknown(types.StringType)
 	data.ManagedFields = types.StringUnknown()
+	data.FieldOwnership = types.MapUnknown(types.StringType)
 }
 
 // validatePatchTarget gets and validates the target resource for patching
@@ -521,6 +522,7 @@ func (r *patchResource) handleNonSSAPatchState(
 	// We'll use semantic content comparison in checkDriftAndPreserveState
 	plannedData.ManagedStateProjection = types.MapNull(types.StringType) // Null for non-SSA
 	plannedData.ManagedFields = types.StringUnknown()
+	plannedData.FieldOwnership = types.MapUnknown(types.StringType)
 	return true
 }
 
@@ -552,6 +554,7 @@ func (r *patchResource) calculateProjectionFromDryRun(
 	}
 
 	plannedData.ManagedStateProjection = mapValue
+
 	tflog.Debug(ctx, fmt.Sprintf("Projection calculated for %s", operationType), map[string]interface{}{
 		"field_count": len(projectionMap),
 	})
@@ -563,7 +566,10 @@ func (r *patchResource) calculateProjectionFromDryRun(
 		r.checkOwnershipTransitions(ctx, req, resp, currentOwnership)
 	}
 
-	// Field ownership populated during apply
+	// Compute field_ownership from dry-run result
+	// This is a core feature: predicting exact field ownership using force=true dry-run
+	updateFieldOwnershipData(ctx, plannedData, patchedObj, fieldManager)
+
 	plannedData.ManagedFields = types.StringUnknown()
 	return true
 }
@@ -649,21 +655,58 @@ func (r *patchResource) patchContentEqual(content1, content2 string, patchType s
 
 // checkOwnershipTransitions compares previous vs current field ownership and warns about transitions
 func (r *patchResource) checkOwnershipTransitions(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse, currentOwnership map[string][]string) {
-	// Get previous ownership from private state
-	previousOwnership := getFieldOwnershipFromPrivateState(ctx, req.Private)
-	if previousOwnership == nil {
-		// No previous ownership tracked - first apply
-		tflog.Debug(ctx, "No previous ownership in private state - skipping transition check")
+	// Skip if no state (first apply)
+	if req.State.Raw.IsNull() {
+		tflog.Debug(ctx, "No state yet - skipping transition check")
 		return
 	}
 
-	// Find ownership transitions (fields that changed owners)
-	var transitions []patchOwnershipTransition
-	for path, currentOwners := range currentOwnership {
-		previousOwners, existed := previousOwnership[path]
+	// Get previous ownership from state attribute
+	var stateData patchResourceModel
+	diags := req.State.Get(ctx, &stateData)
+	if diags.HasError() {
+		// Error reading state
+		tflog.Warn(ctx, "Failed to read state - skipping transition check", map[string]interface{}{
+			"diagnostics": diags,
+		})
+		return
+	}
 
-		// Check if ownership list changed
-		if existed && !common.StringSlicesEqual(previousOwners, currentOwners) {
+	// Extract previous ownership map from state
+	var previousOwnershipFlat map[string]string
+	if !stateData.FieldOwnership.IsNull() && !stateData.FieldOwnership.IsUnknown() {
+		d := stateData.FieldOwnership.ElementsAs(ctx, &previousOwnershipFlat, false)
+		if d.HasError() {
+			tflog.Warn(ctx, "Failed to extract previous field ownership from state", map[string]interface{}{
+				"diagnostics": d,
+			})
+			return
+		}
+	}
+
+	if previousOwnershipFlat == nil || len(previousOwnershipFlat) == 0 {
+		// No previous ownership tracked - first apply
+		tflog.Debug(ctx, "No previous ownership in state - skipping transition check")
+		return
+	}
+
+	// Flatten current ownership for comparison
+	currentOwnershipFlat := fieldmanagement.FlattenFieldOwnership(currentOwnership)
+
+	// Find ownership transitions (fields that changed owner)
+	var transitions []patchOwnershipTransition
+	for path, currentOwner := range currentOwnershipFlat {
+		previousOwner, existed := previousOwnershipFlat[path]
+
+		// If ownership changed, record transition
+		if !existed || previousOwner != currentOwner {
+			// Build owner lists for the transition message (backward compatibility)
+			previousOwners := []string{}
+			if existed {
+				previousOwners = append(previousOwners, previousOwner)
+			}
+			currentOwners := []string{currentOwner}
+
 			transitions = append(transitions, patchOwnershipTransition{
 				Path:           path,
 				PreviousOwners: previousOwners,
@@ -673,12 +716,12 @@ func (r *patchResource) checkOwnershipTransitions(ctx context.Context, req resou
 	}
 
 	// Check for fields that were removed (released ownership)
-	for path, previousOwners := range previousOwnership {
-		if _, exists := currentOwnership[path]; !exists {
+	for path, previousOwner := range previousOwnershipFlat {
+		if _, exists := currentOwnershipFlat[path]; !exists {
 			// Field was previously owned but is no longer in our ownership
 			tflog.Debug(ctx, "Patch field ownership released", map[string]interface{}{
-				"path":            path,
-				"previous_owners": previousOwners,
+				"path":           path,
+				"previous_owner": previousOwner,
 			})
 		}
 	}

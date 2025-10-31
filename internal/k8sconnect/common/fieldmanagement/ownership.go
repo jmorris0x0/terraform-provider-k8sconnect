@@ -3,6 +3,7 @@ package fieldmanagement
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -231,7 +232,9 @@ func ExtractAllFieldOwnership(obj *unstructured.Unstructured) map[string][]strin
 		}
 
 		// Extract paths owned by this manager
-		paths := extractPathsFromFieldsV1Simple(fields, "")
+		// Use the full extraction logic WITH userJSON to get consistent array index format
+		// (e.g., containers[0] instead of containers{"name":"nginx"})
+		paths := extractPathsFromFieldsV1(fields, "", obj.Object)
 		for _, path := range paths {
 			// Skip internal k8sconnect annotations
 			if strings.HasPrefix(path, "metadata.annotations.k8sconnect.terraform.io/") {
@@ -304,4 +307,87 @@ func ExtractFieldPathsFromManagedFieldsJSON(managedFieldsJSON string) ([]string,
 	// Extract field paths using the common logic
 	paths := extractPathsFromFieldsV1Simple(fields, "")
 	return paths, nil
+}
+
+// FlattenFieldOwnership converts map[string][]string to map[string]string for clean UX
+// This flattening is deterministic and follows the rule:
+// - If "k8sconnect" is a co-owner, show "k8sconnect" (we're one of the owners)
+// - Else if single external owner, show that manager
+// - Else if multiple external co-owners, sort and show first (deterministic)
+//
+// This keeps diffs simple while tracking comprehensive ownership internally.
+func FlattenFieldOwnership(ownership map[string][]string) map[string]string {
+	result := make(map[string]string, len(ownership))
+
+	for path, managers := range ownership {
+		if len(managers) == 0 {
+			continue
+		}
+
+		// Check if we're a co-owner
+		hasK8sconnect := false
+		for _, m := range managers {
+			if m == "k8sconnect" {
+				hasK8sconnect = true
+				break
+			}
+		}
+
+		if hasK8sconnect {
+			// We're an owner (exclusive or shared) → show "k8sconnect"
+			result[path] = "k8sconnect"
+		} else if len(managers) == 1 {
+			// External exclusive owner → show that manager
+			result[path] = managers[0]
+		} else {
+			// Multiple external co-owners → pick deterministically
+			sorted := make([]string, len(managers))
+			copy(sorted, managers)
+			sort.Strings(sorted)
+			result[path] = sorted[0] // Alphabetically first
+		}
+	}
+
+	return result
+}
+
+// IsKubernetesSystemAnnotation checks if a field path is a K8s system annotation
+// that is managed by controllers and appears/changes unpredictably.
+// These annotations cause plan/apply inconsistencies if tracked in field_ownership.
+func IsKubernetesSystemAnnotation(path string) bool {
+	// System annotations are under metadata.annotations and end with .kubernetes.io/*
+	if !strings.HasPrefix(path, "metadata.annotations.") {
+		return false
+	}
+
+	// Extract the annotation key (everything after "metadata.annotations.")
+	annotationKey := strings.TrimPrefix(path, "metadata.annotations.")
+
+	// Filter out known K8s system annotation prefixes
+	// These are managed by K8s controllers and change unpredictably
+	systemPrefixes := []string{
+		"deployment.kubernetes.io/",
+		"kubectl.kubernetes.io/",
+		"autoscaling.kubernetes.io/",
+		"control-plane.alpha.kubernetes.io/",
+		"kubernetes.io/",
+	}
+
+	for _, prefix := range systemPrefixes {
+		if strings.HasPrefix(annotationKey, prefix) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// containsString checks if a string is in a slice
+func containsString(slice []string, str string) bool {
+	for _, s := range slice {
+		if s == str {
+			return true
+		}
+	}
+	return false
 }

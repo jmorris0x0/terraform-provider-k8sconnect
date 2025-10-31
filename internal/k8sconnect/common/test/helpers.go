@@ -15,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
+	sigsyaml "sigs.k8s.io/yaml"
 )
 
 // Create K8s client for verification
@@ -738,7 +739,7 @@ func CleanupNamespace(t *testing.T, client kubernetes.Interface, namespace strin
 
 // CreateConfigMapWithKubectl creates a ConfigMap using kubectl apply command
 // This simulates an external tool creating a resource, which will have a different field manager
-func CreateConfigMapWithKubectl(t *testing.T, namespace, name string, labels map[string]string) {
+func CreateConfigMapWithKubectl(t *testing.T, namespace, name string, data map[string]string) {
 	// Create YAML for the ConfigMap
 	yaml := fmt.Sprintf(`apiVersion: v1
 kind: ConfigMap
@@ -747,16 +748,13 @@ metadata:
   namespace: %s
 `, name, namespace)
 
-	// Add labels if provided
-	if len(labels) > 0 {
-		yaml += "  labels:\n"
-		for k, v := range labels {
-			yaml += fmt.Sprintf("    %s: %s\n", k, v)
+	// Add data if provided
+	if len(data) > 0 {
+		yaml += "data:\n"
+		for k, v := range data {
+			yaml += fmt.Sprintf("  %s: %s\n", k, v)
 		}
 	}
-
-	// Add some data
-	yaml += "data:\n  key1: value1\n  key2: value2\n"
 
 	// Write to temp file
 	tmpfile := fmt.Sprintf("/tmp/kubectl-cm-%s.yaml", name)
@@ -772,7 +770,7 @@ metadata:
 		t.Fatalf("kubectl apply failed: %v\nOutput: %s", err, output)
 	}
 
-	fmt.Printf("✅ Created ConfigMap %s/%s with kubectl (field manager: kubectl)\n", namespace, name)
+	fmt.Printf("✅ Created ConfigMap %s/%s with kubectl (field manager: kubectl-create)\n", namespace, name)
 }
 
 // DeleteResourceWithKubectl deletes a resource using kubectl delete command
@@ -885,4 +883,134 @@ func CheckHasAnnotation(client kubernetes.Interface, namespace, kind, name, anno
 		fmt.Printf("✅ Verified %s %s/%s has annotation %q\n", kind, namespace, name, annotationKey)
 		return nil
 	}
+}
+
+// ScaleDeploymentWithKubectl scales a deployment using kubectl scale command
+// This simulates external drift (kubectl changes replicas with client-side apply manager)
+func ScaleDeploymentWithKubectl(t *testing.T, namespace, name string, replicas int) {
+	cmd := exec.Command("kubectl", "scale", "deployment", name, "-n", namespace, fmt.Sprintf("--replicas=%d", replicas))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("kubectl scale failed: %v\nOutput: %s", err, output)
+	}
+
+	fmt.Printf("✅ Scaled deployment %s/%s to %d replicas with kubectl (creates drift)\n", namespace, name, replicas)
+}
+
+// CheckDeploymentReplicas verifies that a deployment has the expected replica count
+func CheckDeploymentReplicas(client kubernetes.Interface, namespace, name string, expectedReplicas int) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		deployment, err := client.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to get deployment %s/%s: %v", namespace, name, err)
+		}
+
+		actualReplicas := int32(expectedReplicas)
+		if deployment.Spec.Replicas == nil || *deployment.Spec.Replicas != actualReplicas {
+			return fmt.Errorf("deployment %s/%s expected %d replicas, got %v",
+				namespace, name, expectedReplicas, deployment.Spec.Replicas)
+		}
+
+		fmt.Printf("✅ Verified deployment %s/%s has %d replicas\n", namespace, name, expectedReplicas)
+		return nil
+	}
+}
+
+// CheckYAMLSemanticEquality returns a TestCheckFunc that compares two YAML strings semantically,
+// ignoring field ordering and whitespace differences. This is used to verify yaml_body attribute
+// after import, where YAML field ordering may differ from user config due to Go map iteration order.
+func CheckYAMLSemanticEquality(resourceName, attributeName, expectedYAML string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[resourceName]
+		if !ok {
+			return fmt.Errorf("resource %q not found in state", resourceName)
+		}
+
+		actualYAML, ok := rs.Primary.Attributes[attributeName]
+		if !ok {
+			return fmt.Errorf("attribute %q not found on resource %q", attributeName, resourceName)
+		}
+
+		// Parse both YAMLs into maps
+		var expectedMap, actualMap map[string]interface{}
+
+		if err := sigsyaml.Unmarshal([]byte(expectedYAML), &expectedMap); err != nil {
+			return fmt.Errorf("failed to parse expected YAML: %w", err)
+		}
+
+		if err := sigsyaml.Unmarshal([]byte(actualYAML), &actualMap); err != nil {
+			return fmt.Errorf("failed to parse actual YAML from state: %w", err)
+		}
+
+		// Deep compare the maps
+		if !deepEqualMaps(expectedMap, actualMap) {
+			return fmt.Errorf("YAML semantic mismatch:\n\nExpected:\n%s\n\nActual:\n%s",
+				expectedYAML, actualYAML)
+		}
+
+		return nil
+	}
+}
+
+// deepEqualMaps recursively compares two maps for semantic equality
+func deepEqualMaps(a, b map[string]interface{}) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for key, aVal := range a {
+		bVal, ok := b[key]
+		if !ok {
+			return false
+		}
+
+		if !deepEqualValues(aVal, bVal) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// deepEqualValues recursively compares two values for semantic equality
+func deepEqualValues(a, b interface{}) bool {
+	// Handle nil cases
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+
+	// Handle maps
+	aMap, aIsMap := a.(map[string]interface{})
+	bMap, bIsMap := b.(map[string]interface{})
+	if aIsMap && bIsMap {
+		return deepEqualMaps(aMap, bMap)
+	}
+	if aIsMap != bIsMap {
+		return false
+	}
+
+	// Handle slices
+	aSlice, aIsSlice := a.([]interface{})
+	bSlice, bIsSlice := b.([]interface{})
+	if aIsSlice && bIsSlice {
+		if len(aSlice) != len(bSlice) {
+			return false
+		}
+		for i := range aSlice {
+			if !deepEqualValues(aSlice[i], bSlice[i]) {
+				return false
+			}
+		}
+		return true
+	}
+	if aIsSlice != bIsSlice {
+		return false
+	}
+
+	// For primitives, use direct comparison
+	return a == b
 }

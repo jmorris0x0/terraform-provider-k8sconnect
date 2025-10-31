@@ -3,6 +3,12 @@
 ## Status
 Accepted
 
+**Scope:** This ADR covers how we use SSA field ownership to determine which fields to include in `managed_state_projection` (our filtered view of K8s state for drift detection). For how we display field ownership information to users, see ADR-020.
+
+**Related ADRs:**
+- ADR-020: Field Ownership Display Strategy (field_ownership computed attribute)
+- ADR-021: Ownership Transition Messaging (centralized warning system)
+
 ## Context
 
 When building a Terraform provider for Kubernetes that uses Server-Side Apply (SSA), we discovered a fundamental incompatibility between three core requirements:
@@ -85,7 +91,7 @@ Kubernetes `managedFields` is an **array** where each field manager has a separa
 
 **When it happens**: SSA creates shared ownership when multiple managers apply identical values to the same field. The `force=true` flag only takes exclusive ownership when values **differ**. When values match, all appliers become co-owners.
 
-**Parsing implication**: Naively iterating the array and overwriting ownership creates a "last-one-wins" bug. Correct parsing must accumulate all managers for each field path. For Terraform consistency, we report "k8sconnect" if we're one of the co-owners (even if not the only owner), since our plan predicted we'd own the field.
+**Parsing implication**: Naively iterating the array and overwriting ownership creates a "last-one-wins" bug. Correct parsing must accumulate **all** managers for each field path. We track shared ownership using `map[string][]string` (field path → list of all co-owners), enabling accurate detection of whether we're an owner, exclusive owner, or one of multiple co-owners.
 
 **Key lesson**: SSA ownership is more nuanced than "apply with force=true → you own it". Identical values create collaboration, different values create takeover.
 
