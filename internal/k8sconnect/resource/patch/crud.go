@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
@@ -64,7 +63,7 @@ func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, 
 	}
 
 	// Surface any API warnings from get operation
-	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
+	k8sclient.SurfaceK8sWarnings(ctx, client, &resp.Diagnostics)
 
 	// 6. CRITICAL VALIDATION: Prevent self-patching
 	if r.isManagedByThisState(ctx, targetObj) {
@@ -90,7 +89,7 @@ func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, 
 	}
 
 	// Surface any API warnings from patch operation
-	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
+	k8sclient.SurfaceK8sWarnings(ctx, client, &resp.Diagnostics)
 
 	tflog.Info(ctx, "Patch applied successfully", map[string]interface{}{
 		"target":        formatTarget(target),
@@ -142,7 +141,7 @@ func (r *patchResource) Read(ctx context.Context, req resource.ReadRequest, resp
 	}
 
 	// Surface any API warnings from get operation
-	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
+	k8sclient.SurfaceK8sWarnings(ctx, client, &resp.Diagnostics)
 
 	// 5. Detect value drift (compare desired patch values with actual current values)
 	fieldManager := fmt.Sprintf("k8sconnect-patch-%s", data.ID.ValueString())
@@ -220,7 +219,7 @@ func (r *patchResource) Read(ctx context.Context, req resource.ReadRequest, resp
 		}
 
 		// Surface any API warnings from patch operation
-		surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
+		k8sclient.SurfaceK8sWarnings(ctx, client, &resp.Diagnostics)
 	}
 
 	// 7. Update managed_fields attribute in state
@@ -278,7 +277,7 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	}
 
 	// Surface any API warnings from get operation
-	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
+	k8sclient.SurfaceK8sWarnings(ctx, client, &resp.Diagnostics)
 
 	// 7. Re-apply updated patch
 	fieldManager := fmt.Sprintf("k8sconnect-patch-%s", plan.ID.ValueString())
@@ -289,7 +288,7 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	}
 
 	// Surface any API warnings from patch operation
-	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
+	k8sclient.SurfaceK8sWarnings(ctx, client, &resp.Diagnostics)
 
 	tflog.Info(ctx, "Patch updated successfully", map[string]interface{}{
 		"target":        formatTarget(target),
@@ -355,7 +354,7 @@ func (r *patchResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 	}
 
 	// Surface any API warnings from get operation
-	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
+	k8sclient.SurfaceK8sWarnings(ctx, client, &resp.Diagnostics)
 
 	// That's it - state removed automatically by framework
 	// The patched values stay on the resource
@@ -370,20 +369,6 @@ func (r *patchResource) ImportState(ctx context.Context, req resource.ImportStat
 			"1. Patches represent partial ownership, not full resource state\n"+
 			"2. There's no way to determine the original patch content from the current state\n"+
 			"Instead, define the patch in your Terraform configuration.")
-}
-
-// surfaceK8sWarnings checks for Kubernetes API warnings and adds them as Terraform diagnostics
-func surfaceK8sWarnings(ctx context.Context, client k8sclient.K8sClient, diagnostics *diag.Diagnostics) {
-	warnings := client.GetWarnings()
-	for _, warning := range warnings {
-		diagnostics.AddWarning(
-			"Kubernetes API Warning",
-			fmt.Sprintf("The Kubernetes API server returned a warning:\n\n%s", warning),
-		)
-		tflog.Warn(ctx, "Kubernetes API warning", map[string]interface{}{
-			"warning": warning,
-		})
-	}
 }
 
 // findRemovedFields finds fields that are in currentFields but not in newFields

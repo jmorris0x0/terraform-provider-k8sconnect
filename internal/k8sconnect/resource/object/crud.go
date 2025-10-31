@@ -49,13 +49,13 @@ func (r *objectResource) Create(ctx context.Context, req resource.CreateRequest,
 	}
 
 	// 6a. Surface any API warnings from apply operation
-	surfaceK8sWarnings(ctx, rc.Client, rc.Object, &resp.Diagnostics)
+	k8sclient.SurfaceK8sWarningsWithIdentity(ctx, rc.Client, rc.Object, &resp.Diagnostics)
 
 	// 7. Phase 2 - Read back to get managedFields
 	r.readResourceAfterCreate(ctx, rc)
 
 	// 7a. Surface any API warnings from read operation
-	surfaceK8sWarnings(ctx, rc.Client, rc.Object, &resp.Diagnostics)
+	k8sclient.SurfaceK8sWarningsWithIdentity(ctx, rc.Client, rc.Object, &resp.Diagnostics)
 
 	// 8. Update projection BEFORE state save
 	if err := r.updateProjection(rc); err != nil {
@@ -136,7 +136,7 @@ func (r *objectResource) Read(ctx context.Context, req resource.ReadRequest, res
 	}
 
 	// 3a. Surface any API warnings from read operation
-	surfaceK8sWarnings(ctx, rc.Client, rc.Object, &resp.Diagnostics)
+	k8sclient.SurfaceK8sWarningsWithIdentity(ctx, rc.Client, rc.Object, &resp.Diagnostics)
 
 	// 4. Check ownership (skip if just imported without annotations)
 	// When a resource is imported without k8sconnect annotations, we skip the ownership
@@ -214,7 +214,7 @@ func (r *objectResource) Update(ctx context.Context, req resource.UpdateRequest,
 	}
 
 	// 4a. Surface any API warnings from apply operation
-	surfaceK8sWarnings(ctx, rc.Client, rc.Object, &resp.Diagnostics)
+	k8sclient.SurfaceK8sWarningsWithIdentity(ctx, rc.Client, rc.Object, &resp.Diagnostics)
 
 	tflog.Info(ctx, "Resource updated", map[string]interface{}{
 		"kind":      rc.Object.GetKind(),
@@ -494,25 +494,6 @@ func handleProjectionFailure(
 			"This is typically caused by network issues. Run 'terraform apply' again to complete the operation.",
 			formatResource(rc.Object), operation, err),
 	)
-}
-
-// surfaceK8sWarnings checks for Kubernetes API warnings and adds them as Terraform diagnostics
-func surfaceK8sWarnings(ctx context.Context, client k8sclient.K8sClient, obj interface {
-	GetKind() string
-	GetName() string
-}, diagnostics *diag.Diagnostics) {
-	warnings := client.GetWarnings()
-	for _, warning := range warnings {
-		diagnostics.AddWarning(
-			fmt.Sprintf("Kubernetes API Warning (%s/%s)", obj.GetKind(), obj.GetName()),
-			fmt.Sprintf("The Kubernetes API server returned a warning:\n\n%s", warning),
-		)
-		tflog.Warn(ctx, "Kubernetes API warning", map[string]interface{}{
-			"warning": warning,
-			"kind":    obj.GetKind(),
-			"name":    obj.GetName(),
-		})
-	}
 }
 
 // populateObjectRef extracts resource identity and populates object_ref output

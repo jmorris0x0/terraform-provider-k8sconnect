@@ -2,10 +2,11 @@ package k8sclient
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
-	"math/rand"
 	"net"
 	"net/url"
 	"strings"
@@ -15,6 +16,18 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
+
+// cryptoRandFloat64 generates a cryptographically secure random float64 in [0.0, 1.0)
+// Used for jitter calculation in retry logic
+func cryptoRandFloat64() float64 {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// Fallback to 0.5 if crypto/rand fails (should never happen)
+		return 0.5
+	}
+	// Convert bytes to uint64, then to float64 in [0.0, 1.0)
+	return float64(binary.BigEndian.Uint64(b[:])) / float64(1<<64)
+}
 
 // RetryConfig defines the retry behavior for Kubernetes API operations
 type RetryConfig struct {
@@ -140,7 +153,7 @@ func calculateBackoff(attempt int, config RetryConfig) time.Duration {
 
 	// Add jitter: random value between (1-jitter) and (1+jitter)
 	jitterRange := exponential * config.Jitter
-	jitterValue := exponential - jitterRange + (rand.Float64() * 2 * jitterRange)
+	jitterValue := exponential - jitterRange + (cryptoRandFloat64() * 2 * jitterRange)
 
 	delay := time.Duration(jitterValue)
 

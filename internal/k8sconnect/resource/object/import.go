@@ -225,7 +225,7 @@ func (r *objectResource) extractProjectionAndOwnership(ctx context.Context, live
 	}
 
 	// Extract field ownership from the imported object using the new flattening approach
-	ownership := extractAllManagedFields(liveObj)
+	ownership := fieldmanagement.ExtractAllManagedFields(liveObj)
 
 	// Filter out status fields - they're always owned by controllers and provide no actionable information
 	filteredOwnership := make(map[string][]string)

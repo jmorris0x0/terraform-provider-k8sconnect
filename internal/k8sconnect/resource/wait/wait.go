@@ -23,7 +23,6 @@ import (
 
 var _ resource.Resource = (*waitResource)(nil)
 var _ resource.ResourceWithConfigure = (*waitResource)(nil)
-var _ resource.ResourceWithUpgradeState = (*waitResource)(nil)
 
 // ClientGetter function type for dependency injection
 type ClientGetter func(auth.ClusterModel) (k8sclient.K8sClient, error)

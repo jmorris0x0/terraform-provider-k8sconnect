@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/factory"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/fieldmanagement"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8serrors"
@@ -138,37 +139,7 @@ func (r *patchResource) preservePatchInputAndState(ctx context.Context, stateDat
 // isConnectionReady checks if all connection fields are known (not computed)
 // Reused from manifest pattern
 func (r *patchResource) isConnectionReady(conn types.Object) bool {
-	if conn.IsNull() || conn.IsUnknown() {
-		return false
-	}
-
-	// Convert to connection model
-	connModel, err := auth.ObjectToConnectionModel(context.Background(), conn)
-	if err != nil {
-		// Conversion failed due to unknown values
-		return false
-	}
-
-	// Check if required fields are known
-	if connModel.Host.IsUnknown() {
-		return false
-	}
-
-	// Check auth fields
-	if !connModel.Token.IsNull() && connModel.Token.IsUnknown() {
-		return false
-	}
-
-	if !connModel.Kubeconfig.IsNull() && connModel.Kubeconfig.IsUnknown() {
-		return false
-	}
-
-	if !connModel.ClusterCACertificate.IsNull() && connModel.ClusterCACertificate.IsUnknown() {
-		return false
-	}
-
-	// Connection is ready
-	return true
+	return auth.IsConnectionReady(conn)
 }
 
 // executeDryRunPatch performs the dry-run patch operation
@@ -221,18 +192,9 @@ func (r *patchResource) executeDryRunPatch(ctx context.Context, req resource.Mod
 
 // setupDryRunClient creates the k8s client for dry-run (reused from manifest pattern)
 func (r *patchResource) setupDryRunClient(ctx context.Context, plannedData *patchResourceModel, resp *resource.ModifyPlanResponse) (k8sclient.K8sClient, error) {
-	// Convert connection
-	conn, err := auth.ObjectToConnectionModel(ctx, plannedData.Cluster)
+	client, err := factory.SetupClient(ctx, plannedData.Cluster, r.clientGetter)
 	if err != nil {
-		tflog.Debug(ctx, "Skipping dry-run due to connection conversion error", map[string]interface{}{"error": err.Error()})
-		setProjectionUnknown(plannedData)
-		return nil, err
-	}
-
-	// Create client
-	client, err := r.clientGetter(conn)
-	if err != nil {
-		tflog.Debug(ctx, "Skipping dry-run due to client creation error", map[string]interface{}{"error": err.Error()})
+		tflog.Debug(ctx, "Skipping dry-run due to client setup error", map[string]interface{}{"error": err.Error()})
 		setProjectionUnknown(plannedData)
 		return nil, err
 	}
@@ -258,7 +220,7 @@ func (r *patchResource) dryRunStrategicMergePatch(ctx context.Context, client k8
 	patchObj.SetNamespace(currentObj.GetNamespace())
 
 	// Merge patch data into the object
-	r.mergeMaps(patchObj.Object, patchData)
+	mergeMaps(patchObj.Object, patchData)
 
 	// Perform dry-run using SSA
 	dryRunResult, err := client.DryRunApply(ctx, patchObj, k8sclient.ApplyOptions{
@@ -272,25 +234,6 @@ func (r *patchResource) dryRunStrategicMergePatch(ctx context.Context, client k8
 	}
 
 	return dryRunResult, nil
-}
-
-// mergeMaps performs a deep merge of src into dst (adapted from helpers.go)
-func (r *patchResource) mergeMaps(dst, src map[string]interface{}) {
-	for key, srcVal := range src {
-		if dstVal, exists := dst[key]; exists {
-			// Key exists in both
-			if dstMap, dstIsMap := dstVal.(map[string]interface{}); dstIsMap {
-				if srcMap, srcIsMap := srcVal.(map[string]interface{}); srcIsMap {
-					// Both are maps - recurse
-					r.mergeMaps(dstMap, srcMap)
-					continue
-				}
-			}
-		}
-		// Either key doesn't exist in dst, or one of the values isn't a map
-		// Override with src value
-		dst[key] = srcVal
-	}
 }
 
 // generateFieldManager returns the field manager name for this patch
@@ -352,7 +295,7 @@ func (r *patchResource) validatePatchTarget(
 	}
 
 	// Surface any warnings from Get operation
-	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
+	k8sclient.SurfaceK8sWarnings(ctx, client, &resp.Diagnostics)
 
 	// CRITICAL VALIDATION: Prevent self-patching
 	if r.isManagedByThisState(ctx, currentObj) {
@@ -438,7 +381,7 @@ func (r *patchResource) executePatchDryRun(
 	patchedObj, err := r.dryRunStrategicMergePatch(ctx, client, currentObj, patchContent, fieldManager)
 
 	// Surface any warnings from Patch operation
-	surfaceK8sWarnings(ctx, client, &resp.Diagnostics)
+	k8sclient.SurfaceK8sWarnings(ctx, client, &resp.Diagnostics)
 
 	if err != nil {
 		// Check for immutable field errors

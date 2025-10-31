@@ -6,7 +6,6 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/fieldmanagement"
@@ -15,29 +14,13 @@ import (
 // Type alias for compatibility
 type ManagedFields = fieldmanagement.ManagedFields
 
-// parseFieldsV1ToPathMap is a wrapper for the common implementation
-func parseFieldsV1ToPathMap(managedFields []metav1.ManagedFieldsEntry, userJSON map[string]interface{}) map[string]ManagedFields {
-	return fieldmanagement.ParseFieldsV1ToPathMap(managedFields, userJSON)
-}
-
-// extractManagedFields returns ownership info for ALL fields
-func extractManagedFields(obj *unstructured.Unstructured) map[string]ManagedFields {
-	return fieldmanagement.ExtractManagedFields(obj)
-}
-
-// extractAllManagedFields extracts ownership for ALL managers (not just k8sconnect)
-// This is used for ownership transition detection
-func extractAllManagedFields(obj *unstructured.Unstructured) map[string][]string {
-	return fieldmanagement.ExtractAllManagedFields(obj)
-}
-
 // updateManagedFieldsData updates the managed_fields attribute in the resource model
 // It extracts, filters, flattens, and sets ownership data for clean UX
 // For patch resources, we need to normalize the field manager name since it changes
 // between plan (k8sconnect-patch-temp) and apply (k8sconnect-patch-{id})
 func updateManagedFieldsData(ctx context.Context, data *patchResourceModel, currentObj *unstructured.Unstructured, fieldManager string) {
 	// Extract ALL field ownership (map[string][]string)
-	ownership := extractAllManagedFields(currentObj)
+	ownership := fieldmanagement.ExtractAllManagedFields(currentObj)
 
 	// Apply filtering first, then flatten
 	filteredOwnership := make(map[string][]string)
