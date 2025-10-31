@@ -140,7 +140,9 @@ func TestAccObjectResource_OwnershipConflict(t *testing.T) {
 					"namespace": config.StringVariable(ns),
 					"cm_name":   config.StringVariable(cmName),
 				},
-				ExpectError: regexp.MustCompile("already managed by a different k8sconnect resource"),
+				// Match the unique error text, avoiding the line-wrap-prone prefix
+				// The error title "Resource Already Managed" is stable and won't wrap
+				ExpectError: regexp.MustCompile("Resource Already Managed"),
 			},
 		},
 		CheckDestroy: testhelpers.CheckConfigMapDestroy(k8sClient, ns, cmName),
