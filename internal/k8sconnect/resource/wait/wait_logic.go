@@ -421,7 +421,7 @@ func (r *waitResource) watchForCondition(ctx context.Context, client k8sclient.K
 	defer watcher.Stop()
 
 	// Watch for events
-	return r.processWatchEvents(ctx, client, watcher, checker, conditionType, timeout)
+	return r.processWatchEvents(ctx, client, gvr, obj.GetNamespace(), obj.GetName(), watcher, checker, conditionType, timeout)
 }
 
 // createWatchOptions creates watch options for the resource
@@ -432,7 +432,8 @@ func (r *waitResource) createWatchOptions(obj *unstructured.Unstructured) metav1
 }
 
 // processWatchEvents processes events from the watcher
-func (r *waitResource) processWatchEvents(ctx context.Context, client k8sclient.K8sClient, watcher watch.Interface,
+func (r *waitResource) processWatchEvents(ctx context.Context, client k8sclient.K8sClient,
+	gvr schema.GroupVersionResource, namespace, name string, watcher watch.Interface,
 	checker func(*unstructured.Unstructured) bool, conditionType string, timeout time.Duration) error {
 
 	timeoutCh := time.After(timeout)
@@ -444,7 +445,7 @@ func (r *waitResource) processWatchEvents(ctx context.Context, client k8sclient.
 			return ctx.Err()
 
 		case <-timeoutCh:
-			return r.buildConditionTimeoutError(ctx, client, lastSeenObj, conditionType, timeout)
+			return r.buildConditionTimeoutError(ctx, client, gvr, namespace, name, lastSeenObj, conditionType, timeout)
 
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
@@ -504,26 +505,38 @@ func (r *waitResource) isWatchError(err error) bool {
 
 // buildConditionTimeoutError creates a detailed timeout error with current conditions
 // Following ADR-015: Actionable Error Messages and Diagnostic Context
-func (r *waitResource) buildConditionTimeoutError(ctx context.Context, client k8sclient.K8sClient, obj *unstructured.Unstructured,
+func (r *waitResource) buildConditionTimeoutError(ctx context.Context, client k8sclient.K8sClient,
+	gvr schema.GroupVersionResource, namespace, name string, obj *unstructured.Unstructured,
 	conditionType string, timeout time.Duration) error {
 
+	// If no object from watch events, fetch current state from API
 	if obj == nil {
-		return fmt.Errorf("timeout after %v waiting for condition %q (no status available)", timeout, conditionType)
+		fetchedObj, err := client.Get(ctx, gvr, namespace, name)
+		if err != nil {
+			// Object may have been deleted or inaccessible
+			resourceRef := fmt.Sprintf("%s/%s", gvr.Resource, name)
+			if namespace != "" {
+				resourceRef = fmt.Sprintf("%s/%s/%s", gvr.Resource, namespace, name)
+			}
+			return fmt.Errorf("timeout after %v waiting for condition %q on %s: unable to fetch current status: %w",
+				timeout, conditionType, resourceRef, err)
+		}
+		obj = fetchedObj
 	}
 
 	kind := obj.GetKind()
-	name := obj.GetName()
-	namespace := obj.GetNamespace()
+	objName := obj.GetName()
+	objNamespace := obj.GetNamespace()
 
-	resourceRef := fmt.Sprintf("%s/%s", kind, name)
-	if namespace != "" {
-		resourceRef = fmt.Sprintf("%s/%s/%s", kind, namespace, name)
+	resourceRef := fmt.Sprintf("%s/%s", kind, objName)
+	if objNamespace != "" {
+		resourceRef = fmt.Sprintf("%s/%s/%s", kind, objNamespace, objName)
 	}
 
 	// Extract all conditions for diagnostics
 	conditions, found, err := unstructured.NestedSlice(obj.Object, "status", "conditions")
 	if err != nil || !found || len(conditions) == 0 {
-		return r.buildNoConditionsError(resourceRef, kind, name, namespace, conditionType, timeout)
+		return r.buildNoConditionsError(resourceRef, kind, objName, objNamespace, conditionType, timeout)
 	}
 
 	// Parse conditions
