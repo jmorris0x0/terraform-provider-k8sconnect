@@ -8,10 +8,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 )
 
-// ExpectFieldOwnershipTransition verifies that the plan shows a field_ownership transition
-// This is the CRITICAL test for field_ownership - it must predict ownership changes in the plan
-func ExpectFieldOwnershipTransition(resourceAddress, fieldPath, fromOwner, toOwner string) plancheck.PlanCheck {
-	return &expectFieldOwnershipTransition{
+// ExpectManagedFieldsTransition verifies that the plan shows a managed_fields transition
+// This is the CRITICAL test for managed_fields - it must predict ownership changes in the plan
+func ExpectManagedFieldsTransition(resourceAddress, fieldPath, fromOwner, toOwner string) plancheck.PlanCheck {
+	return &expectManagedFieldsTransition{
 		resourceAddress: resourceAddress,
 		fieldPath:       fieldPath,
 		fromOwner:       fromOwner,
@@ -19,14 +19,14 @@ func ExpectFieldOwnershipTransition(resourceAddress, fieldPath, fromOwner, toOwn
 	}
 }
 
-type expectFieldOwnershipTransition struct {
+type expectManagedFieldsTransition struct {
 	resourceAddress string
 	fieldPath       string
 	fromOwner       string
 	toOwner         string
 }
 
-func (e *expectFieldOwnershipTransition) CheckPlan(ctx context.Context, req plancheck.CheckPlanRequest, resp *plancheck.CheckPlanResponse) {
+func (e *expectManagedFieldsTransition) CheckPlan(ctx context.Context, req plancheck.CheckPlanRequest, resp *plancheck.CheckPlanResponse) {
 	// Find the resource in ResourceChanges
 	var targetResource *tfjson.ResourceChange
 	for _, rc := range req.Plan.ResourceChanges {
@@ -53,43 +53,43 @@ func (e *expectFieldOwnershipTransition) CheckPlan(ctx context.Context, req plan
 		return
 	}
 
-	// Get field_ownership from after
-	fieldOwnershipRaw, ok := after["field_ownership"]
+	// Get managed_fields from after
+	managedFieldsRaw, ok := after["managed_fields"]
 	if !ok {
-		resp.Error = fmt.Errorf("resource %q after state has no field_ownership attribute", e.resourceAddress)
+		resp.Error = fmt.Errorf("resource %q after state has no managed_fields attribute", e.resourceAddress)
 		return
 	}
 
 	// Handle unknown values (shouldn't happen for UPDATE, but just in case)
-	if fieldOwnershipRaw == nil {
-		resp.Error = fmt.Errorf("resource %q field_ownership is unknown in plan - cannot verify transition", e.resourceAddress)
+	if managedFieldsRaw == nil {
+		resp.Error = fmt.Errorf("resource %q managed_fields is unknown in plan - cannot verify transition", e.resourceAddress)
 		return
 	}
 
-	fieldOwnership, ok := fieldOwnershipRaw.(map[string]interface{})
+	managedFields, ok := managedFieldsRaw.(map[string]interface{})
 	if !ok {
-		resp.Error = fmt.Errorf("resource %q field_ownership is not a map, got %T", e.resourceAddress, fieldOwnershipRaw)
+		resp.Error = fmt.Errorf("resource %q managed_fields is not a map, got %T", e.resourceAddress, managedFieldsRaw)
 		return
 	}
 
-	// Check if the field exists in field_ownership and has the expected "toOwner" value
-	actualOwner, exists := fieldOwnership[e.fieldPath]
+	// Check if the field exists in managed_fields and has the expected "toOwner" value
+	actualOwner, exists := managedFields[e.fieldPath]
 	if !exists {
-		resp.Error = fmt.Errorf("resource %q field_ownership missing path %q\nAvailable paths: %v",
-			e.resourceAddress, e.fieldPath, getKeys(fieldOwnership))
+		resp.Error = fmt.Errorf("resource %q managed_fields missing path %q\nAvailable paths: %v",
+			e.resourceAddress, e.fieldPath, getKeys(managedFields))
 		return
 	}
 
 	actualOwnerStr, ok := actualOwner.(string)
 	if !ok {
-		resp.Error = fmt.Errorf("resource %q field_ownership[%q] is not a string, got %T",
+		resp.Error = fmt.Errorf("resource %q managed_fields[%q] is not a string, got %T",
 			e.resourceAddress, e.fieldPath, actualOwner)
 		return
 	}
 
 	// Verify the transition
 	if actualOwnerStr != e.toOwner {
-		resp.Error = fmt.Errorf("resource %q field_ownership[%q] expected %q (transition from %q), got %q",
+		resp.Error = fmt.Errorf("resource %q managed_fields[%q] expected %q (transition from %q), got %q",
 			e.resourceAddress, e.fieldPath, e.toOwner, e.fromOwner, actualOwnerStr)
 		return
 	}
@@ -97,11 +97,11 @@ func (e *expectFieldOwnershipTransition) CheckPlan(ctx context.Context, req plan
 	// Also verify the before state has the fromOwner
 	before, ok := targetResource.Change.Before.(map[string]interface{})
 	if ok {
-		if beforeFieldOwnership, ok := before["field_ownership"].(map[string]interface{}); ok {
-			if beforeOwner, exists := beforeFieldOwnership[e.fieldPath]; exists {
+		if beforeManagedFields, ok := before["managed_fields"].(map[string]interface{}); ok {
+			if beforeOwner, exists := beforeManagedFields[e.fieldPath]; exists {
 				beforeOwnerStr, ok := beforeOwner.(string)
 				if ok && beforeOwnerStr != e.fromOwner {
-					resp.Error = fmt.Errorf("resource %q field_ownership[%q] before state expected %q, got %q",
+					resp.Error = fmt.Errorf("resource %q managed_fields[%q] before state expected %q, got %q",
 						e.resourceAddress, e.fieldPath, e.fromOwner, beforeOwnerStr)
 					return
 				}
@@ -109,25 +109,25 @@ func (e *expectFieldOwnershipTransition) CheckPlan(ctx context.Context, req plan
 		}
 	}
 
-	fmt.Printf("✅ Plan correctly shows field_ownership transition: %s[%q]: %q → %q\n",
+	fmt.Printf("✅ Plan correctly shows managed_fields transition: %s[%q]: %q → %q\n",
 		e.resourceAddress, e.fieldPath, e.fromOwner, e.toOwner)
 }
 
-// ExpectFieldOwnershipRemoved verifies that a field is no longer in field_ownership
+// ExpectManagedFieldsRemoved verifies that a field is no longer in managed_fields
 // This happens when ignore_fields is added for a previously-managed field
-func ExpectFieldOwnershipRemoved(resourceAddress, fieldPath string) plancheck.PlanCheck {
-	return &expectFieldOwnershipRemoved{
+func ExpectManagedFieldsRemoved(resourceAddress, fieldPath string) plancheck.PlanCheck {
+	return &expectManagedFieldsRemoved{
 		resourceAddress: resourceAddress,
 		fieldPath:       fieldPath,
 	}
 }
 
-type expectFieldOwnershipRemoved struct {
+type expectManagedFieldsRemoved struct {
 	resourceAddress string
 	fieldPath       string
 }
 
-func (e *expectFieldOwnershipRemoved) CheckPlan(ctx context.Context, req plancheck.CheckPlanRequest, resp *plancheck.CheckPlanResponse) {
+func (e *expectManagedFieldsRemoved) CheckPlan(ctx context.Context, req plancheck.CheckPlanRequest, resp *plancheck.CheckPlanResponse) {
 	// Find the resource in ResourceChanges
 	var targetResource *tfjson.ResourceChange
 	for _, rc := range req.Plan.ResourceChanges {
@@ -154,27 +154,27 @@ func (e *expectFieldOwnershipRemoved) CheckPlan(ctx context.Context, req planche
 		return
 	}
 
-	// Get field_ownership from after
-	fieldOwnershipRaw, ok := after["field_ownership"]
+	// Get managed_fields from after
+	managedFieldsRaw, ok := after["managed_fields"]
 	if !ok {
-		resp.Error = fmt.Errorf("resource %q after state has no field_ownership attribute", e.resourceAddress)
+		resp.Error = fmt.Errorf("resource %q after state has no managed_fields attribute", e.resourceAddress)
 		return
 	}
 
-	fieldOwnership, ok := fieldOwnershipRaw.(map[string]interface{})
+	managedFields, ok := managedFieldsRaw.(map[string]interface{})
 	if !ok {
-		resp.Error = fmt.Errorf("resource %q field_ownership is not a map, got %T", e.resourceAddress, fieldOwnershipRaw)
+		resp.Error = fmt.Errorf("resource %q managed_fields is not a map, got %T", e.resourceAddress, managedFieldsRaw)
 		return
 	}
 
-	// Check if the field is NOT in field_ownership (it was removed)
-	if _, exists := fieldOwnership[e.fieldPath]; exists {
-		resp.Error = fmt.Errorf("resource %q field_ownership still contains path %q, expected it to be removed",
+	// Check if the field is NOT in managed_fields (it was removed)
+	if _, exists := managedFields[e.fieldPath]; exists {
+		resp.Error = fmt.Errorf("resource %q managed_fields still contains path %q, expected it to be removed",
 			e.resourceAddress, e.fieldPath)
 		return
 	}
 
-	fmt.Printf("✅ Plan correctly shows field_ownership removal: %s[%q] no longer tracked\n",
+	fmt.Printf("✅ Plan correctly shows managed_fields removal: %s[%q] no longer tracked\n",
 		e.resourceAddress, e.fieldPath)
 }
 

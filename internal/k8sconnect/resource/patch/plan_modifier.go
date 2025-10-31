@@ -51,7 +51,7 @@ func (r *patchResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanR
 	if patchContent == "" {
 		// No patch content, set computed fields to unknown
 		plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
-		plannedData.ManagedFields = types.StringUnknown()
+		plannedData.RawManagedFields = types.StringUnknown()
 		resp.Plan.Set(ctx, &plannedData)
 		return
 	}
@@ -61,7 +61,7 @@ func (r *patchResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanR
 		tflog.Debug(ctx, "Patch contains interpolations, skipping dry-run",
 			map[string]interface{}{"patch_preview": patchContent[:min(100, len(patchContent))]})
 		plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
-		plannedData.ManagedFields = types.StringUnknown()
+		plannedData.RawManagedFields = types.StringUnknown()
 		resp.Plan.Set(ctx, &plannedData)
 		return
 	}
@@ -70,7 +70,7 @@ func (r *patchResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanR
 	if !r.isConnectionReady(plannedData.Cluster) {
 		tflog.Debug(ctx, "Connection has unknown values, skipping dry-run")
 		plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
-		plannedData.ManagedFields = types.StringUnknown()
+		plannedData.RawManagedFields = types.StringUnknown()
 		resp.Plan.Set(ctx, &plannedData)
 		return
 	}
@@ -135,8 +135,8 @@ func (r *patchResource) preservePatchInputAndState(ctx context.Context, stateDat
 
 	// Preserve computed attributes
 	plannedData.ManagedStateProjection = stateData.ManagedStateProjection
+	plannedData.RawManagedFields = stateData.RawManagedFields
 	plannedData.ManagedFields = stateData.ManagedFields
-	plannedData.FieldOwnership = stateData.FieldOwnership
 }
 
 // isConnectionReady checks if all connection fields are known (not computed)
@@ -317,8 +317,8 @@ func (r *patchResource) generateFieldManager(data patchResourceModel) string {
 // setProjectionUnknown sets all projection-related fields to unknown
 func setProjectionUnknown(data *patchResourceModel) {
 	data.ManagedStateProjection = types.MapUnknown(types.StringType)
-	data.ManagedFields = types.StringUnknown()
-	data.FieldOwnership = types.MapUnknown(types.StringType)
+	data.RawManagedFields = types.StringUnknown()
+	data.ManagedFields = types.MapUnknown(types.StringType)
 }
 
 // validatePatchTarget gets and validates the target resource for patching
@@ -383,7 +383,7 @@ func (r *patchResource) validatePatchTarget(
 	}
 
 	// Get current field ownership
-	currentOwnership := fieldmanagement.ExtractFieldOwnershipMap(currentObj)
+	currentOwnership := fieldmanagement.ExtractManagedFieldsMap(currentObj)
 
 	// Generate our field manager name
 	fieldManager := r.generateFieldManager(*plannedData)
@@ -521,8 +521,8 @@ func (r *patchResource) handleNonSSAPatchState(
 	// Non-SSA patches don't support projection - always set to null
 	// We'll use semantic content comparison in checkDriftAndPreserveState
 	plannedData.ManagedStateProjection = types.MapNull(types.StringType) // Null for non-SSA
-	plannedData.ManagedFields = types.StringUnknown()
-	plannedData.FieldOwnership = types.MapUnknown(types.StringType)
+	plannedData.RawManagedFields = types.StringUnknown()
+	plannedData.ManagedFields = types.MapUnknown(types.StringType)
 	return true
 }
 
@@ -562,15 +562,15 @@ func (r *patchResource) calculateProjectionFromDryRun(
 	// Check for ownership transitions (only for UPDATE)
 	if operationType == "UPDATE" {
 		// Extract current ownership from patchedObj
-		currentOwnership := extractFieldOwnershipForManager(patchedObj, fieldManager)
+		currentOwnership := extractManagedFieldsForManager(patchedObj, fieldManager)
 		r.checkOwnershipTransitions(ctx, req, resp, currentOwnership)
 	}
 
-	// Compute field_ownership from dry-run result
+	// Compute managed_fields from dry-run result
 	// This is a core feature: predicting exact field ownership using force=true dry-run
-	updateFieldOwnershipData(ctx, plannedData, patchedObj, fieldManager)
+	updateManagedFieldsData(ctx, plannedData, patchedObj, fieldManager)
 
-	plannedData.ManagedFields = types.StringUnknown()
+	plannedData.RawManagedFields = types.StringUnknown()
 	return true
 }
 
@@ -674,8 +674,8 @@ func (r *patchResource) checkOwnershipTransitions(ctx context.Context, req resou
 
 	// Extract previous ownership map from state
 	var previousOwnershipFlat map[string]string
-	if !stateData.FieldOwnership.IsNull() && !stateData.FieldOwnership.IsUnknown() {
-		d := stateData.FieldOwnership.ElementsAs(ctx, &previousOwnershipFlat, false)
+	if !stateData.ManagedFields.IsNull() && !stateData.ManagedFields.IsUnknown() {
+		d := stateData.ManagedFields.ElementsAs(ctx, &previousOwnershipFlat, false)
 		if d.HasError() {
 			tflog.Warn(ctx, "Failed to extract previous field ownership from state", map[string]interface{}{
 				"diagnostics": d,
@@ -691,7 +691,7 @@ func (r *patchResource) checkOwnershipTransitions(ctx context.Context, req resou
 	}
 
 	// Flatten current ownership for comparison
-	currentOwnershipFlat := fieldmanagement.FlattenFieldOwnership(currentOwnership)
+	currentOwnershipFlat := fieldmanagement.FlattenManagedFields(currentOwnership)
 
 	// Find ownership transitions (fields that changed owner)
 	var transitions []patchOwnershipTransition

@@ -1,13 +1,13 @@
-# ADR-020: Field Ownership Display Strategy
+# ADR-020: Managed Fields Display Strategy
 
 **Status:** Implemented
 **Date:** 2025-10-26
 **Last Updated:** 2025-01-29
-**Related ADRs:** ADR-005 (Field Ownership Strategy), ADR-021 (Ownership Transition Messaging)
+**Related ADRs:** ADR-005 (Managed Fields Strategy), ADR-021 (Ownership Transition Messaging)
 
 ## Context
 
-ADR-005 established that we track field-level ownership from Kubernetes managedFields and expose it via a `field_ownership` computed attribute. This provides critical visibility:
+ADR-005 established that we track field-level ownership from Kubernetes managedFields and expose it via a `managed_fields` computed attribute. This provides critical visibility:
 
 - See ownership transitions in Terraform plan diffs (e.g., "kubectl" → "k8sconnect")
 - Understand controller conflicts (HPA managing replicas, etc.)
@@ -16,7 +16,7 @@ ADR-005 established that we track field-level ownership from Kubernetes managedF
 
 ### The Critical Question
 
-When displaying field_ownership to users, which managers should we track?
+When displaying managed_fields to users, which managers should we track?
 
 **Option A:** Track ALL field managers (k8sconnect, kubectl, HPA, operators, etc.)
 **Option B:** Track ONLY fields where k8sconnect is an owner
@@ -27,17 +27,17 @@ When displaying field_ownership to users, which managers should we track?
 
 ### Critical Architectural Constraint
 
-**field_ownership is bounded by managed_state_projection**. Since managed_state_projection contains fields based on yaml_body (what we want to manage), field_ownership shows managers for those fields.
+**managed_fields is bounded by managed_state_projection**. Since managed_state_projection contains fields based on yaml_body (what we want to manage), managed_fields shows managers for those fields.
 
 **This enables ownership transition visibility:**
 ```hcl
 # Before kubectl scales deployment
-field_ownership = {
+managed_fields = {
   "spec.replicas" = "k8sconnect"
 }
 
 # After kubectl scale (drift)
-field_ownership = {
+managed_fields = {
   "spec.replicas" = "kube-controller-manager" -> "k8sconnect"  # Transition visible!
 }
 ```
@@ -64,7 +64,7 @@ ownership := map[string][]string{
 **User Display (Deterministic Flattening):**
 ```go
 // Flatten to single manager per field for schema
-func FlattenFieldOwnership(ownership map[string][]string) map[string]string {
+func FlattenManagedFields(ownership map[string][]string) map[string]string {
     result := make(map[string]string)
     for path, managers := range ownership {
         if len(managers) == 0 {
@@ -93,8 +93,8 @@ We attempted to implement "track only k8sconnect ownership" for better stability
    ```
    1. Import kubectl-created resource
    2. k8sconnect not yet in managedFields (import hasn't written)
-   3. field_ownership = {} (empty)
-   4. After apply: field_ownership populated
+   3. managed_fields = {} (empty)
+   4. After apply: managed_fields populated
    5. Test fails: "Provider produced inconsistent result after apply"
    ```
 
@@ -102,11 +102,11 @@ We attempted to implement "track only k8sconnect ownership" for better stability
    ```
    1. HPA manages spec.replicas exclusively
    2. k8sconnect not an owner yet
-   3. field_ownership missing spec.replicas entry
+   3. managed_fields missing spec.replicas entry
    4. Cannot detect transition or apply force=true correctly
    ```
 
-**Rollback:** Reverted to v0.1.7's `extractAllFieldOwnership()` + `FlattenFieldOwnership()` approach.
+**Rollback:** Reverted to v0.1.7's `extractAllManagedFields()` + `FlattenManagedFields()` approach.
 
 ### v0.1.7: ALL-Managers Approach (Current Implementation)
 
@@ -183,13 +183,13 @@ We filter status fields from display because:
 
 ## Implementation: Computed Attribute
 
-field_ownership is tracked as a computed attribute (visible in `terraform state show`). Internally, we track all co-owners per field using `map[string][]string` to properly handle SSA shared ownership scenarios where multiple managers co-own the same field.
+managed_fields is tracked as a computed attribute (visible in `terraform state show`). Internally, we track all co-owners per field using `map[string][]string` to properly handle SSA shared ownership scenarios where multiple managers co-own the same field.
 
 **Scope:** Tracking is limited to fields in `managed_state_projection` - we do not track ownership for fields we don't manage.
 
-**Note:** v0.2.0-v0.2.2 briefly moved field_ownership to private state. This was rolled back in v0.2.3 due to test failures.
+**Note:** v0.2.0-v0.2.2 briefly moved managed_fields to private state. This was rolled back in v0.2.3 due to test failures.
 
 ## Related Documentation
 
-- ADR-005: Field Ownership Strategy (force=true usage)
+- ADR-005: Managed Fields Strategy (force=true usage)
 - ADR-021: Ownership Transition Messaging (centralized warning system)

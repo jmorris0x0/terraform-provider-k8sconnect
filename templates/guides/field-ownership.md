@@ -1,13 +1,13 @@
 ---
-page_title: "Field Ownership and Controller Conflicts - k8sconnect Provider"
+page_title: "Managed Fields and Controller Conflicts - k8sconnect Provider"
 subcategory: "Guides"
 description: |-
   Understanding field ownership, handling controller conflicts, and using ignore_fields to coexist with Kubernetes controllers.
 ---
 
-# Field Ownership and Controller Conflicts
+# Managed Fields and Controller Conflicts
 
-## What is Field Ownership?
+## What is Managed Fields?
 
 k8sconnect uses **Server-Side Apply (SSA)** with field ownership tracking to safely coexist with Kubernetes controllers.
 
@@ -30,7 +30,7 @@ The most common conflict occurs with HPA, which automatically manages the `spec.
 **You'll see this warning during `terraform plan`:**
 
 ```
-Warning: Field Ownership Override
+Warning: Managed Fields Override
 
 Forcing ownership of fields managed by other controllers:
   - spec.replicas (managed by "hpa-controller")
@@ -228,9 +228,9 @@ resource "k8sconnect_patch" "coredns_custom" {
 
 ### During Plan (terraform plan)
 
-**Field Ownership Override (object resource):**
+**Managed Fields Override (object resource):**
 ```
-Warning: Field Ownership Override
+Warning: Managed Fields Override
 
 Forcing ownership of fields managed by other controllers:
   - spec.replicas (managed by "hpa-controller")
@@ -244,9 +244,9 @@ To release ownership and allow other controllers to manage these fields, add:
 
 **Action:** Add `ignore_fields` if you want the other controller to manage those fields.
 
-**Field Ownership Takeover (patch resource):**
+**Managed Fields Takeover (patch resource):**
 ```
-Warning: Field Ownership Takeover
+Warning: Managed Fields Takeover
 
 This patch will forcefully take ownership of fields managed by other controllers:
   - spec.replicas (managed by "hpa-controller")
@@ -314,7 +314,7 @@ resource "k8sconnect_object" "app" {
 }
 ```
 
-## Advanced: Field Ownership in Multi-Controller Scenarios
+## Advanced: Managed Fields in Multi-Controller Scenarios
 
 When multiple controllers interact with a resource:
 
@@ -394,7 +394,7 @@ Strategic merge patch supports `[*]` and `[name=...]` selectors. Use specific pa
 
 - [k8sconnect_object](../resources/object.md) - Full lifecycle management with `ignore_fields`
 - [k8sconnect_patch](../resources/patch.md) - Surgical modifications without full ownership
-- [ADR-005: Field Ownership Strategy](../ADRs/005-field-ownership-strategy.md) - Technical deep-dive
+- [ADR-005: Managed Fields Strategy](../ADRs/005-field-ownership-strategy.md) - Technical deep-dive
 
 ## Summary
 

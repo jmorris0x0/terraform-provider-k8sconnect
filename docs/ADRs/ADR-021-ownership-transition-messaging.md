@@ -4,7 +4,7 @@
 **Date:** 2025-10-28
 **Decision Date:** 2025-01-30 (Option A: Value-Based Detection)
 **Last Updated:** 2025-01-30
-**Related ADRs:** ADR-005 (Field Ownership Strategy), ADR-020 (Field Ownership Display Strategy)
+**Related ADRs:** ADR-005 (Managed Fields Strategy), ADR-020 (Managed Fields Display Strategy)
 
 ## Summary
 
@@ -44,7 +44,7 @@ This creates a critical question for ownership transition messaging: **Should we
 
 ### The Problem
 
-ADR-020 established that we track field ownership via the `field_ownership` computed attribute (tracking ALL field managers, not just k8sconnect). However, we had no systematic approach to:
+ADR-020 established that we track field ownership via the `managed_fields` computed attribute (tracking ALL field managers, not just k8sconnect). However, we had no systematic approach to:
 
 1. **Classify all possible ownership transitions** - What are ALL the ways ownership can change?
 2. **Determine appropriate messaging** - Which transitions need warnings vs notes vs silence?
@@ -615,9 +615,9 @@ We identified and fixed a fundamental bug in ownership tracking. The old code us
    ```
 
 2. **Updated core functions**:
-   - `ExtractAllFieldOwnership()` - Now returns `map[string][]string` with ALL co-owners
-   - `getFieldOwnershipFromPrivateState()` - Handles new data structure
-   - `setFieldOwnershipInPrivateState()` - Stores all managers
+   - `ExtractAllManagedFields()` - Now returns `map[string][]string` with ALL co-owners
+   - `getManagedFieldsFromPrivateState()` - Handles new data structure
+   - `setManagedFieldsInPrivateState()` - Stores all managers
    - `checkOwnershipTransitions()` - Compares manager lists properly
 
 3. **Common helper functions** - Added to `internal/k8sconnect/common/types.go`:
@@ -646,8 +646,8 @@ The code now has the **data infrastructure** to implement either Option A or Opt
 
 1. **Private state storage** stores ALL managers for each field:
    ```go
-   ownershipMap := extractAllFieldOwnership(rc.Object)  // Returns map[string][]string
-   setFieldOwnershipInPrivateState(ctx, resp.Private, ownershipMap)
+   ownershipMap := extractAllManagedFields(rc.Object)  // Returns map[string][]string
+   setManagedFieldsInPrivateState(ctx, resp.Private, ownershipMap)
    ```
 
 2. **Ownership comparison capability** - Data structure supports both options:
@@ -746,7 +746,7 @@ The data structure refactor and Option A decision provide a clear path forward f
 
 **Phase 0: Data Structure Foundation** ✅ **COMPLETED (2025-10-28)**
 - ✅ Refactor ownership tracking from `map[string]string` to `map[string][]string`
-- ✅ Update `ExtractAllFieldOwnership()` to track all co-owners
+- ✅ Update `ExtractAllManagedFields()` to track all co-owners
 - ✅ Add helper functions to `common/types.go`
 - ✅ Implement silent state migration in both object and patch resources
 - ✅ Update ownership transition detection to compare manager lists
@@ -773,7 +773,7 @@ The data structure refactor and Option A decision provide a clear path forward f
 - Ensure consistency with object messaging
 
 **Phase 5:** Provider configuration
-- Add `field_ownership_verbosity` provider config
+- Add `managed_fields_verbosity` provider config
 - Default to "full", allow "minimal" and "none"
 
 ## Handling Persistent Ownership Conflicts
@@ -889,8 +889,8 @@ Note: Ownership history tracking for ping-pong detection was considered but reje
 
 ## Related Documentation
 
-- ADR-005: Field Ownership Strategy - Why we track ownership
-- ADR-020: Field Ownership Display Strategy - Private state + warnings decision
+- ADR-005: Managed Fields Strategy - Why we track ownership
+- ADR-020: Managed Fields Display Strategy - Private state + warnings decision
 - ADR-011: Concise Diff Format - How ownership appears in diffs (may be superseded)
 - `OWNERSHIP_TRANSITION_TABLE.md` - Detailed analysis of all 16 states
 

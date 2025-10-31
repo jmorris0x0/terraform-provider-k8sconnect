@@ -13,31 +13,31 @@ import (
 )
 
 // Type alias for compatibility
-type FieldOwnership = fieldmanagement.FieldOwnership
+type ManagedFields = fieldmanagement.ManagedFields
 
 // parseFieldsV1ToPathMap is a wrapper for the common implementation
-func parseFieldsV1ToPathMap(managedFields []metav1.ManagedFieldsEntry, userJSON map[string]interface{}) map[string]FieldOwnership {
+func parseFieldsV1ToPathMap(managedFields []metav1.ManagedFieldsEntry, userJSON map[string]interface{}) map[string]ManagedFields {
 	return fieldmanagement.ParseFieldsV1ToPathMap(managedFields, userJSON)
 }
 
-// extractFieldOwnership returns ownership info for ALL fields
-func extractFieldOwnership(obj *unstructured.Unstructured) map[string]FieldOwnership {
-	return fieldmanagement.ExtractFieldOwnership(obj)
+// extractManagedFields returns ownership info for ALL fields
+func extractManagedFields(obj *unstructured.Unstructured) map[string]ManagedFields {
+	return fieldmanagement.ExtractManagedFields(obj)
 }
 
-// extractAllFieldOwnership extracts ownership for ALL managers (not just k8sconnect)
+// extractAllManagedFields extracts ownership for ALL managers (not just k8sconnect)
 // This is used for ownership transition detection
-func extractAllFieldOwnership(obj *unstructured.Unstructured) map[string][]string {
-	return fieldmanagement.ExtractAllFieldOwnership(obj)
+func extractAllManagedFields(obj *unstructured.Unstructured) map[string][]string {
+	return fieldmanagement.ExtractAllManagedFields(obj)
 }
 
-// updateFieldOwnershipData updates the field_ownership attribute in the resource model
+// updateManagedFieldsData updates the managed_fields attribute in the resource model
 // It extracts, filters, flattens, and sets ownership data for clean UX
 // For patch resources, we need to normalize the field manager name since it changes
 // between plan (k8sconnect-patch-temp) and apply (k8sconnect-patch-{id})
-func updateFieldOwnershipData(ctx context.Context, data *patchResourceModel, currentObj *unstructured.Unstructured, fieldManager string) {
+func updateManagedFieldsData(ctx context.Context, data *patchResourceModel, currentObj *unstructured.Unstructured, fieldManager string) {
 	// Extract ALL field ownership (map[string][]string)
-	ownership := extractAllFieldOwnership(currentObj)
+	ownership := extractAllManagedFields(currentObj)
 
 	// Apply filtering first, then flatten
 	filteredOwnership := make(map[string][]string)
@@ -86,7 +86,7 @@ func updateFieldOwnershipData(ctx context.Context, data *patchResourceModel, cur
 	}
 
 	// Flatten using the common logic
-	ownershipMap := fieldmanagement.FlattenFieldOwnership(filteredOwnership)
+	ownershipMap := fieldmanagement.FlattenManagedFields(filteredOwnership)
 
 	// Convert to types.Map
 	mapValue, diags := types.MapValueFrom(ctx, types.StringType, ownershipMap)
@@ -96,8 +96,8 @@ func updateFieldOwnershipData(ctx context.Context, data *patchResourceModel, cur
 		})
 		// Set empty map on error
 		emptyMap, _ := types.MapValueFrom(ctx, types.StringType, map[string]string{})
-		data.FieldOwnership = emptyMap
+		data.ManagedFields = emptyMap
 	} else {
-		data.FieldOwnership = mapValue
+		data.ManagedFields = mapValue
 	}
 }

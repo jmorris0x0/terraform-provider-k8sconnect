@@ -112,7 +112,7 @@ This ensures the diff compares the same fields that will actually be managed.
 - **Accurate Diffs**: Shows exactly what SSA will change for managed fields
 - **Bounded State**: Only stores fields present in user's YAML
 - **Universal Resource Support**: Works with any Kubernetes resource, including CRDs
-- **Respects Field Ownership**: Other controllers can modify other fields freely
+- **Respects Managed Fields**: Other controllers can modify other fields freely
 - **Predictable Behavior**: Diff matches apply because both use SSA
 - **Kubernetes-Native**: Embraces rather than fights Kubernetes patterns
 

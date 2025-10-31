@@ -18,7 +18,7 @@ import (
 	testhelpers "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/test"
 )
 
-// TestAccFieldOwnershipTransitionVisibility validates that ownership transitions
+// TestAccManagedFieldsTransitionVisibility validates that ownership transitions
 // are visible in the Terraform plan diff. This is a CRITICAL feature that took
 // hundreds of hours to build.
 //
@@ -27,11 +27,11 @@ import (
 // Scenario:
 // 1. Create a deployment with k8sconnect (k8sconnect owns all fields)
 // 2. External kubectl patches spec.replicas using SSA with force=true (kubectl-patch takes ownership)
-// 3. Run terraform plan (should show field_ownership transition: "kubectl-patch" -> "k8sconnect")
+// 3. Run terraform plan (should show managed_fields transition: "kubectl-patch" -> "k8sconnect")
 // 4. Apply terraform (k8sconnect takes ownership back)
 //
 // The critical requirement: Step 3 MUST show the ownership transition in the plan output.
-func TestAccFieldOwnershipTransitionVisibility(t *testing.T) {
+func TestAccManagedFieldsTransitionVisibility(t *testing.T) {
 	t.Parallel()
 
 	raw := os.Getenv("TF_ACC_KUBECONFIG")
@@ -51,7 +51,7 @@ func TestAccFieldOwnershipTransitionVisibility(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create deployment with k8sconnect
 			{
-				Config: testAccConfigFieldOwnershipVisibility(ns, deployName, 2),
+				Config: testAccConfigManagedFieldsVisibility(ns, deployName, 2),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
@@ -59,7 +59,7 @@ func TestAccFieldOwnershipTransitionVisibility(t *testing.T) {
 					resource.TestCheckResourceAttrSet("k8sconnect_object.test", "id"),
 					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 					// Verify k8sconnect owns spec.replicas initially
-					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.spec.replicas", "k8sconnect"),
+					resource.TestCheckResourceAttr("k8sconnect_object.test", "managed_fields.spec.replicas", "k8sconnect"),
 				),
 			},
 			// Step 2: External kubectl patches spec.replicas and takes ownership
@@ -74,17 +74,17 @@ func TestAccFieldOwnershipTransitionVisibility(t *testing.T) {
 					}
 					t.Logf("✓ kubectl-patch took ownership of spec.replicas")
 				},
-				Config: testAccConfigFieldOwnershipVisibility(ns, deployName, 2),
+				Config: testAccConfigManagedFieldsVisibility(ns, deployName, 2),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
 				// CRITICAL: This is the visibility test
-				// The plan MUST show that field_ownership will change from "kubectl-patch" to "k8sconnect"
+				// The plan MUST show that managed_fields will change from "kubectl-patch" to "k8sconnect"
 				// If this fails, it means the visibility feature is broken
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						// Custom plan check that verifies ownership transition is visible
-						&expectFieldOwnershipTransition{
+						&expectManagedFieldsTransition{
 							resourceAddress: "k8sconnect_object.test",
 							fieldPath:       "spec.replicas",
 							oldOwner:        "kubectl-patch",
@@ -94,7 +94,7 @@ func TestAccFieldOwnershipTransitionVisibility(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					// After apply, k8sconnect should own spec.replicas again
-					resource.TestCheckResourceAttr("k8sconnect_object.test", "field_ownership.spec.replicas", "k8sconnect"),
+					resource.TestCheckResourceAttr("k8sconnect_object.test", "managed_fields.spec.replicas", "k8sconnect"),
 					// Replicas should be back to 2 (terraform's value)
 					testhelpers.CheckDeploymentReplicaCount(k8sClient.(*kubernetes.Clientset), ns, deployName, 2),
 				),
@@ -104,46 +104,46 @@ func TestAccFieldOwnershipTransitionVisibility(t *testing.T) {
 	})
 }
 
-// expectFieldOwnershipTransition is a custom plan check that verifies ownership
+// expectManagedFieldsTransition is a custom plan check that verifies ownership
 // transitions are visible in the plan output.
 //
 // This is the guardian of the visibility feature. If this check fails, it means
 // someone broke the field ownership visibility.
-type expectFieldOwnershipTransition struct {
+type expectManagedFieldsTransition struct {
 	resourceAddress string
 	fieldPath       string
 	oldOwner        string
 	newOwner        string
 }
 
-func (e *expectFieldOwnershipTransition) CheckPlan(ctx context.Context, req plancheck.CheckPlanRequest, resp *plancheck.CheckPlanResponse) {
+func (e *expectManagedFieldsTransition) CheckPlan(ctx context.Context, req plancheck.CheckPlanRequest, resp *plancheck.CheckPlanResponse) {
 	// Get the planned resource
 	for _, rs := range req.Plan.ResourceChanges {
 		if rs.Address == e.resourceAddress {
 			// Found our resource
-			// Check if field_ownership is changing
+			// Check if managed_fields is changing
 			if rs.Change == nil || rs.Change.After == nil {
 				resp.Error = fmt.Errorf("resource %s has no planned changes", e.resourceAddress)
 				return
 			}
 
-			// Get the field_ownership attribute from the change
+			// Get the managed_fields attribute from the change
 			afterMap, ok := rs.Change.After.(map[string]interface{})
 			if !ok {
 				resp.Error = fmt.Errorf("resource %s after value is not a map", e.resourceAddress)
 				return
 			}
 
-			fieldOwnership, ok := afterMap["field_ownership"].(map[string]interface{})
+			managedFields, ok := afterMap["managed_fields"].(map[string]interface{})
 			if !ok {
-				resp.Error = fmt.Errorf("field_ownership attribute not found or not a map in resource %s", e.resourceAddress)
+				resp.Error = fmt.Errorf("managed_fields attribute not found or not a map in resource %s", e.resourceAddress)
 				return
 			}
 
 			// Check the specific field's ownership
-			actualOwner, ok := fieldOwnership[e.fieldPath].(string)
+			actualOwner, ok := managedFields[e.fieldPath].(string)
 			if !ok {
-				resp.Error = fmt.Errorf("field_ownership[%s] not found in resource %s", e.fieldPath, e.resourceAddress)
+				resp.Error = fmt.Errorf("managed_fields[%s] not found in resource %s", e.fieldPath, e.resourceAddress)
 				return
 			}
 
@@ -156,7 +156,7 @@ func (e *expectFieldOwnershipTransition) CheckPlan(ctx context.Context, req plan
 			if actualOwner != e.newOwner {
 				resp.Error = fmt.Errorf(
 					"VISIBILITY FAILURE: Plan does not predict ownership transfer.\n"+
-						"Expected field_ownership[%s] to transition to %q, but plan shows %q.\n"+
+						"Expected managed_fields[%s] to transition to %q, but plan shows %q.\n"+
 						"This means the visibility feature is broken - users cannot see ownership transfers.",
 					e.fieldPath, e.newOwner, actualOwner)
 				return
@@ -170,22 +170,22 @@ func (e *expectFieldOwnershipTransition) CheckPlan(ctx context.Context, req plan
 				return
 			}
 
-			beforeFieldOwnership, ok := beforeMap["field_ownership"].(map[string]interface{})
+			beforeManagedFields, ok := beforeMap["managed_fields"].(map[string]interface{})
 			if !ok {
-				resp.Error = fmt.Errorf("field_ownership attribute not found in before state of resource %s", e.resourceAddress)
+				resp.Error = fmt.Errorf("managed_fields attribute not found in before state of resource %s", e.resourceAddress)
 				return
 			}
 
-			beforeOwner, ok := beforeFieldOwnership[e.fieldPath].(string)
+			beforeOwner, ok := beforeManagedFields[e.fieldPath].(string)
 			if !ok {
-				resp.Error = fmt.Errorf("field_ownership[%s] not found in before state of resource %s", e.fieldPath, e.resourceAddress)
+				resp.Error = fmt.Errorf("managed_fields[%s] not found in before state of resource %s", e.fieldPath, e.resourceAddress)
 				return
 			}
 
 			if beforeOwner != e.oldOwner {
 				resp.Error = fmt.Errorf(
 					"VISIBILITY FAILURE: Before state does not show current ownership.\n"+
-						"Expected field_ownership[%s] to be %q (current owner), but state shows %q.\n"+
+						"Expected managed_fields[%s] to be %q (current owner), but state shows %q.\n"+
 						"This means the plan is not showing the real current state.",
 					e.fieldPath, e.oldOwner, beforeOwner)
 				return
@@ -200,7 +200,7 @@ func (e *expectFieldOwnershipTransition) CheckPlan(ctx context.Context, req plan
 	resp.Error = fmt.Errorf("resource %s not found in plan", e.resourceAddress)
 }
 
-func testAccConfigFieldOwnershipVisibility(namespace, deployName string, replicas int) string {
+func testAccConfigManagedFieldsVisibility(namespace, deployName string, replicas int) string {
 	return fmt.Sprintf(`
 variable "raw" {
   type = string

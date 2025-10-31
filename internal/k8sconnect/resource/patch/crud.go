@@ -105,10 +105,10 @@ func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, 
 				formatTarget(target), fieldManager, err.Error()))
 		managedFields = "{}"
 	}
-	data.ManagedFields = types.StringValue(managedFields)
+	data.RawManagedFields = types.StringValue(managedFields)
 
-	// 10. Update field_ownership attribute in state
-	updateFieldOwnershipData(ctx, &data, patchedObj, fieldManager)
+	// 10. Update managed_fields attribute in state
+	updateManagedFieldsData(ctx, &data, patchedObj, fieldManager)
 
 	// 12. Save state
 	diags = resp.State.Set(ctx, &data)
@@ -169,7 +169,7 @@ func (r *patchResource) Read(ctx context.Context, req resource.ReadRequest, resp
 		patchContent := r.getPatchContent(data)
 		patchType := r.determinePatchType(data)
 		patchedFieldPaths, _ := r.extractPatchFieldPaths(ctx, patchContent, patchType)
-		currentOwnership := fieldmanagement.ExtractFieldOwnershipForPaths(currentObj, patchedFieldPaths)
+		currentOwnership := fieldmanagement.ExtractManagedFieldsForPaths(currentObj, patchedFieldPaths)
 
 		// Format drifted fields with ownership info (limit to first 5 for readability)
 		var fieldDetails []string
@@ -243,13 +243,13 @@ func (r *patchResource) Read(ctx context.Context, req resource.ReadRequest, resp
 	}
 
 	// 8. Update managed fields in state
-	if currentManagedFields != data.ManagedFields.ValueString() {
+	if currentManagedFields != data.RawManagedFields.ValueString() {
 		tflog.Debug(ctx, "Managed fields changed (ownership or structure drift)")
-		data.ManagedFields = types.StringValue(currentManagedFields)
+		data.RawManagedFields = types.StringValue(currentManagedFields)
 	}
 
-	// 8. Update field_ownership attribute in state
-	updateFieldOwnershipData(ctx, &data, currentObj, fieldManager)
+	// 8. Update managed_fields attribute in state
+	updateManagedFieldsData(ctx, &data, currentObj, fieldManager)
 
 	// 9. Save refreshed state
 	diags = resp.State.Set(ctx, &data)
@@ -310,9 +310,9 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 
 	// Extract current fields from state's managed_fields
 	var currentFieldPaths []string
-	if !state.ManagedFields.IsNull() && state.ManagedFields.ValueString() != "" && state.ManagedFields.ValueString() != "{}" {
+	if !state.RawManagedFields.IsNull() && state.RawManagedFields.ValueString() != "" && state.RawManagedFields.ValueString() != "{}" {
 		var err error
-		currentFieldPaths, err = fieldmanagement.ExtractFieldPathsFromManagedFieldsJSON(state.ManagedFields.ValueString())
+		currentFieldPaths, err = fieldmanagement.ExtractFieldPathsFromManagedFieldsJSON(state.RawManagedFields.ValueString())
 		if err != nil {
 			tflog.Warn(ctx, "Failed to extract current field paths from managed_fields", map[string]interface{}{
 				"error": err.Error(),
@@ -377,12 +377,12 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 				formatTarget(target), fieldManager, err.Error()))
 		managedFields = "{}"
 	}
-	plan.ManagedFields = types.StringValue(managedFields)
+	plan.RawManagedFields = types.StringValue(managedFields)
 
 	// 9. Preserve previous owners (only set during Create)
 
-	// 10. Update field_ownership attribute in state
-	updateFieldOwnershipData(ctx, &plan, patchedObj, fieldManager)
+	// 10. Update managed_fields attribute in state
+	updateManagedFieldsData(ctx, &plan, patchedObj, fieldManager)
 
 	// 11. Save updated state
 	diags = resp.State.Set(ctx, &plan)

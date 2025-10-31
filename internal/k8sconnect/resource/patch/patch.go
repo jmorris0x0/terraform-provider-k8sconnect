@@ -24,7 +24,6 @@ var _ resource.ResourceWithConfigValidators = (*patchResource)(nil)
 var _ resource.ResourceWithImportState = (*patchResource)(nil)
 var _ resource.ResourceWithConfigure = (*patchResource)(nil)
 var _ resource.ResourceWithModifyPlan = (*patchResource)(nil)
-var _ resource.ResourceWithUpgradeState = (*patchResource)(nil)
 
 // ClientGetter function type for dependency injection
 type ClientGetter func(auth.ClusterModel) (k8sclient.K8sClient, error)
@@ -45,8 +44,8 @@ type patchResourceModel struct {
 	// Computed fields
 
 	ManagedStateProjection types.Map    `tfsdk:"managed_state_projection"`
-	FieldOwnership         types.Map    `tfsdk:"field_ownership"`
-	ManagedFields          types.String `tfsdk:"managed_fields"`
+	ManagedFields         types.Map    `tfsdk:"managed_fields"`
+	RawManagedFields          types.String `tfsdk:"raw_managed_fields"`
 }
 
 type patchTargetModel struct {
@@ -229,7 +228,7 @@ When you destroy a patch resource, ownership is released but patched values rema
 					"Non-SSA patches (json_patch, merge_patch) do not provide projection.",
 			},
 
-			"field_ownership": schema.MapAttribute{
+			"managed_fields": schema.MapAttribute{
 				Computed:    true,
 				ElementType: types.StringType,
 				Description: "Tracks which field manager owns each field path in the patched resource. " +
@@ -237,7 +236,7 @@ When you destroy a patch resource, ownership is released but patched values rema
 					"When ownership changes appear in diffs, it indicates another system has taken control of those fields.",
 			},
 
-			"managed_fields": schema.StringAttribute{
+			"raw_managed_fields": schema.StringAttribute{
 				Computed:    true,
 				Description: "JSON representation of only the fields managed by this patch. Used for drift detection.",
 			},

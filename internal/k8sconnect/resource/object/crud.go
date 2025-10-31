@@ -71,8 +71,8 @@ func (r *objectResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	// 8b. Update field_ownership attribute in state
-	updateFieldOwnershipData(ctx, rc.Data, rc.Object)
+	// 8b. Update managed_fields attribute in state
+	updateManagedFieldsData(ctx, rc.Data, rc.Object)
 
 	// 8c. Save ownership baseline to private state for drift detection (ADR-021)
 	ignoreFields := getIgnoreFields(ctx, rc.Data)
@@ -160,7 +160,7 @@ func (r *objectResource) Read(ctx context.Context, req resource.ReadRequest, res
 			})
 			emptyMap, _ := types.MapValueFrom(ctx, types.StringType, map[string]string{})
 			data.ManagedStateProjection = emptyMap
-			data.FieldOwnership = emptyMap
+			data.ManagedFields = emptyMap
 			setPendingProjectionFlag(ctx, resp.Private)
 		} else {
 			resp.Diagnostics.AddError("Projection Failed",
@@ -173,7 +173,7 @@ func (r *objectResource) Read(ctx context.Context, req resource.ReadRequest, res
 	}
 
 	// 6. Update field ownership
-	updateFieldOwnershipData(ctx, &data, currentObj)
+	updateManagedFieldsData(ctx, &data, currentObj)
 
 	// 7. Save refreshed state
 	diags = resp.State.Set(ctx, &data)
@@ -255,8 +255,8 @@ func (r *objectResource) Update(ctx context.Context, req resource.UpdateRequest,
 		clearImportedWithoutAnnotationsFlag(ctx, resp.Private)
 	}
 
-	// 7. Update field_ownership attribute in state
-	updateFieldOwnershipData(ctx, &plan, rc.Object)
+	// 7. Update managed_fields attribute in state
+	updateManagedFieldsData(ctx, &plan, rc.Object)
 
 	// 7b. Save ownership baseline to private state for drift detection (ADR-021)
 	ignoreFields := getIgnoreFields(ctx, &plan)
@@ -480,7 +480,7 @@ func handleProjectionFailure(
 	// Set empty projection and field ownership - both must be known for Terraform to save state
 	emptyMap, _ := types.MapValueFrom(ctx, types.StringType, map[string]string{})
 	rc.Data.ManagedStateProjection = emptyMap
-	rc.Data.FieldOwnership = emptyMap
+	rc.Data.ManagedFields = emptyMap
 
 	// Save state with pending projection flag in Private state
 	setPendingProjectionFlag(ctx, privateSetter)

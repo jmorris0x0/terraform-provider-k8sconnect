@@ -53,7 +53,7 @@ func (r *objectResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 	if yamlStr == "" {
 		// Mark computed fields as unknown
 		plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
-		plannedData.FieldOwnership = types.MapUnknown(types.StringType)
+		plannedData.ManagedFields = types.MapUnknown(types.StringType)
 
 		// Save the plan with unknown computed fields
 		diags = resp.Plan.Set(ctx, &plannedData)
@@ -68,7 +68,7 @@ func (r *objectResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 			// During plan with interpolations to computed values, we can't parse/validate
 			// Mark computed fields as unknown
 			plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
-			plannedData.FieldOwnership = types.MapUnknown(types.StringType)
+			plannedData.ManagedFields = types.MapUnknown(types.StringType)
 
 			// Save the plan with unknown computed fields
 			diags = resp.Plan.Set(ctx, &plannedData)
@@ -130,11 +130,11 @@ func (r *objectResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 // setProjectionUnknown sets projection to unknown and saves plan
 //
 // When we can't perform dry-run to predict the result, we set
-// managed_state_projection and field_ownership to unknown.
+// managed_state_projection and managed_fields to unknown.
 func (r *objectResource) setProjectionUnknown(ctx context.Context, plannedData *objectResourceModel, resp *resource.ModifyPlanResponse, reason string) {
 	tflog.Debug(ctx, reason)
 	plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
-	plannedData.FieldOwnership = types.MapUnknown(types.StringType)
+	plannedData.ManagedFields = types.MapUnknown(types.StringType)
 	diags := resp.Plan.Set(ctx, plannedData)
 	resp.Diagnostics.Append(diags...)
 }
@@ -162,17 +162,17 @@ func (r *objectResource) checkDriftAndPreserveState(ctx context.Context, req res
 				// Preserve object_ref since resource identity hasn't changed
 				plannedData.ObjectRef = stateData.ObjectRef
 
-				// Only preserve field_ownership if BOTH:
+				// Only preserve managed_fields if BOTH:
 				// 1. ignore_fields hasn't changed
-				// 2. field_ownership hasn't changed (no ownership transitions)
-				// When either changes, we must show the predicted field_ownership from dry-run
+				// 2. managed_fields hasn't changed (no ownership transitions)
+				// When either changes, we must show the predicted managed_fields from dry-run
 				ignoreFieldsChanged := !stateData.IgnoreFields.Equal(plannedData.IgnoreFields)
-				hasOwnershipTransition := detectOwnershipManagerTransition(ctx, stateData.FieldOwnership, plannedData.FieldOwnership)
+				hasOwnershipTransition := detectOwnershipManagerTransition(ctx, stateData.ManagedFields, plannedData.ManagedFields)
 
 				if !ignoreFieldsChanged && !hasOwnershipTransition {
-					plannedData.FieldOwnership = stateData.FieldOwnership
+					plannedData.ManagedFields = stateData.ManagedFields
 				}
-				// else: leave field_ownership as predicted from dry-run (already set in applyProjection)
+				// else: leave managed_fields as predicted from dry-run (already set in applyProjection)
 
 				// Note: ImportedWithoutAnnotations is now in private state, not model
 				// But still allow terraform-specific settings to update
@@ -304,7 +304,7 @@ func (r *objectResource) calculateProjection(ctx context.Context, req resource.M
 			// Extract ACTUAL current ownership from cluster for ALL managers
 			// This is critical: we need to see ownership by external-operator, kubectl, etc.
 			// to detect transitions, not just k8sconnect-owned fields
-			actualOwnershipMap := extractAllFieldOwnership(currentObj)
+			actualOwnershipMap := extractAllManagedFields(currentObj)
 
 			tflog.Debug(ctx, "PLAN PHASE - Actual current field ownership from cluster (ALL managers)", map[string]interface{}{
 				"actual_ownership_map": actualOwnershipMap,
@@ -444,24 +444,24 @@ func (r *objectResource) applyProjection(ctx context.Context, dryRunResult *unst
 		"map_size":   len(projectionMap),
 	})
 
-	// Handle field_ownership based on operation type
+	// Handle managed_fields based on operation type
 	if isCreate {
-		// For CREATE: Set field_ownership to unknown (will be populated after apply)
-		// We can't accurately predict field_ownership for CREATE because k8sconnect
+		// For CREATE: Set managed_fields to unknown (will be populated after apply)
+		// We can't accurately predict managed_fields for CREATE because k8sconnect
 		// annotations haven't been added yet
-		plannedData.FieldOwnership = types.MapUnknown(types.StringType)
-		tflog.Debug(ctx, "Set field_ownership to unknown for CREATE operation")
+		plannedData.ManagedFields = types.MapUnknown(types.StringType)
+		tflog.Debug(ctx, "Set managed_fields to unknown for CREATE operation")
 	} else {
-		// For UPDATE: Compute field_ownership from dry-run result
+		// For UPDATE: Compute managed_fields from dry-run result
 		// This is a core feature: predicting exact field ownership using force=true dry-run
 
 		// Extract ALL ownership from dry-run (kubectl, hpa-controller, etc.) not just k8sconnect
 		// This is CRITICAL for ADR-019 override to work when k8sconnect doesn't own fields yet
 		// (e.g., after import where kubectl owns everything, or ignore_fields modifications
-		// where external controllers took ownership). v0.1.7 used ExtractFieldOwnershipMap
+		// where external controllers took ownership). v0.1.7 used ExtractManagedFieldsMap
 		// which iterated over ALL managers, not just k8sconnect.
-		allOwnership := extractAllFieldOwnership(dryRunResult)
-		ownershipMap := fieldmanagement.FlattenFieldOwnership(allOwnership)
+		allOwnership := extractAllManagedFields(dryRunResult)
+		ownershipMap := fieldmanagement.FlattenManagedFields(allOwnership)
 
 		// ADR-019: Override predicted ownership for fields we're applying with force=true
 		// Kubernetes dry-run doesn't predict force=true ownership takeover, so we must
@@ -514,7 +514,7 @@ func (r *objectResource) applyProjection(ctx context.Context, dryRunResult *unst
 			}
 		}
 
-		// Note: Parent field removal happens automatically in extractFieldOwnershipMap()
+		// Note: Parent field removal happens automatically in extractManagedFieldsMap()
 		// No need to do it again here
 
 		if overrideCount > 0 {
@@ -535,32 +535,32 @@ func (r *objectResource) applyProjection(ctx context.Context, dryRunResult *unst
 			}
 		}
 
-		// NOTE: We do NOT filter out ignore_fields from field_ownership
+		// NOTE: We do NOT filter out ignore_fields from managed_fields
 		// Users need visibility into who owns ignored fields
 
-		// Set field_ownership to predicted value from dry-run
-		predictedFieldOwnership, diags := types.MapValueFrom(ctx, types.StringType, ownershipMap)
+		// Set managed_fields to predicted value from dry-run
+		predictedManagedFields, diags := types.MapValueFrom(ctx, types.StringType, ownershipMap)
 		if !diags.HasError() {
-			plannedData.FieldOwnership = predictedFieldOwnership
-			tflog.Debug(ctx, "Set field_ownership from dry-run prediction", map[string]interface{}{
+			plannedData.ManagedFields = predictedManagedFields
+			tflog.Debug(ctx, "Set managed_fields from dry-run prediction", map[string]interface{}{
 				"field_count": len(ownershipMap),
 			})
 		} else {
 			// If conversion fails, mark as unknown
-			plannedData.FieldOwnership = types.MapUnknown(types.StringType)
+			plannedData.ManagedFields = types.MapUnknown(types.StringType)
 		}
 	}
 
 	return true
 }
 
-// extractFieldOwnershipMap extracts field ownership from object and flattens to map[string]string
-func extractFieldOwnershipMap(ctx context.Context, obj *unstructured.Unstructured) map[string]string {
+// extractManagedFieldsMap extracts field ownership from object and flattens to map[string]string
+func extractManagedFieldsMap(ctx context.Context, obj *unstructured.Unstructured) map[string]string {
 	// Extract all field ownership
-	ownership := extractAllFieldOwnership(obj)
+	ownership := extractAllManagedFields(obj)
 
 	// Flatten using the common logic
-	ownershipFlat := fieldmanagement.FlattenFieldOwnership(ownership)
+	ownershipFlat := fieldmanagement.FlattenManagedFields(ownership)
 
 	// Remove parent field entries when child fields exist
 	// Example: If "data.owner" exists, remove "data" from ownership map
@@ -713,7 +713,7 @@ func (r *objectResource) detectOwnershipConflicts(ctx context.Context, req resou
 	}
 
 	// Flatten current ownership for comparison
-	currentOwnershipFlat := fieldmanagement.FlattenFieldOwnership(currentOwnership)
+	currentOwnershipFlat := fieldmanagement.FlattenManagedFields(currentOwnership)
 
 	// Build map of fields we're sending in yaml_body (minus ignore_fields)
 	// This is CRITICAL for calculating nowOwned: with force=true, we WILL own any field we send

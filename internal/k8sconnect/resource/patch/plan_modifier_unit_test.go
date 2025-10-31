@@ -321,10 +321,10 @@ func TestCheckOwnershipTransitions_NoPreviousOwnership(t *testing.T) {
 	}
 }
 
-// Test helper: Mock getFieldOwnershipFromPrivateState for unit testing
+// Test helper: Mock getManagedFieldsFromPrivateState for unit testing
 // Note: In actual implementation, this function reads from req.Private
 // For unit tests, we'll test checkOwnershipTransitions behavior when
-// getFieldOwnershipFromPrivateState returns nil vs non-nil
+// getManagedFieldsFromPrivateState returns nil vs non-nil
 
 // Test 3.2: checkOwnershipTransitions with field ownership transitions
 // This test verifies the LOGIC of transition detection, not the full integration
@@ -339,7 +339,7 @@ func TestCheckOwnershipTransitions_TransitionDetection(t *testing.T) {
 	// - Current apply: patch takes ownership back with force
 	// - Expected: Transition warning emitted
 
-	// Note: Full implementation requires mocking getFieldOwnershipFromPrivateState
+	// Note: Full implementation requires mocking getManagedFieldsFromPrivateState
 	// which reads from terraform private state. This is better tested via
 	// acceptance tests that exercise the full state lifecycle.
 

@@ -41,7 +41,7 @@ type objectResourceModel struct {
 	ForceDestroy           types.Bool   `tfsdk:"force_destroy"`
 	IgnoreFields           types.List   `tfsdk:"ignore_fields"`
 	ManagedStateProjection types.Map    `tfsdk:"managed_state_projection"`
-	FieldOwnership         types.Map    `tfsdk:"field_ownership"`
+	ManagedFields         types.Map    `tfsdk:"managed_fields"`
 	ObjectRef              types.Object `tfsdk:"object_ref"`
 }
 
@@ -138,7 +138,7 @@ func (r *objectResource) Schema(ctx context.Context, req resource.SchemaRequest,
 					"When this differs from current cluster state, it indicates drift - someone modified your managed fields outside Terraform. " +
 					"Computed via Server-Side Apply dry-run for accuracy, enabling precise drift detection without false positives.",
 			},
-			"field_ownership": schema.MapAttribute{
+			"managed_fields": schema.MapAttribute{
 				Computed:    true,
 				ElementType: types.StringType,
 				Description: "Tracks which field manager owns each field path in the resource. " +

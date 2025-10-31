@@ -19,18 +19,18 @@ import (
 // TestAccObjectResource_OwnershipTransitionInPlan tests the CRITICAL requirement:
 // When ownership transitions occur, the PLAN must show the transition BEFORE apply.
 //
-// This is the core feature of field_ownership - showing "who owns it now" vs "who will own it after apply"
+// This is the core feature of managed_fields - showing "who owns it now" vs "who will own it after apply"
 //
 // Test scenarios:
 //
 //  1. Import kubectl-created resource → k8sconnect takes ownership
-//     Plan MUST show: field_ownership["data.foo"] = "kubectl-create" -> "k8sconnect"
+//     Plan MUST show: managed_fields["data.foo"] = "kubectl-create" -> "k8sconnect"
 //
 //  2. External controller modifies k8sconnect-owned field → k8sconnect reclaims ownership
-//     Plan MUST show: field_ownership["spec.replicas"] = "kubectl" -> "k8sconnect"
+//     Plan MUST show: managed_fields["spec.replicas"] = "kubectl" -> "k8sconnect"
 //
 //  3. k8sconnect manages field, then ignore_fields added → ownership released
-//     Plan MUST show field removed from field_ownership map
+//     Plan MUST show field removed from managed_fields map
 //
 // Each scenario verifies:
 // - Plan shows the transition (not just warnings)
@@ -94,10 +94,10 @@ func testImportShowsOwnershipTransitionInPlan(t *testing.T, raw string) {
 					"name": config.StringVariable(cmName),
 				},
 				// After import+apply, k8sconnect has taken ownership
-				// This verifies the fix: field_ownership transitions are now correctly predicted
+				// This verifies the fix: managed_fields transitions are now correctly predicted
 				// in plans BEFORE apply, avoiding "Provider produced inconsistent result" errors
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("k8sconnect_object.imported_cm", "field_ownership.data.owner", "k8sconnect"),
+					resource.TestCheckResourceAttr("k8sconnect_object.imported_cm", "managed_fields.data.owner", "k8sconnect"),
 					testhelpers.CheckFieldManager(k8sClient, ns, "ConfigMap", cmName, "k8sconnect"),
 				),
 			},
@@ -136,7 +136,7 @@ func testExternalDriftShowsOwnershipTransitionInPlan(t *testing.T, raw string) {
 					"replicas": config.IntegerVariable(3),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("k8sconnect_object.deployment", "field_ownership.spec.replicas", "k8sconnect"),
+					resource.TestCheckResourceAttr("k8sconnect_object.deployment", "managed_fields.spec.replicas", "k8sconnect"),
 					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 				),
 			},
@@ -156,8 +156,8 @@ func testExternalDriftShowsOwnershipTransitionInPlan(t *testing.T, raw string) {
 					PreApply: []plancheck.PlanCheck{
 						// Verify the plan shows the ownership transition BEFORE apply
 						plancheck.ExpectResourceAction("k8sconnect_object.deployment", plancheck.ResourceActionUpdate),
-						// This check verifies field_ownership shows: kubectl → k8sconnect
-						testhelpers.ExpectFieldOwnershipTransition(
+						// This check verifies managed_fields shows: kubectl → k8sconnect
+						testhelpers.ExpectManagedFieldsTransition(
 							"k8sconnect_object.deployment",
 							"spec.replicas",
 							"kubectl",    // kubectl scale changes manager to this
@@ -167,7 +167,7 @@ func testExternalDriftShowsOwnershipTransitionInPlan(t *testing.T, raw string) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					// After apply, ownership should be k8sconnect again
-					resource.TestCheckResourceAttr("k8sconnect_object.deployment", "field_ownership.spec.replicas", "k8sconnect"),
+					resource.TestCheckResourceAttr("k8sconnect_object.deployment", "managed_fields.spec.replicas", "k8sconnect"),
 					testhelpers.CheckDeploymentReplicas(k8sClient, ns, deployName, 3),
 				),
 			},
@@ -206,7 +206,7 @@ func testIgnoreFieldsShowsOwnershipReleaseInPlan(t *testing.T, raw string) {
 					"replicas": config.IntegerVariable(3),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("k8sconnect_object.deployment", "field_ownership.spec.replicas", "k8sconnect"),
+					resource.TestCheckResourceAttr("k8sconnect_object.deployment", "managed_fields.spec.replicas", "k8sconnect"),
 				),
 			},
 			// Step 3: Add ignore_fields for spec.replicas - releases ownership
@@ -219,11 +219,11 @@ func testIgnoreFieldsShowsOwnershipReleaseInPlan(t *testing.T, raw string) {
 				},
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						// Verify the plan shows spec.replicas being removed from field_ownership BEFORE apply
+						// Verify the plan shows spec.replicas being removed from managed_fields BEFORE apply
 						// This is an ownership release (not a transition to another manager)
-						testhelpers.ExpectFieldOwnershipRemoved(
+						testhelpers.ExpectManagedFieldsRemoved(
 							"k8sconnect_object.deployment",
-							"spec.replicas", // This field should no longer be in field_ownership after ignore_fields
+							"spec.replicas", // This field should no longer be in managed_fields after ignore_fields
 						),
 					},
 				},

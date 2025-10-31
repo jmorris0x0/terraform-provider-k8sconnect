@@ -3,28 +3,28 @@
 ## Status
 Superseded by ADR-020 (2025-10-26)
 
-**Note**: This ADR documents the evolution of field ownership display strategy. The final solution was to move `field_ownership` to private state with warnings (ADR-020), rather than improving the diff format. This ADR is preserved for historical context.
+**Note**: This ADR documents the evolution of field ownership display strategy. The final solution was to move `managed_fields` to private state with warnings (ADR-020), rather than improving the diff format. This ADR is preserved for historical context.
 
 ## Context
 
-**Problem**: Terraform plan output for simple 2-field change showed **136 lines of diff** (field_ownership: 63 lines, managed_state_projection: 26 lines, yaml_body: 47 lines).
+**Problem**: Terraform plan output for simple 2-field change showed **136 lines of diff** (managed_fields: 63 lines, managed_state_projection: 26 lines, yaml_body: 47 lines).
 
-**Initial instinct**: Hide `field_ownership` as "noise".
+**Initial instinct**: Hide `managed_fields` as "noise".
 
 **Realization**: Field ownership changes are **critical information** for SSA-aware infrastructure. If HPA takes over `spec.replicas`, users need to see that. Problem isn't *what* we show - it's *how verbose the format is*.
 
-## Attempted Solution: field_ownership Map Format
+## Attempted Solution: managed_fields Map Format
 
-Converted `field_ownership` from verbose JSON string to concise Map format. Terraform automatically hides unchanged keys.
+Converted `managed_fields` from verbose JSON string to concise Map format. Terraform automatically hides unchanged keys.
 
 **Before**: 63 lines showing all fields on every update
 **After**: 0 lines when ownership unchanged, 1-5 lines when ownership changes (e.g., HPA takes over replicas)
 
 **Enhancements**:
-- Preserve field_ownership from state during plan when `ignore_fields` unchanged (prevents "(known after apply)" noise)
+- Preserve managed_fields from state during plan when `ignore_fields` unchanged (prevents "(known after apply)" noise)
 - Filter out `status.*` paths (always owned by K8s controllers, never by k8sconnect)
 
-**Ultimate outcome**: While this reduced verbosity, tracking external field ownership in public state created stability issues (flaky tests, inconsistent plan errors). The final solution was ADR-020: Move field_ownership to private state and emit warnings during plan instead.
+**Ultimate outcome**: While this reduced verbosity, tracking external field ownership in public state created stability issues (flaky tests, inconsistent plan errors). The final solution was ADR-020: Move managed_fields to private state and emit warnings during plan instead.
 
 ## Rejected: yaml_body Sensitivity with YAML Fallback
 
@@ -43,7 +43,7 @@ Converted `field_ownership` from verbose JSON string to concise Map format. Terr
 
 ## Not Implemented: managed_state_projection Map Format
 
-**Deferred** until proven necessary by user feedback. After field_ownership improvements, remaining verbosity is acceptable:
+**Deferred** until proven necessary by user feedback. After managed_fields improvements, remaining verbosity is acceptable:
 - Most changes are small (2-10 fields), JSON hierarchical structure is readable
 - CREATE operations: projection is Unknown (no verbosity)
 - Map format would help for very large changes (50+ fields) but these are rare

@@ -863,7 +863,7 @@ YAML
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckDeploymentExists(k8sClient, ns, deployName),
 					testhelpers.CheckDeploymentReplicaCount(k8sClientset, ns, deployName, 2),
-					resource.TestCheckResourceAttr("k8sconnect_object.deployment", "field_ownership.spec.replicas", "k8sconnect"),
+					resource.TestCheckResourceAttr("k8sconnect_object.deployment", "managed_fields.spec.replicas", "k8sconnect"),
 				),
 			},
 			// Step 2: External controller modifies replicas (simulating kubectl edit or HPA)
@@ -901,8 +901,8 @@ YAML
 				// This should succeed and forcibly take ownership back
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckDeploymentReplicaCount(k8sClientset, ns, deployName, 2),
-					// Critical: field_ownership should update to show k8sconnect owns it again
-					resource.TestCheckResourceAttr("k8sconnect_object.deployment", "field_ownership.spec.replicas", "k8sconnect"),
+					// Critical: managed_fields should update to show k8sconnect owns it again
+					resource.TestCheckResourceAttr("k8sconnect_object.deployment", "managed_fields.spec.replicas", "k8sconnect"),
 				),
 			},
 		},
@@ -1025,9 +1025,9 @@ YAML
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckDeploymentReplicaCount(k8sClientset, ns, deployName, 2),
 					// All fields should be owned by k8sconnect again
-					resource.TestCheckResourceAttr("k8sconnect_object.deployment", "field_ownership.spec.replicas", "k8sconnect"),
-					resource.TestCheckResourceAttr("k8sconnect_object.deployment", "field_ownership.spec.template.spec.containers[0].resources.limits.cpu", "k8sconnect"),
-					resource.TestCheckResourceAttr("k8sconnect_object.deployment", "field_ownership.spec.template.spec.containers[0].resources.limits.memory", "k8sconnect"),
+					resource.TestCheckResourceAttr("k8sconnect_object.deployment", "managed_fields.spec.replicas", "k8sconnect"),
+					resource.TestCheckResourceAttr("k8sconnect_object.deployment", "managed_fields.spec.template.spec.containers[0].resources.limits.cpu", "k8sconnect"),
+					resource.TestCheckResourceAttr("k8sconnect_object.deployment", "managed_fields.spec.template.spec.containers[0].resources.limits.memory", "k8sconnect"),
 				),
 				// All conflicts should be detected and corrected (we always force ownership)
 			},

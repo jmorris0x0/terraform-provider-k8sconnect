@@ -369,7 +369,7 @@ func TestAccPatchResource_DeepNestedContainerEnv(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("k8sconnect_patch.test", "id"),
-					resource.TestCheckResourceAttrSet("k8sconnect_patch.test", "managed_fields"),
+					resource.TestCheckResourceAttrSet("k8sconnect_patch.test", "raw_managed_fields"),
 				),
 			},
 		},
@@ -446,7 +446,7 @@ func TestAccPatchResource_DeepNestedFieldExtraction(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					// Verify managed_fields is populated with nested structure
-					resource.TestCheckResourceAttrSet("k8sconnect_patch.test", "managed_fields"),
+					resource.TestCheckResourceAttrSet("k8sconnect_patch.test", "raw_managed_fields"),
 				),
 			},
 		},

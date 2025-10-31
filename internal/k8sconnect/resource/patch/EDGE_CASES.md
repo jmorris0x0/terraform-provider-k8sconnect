@@ -55,7 +55,7 @@ since patch reuses the same connection/auth/client mechanisms. Focus on patch-sp
 
 ### 8. Conflicting Ownership
 - [ ] **9.1** Patch field currently owned by external controller
-- [ ] **9.2** Verify warning about "Field Ownership Override"
+- [ ] **9.2** Verify warning about "Managed Fields Override"
 - [ ] **8.3** Verify force=true takes ownership
 - [ ] **8.4** Verify external controller listed in warning
 
@@ -65,7 +65,7 @@ since patch reuses the same connection/auth/client mechanisms. Focus on patch-sp
 - [ ] **10.1** Basic create with valid patch
 - [ ] **10.2** Verify ID generated
 - [ ] **10.3** Verify managed_fields populated
-- [ ] **9.4** Verify field_ownership populated
+- [ ] **9.4** Verify managed_fields populated
 - [ ] **9.5** Verify previous_owners captured
 
 ### 10. Read/Drift Detection

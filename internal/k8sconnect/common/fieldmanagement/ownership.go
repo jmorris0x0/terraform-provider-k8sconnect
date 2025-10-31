@@ -10,13 +10,13 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-// FieldOwnership represents ownership information for a field
-type FieldOwnership struct {
+// ManagedFields represents ownership information for a field
+type ManagedFields struct {
 	Manager string `json:"manager"`
 	Version string `json:"version,omitempty"`
 }
 
-// ParseFieldsV1ToPathMap parses managedFields and returns a map of path -> FieldOwnership
+// ParseFieldsV1ToPathMap parses managedFields and returns a map of path -> ManagedFields
 // This is the core parsing logic that both resources can use.
 //
 // IMPORTANT: We only track ownership for the "k8sconnect" manager, not other managers.
@@ -26,8 +26,8 @@ type FieldOwnership struct {
 //
 // When multiple managers co-own a field (identical values with SSA), we report "k8sconnect"
 // if we're one of the co-owners. External co-ownership is not tracked.
-func ParseFieldsV1ToPathMap(managedFields []metav1.ManagedFieldsEntry, userJSON map[string]interface{}) map[string]FieldOwnership {
-	result := make(map[string]FieldOwnership)
+func ParseFieldsV1ToPathMap(managedFields []metav1.ManagedFieldsEntry, userJSON map[string]interface{}) map[string]ManagedFields {
+	result := make(map[string]ManagedFields)
 
 	// Only process k8sconnect's ownership entry
 	// Ignore other managers (kubectl-patch, hpa-controller, etc.) even if they co-own fields
@@ -55,7 +55,7 @@ func ParseFieldsV1ToPathMap(managedFields []metav1.ManagedFieldsEntry, userJSON 
 			if strings.HasPrefix(path, "metadata.annotations.k8sconnect.terraform.io/") {
 				continue
 			}
-			result[path] = FieldOwnership{
+			result[path] = ManagedFields{
 				Manager: mf.Manager,
 				Version: mf.APIVersion,
 			}
@@ -125,17 +125,17 @@ func extractPathsFromFieldsV1(fields map[string]interface{}, prefix string, user
 	return paths
 }
 
-// ExtractFieldOwnership returns ownership info for ALL fields
-func ExtractFieldOwnership(obj *unstructured.Unstructured) map[string]FieldOwnership {
+// ExtractManagedFields returns ownership info for ALL fields
+func ExtractManagedFields(obj *unstructured.Unstructured) map[string]ManagedFields {
 	// Use the same parsing logic but return the full ownership map
 	return ParseFieldsV1ToPathMap(obj.GetManagedFields(), obj.Object)
 }
 
-// ExtractFieldOwnershipMap extracts field ownership as a simple map[path]manager
-// This is a simplified version that returns just the manager name (not full FieldOwnership)
+// ExtractManagedFieldsMap extracts field ownership as a simple map[path]manager
+// This is a simplified version that returns just the manager name (not full ManagedFields)
 //
 // Like ParseFieldsV1ToPathMap, this only tracks k8sconnect ownership, not other managers.
-func ExtractFieldOwnershipMap(obj *unstructured.Unstructured) map[string]string {
+func ExtractManagedFieldsMap(obj *unstructured.Unstructured) map[string]string {
 	result := make(map[string]string)
 
 	for _, mf := range obj.GetManagedFields() {
@@ -210,14 +210,14 @@ func extractPathsFromFieldsV1Simple(fields map[string]interface{}, prefix string
 	return paths
 }
 
-// ExtractAllFieldOwnership extracts field ownership for ALL managers, not just k8sconnect
+// ExtractAllManagedFields extracts field ownership for ALL managers, not just k8sconnect
 // This is used for ownership transition detection to identify when external controllers
 // take ownership of fields from k8sconnect.
 //
-// Unlike ExtractFieldOwnershipMap which only tracks k8sconnect ownership,
+// Unlike ExtractManagedFieldsMap which only tracks k8sconnect ownership,
 // this function returns ALL managers for each field path to properly handle shared ownership.
 // When multiple managers co-own a field (via SSA), all of them are included in the slice.
-func ExtractAllFieldOwnership(obj *unstructured.Unstructured) map[string][]string {
+func ExtractAllManagedFields(obj *unstructured.Unstructured) map[string][]string {
 	result := make(map[string][]string)
 
 	// Process ALL managers, not just k8sconnect
@@ -251,12 +251,12 @@ func ExtractAllFieldOwnership(obj *unstructured.Unstructured) map[string][]strin
 	return result
 }
 
-// ExtractFieldOwnershipForPaths extracts ownership info for specific field paths
-func ExtractFieldOwnershipForPaths(obj *unstructured.Unstructured, paths []string) map[string]string {
+// ExtractManagedFieldsForPaths extracts ownership info for specific field paths
+func ExtractManagedFieldsForPaths(obj *unstructured.Unstructured, paths []string) map[string]string {
 	result := make(map[string]string)
 
 	// Get all ownership info
-	allOwnership := ExtractFieldOwnershipMap(obj)
+	allOwnership := ExtractManagedFieldsMap(obj)
 
 	// Filter to only the paths we care about
 	for _, path := range paths {
@@ -309,14 +309,14 @@ func ExtractFieldPathsFromManagedFieldsJSON(managedFieldsJSON string) ([]string,
 	return paths, nil
 }
 
-// FlattenFieldOwnership converts map[string][]string to map[string]string for clean UX
+// FlattenManagedFields converts map[string][]string to map[string]string for clean UX
 // This flattening is deterministic and follows the rule:
 // - If "k8sconnect" is a co-owner, show "k8sconnect" (we're one of the owners)
 // - Else if single external owner, show that manager
 // - Else if multiple external co-owners, sort and show first (deterministic)
 //
 // This keeps diffs simple while tracking comprehensive ownership internally.
-func FlattenFieldOwnership(ownership map[string][]string) map[string]string {
+func FlattenManagedFields(ownership map[string][]string) map[string]string {
 	result := make(map[string]string, len(ownership))
 
 	for path, managers := range ownership {
@@ -353,7 +353,7 @@ func FlattenFieldOwnership(ownership map[string][]string) map[string]string {
 
 // IsKubernetesSystemAnnotation checks if a field path is a K8s system annotation
 // that is managed by controllers and appears/changes unpredictably.
-// These annotations cause plan/apply inconsistencies if tracked in field_ownership.
+// These annotations cause plan/apply inconsistencies if tracked in managed_fields.
 func IsKubernetesSystemAnnotation(path string) bool {
 	// System annotations are under metadata.annotations and end with .kubernetes.io/*
 	if !strings.HasPrefix(path, "metadata.annotations.") {

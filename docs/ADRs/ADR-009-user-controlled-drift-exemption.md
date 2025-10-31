@@ -27,13 +27,13 @@ But:
 
 ## Critical Implementation Detail: Consistency bug (Historical)
 
-**Note**: As of ADR-020, `field_ownership` was moved to private state, making this bug obsolete. This section is preserved for historical context.
+**Note**: As of ADR-020, `managed_fields` was moved to private state, making this bug obsolete. This section is preserved for historical context.
 
-**Bug discovered**: `field_ownership` filtering MUST happen in **both** `ModifyPlan()` and `ModifyApply()`.
+**Bug discovered**: `managed_fields` filtering MUST happen in **both** `ModifyPlan()` and `ModifyApply()`.
 
 **Initial broken implementation**: Only filtered in Apply, not Plan.
 
-**Error**: "Provider produced inconsistent result after apply" - Plan had different field_ownership than State.
+**Error**: "Provider produced inconsistent result after apply" - Plan had different managed_fields than State.
 
 **Root cause**: Terraform compares Plan projection to Apply projection. If they differ, it assumes the provider is buggy.
 

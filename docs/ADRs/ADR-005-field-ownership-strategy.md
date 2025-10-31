@@ -1,4 +1,4 @@
-# ADR-005: Field Ownership Strategy for Drift Prevention
+# ADR-005: Managed Fields Strategy for Drift Prevention
 
 ## Status
 Accepted
@@ -6,7 +6,7 @@ Accepted
 **Scope:** This ADR covers how we use SSA field ownership to determine which fields to include in `managed_state_projection` (our filtered view of K8s state for drift detection). For how we display field ownership information to users, see ADR-020.
 
 **Related ADRs:**
-- ADR-020: Field Ownership Display Strategy (field_ownership computed attribute)
+- ADR-020: Managed Fields Display Strategy (managed_fields computed attribute)
 - ADR-021: Ownership Transition Messaging (centralized warning system)
 
 ## Context
@@ -62,7 +62,7 @@ This same problem exists for ANY field that ANY controller might add:
 **Option 3: Accept the Drift** - Store dry-run prediction without updating after apply.
 - Rejected: Shows false drift, misses normalization ("1Gi" → "1073741824"), fundamentally broken UX
 
-**Option 4: SSA Field Ownership Tracking (Chosen)** - Only track fields owned by our fieldManager.
+**Option 4: SSA Managed Fields Tracking (Chosen)** - Only track fields owned by our fieldManager.
 - Accepted: Only solution that maintains clean diffs, works universally, and eliminates false positives
 
 ## How It Works
