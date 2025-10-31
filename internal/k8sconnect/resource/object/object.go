@@ -41,7 +41,7 @@ type objectResourceModel struct {
 	ForceDestroy           types.Bool   `tfsdk:"force_destroy"`
 	IgnoreFields           types.List   `tfsdk:"ignore_fields"`
 	ManagedStateProjection types.Map    `tfsdk:"managed_state_projection"`
-	ManagedFields         types.Map    `tfsdk:"managed_fields"`
+	ManagedFields          types.Map    `tfsdk:"managed_fields"`
 	ObjectRef              types.Object `tfsdk:"object_ref"`
 }
 

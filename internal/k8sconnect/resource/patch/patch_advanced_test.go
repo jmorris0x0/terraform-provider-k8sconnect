@@ -444,7 +444,7 @@ func TestAccPatchResource_DeepNestedFieldExtraction(t *testing.T) {
 					"raw": config.StringVariable(raw),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					// Verify managed_fields is populated with nested structure
+				// Verify managed_fields is populated with nested structure
 				),
 			},
 		},

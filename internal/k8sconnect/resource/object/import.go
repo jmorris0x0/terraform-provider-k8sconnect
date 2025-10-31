@@ -311,7 +311,7 @@ func (r *objectResource) buildImportState(ctx context.Context, resourceID string
 		DeleteProtection:       types.BoolValue(false),
 		IgnoreFields:           types.ListNull(types.StringType),
 		ManagedStateProjection: projectionMapValue,
-		ManagedFields:         managedFieldsMap,
+		ManagedFields:          managedFieldsMap,
 		ObjectRef:              objRefValue,
 	}
 
