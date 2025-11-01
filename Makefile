@@ -17,7 +17,7 @@ build:
 .PHONY: test
 test:
 	@echo "🧪 Running unit tests"
-	@go test -v $$(go list ./... | grep -v /test/examples | grep -v /test/doctest) -run "^Test[^A].*"
+	@go test -v $$(go list ./... | grep -v /test/examples | grep -v /test/doctest | grep -v /test/diagnostics) -run "^Test[^A].*"
 
 .PHONY: install
 install:
@@ -215,6 +215,19 @@ test-docs-examples: create-cluster install
 	cd test/doctest && \
 	TF_ACC_KUBECONFIG="$$(cat ../../.testbuild/kubeconfig.yaml)" \
 	go test -v -timeout 30m
+
+.PHONY: test-diagnostics
+test-diagnostics: create-cluster install
+	@echo "🔬 Testing diagnostic output (warnings/errors)..."; \
+	TEST_FILTER="$${TEST:-}"; \
+	if [ -n "$$TEST_FILTER" ]; then \
+		echo "Running tests matching: $$TEST_FILTER"; \
+	else \
+		echo "Running all diagnostic tests"; \
+	fi; \
+	cd test/diagnostics && \
+	TF_ACC_KUBECONFIG="$$(cat ../../.testbuild/kubeconfig.yaml)" \
+	go test -v -timeout 30m -run "$$TEST_FILTER"
 
 .PHONY: clean
 clean:

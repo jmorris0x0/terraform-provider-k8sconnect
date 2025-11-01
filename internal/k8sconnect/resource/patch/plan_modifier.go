@@ -441,12 +441,12 @@ func (r *patchResource) handleStrategicMergeProjection(
 ) bool {
 	// For CREATE operations, calculate projection
 	if req.State.Raw.IsNull() {
-		return r.calculateCreateProjection(ctx, req, plannedData, patchedObj, fieldManager, resp)
+		return r.calculateCreateProjection(ctx, req, plannedData, patchedObj, currentObj, fieldManager, resp)
 	}
 
 	// For UPDATE: always calculate new projection
 	// We'll compare projections later in checkDriftAndPreserveState to suppress formatting diffs
-	return r.calculateUpdateProjection(ctx, req, plannedData, patchedObj, fieldManager, resp)
+	return r.calculateUpdateProjection(ctx, req, plannedData, patchedObj, currentObj, fieldManager, resp)
 }
 
 // handleNonSSAPatchState manages state for JSON/Merge patches (no SSA)
@@ -469,6 +469,7 @@ func (r *patchResource) calculateProjectionFromDryRun(
 	req resource.ModifyPlanRequest,
 	plannedData *patchResourceModel,
 	patchedObj *unstructured.Unstructured,
+	currentObj *unstructured.Unstructured,
 	fieldManager string,
 	operationType string,
 	resp *resource.ModifyPlanResponse,
@@ -496,12 +497,37 @@ func (r *patchResource) calculateProjectionFromDryRun(
 		"field_count": len(projectionMap),
 	})
 
-	// Check for ownership transitions (only for UPDATE)
-	if operationType == "UPDATE" {
-		// Extract current ownership from patchedObj
-		currentOwnership := extractManagedFieldsForManager(patchedObj, fieldManager)
-		r.checkOwnershipTransitions(ctx, req, resp, currentOwnership)
+	// Check for ownership transitions (both CREATE and UPDATE)
+	// On CREATE: warn if taking ownership from external managers (kubectl, etc.)
+	// On UPDATE: warn if ownership changed since last apply
+	//
+	// Extract current ownership from currentObj (BEFORE the patch)
+	// This allows us to detect actual ownership transitions, not just force=true effects
+	allOwnership := extractManagedFieldsForManager(currentObj, fieldManager)
+
+	// Filter and normalize: Only check fields WE own (matching our field manager pattern)
+	// This prevents false positives from fields owned by kubectl, k3s, etc.
+	currentOwnership := make(map[string][]string)
+	for path, managers := range allOwnership {
+		ourManagers := make([]string, 0)
+		for _, m := range managers {
+			// Include our field manager (exact match or with temp/ID suffix)
+			if m == "k8sconnect-patch" || m == "k8sconnect-patch-temp" || strings.HasPrefix(m, "k8sconnect-patch-") {
+				// Normalize to generic name to match how we store in state
+				ourManagers = append(ourManagers, "k8sconnect-patch")
+			}
+		}
+		// Only include this field if WE own it
+		if len(ourManagers) > 0 {
+			currentOwnership[path] = ourManagers
+		}
 	}
+
+	// Extract resource identity for unique warning Summary (prevents collapsing)
+	kind := currentObj.GetKind()
+	namespace := currentObj.GetNamespace()
+	name := currentObj.GetName()
+	r.checkOwnershipTransitions(ctx, req, resp, currentOwnership, kind, namespace, name)
 
 	// Compute managed_fields from dry-run result
 	// This is a core feature: predicting exact field ownership using force=true dry-run
@@ -516,10 +542,11 @@ func (r *patchResource) calculateCreateProjection(
 	req resource.ModifyPlanRequest,
 	plannedData *patchResourceModel,
 	patchedObj *unstructured.Unstructured,
+	currentObj *unstructured.Unstructured,
 	fieldManager string,
 	resp *resource.ModifyPlanResponse,
 ) bool {
-	return r.calculateProjectionFromDryRun(ctx, req, plannedData, patchedObj, fieldManager, "CREATE", resp)
+	return r.calculateProjectionFromDryRun(ctx, req, plannedData, patchedObj, currentObj, fieldManager, "CREATE", resp)
 }
 
 // calculateUpdateProjection calculates projection for UPDATE operations with changed content
@@ -528,10 +555,11 @@ func (r *patchResource) calculateUpdateProjection(
 	req resource.ModifyPlanRequest,
 	plannedData *patchResourceModel,
 	patchedObj *unstructured.Unstructured,
+	currentObj *unstructured.Unstructured,
 	fieldManager string,
 	resp *resource.ModifyPlanResponse,
 ) bool {
-	return r.calculateProjectionFromDryRun(ctx, req, plannedData, patchedObj, fieldManager, "UPDATE", resp)
+	return r.calculateProjectionFromDryRun(ctx, req, plannedData, patchedObj, currentObj, fieldManager, "UPDATE", resp)
 }
 
 // patchContentEqual performs semantic comparison of patch content
@@ -590,7 +618,7 @@ func (r *patchResource) patchContentEqual(content1, content2 string, patchType s
 }
 
 // checkOwnershipTransitions compares previous vs current field ownership and warns about transitions
-func (r *patchResource) checkOwnershipTransitions(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse, currentOwnership map[string][]string) {
+func (r *patchResource) checkOwnershipTransitions(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse, currentOwnership map[string][]string, kind, namespace, name string) {
 	// Skip if no state (first apply)
 	if req.State.Raw.IsNull() {
 		tflog.Debug(ctx, "No state yet - skipping transition check")
@@ -664,7 +692,7 @@ func (r *patchResource) checkOwnershipTransitions(ctx context.Context, req resou
 
 	// Emit warnings for ownership transitions
 	if len(transitions) > 0 {
-		addPatchOwnershipTransitionWarning(resp, transitions)
+		addPatchOwnershipTransitionWarning(resp, transitions, kind, namespace, name)
 	}
 }
 
@@ -676,7 +704,8 @@ type patchOwnershipTransition struct {
 }
 
 // addPatchOwnershipTransitionWarning emits a warning about field ownership transitions
-func addPatchOwnershipTransitionWarning(resp *resource.ModifyPlanResponse, transitions []patchOwnershipTransition) {
+// Includes resource identity in Summary to prevent Terraform from collapsing warnings
+func addPatchOwnershipTransitionWarning(resp *resource.ModifyPlanResponse, transitions []patchOwnershipTransition, kind, namespace, name string) {
 	var details []string
 	for _, t := range transitions {
 		prevOwners := strings.Join(t.PreviousOwners, ", ")
@@ -684,8 +713,16 @@ func addPatchOwnershipTransitionWarning(resp *resource.ModifyPlanResponse, trans
 		details = append(details, fmt.Sprintf("  • %s: [%s] → [%s]", t.Path, prevOwners, currOwners))
 	}
 
+	// Build resource identity for unique Summary (prevents collapsing)
+	var resourceIdentity string
+	if namespace != "" {
+		resourceIdentity = fmt.Sprintf("%s %s/%s", kind, namespace, name)
+	} else {
+		resourceIdentity = fmt.Sprintf("%s %s", kind, name)
+	}
+
 	resp.Diagnostics.AddWarning(
-		"Patch Field Ownership Transition",
+		fmt.Sprintf("Patch Field Ownership Transition (%s)", resourceIdentity),
 		fmt.Sprintf("Field ownership changed during this patch:\n%s\n\n"+
 			"This patch took ownership using force. "+
 			"The previous controller may attempt to reclaim these fields.",

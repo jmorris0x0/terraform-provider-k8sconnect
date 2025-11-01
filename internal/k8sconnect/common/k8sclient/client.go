@@ -358,12 +358,13 @@ func (d *DynamicK8sClient) getGVR(ctx context.Context, obj *unstructured.Unstruc
 	}
 
 	return schema.GroupVersionResource{}, fmt.Errorf(
-		"no resource found for %s\n\nAvailable kinds in %s: %s\n\n"+
+		"no resource found for %s\n\n"+
 			"This usually means:\n"+
 			"1. The resource kind doesn't exist (check spelling)\n"+
 			"2. A CRD needs to be installed first (try: depends_on = [k8sconnect_object.your_crd])\n"+
-			"3. The API version is incorrect",
-		gvk, gvk.GroupVersion(), d.listAvailableKinds(resources))
+			"3. The API version is incorrect\n\n"+
+			"Check spelling or try: kubectl api-resources --api-group=%s",
+		gvk, gvk.Group)
 }
 
 // isDiscoveryError checks if the error is related to discovery
@@ -385,30 +386,6 @@ func (d *DynamicK8sClient) isDiscoveryError(err error) bool {
 		}
 	}
 	return false
-}
-
-// listAvailableKinds helps with error messages
-func (d *DynamicK8sClient) listAvailableKinds(resources *metav1.APIResourceList) string {
-	if resources == nil || len(resources.APIResources) == 0 {
-		return "none"
-	}
-
-	kinds := make([]string, 0, len(resources.APIResources))
-	for _, resource := range resources.APIResources {
-		if resource.Kind != "" {
-			kinds = append(kinds, resource.Kind)
-		}
-	}
-
-	if len(kinds) == 0 {
-		return "none"
-	}
-
-	// Limit to first 10 to avoid overwhelming error messages
-	if len(kinds) > 10 {
-		return strings.Join(kinds[:10], ", ") + ", ..."
-	}
-	return strings.Join(kinds, ", ")
 }
 
 // DiscoverGVR discovers the GVR for a given apiVersion and kind using the discovery API.
@@ -453,19 +430,14 @@ func (d *DynamicK8sClient) DiscoverGVR(ctx context.Context, apiVersion, kind str
 	}
 
 	if resourceName == "" {
-		// Build list of available kinds to help user
-		availableKinds := make([]string, 0, len(resourceList.APIResources))
-		for _, apiResource := range resourceList.APIResources {
-			if apiResource.Kind != "" {
-				availableKinds = append(availableKinds, apiResource.Kind)
-			}
-		}
-
 		return schema.GroupVersionResource{}, fmt.Errorf(
 			"kind %q not found in apiVersion %q\n\n"+
-				"Available kinds: %s\n\n"+
+				"This usually means:\n"+
+				"1. The resource kind doesn't exist (check spelling)\n"+
+				"2. A CRD needs to be installed first\n"+
+				"3. The apiVersion is incorrect\n\n"+
 				"Check spelling or try: kubectl api-resources --api-group=%s",
-			kind, apiVersion, strings.Join(availableKinds, ", "), gv.Group)
+			kind, apiVersion, gv.Group)
 	}
 
 	// Construct the GVR
@@ -518,20 +490,15 @@ func (d *DynamicK8sClient) IsResourceNamespaced(ctx context.Context, apiVersion,
 		}
 	}
 
-	// Build list of available kinds to help user
-	availableKinds := make([]string, 0, len(resourceList.APIResources))
-	for _, apiResource := range resourceList.APIResources {
-		if apiResource.Kind != "" {
-			availableKinds = append(availableKinds, apiResource.Kind)
-		}
-	}
-
 	gv, _ := schema.ParseGroupVersion(apiVersion)
 	return false, fmt.Errorf(
 		"kind %q not found in apiVersion %q\n\n"+
-			"Available kinds: %s\n\n"+
+			"This usually means:\n"+
+			"1. The resource kind doesn't exist (check spelling)\n"+
+			"2. A CRD needs to be installed first\n"+
+			"3. The apiVersion is incorrect\n\n"+
 			"Check spelling or try: kubectl api-resources --api-group=%s",
-		kind, apiVersion, strings.Join(availableKinds, ", "), gv.Group)
+		kind, apiVersion, gv.Group)
 }
 
 func (d *DynamicK8sClient) Patch(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string, patchType types.PatchType, data []byte, options metav1.PatchOptions) (*unstructured.Unstructured, error) {

@@ -1281,8 +1281,17 @@ func (r *waitResource) buildFieldValuesTimeoutError(obj *unstructured.Unstructur
 	errMsg += fmt.Sprintf("%s did not reach the expected field values within %v\n\n", resourceRef, timeout)
 
 	errMsg += "Waiting for:\n"
-	for field, value := range fieldValues {
-		errMsg += fmt.Sprintf("• %s = %q\n", field, value)
+	for field, expectedValue := range fieldValues {
+		// Extract current value from the object
+		currentValue, exists, err := unstructured.NestedFieldNoCopy(obj.Object, strings.Split(field, ".")...)
+
+		currentValStr := "<not set>"
+		if err == nil && exists {
+			currentValStr = fmt.Sprintf("%v", currentValue)
+		}
+
+		errMsg += fmt.Sprintf("• %s = %q\n", field, expectedValue)
+		errMsg += fmt.Sprintf("  Current value: %s\n", currentValStr)
 	}
 	errMsg += "\n"
 
