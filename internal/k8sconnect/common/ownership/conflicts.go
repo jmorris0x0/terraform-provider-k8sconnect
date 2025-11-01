@@ -142,21 +142,33 @@ func (c *ConflictDetection) HasConflicts() bool {
 
 // FormatWarnings generates resource-level warning messages for all detected conflicts.
 // Returns a slice of warning summaries (one per conflict type) and detailed messages.
-func (c *ConflictDetection) FormatWarnings() []Warning {
+// Includes resource identity (kind, namespace, name) in Summary to prevent Terraform from collapsing warnings.
+func (c *ConflictDetection) FormatWarnings(kind, namespace, name string) []Warning {
 	var warnings []Warning
+
+	// Build resource identity string for Summary (prevents collapsing)
+	resourceIdentity := formatResourceIdentity(kind, namespace, name)
 
 	// Order matters: Show drift first (most common), then taking, then update
 	if len(c.driftConflicts) > 0 {
-		warnings = append(warnings, c.formatDriftWarning())
+		warnings = append(warnings, c.formatDriftWarning(resourceIdentity))
 	}
 	if len(c.takingConflicts) > 0 {
-		warnings = append(warnings, c.formatTakingWarning())
+		warnings = append(warnings, c.formatTakingWarning(resourceIdentity))
 	}
 	if len(c.updateConflicts) > 0 {
-		warnings = append(warnings, c.formatUpdateWarning())
+		warnings = append(warnings, c.formatUpdateWarning(resourceIdentity))
 	}
 
 	return warnings
+}
+
+// formatResourceIdentity creates a concise resource identifier for warning Summaries
+func formatResourceIdentity(kind, namespace, name string) string {
+	if namespace != "" {
+		return fmt.Sprintf("%s %s/%s", kind, namespace, name)
+	}
+	return fmt.Sprintf("%s %s", kind, name)
 }
 
 // Warning represents a structured warning message
@@ -166,7 +178,7 @@ type Warning struct {
 }
 
 // formatDriftWarning creates warning for Row 13 (RE-TAKING) scenarios
-func (c *ConflictDetection) formatDriftWarning() Warning {
+func (c *ConflictDetection) formatDriftWarning(resourceIdentity string) Warning {
 	var details []string
 	for _, field := range c.driftConflicts {
 		details = append(details, fmt.Sprintf("  • %s: %v → %v (modified by: %s)",
@@ -184,13 +196,13 @@ func (c *ConflictDetection) formatDriftWarning() Warning {
 	)
 
 	return Warning{
-		Summary: "Drift Detected - Reverting External Changes",
+		Summary: fmt.Sprintf("Drift Detected - Reverting External Changes (%s)", resourceIdentity),
 		Detail:  detailMsg,
 	}
 }
 
 // formatTakingWarning creates warning for Row 7 (TAKING with Conflict) scenarios
-func (c *ConflictDetection) formatTakingWarning() Warning {
+func (c *ConflictDetection) formatTakingWarning(resourceIdentity string) Warning {
 	var details []string
 	for _, field := range c.takingConflicts {
 		details = append(details, fmt.Sprintf("  • %s (managed by: %s)",
@@ -207,13 +219,13 @@ func (c *ConflictDetection) formatTakingWarning() Warning {
 	)
 
 	return Warning{
-		Summary: "Ownership Conflict - Taking Field from Active Controller",
+		Summary: fmt.Sprintf("Ownership Conflict - Taking Field from Active Controller (%s)", resourceIdentity),
 		Detail:  detailMsg,
 	}
 }
 
 // formatUpdateWarning creates warning for Row 15 (UPDATE + Conflict) scenarios
-func (c *ConflictDetection) formatUpdateWarning() Warning {
+func (c *ConflictDetection) formatUpdateWarning(resourceIdentity string) Warning {
 	var details []string
 	for _, field := range c.updateConflicts {
 		details = append(details, fmt.Sprintf("  • %s: your value: %v, external value: %v (managed by: %s)",
@@ -231,7 +243,7 @@ func (c *ConflictDetection) formatUpdateWarning() Warning {
 	)
 
 	return Warning{
-		Summary: "Ownership Conflict - Overwriting Concurrent External Changes",
+		Summary: fmt.Sprintf("Ownership Conflict - Overwriting Concurrent External Changes (%s)", resourceIdentity),
 		Detail:  detailMsg,
 	}
 }

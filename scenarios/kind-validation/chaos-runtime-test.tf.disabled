@@ -1,0 +1,113 @@
+# CHAOS RUNTIME TESTS
+# These should pass plan but fail at runtime with excellent error messages
+
+# Test 1: ABSURDLY SHORT TIMEOUT - Should fail with descriptive error
+resource "k8sconnect_wait" "chaos_impossible_timeout" {
+  object_ref = k8sconnect_object.web_deployment.object_ref
+  wait_for = {
+    rollout = true
+    timeout = "100ms"  # Deployment can't possibly be ready this fast
+  }
+  cluster = local.cluster
+}
+
+# Test 2: WAIT ON NON-EXISTENT RESOURCE
+resource "k8sconnect_wait" "chaos_wait_missing" {
+  object_ref = {
+    api_version = "v1"
+    kind        = "ConfigMap"
+    name        = "does-not-exist-chaos"
+    namespace   = "kind-validation"
+  }
+  wait_for = {
+    field   = "data.anything"
+    timeout = "10s"
+  }
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace]
+}
+
+# Test 3: PATCH NON-EXISTENT RESOURCE
+resource "k8sconnect_patch" "chaos_patch_missing" {
+  target = {
+    api_version = "v1"
+    kind        = "Service"
+    name        = "service-does-not-exist"
+    namespace   = "kind-validation"
+  }
+  patch = jsonencode({
+    metadata = {
+      labels = {
+        "test" = "chaos"
+      }
+    }
+  })
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace]
+}
+
+# Test 4: WAIT FOR FIELD THAT NEVER APPEARS
+resource "k8sconnect_wait" "chaos_impossible_field" {
+  object_ref = k8sconnect_object.namespace.object_ref
+  wait_for = {
+    field_value = {
+      "metadata.labels.this-will-never-exist" = "impossible"
+    }
+    timeout = "15s"
+  }
+  cluster = local.cluster
+}
+
+# Test 5: INVALID API VERSION (runtime discovery failure)
+resource "k8sconnect_object" "chaos_fake_api" {
+  yaml_body = <<-YAML
+    apiVersion: totally.fake/v1
+    kind: FakeResource
+    metadata:
+      name: chaos-fake
+      namespace: kind-validation
+  YAML
+
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace]
+}
+
+# Test 6: BAD IMAGE with wait (should show excellent pod diagnostics)
+resource "k8sconnect_object" "chaos_bad_image" {
+  yaml_body = <<-YAML
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: chaos-bad-image
+      namespace: kind-validation
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app: chaos-bad
+      template:
+        metadata:
+          labels:
+            app: chaos-bad
+        spec:
+          containers:
+          - name: app
+            image: this-image-absolutely-does-not-exist:never
+            resources:
+              requests:
+                memory: "16Mi"
+                cpu: "25m"
+  YAML
+
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace]
+}
+
+resource "k8sconnect_wait" "chaos_bad_image_wait" {
+  object_ref = k8sconnect_object.chaos_bad_image.object_ref
+  wait_for = {
+    rollout = true
+    timeout = "30s"
+  }
+  cluster = local.cluster
+}

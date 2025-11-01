@@ -253,7 +253,7 @@ func TestAddPatchOwnershipTransitionWarning(t *testing.T) {
 				Diagnostics: diag.Diagnostics{},
 			}
 
-			addPatchOwnershipTransitionWarning(resp, tt.transitions)
+			addPatchOwnershipTransitionWarning(resp, tt.transitions, "Deployment", "test-ns", "test-deploy")
 
 			// Verify warning was added
 			if resp.Diagnostics.WarningsCount() == 0 {
@@ -313,7 +313,7 @@ func TestCheckOwnershipTransitions_NoPreviousOwnership(t *testing.T) {
 	}
 
 	// Should return early with no warnings (no previous state to compare)
-	r.checkOwnershipTransitions(ctx, req, resp, currentOwnership)
+	r.checkOwnershipTransitions(ctx, req, resp, currentOwnership, "ConfigMap", "test-ns", "test-cm")
 
 	// Verify no warnings added
 	if resp.Diagnostics.WarningsCount() > 0 {
