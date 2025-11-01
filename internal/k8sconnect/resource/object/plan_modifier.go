@@ -682,9 +682,25 @@ func (r *objectResource) detectOwnershipConflicts(ctx context.Context, req resou
 	conflicts := r.classifyFieldConflicts(ctx, currentOwnershipFlat, baselineOwnership, fieldsSendingMap,
 		configChanged, stateObj, currentObj, desiredObj)
 
-	// Emit warnings (resource-level aggregation)
+	// Emit warnings (resource-level aggregation) with resource identity to prevent collapsing
 	if conflicts.HasConflicts() {
-		for _, warning := range conflicts.FormatWarnings() {
+		// Extract resource identity from desiredObj (or fallback to currentObj/stateObj)
+		var kind, namespace, name string
+		if desiredObj != nil {
+			kind = desiredObj.GetKind()
+			namespace = desiredObj.GetNamespace()
+			name = desiredObj.GetName()
+		} else if currentObj != nil {
+			kind = currentObj.GetKind()
+			namespace = currentObj.GetNamespace()
+			name = currentObj.GetName()
+		} else if stateObj != nil {
+			kind = stateObj.GetKind()
+			namespace = stateObj.GetNamespace()
+			name = stateObj.GetName()
+		}
+
+		for _, warning := range conflicts.FormatWarnings(kind, namespace, name) {
 			resp.Diagnostics.AddWarning(warning.Summary, warning.Detail)
 		}
 	}

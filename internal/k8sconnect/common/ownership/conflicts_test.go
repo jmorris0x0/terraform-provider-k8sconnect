@@ -339,7 +339,7 @@ func TestConflictDetection_NoConflicts(t *testing.T) {
 		t.Error("HasConflicts() = true, want false for empty detection")
 	}
 
-	warnings := cd.FormatWarnings()
+	warnings := cd.FormatWarnings("Deployment", "test-ns", "test-deploy")
 	if len(warnings) != 0 {
 		t.Errorf("FormatWarnings() returned %d warnings, want 0 for empty detection", len(warnings))
 	}
@@ -363,7 +363,7 @@ func TestConflictDetection_FormatWarnings(t *testing.T) {
 		CurrentManager: "vertical-pod-autoscaler",
 	})
 
-	warnings := cd.FormatWarnings()
+	warnings := cd.FormatWarnings("Deployment", "test-ns", "test-deploy")
 
 	// Should have 2 warnings (drift + taking)
 	if len(warnings) != 2 {
@@ -402,7 +402,7 @@ func TestConflictDetection_MultipleFieldsSameType(t *testing.T) {
 	cd.AddField(DriftConflict, FieldChange{Path: "spec.image"})
 	cd.AddField(DriftConflict, FieldChange{Path: "metadata.labels.version"})
 
-	warnings := cd.FormatWarnings()
+	warnings := cd.FormatWarnings("Deployment", "test-ns", "test-deploy")
 
 	// Should have 1 warning aggregating all 3 fields
 	if len(warnings) != 1 {
@@ -451,7 +451,7 @@ func TestConflictDetection_WarningOrder(t *testing.T) {
 	cd.AddField(TakingConflict, FieldChange{Path: "field2"})
 	cd.AddField(DriftConflict, FieldChange{Path: "field1"})
 
-	warnings := cd.FormatWarnings()
+	warnings := cd.FormatWarnings("Deployment", "test-ns", "test-deploy")
 
 	if len(warnings) != 3 {
 		t.Fatalf("FormatWarnings() returned %d warnings, want 3", len(warnings))
