@@ -89,7 +89,7 @@ func (r *objectResource) Configure(ctx context.Context, req resource.ConfigureRe
 
 func (r *objectResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Version:     1,
+		Version:     2,
 		Description: "Applies a single‑document Kubernetes YAML manifest to a cluster, with per‑resource inline or kubeconfig‑based connection settings.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
