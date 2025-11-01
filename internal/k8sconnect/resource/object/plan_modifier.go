@@ -98,8 +98,7 @@ func (r *objectResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 					"name": desiredObj.GetName(),
 				})
 			} else {
-				resp.Diagnostics.AddError("Failed to populate object_ref",
-					fmt.Sprintf("Failed to populate object_ref during plan: %s", err))
+				resp.Diagnostics.AddError("Resource Type Not Found", err.Error())
 				return
 			}
 		}

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"testing"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
@@ -70,80 +69,6 @@ func TestDiscoveryErrorDetection(t *testing.T) {
 			result := client.isDiscoveryError(tt.err)
 			if result != tt.shouldMatch {
 				t.Errorf("isDiscoveryError(%v) = %v, want %v", tt.err, result, tt.shouldMatch)
-			}
-		})
-	}
-}
-
-func TestListAvailableKinds(t *testing.T) {
-	client := &DynamicK8sClient{}
-
-	tests := []struct {
-		name     string
-		input    *metav1.APIResourceList
-		expected string
-	}{
-		{
-			name:     "nil input",
-			input:    nil,
-			expected: "none",
-		},
-		{
-			name: "empty list",
-			input: &metav1.APIResourceList{
-				APIResources: []metav1.APIResource{},
-			},
-			expected: "none",
-		},
-		{
-			name: "single resource",
-			input: &metav1.APIResourceList{
-				APIResources: []metav1.APIResource{
-					{Kind: "Pod"},
-				},
-			},
-			expected: "Pod",
-		},
-		{
-			name: "multiple resources",
-			input: &metav1.APIResourceList{
-				APIResources: []metav1.APIResource{
-					{Kind: "Pod"},
-					{Kind: "Service"},
-					{Kind: "Deployment"},
-				},
-			},
-			expected: "Pod, Service, Deployment",
-		},
-		{
-			name: "resources with empty kinds",
-			input: &metav1.APIResourceList{
-				APIResources: []metav1.APIResource{
-					{Kind: "Pod"},
-					{Kind: ""}, // Empty kind should be skipped
-					{Kind: "Service"},
-				},
-			},
-			expected: "Pod, Service",
-		},
-		{
-			name: "more than 10 resources",
-			input: &metav1.APIResourceList{
-				APIResources: []metav1.APIResource{
-					{Kind: "Pod"}, {Kind: "Service"}, {Kind: "Deployment"}, {Kind: "ConfigMap"}, {Kind: "Secret"},
-					{Kind: "Namespace"}, {Kind: "Node"}, {Kind: "PersistentVolume"}, {Kind: "PersistentVolumeClaim"}, {Kind: "ServiceAccount"},
-					{Kind: "Role"}, {Kind: "RoleBinding"},
-				},
-			},
-			expected: "Pod, Service, Deployment, ConfigMap, Secret, Namespace, Node, PersistentVolume, PersistentVolumeClaim, ServiceAccount, ...",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := client.listAvailableKinds(tt.input)
-			if result != tt.expected {
-				t.Errorf("listAvailableKinds() = %q, want %q", result, tt.expected)
 			}
 		})
 	}
