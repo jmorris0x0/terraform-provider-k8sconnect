@@ -445,6 +445,17 @@ func (r *waitResource) processWatchEvents(ctx context.Context, client k8sclient.
 			return ctx.Err()
 
 		case <-timeoutCh:
+			// RACE CONDITION FIX: Check if condition was met in last seen state
+			// This handles cases where:
+			// 1. Watch event arrives just before timeout (select race)
+			// 2. Condition became true but event delivery was delayed
+			if lastSeenObj != nil && checker(lastSeenObj) {
+				tflog.Info(ctx, "Condition met at timeout boundary", map[string]interface{}{
+					"condition": conditionType,
+					"resource":  fmt.Sprintf("%s/%s", namespace, name),
+				})
+				return nil
+			}
 			return r.buildConditionTimeoutError(ctx, client, gvr, namespace, name, lastSeenObj, conditionType, timeout)
 
 		case event, ok := <-watcher.ResultChan():
@@ -564,6 +575,22 @@ func (r *waitResource) buildConditionTimeoutError(ctx context.Context, client k8
 		if typeVal == conditionType {
 			targetCondition = condMap
 			targetFound = true
+		}
+	}
+
+	// DEFENSE IN DEPTH: Final check if condition is actually met
+	// Primary fix is in processWatchEvents, but this catches edge cases
+	// (e.g., if lastSeenObj was nil and fresh fetch shows condition met)
+	if targetFound {
+		statusVal, _ := targetCondition["status"].(string)
+		if statusVal == "True" {
+			// Condition is met - this is success, not a timeout
+			// This should rarely happen if the primary fix in processWatchEvents is working
+			tflog.Warn(ctx, "Condition was True when building timeout error - watch event likely delayed", map[string]interface{}{
+				"condition": conditionType,
+				"resource":  resourceRef,
+			})
+			return nil
 		}
 	}
 

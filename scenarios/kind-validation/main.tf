@@ -262,7 +262,7 @@ resource "k8sconnect_wait" "migration_complete" {
   object_ref = k8sconnect_object.migration_job.object_ref
   wait_for = {
     condition = "Complete"
-    timeout   = "120s"
+    timeout   = "120s"  # Testing race condition fix - Job completes in ~6s
   }
   cluster = local.cluster
 }

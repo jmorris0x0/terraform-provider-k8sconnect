@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2025-10-31
+
+### BREAKING CHANGES
+
+- **Restored `managed_fields` computed attribute** to `k8sconnect_object` and `k8sconnect_patch` resources
+  - This attribute was removed in v0.2.0 and has now been restored with enhanced functionality
+  - Tracks all field managers (not just k8sconnect) to support Server-Side Apply shared ownership detection
+  - Shows field-level ownership as `map[string]string` where keys are field paths and values are manager names
+  - When ownership changes appear in diffs, it indicates another system has taken control of those fields
+  - **Migration impact**: State files from v0.2.x will show this attribute appearing during first plan/apply after upgrade
+  - Note: `previous_owners` attribute remains removed (as of v0.2.0)
+
+### Security
+
+- **Updated Go runtime to 1.25.3** to address security vulnerability GO-2025-4007
+
+### Fixed
+
+- **Fixed wait resource race condition with condition evaluation timing**
+  - Wait operations could incorrectly report timeout when condition was actually met due to watch event delivery lag or select statement timing
+  - Added dual-layer condition check: primary check at timeout boundary in watch loop, defense-in-depth check in error builder
+  - Wait operations now accurately detect when conditions are met even when watch events are delayed
+- **Fixed wait resource initial status reporting**
+  - Enhanced wait logic to properly report first status check
+  - Added comprehensive timeout test coverage
+
+### Improved
+
+- **Enhanced field ownership tracking for shared ownership scenarios**
+  - Refactored internal ownership data structures to track all field managers (not just k8sconnect)
+  - Enables proper handling of Server-Side Apply shared ownership (ADR-021 Phase 0)
+  - Foundation for future ownership transition messaging improvements
+
+- **Code quality and maintainability**
+  - Renamed internal field ownership modules to managed_fields for clarity
+  - Reduced code complexity through DRY refactoring
+  - Removed dead code and state upgrade files
+  - Improved test coverage for wait resources and shared ownership scenarios
+
 ## [0.2.2] - 2025-10-28
 
 ### Improved
