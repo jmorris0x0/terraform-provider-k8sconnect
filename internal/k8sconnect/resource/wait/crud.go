@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
@@ -240,6 +241,24 @@ func (r *waitResource) performWait(ctx context.Context, wc *waitContext) error {
 	// Get the current object to verify it exists
 	obj, err := wc.Client.Get(ctx, wc.GVR, wc.ObjectRef.Namespace.ValueString(), wc.ObjectRef.Name.ValueString())
 	if err != nil {
+		// Check if this is a not-found error and provide helpful context
+		if errors.IsNotFound(err) {
+			// Build resource description
+			resourceDesc := fmt.Sprintf("%s %q", wc.ObjectRef.Kind.ValueString(), wc.ObjectRef.Name.ValueString())
+			if !wc.ObjectRef.Namespace.IsNull() && wc.ObjectRef.Namespace.ValueString() != "" {
+				resourceDesc = fmt.Sprintf("%s (namespace: %q)", resourceDesc, wc.ObjectRef.Namespace.ValueString())
+			}
+
+			return fmt.Errorf("%s was not found.\n\n"+
+				"k8sconnect_wait can only wait on existing resources. The resource must be created before wait can begin.\n\n"+
+				"Possible causes:\n"+
+				"1. The resource hasn't been created yet\n"+
+				"2. There's a typo in the resource name or namespace\n"+
+				"3. Missing depends_on relationship\n\n"+
+				"If the resource is created in this same Terraform config, add a depends_on:\n"+
+				"  depends_on = [k8sconnect_object.my_resource]",
+				resourceDesc)
+		}
 		return fmt.Errorf("failed to get resource: %w", err)
 	}
 
