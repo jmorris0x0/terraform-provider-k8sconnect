@@ -133,3 +133,97 @@ variable "namespace" {
 }
 `, namespace)
 }
+
+// TestAccObjectResource_EmptyYAML tests that empty yaml_body produces a clean error
+// Bug #1: Provider should not crash on empty YAML
+func TestAccObjectResource_EmptyYAML(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testAccObjectResourceEmptyYAMLConfig(),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				// Should get a clean validation error, not a crash
+				ExpectError: regexp.MustCompile("yaml_body.*empty|cannot be empty|must not be empty"),
+			},
+		},
+	})
+}
+
+func testAccObjectResourceEmptyYAMLConfig() string {
+	return `
+resource "k8sconnect_object" "empty_yaml" {
+  yaml_body = ""
+
+  cluster = {
+    kubeconfig = var.raw
+  }
+}
+
+variable "raw" {
+  type = string
+}
+`
+}
+
+// TestAccObjectResource_NamespaceNotFound tests that non-existent namespace errors are clear
+// Bug #2: Should not be misdiagnosed as CRD issues
+func TestAccObjectResource_NamespaceNotFound(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testAccObjectResourceNamespaceNotFoundConfig(),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				// Should get a clear namespace error, not a CRD error
+				ExpectError: regexp.MustCompile("(?i)(namespace.*(not found|does not exist|doesn't exist))"),
+			},
+		},
+	})
+}
+
+func testAccObjectResourceNamespaceNotFoundConfig() string {
+	return `
+resource "k8sconnect_object" "bad_namespace" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: test-config
+      namespace: this-namespace-definitely-does-not-exist
+    data:
+      test: value
+  YAML
+
+  cluster = {
+    kubeconfig = var.raw
+  }
+}
+
+variable "raw" {
+  type = string
+}
+`
+}

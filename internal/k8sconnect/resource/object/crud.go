@@ -25,6 +25,15 @@ func (r *objectResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
+	// 1a. Validate yaml_body is not empty
+	if data.YAMLBody.IsNull() || data.YAMLBody.ValueString() == "" {
+		resp.Diagnostics.AddError(
+			"Invalid Configuration",
+			"The yaml_body attribute cannot be empty. Please provide valid Kubernetes YAML configuration.",
+		)
+		return
+	}
+
 	// 2. Generate resource ID
 	data.ID = types.StringValue(common.GenerateID())
 
