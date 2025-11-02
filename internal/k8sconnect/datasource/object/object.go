@@ -123,7 +123,7 @@ func (d *objectDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 	client, err := d.clientFactory.GetClient(conn)
 	if err != nil {
 		// Client creation errors are connection-related, classify them
-		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Connect to Cluster", "cluster")
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Connect to Cluster", "cluster", "")
 		return
 	}
 
@@ -135,7 +135,7 @@ func (d *objectDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 	if err != nil {
 		// GVR resolution errors
 		resourceDesc := fmt.Sprintf("%s/%s", apiVersion, kind)
-		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Discover Resource Type", resourceDesc)
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Discover Resource Type", resourceDesc, apiVersion)
 		return
 	}
 
@@ -150,7 +150,7 @@ func (d *objectDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 		if namespace != "" {
 			resourceDesc = fmt.Sprintf("%s %s/%s", data.Kind.ValueString(), namespace, name)
 		}
-		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Read Resource", resourceDesc)
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Read Resource", resourceDesc, data.APIVersion.ValueString())
 		return
 	}
 

@@ -52,7 +52,7 @@ func (r *objectResource) checkResourceExistenceAndOwnership(ctx context.Context,
 
 		// Real error checking if resource exists - use error classification for better UX
 		resourceDesc := formatResource(rc.Object)
-		severity, title, detail := r.classifyK8sError(err, "Create", resourceDesc)
+		severity, title, detail := r.classifyK8sError(err, "Create", resourceDesc, rc.Object.GetAPIVersion())
 		if severity == "warning" {
 			resp.Diagnostics.AddWarning(title, detail)
 		} else {
@@ -124,7 +124,26 @@ func (r *objectResource) applyWithCRDRetry(ctx context.Context, client k8sclient
 		}
 	}
 
-	// All retries exhausted - return enhanced error
+	// All retries exhausted - return enhanced error based on error type
+	if r.isNamespaceNotFoundError(lastErr) {
+		// Extract namespace name from error if possible
+		nsName := obj.GetNamespace()
+		if nsName == "" {
+			nsName = "(unknown)"
+		}
+
+		return fmt.Errorf(
+			"Namespace \"%s\" not found.\n\n"+
+				"Solutions:\n"+
+				"- Create the namespace first\n"+
+				"- Check spelling in metadata.namespace field\n"+
+				"- Add depends_on if namespace is in same config\n\n"+
+				"Original error: %v",
+			nsName, lastErr,
+		)
+	}
+
+	// CRD-specific error message
 	return fmt.Errorf(
 		"CRD for %s/%s not found after 30s.\n\n"+
 			"This usually means:\n"+
@@ -193,7 +212,7 @@ func (r *objectResource) applyResourceWithConflictHandling(ctx context.Context, 
 		if isFieldConflictError(err) {
 			r.addFieldConflictError(resp, operation, resourceDesc)
 		} else {
-			r.addOperationError(resp, operation, resourceDesc, err)
+			r.addOperationError(resp, operation, resourceDesc, rc.Object.GetAPIVersion(), err)
 		}
 		return err
 	}
@@ -344,9 +363,9 @@ func (r *objectResource) addFieldConflictError(resp interface{}, operation strin
 	}
 }
 
-func (r *objectResource) addOperationError(resp interface{}, operation string, resourceDesc string, err error) {
+func (r *objectResource) addOperationError(resp interface{}, operation string, resourceDesc string, apiVersion string, err error) {
 	// Classify the error for user-friendly messages
-	severity, title, detail := r.classifyK8sError(err, operation, resourceDesc)
+	severity, title, detail := r.classifyK8sError(err, operation, resourceDesc, apiVersion)
 
 	if createResp, ok := resp.(*resource.CreateResponse); ok {
 		if severity == "warning" {

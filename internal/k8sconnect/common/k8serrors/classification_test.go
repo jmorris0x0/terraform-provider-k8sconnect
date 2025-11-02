@@ -497,6 +497,7 @@ func TestClassifyError(t *testing.T) {
 		err              error
 		operation        string
 		resourceDesc     string
+		apiVersion       string
 		expectedSeverity string
 		expectedInTitle  string
 		expectedInDetail string
@@ -511,6 +512,7 @@ func TestClassifyError(t *testing.T) {
 			},
 			operation:        "Plan",
 			resourceDesc:     "Deployment test-deployment",
+			apiVersion:       "apps/v1",
 			expectedSeverity: "error",
 			expectedInTitle:  "Field Validation Failed",
 			expectedInDetail: "spec.replica",
@@ -525,6 +527,7 @@ func TestClassifyError(t *testing.T) {
 			},
 			operation:        "Create",
 			resourceDesc:     "Widget test-widget",
+			apiVersion:       "example.com/v1",
 			expectedSeverity: "error",
 			expectedInTitle:  "CEL Validation Failed",
 			expectedInDetail: "replicas cannot exceed 10",
@@ -539,6 +542,7 @@ func TestClassifyError(t *testing.T) {
 			},
 			operation:        "Update",
 			resourceDesc:     "PVC test-pvc",
+			apiVersion:       "v1",
 			expectedSeverity: "error",
 			expectedInTitle:  "Immutable Field Changed",
 			expectedInDetail: "terraform apply -replace",
@@ -548,6 +552,7 @@ func TestClassifyError(t *testing.T) {
 			err:              errors.NewNotFound(schema.GroupResource{}, "test"),
 			operation:        "Read",
 			resourceDesc:     "ConfigMap test-cm",
+			apiVersion:       "v1",
 			expectedSeverity: "warning",
 			expectedInTitle:  "Resource Not Found",
 			expectedInDetail: "deleted outside of Terraform",
@@ -557,6 +562,7 @@ func TestClassifyError(t *testing.T) {
 			err:              errors.NewForbidden(schema.GroupResource{}, "test", nil),
 			operation:        "Create",
 			resourceDesc:     "Secret test-secret",
+			apiVersion:       "v1",
 			expectedSeverity: "error",
 			expectedInTitle:  "Insufficient Permissions",
 			expectedInDetail: "RBAC permissions insufficient",
@@ -570,6 +576,7 @@ func TestClassifyError(t *testing.T) {
 			},
 			operation:        "Create",
 			resourceDesc:     "Widget test-widget",
+			apiVersion:       "example.com/v1",
 			expectedSeverity: "error",
 			expectedInTitle:  "Custom Resource Definition Not Found",
 			expectedInDetail: "Custom Resource Definition (CRD) for Widget test-widget does not exist",
@@ -578,7 +585,7 @@ func TestClassifyError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			severity, title, detail := ClassifyError(tt.err, tt.operation, tt.resourceDesc)
+			severity, title, detail := ClassifyError(tt.err, tt.operation, tt.resourceDesc, tt.apiVersion)
 
 			if severity != tt.expectedSeverity {
 				t.Errorf("ClassifyError() severity = %v, want %v", severity, tt.expectedSeverity)
@@ -606,7 +613,7 @@ func TestFieldValidationErrorPriority(t *testing.T) {
 		},
 	}
 
-	severity, title, detail := ClassifyError(err, "Plan", "Deployment test")
+	severity, title, detail := ClassifyError(err, "Plan", "Deployment test", "apps/v1")
 
 	// Should be classified as field validation, not CEL
 	if !strings.Contains(title, "Field Validation Failed") {

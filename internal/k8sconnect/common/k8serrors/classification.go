@@ -9,10 +9,82 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 )
 
+// isBuiltInAPIGroup checks if the apiVersion belongs to a built-in Kubernetes API group
+// Built-in groups are either:
+// 1. Core API (v1, v1alpha1, v1beta1) - no group prefix
+// 2. Legacy groups (apps, batch, autoscaling, etc.) - no domain in group name
+// 3. Modern K8s groups (*.k8s.io) - official Kubernetes API extensions
+// CRDs MUST have a domain (contain a dot) that is NOT .k8s.io
+func isBuiltInAPIGroup(apiVersion string) bool {
+	parts := strings.Split(apiVersion, "/")
+
+	if len(parts) == 1 {
+		// Core API: v1, v1alpha1, v1beta1
+		return true
+	}
+
+	group := parts[0]
+
+	// CRDs must have a domain. Built-in groups either:
+	// 1. Have no dot (legacy: apps, batch, autoscaling, etc.)
+	// 2. End with .k8s.io (modern K8s extensions)
+	if !strings.Contains(group, ".") {
+		return true // Legacy built-in (apps, batch, etc.)
+	}
+
+	return strings.HasSuffix(group, ".k8s.io")
+}
+
+// IsConnectionError checks if an error is a network/connection error
+// These include: DNS lookup failures, connection refused, invalid ports, timeouts
+func IsConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errMsg := strings.ToLower(err.Error())
+
+	// Check for common connection error patterns
+	connectionPatterns := []string{
+		"dial tcp",           // Generic dial errors
+		"connection refused", // Port not listening
+		"no such host",       // DNS lookup failure
+		"invalid port",       // Port number out of range
+		"i/o timeout",        // Network timeout
+		"connection reset",   // Connection interrupted
+		"connection timed out",
+		"network is unreachable",
+		"no route to host",
+		"failed to get resource info", // K8s client discovery error wrapper
+	}
+
+	for _, pattern := range connectionPatterns {
+		if strings.Contains(errMsg, pattern) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // ClassifyError categorizes Kubernetes API errors for better user experience
 // Returns (severity, title, detail) suitable for Terraform diagnostics
-func ClassifyError(err error, operation, resourceDesc string) (severity, title, detail string) {
+func ClassifyError(err error, operation, resourceDesc, apiVersion string) (severity, title, detail string) {
 	switch {
+	// Check connection errors FIRST (Bug #4 fix)
+	// Connection errors were being misdiagnosed as "Resource Type Not Found"
+	case IsConnectionError(err):
+		return "error", fmt.Sprintf("%s: Cluster Connection Failed", operation),
+			fmt.Sprintf("Could not connect to Kubernetes cluster.\n\n"+
+				"Error: %v\n\n"+
+				"This usually means:\n"+
+				"1. The cluster host address is incorrect\n"+
+				"2. The cluster is not running or unreachable\n"+
+				"3. Network connectivity issues\n"+
+				"4. Invalid port number\n\n"+
+				"Check your cluster configuration and verify the host address is correct.",
+				err)
+
 	case errors.IsNotFound(err):
 		return "warning", fmt.Sprintf("%s: Resource Not Found", operation),
 			fmt.Sprintf("The %s was not found in the cluster. It may have been deleted outside of Terraform.", resourceDesc)
@@ -84,9 +156,9 @@ func ClassifyError(err error, operation, resourceDesc string) (severity, title, 
 		}
 
 		// Check if this is specifically a CEL validation error
-		// IMPORTANT: Check this BEFORE generic field validation, since CEL errors
-		// also contain field-specific details but need special formatting
-		if IsCELValidationError(err) {
+		// IMPORTANT: Only show CEL error for CRDs, not built-in K8s resources
+		// Built-in resources (v1, apps/v1, etc.) use OpenAPI schema validation, not CEL
+		if IsCELValidationError(err) && !isBuiltInAPIGroup(apiVersion) {
 			celDetails := ExtractCELValidationDetails(err)
 			return "error", fmt.Sprintf("%s: CEL Validation Failed", operation),
 				fmt.Sprintf("CEL validation rule failed for %s.\n\n"+
@@ -149,8 +221,8 @@ func ClassifyError(err error, operation, resourceDesc string) (severity, title, 
 
 // AddClassifiedError classifies a K8s error and adds it to diagnostics
 // This is a convenience function that combines ClassifyError with adding to diagnostics
-func AddClassifiedError(diags *diag.Diagnostics, err error, operation, resourceDesc string) {
-	severity, title, detail := ClassifyError(err, operation, resourceDesc)
+func AddClassifiedError(diags *diag.Diagnostics, err error, operation, resourceDesc, apiVersion string) {
+	severity, title, detail := ClassifyError(err, operation, resourceDesc, apiVersion)
 	if severity == "warning" {
 		diags.AddWarning(title, detail)
 	} else {

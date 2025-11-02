@@ -134,7 +134,7 @@ func TestClassifyError_CELImmutability(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			severity, title, detail := ClassifyError(tt.err, tt.operation, tt.resourceDesc)
+			severity, title, detail := ClassifyError(tt.err, tt.operation, tt.resourceDesc, "v1")
 
 			if severity != tt.expectedSeverity {
 				t.Errorf("severity = %v, want %v", severity, tt.expectedSeverity)

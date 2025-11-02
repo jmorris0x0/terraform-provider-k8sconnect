@@ -58,7 +58,7 @@ func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, 
 			return
 		}
 		// Use error classification for other K8s API errors
-		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Get Target Resource", formatTarget(target))
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Get Target Resource", formatTarget(target), target.APIVersion.ValueString())
 		return
 	}
 
@@ -84,7 +84,7 @@ func (r *patchResource) Create(ctx context.Context, req resource.CreateRequest, 
 	fieldManager := fmt.Sprintf("k8sconnect-patch-%s", data.ID.ValueString())
 	patchedObj, err := r.applyPatch(ctx, client, targetObj, data, fieldManager, gvr)
 	if err != nil {
-		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Apply Patch", formatTarget(target))
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Apply Patch", formatTarget(target), targetObj.GetAPIVersion())
 		return
 	}
 
@@ -136,7 +136,7 @@ func (r *patchResource) Read(ctx context.Context, req resource.ReadRequest, resp
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Read Target Resource", formatTarget(target))
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Read Target Resource", formatTarget(target), target.APIVersion.ValueString())
 		return
 	}
 
@@ -272,7 +272,7 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	// 6. Get current resource
 	gvr, currentObj, err := r.getTargetResource(ctx, client, target)
 	if err != nil {
-		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Get Target Resource", formatTarget(target))
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Get Target Resource", formatTarget(target), target.APIVersion.ValueString())
 		return
 	}
 
@@ -283,7 +283,7 @@ func (r *patchResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	fieldManager := fmt.Sprintf("k8sconnect-patch-%s", plan.ID.ValueString())
 	patchedObj, err := r.applyPatch(ctx, client, currentObj, plan, fieldManager, gvr)
 	if err != nil {
-		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Update Patch", formatTarget(target))
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Update Patch", formatTarget(target), currentObj.GetAPIVersion())
 		return
 	}
 
