@@ -341,3 +341,83 @@ variable "namespace" {
 }
 `, namespace)
 }
+
+// TestAccObjectResource_InvalidClusterHost tests that connection errors with invalid DNS
+// Bug #4: Should show "Cluster Connection Failed" not "Resource Type Not Found"
+func TestAccObjectResource_InvalidClusterHost(t *testing.T) {
+	t.Parallel()
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testAccObjectResourceInvalidHostConfig(),
+				// Should get connection failed error, NOT "Resource Type Not Found"
+				// If this shows "Resource Type Not Found", the bug is present
+				ExpectError: regexp.MustCompile("(?i)(connection.*failed|connect.*cluster|dial tcp)"),
+			},
+		},
+	})
+}
+
+func testAccObjectResourceInvalidHostConfig() string {
+	return `
+resource "k8sconnect_object" "invalid_host" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: test-config
+      namespace: default
+    data:
+      test: value
+  YAML
+
+  cluster = {
+    host = "https://invalid.cluster.local:6443"
+  }
+}
+`
+}
+
+// TestAccObjectResource_InvalidPort tests that connection errors with invalid port
+// Bug #4: Should show "Cluster Connection Failed" not "Resource Type Not Found"
+func TestAccObjectResource_InvalidPort(t *testing.T) {
+	t.Parallel()
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testAccObjectResourceInvalidPortConfig(),
+				// Should get connection failed error, NOT "Resource Type Not Found"
+				// If this shows "Resource Type Not Found", the bug is present
+				ExpectError: regexp.MustCompile("(?i)(connection.*failed|connect.*cluster|invalid port)"),
+			},
+		},
+	})
+}
+
+func testAccObjectResourceInvalidPortConfig() string {
+	return `
+resource "k8sconnect_object" "invalid_port" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: test-config
+      namespace: default
+    data:
+      test: value
+  YAML
+
+  cluster = {
+    host = "https://127.0.0.1:99999"
+  }
+}
+`
+}

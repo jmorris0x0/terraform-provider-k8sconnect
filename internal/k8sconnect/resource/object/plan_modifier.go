@@ -98,7 +98,11 @@ func (r *objectResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 					"name": desiredObj.GetName(),
 				})
 			} else {
-				resp.Diagnostics.AddError("Resource Type Not Found", err.Error())
+				// Use classified error for better error messages (Bug #4 fix)
+				resourceDesc := fmt.Sprintf("%s/%s %s/%s",
+					desiredObj.GetAPIVersion(), desiredObj.GetKind(),
+					desiredObj.GetNamespace(), desiredObj.GetName())
+				r.addClassifiedError(&resp.Diagnostics, err, "Plan", resourceDesc, desiredObj.GetAPIVersion())
 				return
 			}
 		}

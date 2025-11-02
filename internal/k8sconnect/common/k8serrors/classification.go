@@ -35,10 +35,56 @@ func isBuiltInAPIGroup(apiVersion string) bool {
 	return strings.HasSuffix(group, ".k8s.io")
 }
 
+// IsConnectionError checks if an error is a network/connection error
+// These include: DNS lookup failures, connection refused, invalid ports, timeouts
+func IsConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errMsg := strings.ToLower(err.Error())
+
+	// Check for common connection error patterns
+	connectionPatterns := []string{
+		"dial tcp",           // Generic dial errors
+		"connection refused", // Port not listening
+		"no such host",       // DNS lookup failure
+		"invalid port",       // Port number out of range
+		"i/o timeout",        // Network timeout
+		"connection reset",   // Connection interrupted
+		"connection timed out",
+		"network is unreachable",
+		"no route to host",
+		"failed to get resource info", // K8s client discovery error wrapper
+	}
+
+	for _, pattern := range connectionPatterns {
+		if strings.Contains(errMsg, pattern) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // ClassifyError categorizes Kubernetes API errors for better user experience
 // Returns (severity, title, detail) suitable for Terraform diagnostics
 func ClassifyError(err error, operation, resourceDesc, apiVersion string) (severity, title, detail string) {
 	switch {
+	// Check connection errors FIRST (Bug #4 fix)
+	// Connection errors were being misdiagnosed as "Resource Type Not Found"
+	case IsConnectionError(err):
+		return "error", fmt.Sprintf("%s: Cluster Connection Failed", operation),
+			fmt.Sprintf("Could not connect to Kubernetes cluster.\n\n"+
+				"Error: %v\n\n"+
+				"This usually means:\n"+
+				"1. The cluster host address is incorrect\n"+
+				"2. The cluster is not running or unreachable\n"+
+				"3. Network connectivity issues\n"+
+				"4. Invalid port number\n\n"+
+				"Check your cluster configuration and verify the host address is correct.",
+				err)
+
 	case errors.IsNotFound(err):
 		return "warning", fmt.Sprintf("%s: Resource Not Found", operation),
 			fmt.Sprintf("The %s was not found in the cluster. It may have been deleted outside of Terraform.", resourceDesc)
