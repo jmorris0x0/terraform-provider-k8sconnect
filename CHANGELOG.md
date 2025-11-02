@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2025-11-02
+
+### Fixed
+
+- **Fixed empty YAML validation and error handling**
+  - Provider now validates `yaml_body` is not empty or whitespace-only before attempting to parse
+- **Fixed error message clarity for missing namespaces**
+  - Missing namespace errors now clearly indicate "namespace not found" instead of suggesting CRD issues
+- **Fixed CEL validation error categorization for built-in resources**
+  - Built-in Kubernetes resources (v1, apps/v1, *.k8s.io) with validation errors now show "Invalid Resource" instead of "CEL Validation Failed"
+- **Fixed connection error categorization and messaging**
+  - Network/connection errors now properly categorized as "Cluster Connection Failed" instead of "Resource Type Not Found"
+
+### Improved
+- **Enhanced error message quality across all resource operations**
+  - All error messages now follow consistent UX pattern: clear title, what happened, why it happened, how to fix
+
 ## [0.3.0] - 2025-10-31
 
 ### BREAKING CHANGES
