@@ -227,3 +227,117 @@ variable "raw" {
 }
 `
 }
+
+// TestAccObjectResource_InvalidLabel tests that built-in resource validation errors
+// Bug #3: Should NOT be labeled as "CEL Validation Failed" for built-in resources
+func TestAccObjectResource_InvalidLabel(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("invalid-label-ns-%d", time.Now().UnixNano()%1000000)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create namespace
+			{
+				Config: testAccObjectResourceInvalidLabelNamespace(ns),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("k8sconnect_object.namespace", "id"),
+				),
+			},
+			// Step 2: Try to create ConfigMap with invalid label
+			// Should get field validation error, NOT CEL validation error
+			{
+				Config: testAccObjectResourceInvalidLabelConfig(ns),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+				},
+				// Should get validation error, but NOT "CEL Validation Failed"
+				// Built-in resources use OpenAPI schema validation, not CEL
+				ExpectError: regexp.MustCompile("(?i)(invalid|metadata\\.labels)"),
+			},
+		},
+	})
+}
+
+func testAccObjectResourceInvalidLabelNamespace(namespace string) string {
+	return fmt.Sprintf(`
+resource "k8sconnect_object" "namespace" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: %[1]s
+  YAML
+
+  cluster = {
+    kubeconfig = var.raw
+  }
+}
+
+variable "raw" {
+  type = string
+}
+
+variable "namespace" {
+  type = string
+}
+`, namespace)
+}
+
+func testAccObjectResourceInvalidLabelConfig(namespace string) string {
+	return fmt.Sprintf(`
+resource "k8sconnect_object" "namespace" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: %[1]s
+  YAML
+
+  cluster = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_object" "bad_label" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: test-config
+      namespace: %[1]s
+      labels:
+        invalid label with spaces: "value"
+    data:
+      test: value
+  YAML
+
+  cluster = {
+    kubeconfig = var.raw
+  }
+
+  depends_on = [k8sconnect_object.namespace]
+}
+
+variable "raw" {
+  type = string
+}
+
+variable "namespace" {
+  type = string
+}
+`, namespace)
+}

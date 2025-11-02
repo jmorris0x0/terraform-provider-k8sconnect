@@ -9,9 +9,35 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 )
 
+// isBuiltInAPIGroup checks if the apiVersion belongs to a built-in Kubernetes API group
+// Built-in groups are either:
+// 1. Core API (v1, v1alpha1, v1beta1) - no group prefix
+// 2. Legacy groups (apps, batch, autoscaling, etc.) - no domain in group name
+// 3. Modern K8s groups (*.k8s.io) - official Kubernetes API extensions
+// CRDs MUST have a domain (contain a dot) that is NOT .k8s.io
+func isBuiltInAPIGroup(apiVersion string) bool {
+	parts := strings.Split(apiVersion, "/")
+
+	if len(parts) == 1 {
+		// Core API: v1, v1alpha1, v1beta1
+		return true
+	}
+
+	group := parts[0]
+
+	// CRDs must have a domain. Built-in groups either:
+	// 1. Have no dot (legacy: apps, batch, autoscaling, etc.)
+	// 2. End with .k8s.io (modern K8s extensions)
+	if !strings.Contains(group, ".") {
+		return true // Legacy built-in (apps, batch, etc.)
+	}
+
+	return strings.HasSuffix(group, ".k8s.io")
+}
+
 // ClassifyError categorizes Kubernetes API errors for better user experience
 // Returns (severity, title, detail) suitable for Terraform diagnostics
-func ClassifyError(err error, operation, resourceDesc string) (severity, title, detail string) {
+func ClassifyError(err error, operation, resourceDesc, apiVersion string) (severity, title, detail string) {
 	switch {
 	case errors.IsNotFound(err):
 		return "warning", fmt.Sprintf("%s: Resource Not Found", operation),
@@ -84,9 +110,9 @@ func ClassifyError(err error, operation, resourceDesc string) (severity, title, 
 		}
 
 		// Check if this is specifically a CEL validation error
-		// IMPORTANT: Check this BEFORE generic field validation, since CEL errors
-		// also contain field-specific details but need special formatting
-		if IsCELValidationError(err) {
+		// IMPORTANT: Only show CEL error for CRDs, not built-in K8s resources
+		// Built-in resources (v1, apps/v1, etc.) use OpenAPI schema validation, not CEL
+		if IsCELValidationError(err) && !isBuiltInAPIGroup(apiVersion) {
 			celDetails := ExtractCELValidationDetails(err)
 			return "error", fmt.Sprintf("%s: CEL Validation Failed", operation),
 				fmt.Sprintf("CEL validation rule failed for %s.\n\n"+
@@ -149,8 +175,8 @@ func ClassifyError(err error, operation, resourceDesc string) (severity, title, 
 
 // AddClassifiedError classifies a K8s error and adds it to diagnostics
 // This is a convenience function that combines ClassifyError with adding to diagnostics
-func AddClassifiedError(diags *diag.Diagnostics, err error, operation, resourceDesc string) {
-	severity, title, detail := ClassifyError(err, operation, resourceDesc)
+func AddClassifiedError(diags *diag.Diagnostics, err error, operation, resourceDesc, apiVersion string) {
+	severity, title, detail := ClassifyError(err, operation, resourceDesc, apiVersion)
 	if severity == "warning" {
 		diags.AddWarning(title, detail)
 	} else {

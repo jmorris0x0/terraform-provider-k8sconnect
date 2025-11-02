@@ -290,7 +290,7 @@ func (r *patchResource) validatePatchTarget(
 
 		// Other errors
 		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Get Target Resource",
-			formatTarget(target))
+			formatTarget(target), target.APIVersion.ValueString())
 		return nil, false
 	}
 
@@ -401,7 +401,7 @@ func (r *patchResource) executePatchDryRun(
 		}
 
 		// Other errors
-		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Dry-run Patch", formatTarget(target))
+		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Dry-run Patch", formatTarget(target), currentObj.GetAPIVersion())
 		return nil, false
 	}
 

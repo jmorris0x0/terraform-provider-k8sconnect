@@ -135,7 +135,7 @@ func (r *objectResource) Read(ctx context.Context, req resource.ReadRequest, res
 			return
 		}
 		resourceDesc := fmt.Sprintf("%s %s", rc.Object.GetKind(), rc.Object.GetName())
-		severity, title, detail := r.classifyK8sError(err, "Read", resourceDesc)
+		severity, title, detail := r.classifyK8sError(err, "Read", resourceDesc, rc.Object.GetAPIVersion())
 		if severity == "warning" {
 			resp.Diagnostics.AddWarning(title, detail)
 		} else {
@@ -326,7 +326,7 @@ func (r *objectResource) Delete(ctx context.Context, req resource.DeleteRequest,
 			return
 		}
 		resourceDesc := fmt.Sprintf("%s %s", rc.Object.GetKind(), rc.Object.GetName())
-		severity, title, detail := r.classifyK8sError(err, "Delete", resourceDesc)
+		severity, title, detail := r.classifyK8sError(err, "Delete", resourceDesc, rc.Object.GetAPIVersion())
 		if severity == "warning" {
 			resp.Diagnostics.AddWarning(title, detail)
 		} else {
@@ -355,7 +355,7 @@ func (r *objectResource) Delete(ctx context.Context, req resource.DeleteRequest,
 	err = rc.Client.Delete(ctx, rc.GVR, rc.Object.GetNamespace(), rc.Object.GetName(), k8sclient.DeleteOptions{})
 	if err != nil && !errors.IsNotFound(err) {
 		resourceDesc := fmt.Sprintf("%s %s", rc.Object.GetKind(), rc.Object.GetName())
-		severity, title, detail := r.classifyK8sError(err, "Delete", resourceDesc)
+		severity, title, detail := r.classifyK8sError(err, "Delete", resourceDesc, rc.Object.GetAPIVersion())
 		if severity == "warning" {
 			resp.Diagnostics.AddWarning(title, detail)
 		} else {

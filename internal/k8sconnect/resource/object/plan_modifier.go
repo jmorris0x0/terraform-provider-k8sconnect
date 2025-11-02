@@ -346,7 +346,7 @@ func (r *objectResource) performDryRun(ctx context.Context, client k8sclient.K8s
 				desiredObj.GetNamespace(), desiredObj.GetName())
 
 			// Use classified error formatting for clear user feedback
-			r.addClassifiedError(&resp.Diagnostics, err, "Plan", resourceDesc)
+			r.addClassifiedError(&resp.Diagnostics, err, "Plan", resourceDesc, desiredObj.GetAPIVersion())
 
 			// Set projection to unknown (can't project invalid resource)
 			plannedData.ManagedStateProjection = types.MapUnknown(types.StringType)
