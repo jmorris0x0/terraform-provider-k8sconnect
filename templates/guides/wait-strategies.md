@@ -120,9 +120,10 @@ resource "k8sconnect_wait" "setup_job" {
   object_ref = k8sconnect_object.setup_job.object_ref
 
   wait_for = {
-    field       = "status.succeeded"
-    field_value = "1"
-    timeout     = "10m"
+    field_value = {
+      "status.succeeded" = "1"
+    }
+    timeout = "10m"
   }
 
   cluster = local.cluster

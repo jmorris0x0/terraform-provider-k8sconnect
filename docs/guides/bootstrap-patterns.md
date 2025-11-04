@@ -137,7 +137,7 @@ data "k8sconnect_yaml_split" "cert_manager" {
 }
 
 resource "k8sconnect_object" "cert_manager" {
-  for_each = data.k8sconnect_yaml_split.cert_manager.documents
+  for_each = data.k8sconnect_yaml_split.cert_manager.manifests
 
   yaml_body          = each.value
   cluster = local.cluster
@@ -154,7 +154,7 @@ data "k8sconnect_yaml_split" "ingress_nginx" {
 }
 
 resource "k8sconnect_object" "ingress_nginx" {
-  for_each = data.k8sconnect_yaml_split.ingress_nginx.documents
+  for_each = data.k8sconnect_yaml_split.ingress_nginx.manifests
 
   yaml_body          = each.value
   cluster = local.cluster
@@ -352,7 +352,7 @@ resource "k8sconnect_object" "app_namespace" {
 
 # Each stack deploys in parallel too
 resource "k8sconnect_object" "monitoring" {
-  for_each = data.k8sconnect_yaml_split.prometheus.documents
+  for_each = data.k8sconnect_yaml_split.prometheus.manifests
   yaml_body = each.value
   cluster = local.cluster
 
@@ -360,7 +360,7 @@ resource "k8sconnect_object" "monitoring" {
 }
 
 resource "k8sconnect_object" "app" {
-  for_each = data.k8sconnect_yaml_split.app.documents
+  for_each = data.k8sconnect_yaml_split.app.manifests
   yaml_body = each.value
   cluster = local.cluster
 
