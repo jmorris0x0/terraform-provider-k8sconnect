@@ -284,64 +284,28 @@ resource "k8sconnect_object" "app" {
 
 ### Explicit Chain
 
-<!-- runnable-test: bootstrap-explicit-chain -->
 ```terraform
 resource "k8sconnect_object" "namespace" {
-  yaml_body = <<-YAML
-    apiVersion: v1
-    kind: Namespace
-    metadata:
-      name: chain-example
-  YAML
+  yaml_body = file("namespace.yaml")
   cluster = local.cluster
+
+  depends_on = [aws_eks_node_group.main]
 }
 
 resource "k8sconnect_object" "config" {
-  yaml_body = <<-YAML
-    apiVersion: v1
-    kind: ConfigMap
-    metadata:
-      name: app-config
-      namespace: chain-example
-    data:
-      environment: production
-  YAML
+  yaml_body = file("config.yaml")
   cluster = local.cluster
 
   depends_on = [k8sconnect_object.namespace]
 }
 
 resource "k8sconnect_object" "app" {
-  yaml_body = <<-YAML
-    apiVersion: apps/v1
-    kind: Deployment
-    metadata:
-      name: web-app
-      namespace: chain-example
-    spec:
-      replicas: 1
-      selector:
-        matchLabels:
-          app: web
-      template:
-        metadata:
-          labels:
-            app: web
-        spec:
-          containers:
-          - name: nginx
-            image: nginx:1.21
-            resources:
-              requests:
-                cpu: 50m
-                memory: 64Mi
-  YAML
+  yaml_body = file("app.yaml")
   cluster = local.cluster
 
   depends_on = [k8sconnect_object.config]
 }
 ```
-<!-- /runnable-test -->
 
 ### Implicit (via references)
 
