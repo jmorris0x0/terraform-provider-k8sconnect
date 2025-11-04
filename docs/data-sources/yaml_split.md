@@ -2,12 +2,12 @@
 page_title: "Data Source k8sconnect_yaml_split - terraform-provider-k8sconnect"
 subcategory: ""
 description: |-
-  Splits multi-document YAML content into individual manifests with stable, human-readable IDs. Handles complex YAML edge cases and provides excellent error reporting.
+  Splits multi-document YAML content into individual manifests with stable, human-readable IDs.
 ---
 
 # Data Source: k8sconnect_yaml_split
 
-Splits multi-document YAML content into individual manifests with stable, human-readable IDs. Handles complex YAML edge cases and provides excellent error reporting.
+Splits multi-document YAML content into individual manifests with stable, human-readable IDs.
 
 ## Example Usage - Inline Content
 

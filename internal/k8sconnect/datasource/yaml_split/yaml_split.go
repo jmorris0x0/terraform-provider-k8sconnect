@@ -44,7 +44,7 @@ func (d *yamlSplitDataSource) ConfigValidators(ctx context.Context) []datasource
 
 func (d *yamlSplitDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Splits multi-document YAML content into individual manifests with stable, human-readable IDs. Handles complex YAML edge cases and provides excellent error reporting.",
+		Description: "Splits multi-document YAML content into individual manifests with stable, human-readable IDs.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:    true,

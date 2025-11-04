@@ -18,7 +18,7 @@ Bootstrap Kubernetes clusters and workloads in a **single `terraform apply`**. N
 | Cluster‑first dependency hell         | ❌ Two-phase workflow, providers at root only                               | ✅ Single, dynamic apply handles cluster creation and workloads together    |
 | CRD + CR in single apply              | ❌ Manual workaround or requires config                                     | ✅ Auto-retry, zero configuration                                           |
 | Controller coexistence                | ⚠️ SSA optional or no ignore_fields                                         | ✅ Always-on SSA + ignore_fields for HPA, webhooks, operators               |
-| Unpredictable plan diffs              | ❌ Plan shows what you send, not what K8s will do                           | ✅ Dry-run projections show exact changes before apply                      |
+| Unpredictable plan diffs              | ❌ Plan shows what you send, not what K8s will do                           | ✅ Dry-run plans show exact changes before apply                      |
 | Typos and invalid fields              | ❌ Always out-of-date typed resources                                       | ✅ Dry-run + field validation makes typed resources obsolete                |
 | Surgical patches on managed resources | ❌ Import or take full ownership                                            | ✅ Patch EKS/GKE/Helm/operator resources                                    |
 | Wait timeout behavior                 | ⚠️ Taints resource, forces recreate on retry                                | ✅ Separate wait resource, retry in-place                                   |
@@ -304,7 +304,7 @@ k8sconnect uses **Server-Side Apply with Dry-Run** for every operation, giving y
    - `managed_state_projection` diffs = External changes that will be corrected
    - Plan warnings = Ownership changes between controllers
 
-This provider combines Server-Side Apply field ownership tracking with dry-run projections during plan, enabling accurate diffs and multi-controller coexistence patterns via ignore_fields.
+This provider combines Server-Side Apply field ownership tracking with server-side dry-run plans, enabling accurate diffs and multi-controller coexistence patterns via ignore_fields.
 
 ---
 

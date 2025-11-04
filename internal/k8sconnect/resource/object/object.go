@@ -131,11 +131,9 @@ func (r *objectResource) Schema(ctx context.Context, req resource.SchemaRequest,
 			"managed_state_projection": schema.MapAttribute{
 				Computed:    true,
 				ElementType: types.StringType,
-				Description: "Field-by-field snapshot of managed state as flat key-value pairs with dotted paths. " +
-					"Shows exactly which fields k8sconnect manages and their current values. " +
-					"Terraform automatically displays only changed keys in diffs for clean, scannable output. " +
-					"When this differs from current cluster state, it indicates drift - someone modified your managed fields outside Terraform. " +
-					"Computed via Server-Side Apply dry-run for accuracy, enabling precise drift detection without false positives.",
+				Description: "Filtered Kubernetes state containing only fields owned by k8sconnect (determined via managedFields parsing). " +
+					"Used for drift detection by comparing current cluster state against last-applied owned fields. " +
+					"Displayed as flat key-value pairs with dotted paths (e.g., 'spec.replicas': '3').",
 			},
 			"managed_fields": schema.MapAttribute{
 				Computed:    true,
