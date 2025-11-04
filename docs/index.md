@@ -95,11 +95,12 @@ cluster = {
 ## Resources
 
 - `k8sconnect_object` - Full lifecycle management for any Kubernetes resource
+- `k8sconnect_wait` - Wait for resources to reach desired state with extractable results
 - `k8sconnect_patch` - Surgical modifications to existing resources
 
 ## Data Sources
 
-- `k8sconnect_yaml_split` - Parse multi-document YAML files
 - `k8sconnect_object` - Read existing cluster resources
+- `k8sconnect_yaml_split` - Parse multi-document YAML files
 - `k8sconnect_yaml_scoped` - Filter resources by category (CRDs, cluster-scoped, namespaced)
 

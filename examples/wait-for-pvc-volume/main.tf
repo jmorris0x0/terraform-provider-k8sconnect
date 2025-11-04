@@ -1,4 +1,5 @@
-# examples/wait-for-pvc-volume/main.tf
+# To run this example, define your cluster connection in locals.tf
+# See ../README.md for setup instructions
 
 provider "k8sconnect" {}
 
@@ -51,8 +52,8 @@ resource "k8sconnect_object" "pvc" {
           storage: 5Gi
   YAML
 
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.namespace, k8sconnect_object.pv]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace, k8sconnect_object.pv]
 }
 
 # Wait for PVC to be bound before proceeding with dependent resources
@@ -81,6 +82,6 @@ resource "k8sconnect_object" "volume_metadata" {
       capacity: "5Gi"
   YAML
 
-  cluster = local.cluster
-  depends_on         = [k8sconnect_wait.pvc]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_wait.pvc]
 }

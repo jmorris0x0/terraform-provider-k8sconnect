@@ -1,4 +1,5 @@
-# examples/manifest-datasource-kubernetes-service/main.tf
+# To run this example, define your cluster connection in locals.tf
+# See ../README.md for setup instructions
 
 provider "k8sconnect" {}
 
@@ -39,8 +40,8 @@ resource "k8sconnect_object" "api_endpoint_config" {
       service_name: "${data.k8sconnect_object.kubernetes_api.object.metadata.name}"
   YAML
 
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.namespace]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace]
 }
 
 # Output the API endpoint for verification

@@ -54,5 +54,43 @@ Workload resources that just need readiness confirmation for sequencing:
 
 ## Running Examples
 
-Examples assume you have the provider installed and cluster access configured.
+All examples are tested automatically via `make test-examples`. To run an example manually:
+
+1. **Install the provider**: `make install` from the project root
+2. **Add cluster configuration** to the example directory:
+
+```hcl
+# locals.tf
+locals {
+  cluster = {
+    kubeconfig = "~/.kube/config"
+    # Or use inline connection:
+    # host = "https://..."
+    # cluster_ca_certificate = "..."
+    # exec = { ... }
+  }
+}
+```
+
+3. **Add provider configuration**:
+
+```hcl
+# versions.tf
+terraform {
+  required_providers {
+    k8sconnect = {
+      source = "registry.terraform.io/jmorris0x0/k8sconnect"
+    }
+  }
+}
+```
+
+4. **Run Terraform**:
+```bash
+cd examples/basic-deployment
+terraform init
+terraform apply
+```
+
+**Note**: The test framework auto-generates these files, which is why they're not checked in.
 

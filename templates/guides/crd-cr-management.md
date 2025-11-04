@@ -280,7 +280,7 @@ data "k8sconnect_yaml_split" "crds" {
 }
 
 resource "k8sconnect_object" "crds" {
-  for_each = data.k8sconnect_yaml_split.crds.documents
+  for_each = data.k8sconnect_yaml_split.crds.manifests
 
   yaml_body          = each.value
   cluster = local.cluster

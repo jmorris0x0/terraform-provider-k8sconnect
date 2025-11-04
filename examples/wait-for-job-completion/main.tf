@@ -1,4 +1,5 @@
-# examples/wait-for-job-completion/main.tf
+# To run this example, define your cluster connection in locals.tf
+# See ../README.md for setup instructions
 
 provider "k8sconnect" {}
 
@@ -35,8 +36,8 @@ resource "k8sconnect_object" "migration_job" {
           restartPolicy: Never
   YAML
 
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.namespace]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace]
 }
 
 resource "k8sconnect_wait" "migration_job" {
@@ -53,7 +54,7 @@ resource "k8sconnect_wait" "migration_job" {
 }
 
 # Deploy app only after migrations complete
-# Note: field_value waits don't populate .object (only field waits do)
+# Note: field_value waits don't populate .result (only field waits do)
 # We use depends_on to ensure this runs after the migration succeeds
 resource "k8sconnect_object" "app_deployment" {
   yaml_body = <<-YAML
@@ -67,8 +68,8 @@ resource "k8sconnect_object" "app_deployment" {
       migrations_complete: "true"
   YAML
 
-  cluster = local.cluster
-  depends_on         = [k8sconnect_wait.migration_job]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_wait.migration_job]
 }
 
 output "job_deployed" {

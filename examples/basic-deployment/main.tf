@@ -1,4 +1,5 @@
-# examples/basic-deployment/main.tf
+# To run this example, define your cluster connection in locals.tf
+# See ../README.md for setup instructions
 
 provider "k8sconnect" {}
 
@@ -35,6 +36,6 @@ resource "k8sconnect_object" "deployment" {
             image: public.ecr.aws/nginx/nginx:1.21
   YAML
 
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.namespace]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace]
 }

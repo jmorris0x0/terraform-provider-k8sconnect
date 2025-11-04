@@ -1,4 +1,5 @@
-# examples/wait-for-loadbalancer/main.tf
+# To run this example, define your cluster connection in locals.tf
+# See ../README.md for setup instructions
 
 provider "k8sconnect" {}
 
@@ -29,8 +30,8 @@ resource "k8sconnect_object" "loadbalancer_service" {
         app: demo
   YAML
 
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.namespace]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace]
 }
 
 resource "k8sconnect_wait" "loadbalancer_service" {
@@ -56,8 +57,8 @@ resource "k8sconnect_object" "endpoint_config" {
       endpoint_ready: "true"
   YAML
 
-  cluster = local.cluster
-  depends_on         = [k8sconnect_wait.loadbalancer_service]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_wait.loadbalancer_service]
 }
 
 output "loadbalancer_endpoint" {

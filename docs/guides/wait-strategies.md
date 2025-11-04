@@ -110,9 +110,26 @@ Wait for field to match exact string value.
 
 **Use for:** Job completion, PVC binding, Pod phases
 
+<!-- runnable-test: wait-field-value-job -->
 ```terraform
 resource "k8sconnect_object" "setup_job" {
-  yaml_body = file("setup-job.yaml")
+  yaml_body = <<-YAML
+    apiVersion: batch/v1
+    kind: Job
+    metadata:
+      name: setup-job
+      namespace: default
+    spec:
+      backoffLimit: 1
+      completions: 1
+      template:
+        spec:
+          containers:
+          - name: setup
+            image: public.ecr.aws/docker/library/busybox:latest
+            command: ["sh", "-c", "echo 'Running setup'; sleep 2; echo 'Setup complete'"]
+          restartPolicy: Never
+  YAML
   cluster = local.cluster
 }
 
@@ -120,20 +137,30 @@ resource "k8sconnect_wait" "setup_job" {
   object_ref = k8sconnect_object.setup_job.object_ref
 
   wait_for = {
-    field       = "status.succeeded"
-    field_value = "1"
-    timeout     = "10m"
+    field_value = {
+      "status.succeeded" = "1"
+    }
+    timeout = "10m"
   }
 
   cluster = local.cluster
 }
 
 resource "k8sconnect_object" "app" {
-  yaml_body  = file("app.yaml")
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: app-config
+      namespace: default
+    data:
+      setup_complete: "true"
+  YAML
   cluster = local.cluster
   depends_on = [k8sconnect_wait.setup_job]
 }
 ```
+<!-- /runnable-test -->
 
 ## Common Patterns
 

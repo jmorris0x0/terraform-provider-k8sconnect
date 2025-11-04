@@ -231,7 +231,7 @@ When you destroy a patch resource, ownership is released but patched values rema
 				Computed:    true,
 				ElementType: types.StringType,
 				Description: "Tracks which field manager owns each field path in the patched resource. " +
-					"Shows 'k8sconnect' for fields managed by this provider, or external manager names (e.g., 'kubectl', 'hpa-controller') for files managed by other systems. " +
+					"Shows 'k8sconnect' for fields managed by this provider, or external manager names (e.g., 'kubectl', 'hpa-controller') for fields managed by other systems. " +
 					"When ownership changes appear in diffs, it indicates another system has taken control of those fields.",
 			},
 		},

@@ -1,4 +1,5 @@
-# examples/patch-json-patch/main.tf
+# To run this example, define your cluster connection in locals.tf
+# See ../README.md for setup instructions
 
 provider "k8sconnect" {}
 
