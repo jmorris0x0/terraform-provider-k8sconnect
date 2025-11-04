@@ -100,7 +100,7 @@ cluster = {
 
 ## Data Sources
 
-- `k8sconnect_yaml_split` - Parse multi-document YAML files
 - `k8sconnect_object` - Read existing cluster resources
+- `k8sconnect_yaml_split` - Parse multi-document YAML files
 - `k8sconnect_yaml_scoped` - Filter resources by category (CRDs, cluster-scoped, namespaced)
 
