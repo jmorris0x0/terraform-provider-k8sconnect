@@ -12,11 +12,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Fixed documentation errors in guides and resource templates**
-  - Corrected `yaml_split` data source attribute from `.documents` to `.manifests` in guide examples
-  - Fixed `field_value` wait syntax in wait-strategies guide
-  - Fixed typo in patch resource schema description ("files" → "fields")
-  - Corrected default timeout documentation for wait resource (10m, not 5m)
-  - Added missing wait resource to index documentation
 
 ## [0.3.1] - 2025-11-02
 
