@@ -292,7 +292,7 @@ If your change requires trade-offs between these, discuss in the issue first.
 ### Key Architectural Concepts
 
 - **Server-Side Apply (SSA)**: All resource operations use SSA with field ownership tracking
-- **Dry-run projections**: Plan phase uses dry-run to predict exact Kubernetes behavior
+- **Dry-run plans**: Plan phase uses dry-run to predict exact Kubernetes behavior
 - **Field ownership parsing**: We parse `managedFields` to determine what we manage vs. external controllers
 - **Bootstrap handling**: Smart logic for cluster-creation scenarios where connections are "known after apply"
 

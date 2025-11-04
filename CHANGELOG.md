@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2025-11-03
+
+### Fixed
+
+- **Fixed schema descriptions to improve technical accuracy**
+
 ## [0.3.2] - 2025-11-03
 
 ### Fixed
@@ -170,7 +176,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release of terraform-provider-k8sconnect
 - Server-Side Apply (SSA) support with field ownership tracking
-- Dry-run projections for accurate diffs
+- Dry-run plans for accurate diffs
 - Inline per-resource cluster connections (no provider-level configuration required)
 - Universal CRD support via dynamic client discovery
 - `k8sconnect_object` resource for managing any Kubernetes resource

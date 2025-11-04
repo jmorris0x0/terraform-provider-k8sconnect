@@ -222,9 +222,9 @@ When you destroy a patch resource, ownership is released but patched values rema
 			"managed_state_projection": schema.MapAttribute{
 				Computed:    true,
 				ElementType: types.StringType,
-				Description: "Flattened projection of fields that will be patched. Shows the predicted state after patch " +
-					"application, including any Kubernetes defaults. Only available for strategic merge patches (SSA). " +
-					"Non-SSA patches (json_patch, merge_patch) do not provide projection.",
+				Description: "Filtered Kubernetes state containing only fields owned by k8sconnect (determined via managedFields parsing). " +
+					"Used for drift detection. Only available for strategic merge patches (SSA). " +
+					"Non-SSA patches (json_patch, merge_patch) do not track field ownership.",
 			},
 
 			"managed_fields": schema.MapAttribute{
