@@ -1,4 +1,5 @@
-# examples/wait-for-condition/main.tf
+# To run this example, define your cluster connection in locals.tf
+# See ../README.md for setup instructions
 
 provider "k8sconnect" {}
 
@@ -33,8 +34,8 @@ resource "k8sconnect_object" "pvc" {
           storage: 1Gi
   YAML
 
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.namespace]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace]
 }
 
 # Create deployment that uses the PVC
@@ -74,8 +75,8 @@ resource "k8sconnect_object" "app" {
               claimName: data-claim
   YAML
 
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.pvc]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.pvc]
 }
 
 # Wait for "Available" condition to be True

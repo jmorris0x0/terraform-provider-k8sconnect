@@ -1,4 +1,5 @@
-# examples/wait-for-ingress/main.tf
+# To run this example, define your cluster connection in locals.tf
+# See ../README.md for setup instructions
 
 provider "k8sconnect" {}
 
@@ -29,8 +30,8 @@ resource "k8sconnect_object" "backend" {
         app: backend
   YAML
 
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.namespace]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace]
 }
 
 # Create Ingress
@@ -55,8 +56,8 @@ resource "k8sconnect_object" "ingress" {
                   number: 8080
   YAML
 
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.backend]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.backend]
 }
 
 # Wait for Ingress controller to assign hostname/IP
@@ -85,8 +86,8 @@ resource "k8sconnect_object" "dns_config" {
       external_url: "https://api.example.com"
   YAML
 
-  cluster = local.cluster
-  depends_on         = [k8sconnect_wait.ingress]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_wait.ingress]
 }
 
 output "ingress_endpoint" {

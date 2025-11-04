@@ -1,4 +1,5 @@
-# examples/wait-for-external-resources/main.tf
+# To run this example, define your cluster connection in locals.tf
+# See ../README.md for setup instructions
 #
 # This example demonstrates using k8sconnect_wait STANDALONE to wait for
 # resources you don't manage with Terraform. No k8sconnect_object needed.

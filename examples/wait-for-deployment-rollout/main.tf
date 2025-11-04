@@ -1,4 +1,5 @@
-# examples/wait-for-deployment-rollout/main.tf
+# To run this example, define your cluster connection in locals.tf
+# See ../README.md for setup instructions
 
 provider "k8sconnect" {}
 
@@ -49,8 +50,8 @@ resource "k8sconnect_object" "app" {
                 memory: 256Mi
   YAML
 
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.namespace]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace]
 }
 
 # Wait for rollout completion - ensures all 3 replicas are updated and ready
@@ -88,8 +89,8 @@ resource "k8sconnect_object" "service" {
         app: web
   YAML
 
-  cluster = local.cluster
-  depends_on         = [k8sconnect_wait.app]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_wait.app]
 }
 
 # Output confirms deployment completed
