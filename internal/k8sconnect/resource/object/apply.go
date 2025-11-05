@@ -38,7 +38,34 @@ func (r *objectResource) checkResourceExistenceAndOwnership(ctx context.Context,
 			)
 			return fmt.Errorf("resource already managed")
 		}
-		// If existingID is empty (unowned) or matches our ID, we can proceed
+		// Block if resource exists without k8sconnect ownership
+		if existingID == "" {
+			kind := rc.Object.GetKind()
+			namespace := rc.Object.GetNamespace()
+			name := rc.Object.GetName()
+
+			// Build import command based on whether resource is namespaced
+			var importID string
+			if namespace != "" {
+				importID = fmt.Sprintf("<cluster-id>:%s/%s:%s:%s",
+					rc.Object.GetAPIVersion(), kind, namespace, name)
+			} else {
+				importID = fmt.Sprintf("<cluster-id>:%s/%s:%s",
+					rc.Object.GetAPIVersion(), kind, name)
+			}
+
+			resp.Diagnostics.AddError(
+				"Resource Already Exists",
+				fmt.Sprintf(
+					"The %s '%s' already exists in the cluster but is not managed by k8sconnect.\n\n"+
+						"To manage this existing resource, use 'terraform import':\n"+
+						"  terraform import k8sconnect_object.<resource_name> %s\n\n"+
+						"Replace <cluster-id> with your cluster identifier and <resource_name> with your Terraform resource name.",
+					kind, formatResource(rc.Object), importID),
+			)
+			return fmt.Errorf("resource already exists")
+		}
+		// If existingID matches our ID, we can proceed (resource is in our state)
 	} else if !errors.IsNotFound(err) && !r.isNamespaceNotFoundError(err) {
 		// If namespace doesn't exist, resource can't exist either - skip check
 		// The apply retry logic will handle this case
@@ -259,12 +286,19 @@ func (r *objectResource) verifyOwnership(currentObj *unstructured.Unstructured, 
 	}
 
 	if currentID == "" {
-		resp.Diagnostics.AddError(
-			"Resource Not Managed",
-			fmt.Sprintf("The %s '%s' exists but is not managed by Terraform. Use 'terraform import' to manage it.",
-				obj.GetKind(), obj.GetName()),
+		// Resource is in our state but missing annotations - we can recover
+		resp.Diagnostics.AddWarning(
+			"Resource Annotations Missing - Will Restore",
+			fmt.Sprintf("The %s '%s' is missing k8sconnect ownership annotations.\n\n"+
+				"This can happen if:\n"+
+				"• Annotations were manually removed with kubectl\n"+
+				"• Another tool modified the resource\n"+
+				"• Resource was recreated outside Terraform\n\n"+
+				"The annotations will be restored on the next apply.",
+				obj.GetKind(), formatResource(obj)),
 		)
-		return fmt.Errorf("resource not managed")
+		// Return nil to allow UPDATE to continue and restore annotations
+		return nil
 	}
 
 	if currentID != expectedID {

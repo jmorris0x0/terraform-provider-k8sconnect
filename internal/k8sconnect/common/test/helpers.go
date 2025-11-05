@@ -1014,3 +1014,34 @@ func deepEqualValues(a, b interface{}) bool {
 	// For primitives, use direct comparison
 	return a == b
 }
+
+// RemoveAnnotation removes an annotation from a Kubernetes resource
+// This is used in tests to simulate annotation loss scenarios
+func RemoveAnnotation(t *testing.T, client kubernetes.Interface, namespace, kind, name, annotationKey string) {
+	ctx := context.Background()
+
+	switch kind {
+	case "ConfigMap":
+		cm, err := client.CoreV1().ConfigMaps(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("Failed to get ConfigMap %s/%s: %v", namespace, name, err)
+		}
+
+		if cm.Annotations == nil {
+			fmt.Printf("⚠️  ConfigMap %s/%s has no annotations to remove\n", namespace, name)
+			return
+		}
+
+		delete(cm.Annotations, annotationKey)
+
+		_, err = client.CoreV1().ConfigMaps(namespace).Update(ctx, cm, metav1.UpdateOptions{})
+		if err != nil {
+			t.Fatalf("Failed to update ConfigMap %s/%s: %v", namespace, name, err)
+		}
+
+		fmt.Printf("✅ Removed annotation %q from ConfigMap %s/%s\n", annotationKey, namespace, name)
+
+	default:
+		t.Fatalf("Unsupported kind for RemoveAnnotation: %s", kind)
+	}
+}
