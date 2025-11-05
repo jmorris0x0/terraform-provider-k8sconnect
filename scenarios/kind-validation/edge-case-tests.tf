@@ -222,3 +222,62 @@ resource "k8sconnect_object" "long_args_deployment" {
 #   cluster    = local.cluster
 #   depends_on = [k8sconnect_object.namespace]
 # }
+
+#############################################
+# UX TEST 1: Manual Deletion Scenario
+# Create → Delete manually → Reapply
+#############################################
+resource "k8sconnect_object" "ux_manual_delete" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: ux-manual-delete
+      namespace: kind-validation
+    data:
+      scenario: "manual-deletion"
+      test: "Delete this manually with kubectl, then apply again"
+  YAML
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace]
+}
+
+#############################################
+# UX TEST 2: Annotation Removal Scenario
+# Create → Remove k8s annotation → Reapply
+#############################################
+resource "k8sconnect_object" "ux_annotation_removal" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: ux-annotation-removal
+      namespace: kind-validation
+    data:
+      scenario: "annotation-removal"
+      test: "Remove kubectl.kubernetes.io/last-applied-configuration annotation manually"
+  YAML
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace]
+}
+
+#############################################
+# UX TEST 3: Pre-existing Object Adoption
+# Create outside k8sconnect → Add to HCL → Apply
+# NOTE: Comment this out initially, create with kubectl first
+#############################################
+resource "k8sconnect_object" "ux_adoption" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: ux-adoption
+      namespace: kind-validation
+    data:
+      scenario: "adoption"
+      test: "Created outside k8sconnect via kubectl"
+      origin: "external"
+  YAML
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace]
+}

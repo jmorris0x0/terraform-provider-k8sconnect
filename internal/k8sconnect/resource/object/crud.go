@@ -150,7 +150,16 @@ func (r *objectResource) Read(ctx context.Context, req resource.ReadRequest, res
 	// 4. Check ownership (skip if just imported without annotations)
 	// When a resource is imported without k8sconnect annotations, we skip the ownership
 	// check until Update adds the annotations. The flag is cleared by Update after applying.
+	annotationsMissing := false
 	if !checkImportedWithoutAnnotationsFlag(ctx, req.Private) {
+		// Check if annotations are missing before calling verifyOwnership
+		annotations := currentObj.GetAnnotations()
+		terraformID := ""
+		if annotations != nil {
+			terraformID = annotations["k8sconnect.terraform.io/terraform-id"]
+		}
+		annotationsMissing = (terraformID == "")
+
 		if err := r.verifyOwnership(currentObj, data.ID.ValueString(), rc.Object, resp); err != nil {
 			return
 		}
@@ -179,6 +188,19 @@ func (r *objectResource) Read(ctx context.Context, req resource.ReadRequest, res
 	} else {
 		// Projection succeeded - clear pending flag if it was set
 		handleProjectionSuccess(ctx, hasPendingProjection, resp.Private, "during refresh")
+
+		// If annotations are missing, force a diff by clearing the projection
+		// This ensures Terraform sees a change and runs UPDATE to restore annotations
+		if annotationsMissing {
+			tflog.Info(ctx, "Clearing projection to force update due to missing annotations", map[string]interface{}{
+				"kind":      rc.Object.GetKind(),
+				"name":      rc.Object.GetName(),
+				"namespace": rc.Object.GetNamespace(),
+			})
+			// Set projection to empty to force a diff
+			emptyMap, _ := types.MapValueFrom(ctx, types.StringType, map[string]string{})
+			data.ManagedStateProjection = emptyMap
+		}
 	}
 
 	// 6. Update field ownership

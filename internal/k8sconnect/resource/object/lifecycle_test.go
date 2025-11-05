@@ -1552,12 +1552,8 @@ func TestAccObjectResource_CreateAlreadyExists(t *testing.T) {
 					"namespace": config.StringVariable(ns),
 					"cm_name":   config.StringVariable(cmName),
 				},
-				// Terraform should attempt SSA which will succeed by taking ownership
-				// (This is actually the correct behavior with SSA - it doesn't fail on already exists)
-				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttrSet("k8sconnect_object.test_cm", "id"),
-					testhelpers.CheckConfigMapExists(k8sClient, ns, cmName),
-				),
+				// Should error - resource exists without k8sconnect ownership (must use import)
+				ExpectError: regexp.MustCompile(`(?i)Resource Already Exists`),
 			},
 		},
 		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, ns),

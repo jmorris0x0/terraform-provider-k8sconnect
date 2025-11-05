@@ -3,6 +3,7 @@ package object_test
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"testing"
 	"time"
 
@@ -257,7 +258,7 @@ func TestAccObjectResource_ImportWithOwnershipConflict(t *testing.T) {
 					testhelpers.CheckFieldManager(k8sClient, ns, "ConfigMap", configMapName, "kubectl-client-side-apply"),
 				),
 			},
-			// Step 3: Apply with k8sconnect - this triggers SSA force=true ownership takeover
+			// Step 3: Apply with k8sconnect - should ERROR (resource exists, must use import)
 			{
 				Config: testAccManifestConfigImportOwnershipConflict(ns, configMapName),
 				ConfigVariables: config.Variables{
@@ -265,11 +266,7 @@ func TestAccObjectResource_ImportWithOwnershipConflict(t *testing.T) {
 					"namespace": config.StringVariable(ns),
 					"name":      config.StringVariable(configMapName),
 				},
-				Check: resource.ComposeTestCheckFunc(
-					testhelpers.CheckConfigMapExists(k8sClient, ns, configMapName),
-					// Verify k8sconnect now owns the fields
-					testhelpers.CheckFieldManager(k8sClient, ns, "ConfigMap", configMapName, "k8sconnect"),
-				),
+				ExpectError: regexp.MustCompile("Resource Already Exists"),
 			},
 		},
 		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, ns),
@@ -339,6 +336,138 @@ resource "k8sconnect_object" "test_import" {
   }
 
   depends_on = [k8sconnect_object.import_namespace]
+}
+`, namespace, name, namespace)
+}
+
+// TestAccObjectResource_AnnotationLossRecovery verifies that k8sconnect can recover
+// when ownership annotations are removed from a managed resource
+func TestAccObjectResource_AnnotationLossRecovery(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+	ns := fmt.Sprintf("annotation-loss-ns-%d", time.Now().UnixNano()%1000000)
+	configMapName := fmt.Sprintf("annotation-loss-cm-%d", time.Now().UnixNano()%1000000)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			// Step 1: Create namespace
+			{
+				Config: testAccManifestConfigAnnotationLossPrep(ns),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckNamespaceExists(k8sClient, ns),
+				),
+			},
+			// Step 2: Create ConfigMap with k8sconnect
+			{
+				Config: testAccManifestConfigAnnotationLoss(ns, configMapName),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"name":      config.StringVariable(configMapName),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckConfigMapExists(k8sClient, ns, configMapName),
+					// Verify k8sconnect owns the resource
+					testhelpers.CheckFieldManager(k8sClient, ns, "ConfigMap", configMapName, "k8sconnect"),
+					testhelpers.CheckHasAnnotation(k8sClient, ns, "ConfigMap", configMapName, "k8sconnect.terraform.io/terraform-id"),
+				),
+			},
+			// Step 3: Remove annotations manually, then verify recovery on next apply
+			{
+				PreConfig: func() {
+					// Remove k8sconnect annotation using kubectl
+					testhelpers.RemoveAnnotation(t, k8sClient, ns, "ConfigMap", configMapName, "k8sconnect.terraform.io/terraform-id")
+				},
+				Config: testAccManifestConfigAnnotationLoss(ns, configMapName),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"name":      config.StringVariable(configMapName),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					testhelpers.CheckConfigMapExists(k8sClient, ns, configMapName),
+					// Verify k8sconnect reclaimed ownership
+					testhelpers.CheckFieldManager(k8sClient, ns, "ConfigMap", configMapName, "k8sconnect"),
+					testhelpers.CheckHasAnnotation(k8sClient, ns, "ConfigMap", configMapName, "k8sconnect.terraform.io/terraform-id"),
+				),
+			},
+		},
+		CheckDestroy: testhelpers.CheckNamespaceDestroy(k8sClient, ns),
+	})
+}
+
+func testAccManifestConfigAnnotationLossPrep(namespace string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+variable "namespace" { type = string }
+
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "test_namespace" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: %s
+  YAML
+
+  cluster = {
+    kubeconfig = var.raw
+  }
+}
+`, namespace)
+}
+
+func testAccManifestConfigAnnotationLoss(namespace, name string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+variable "namespace" { type = string }
+variable "name" { type = string }
+
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "test_namespace" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: %s
+  YAML
+
+  cluster = {
+    kubeconfig = var.raw
+  }
+}
+
+resource "k8sconnect_object" "test_configmap" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: %s
+      namespace: %s
+    data:
+      test: annotation-loss-recovery
+  YAML
+
+  cluster = {
+    kubeconfig = var.raw
+  }
+
+  depends_on = [k8sconnect_object.test_namespace]
 }
 `, namespace, name, namespace)
 }
