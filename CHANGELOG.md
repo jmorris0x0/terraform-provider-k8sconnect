@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] - 2025-11-04
+
+### Improved
+
+- **Enhanced collision detection for existing unmanaged resources**
+  - When attempting to create a resource that already exists in the cluster but is not managed by k8sconnect, the provider now blocks the operation with a clear error message
+
+- **Improved annotation recovery UX**
+  - Changed behavior when k8sconnect ownership annotations are missing from resources in state
+  - Previously: Would fail with error "Resource Not Managed"
+  - Now: Shows warning and automatically restores annotations on next apply
+
 ## [0.3.3] - 2025-11-03
 
 ### Fixed
