@@ -171,7 +171,7 @@ resource "k8sconnect_object" "app" {
 
 The `yaml_split` data source creates stable IDs like `deployment.my-app.nginx` and `service.my-app.nginx`, preventing unnecessary resource recreation when manifests are reordered.
 
-**→ [YAML split examples](examples/#yaml-split-data-source)** - Inline, file patterns, templated
+**→ [YAML split examples](examples/#yaml-split-data-source)** - Inline, file pattern globbing, templated, kustomize folders
 
 ---
 
