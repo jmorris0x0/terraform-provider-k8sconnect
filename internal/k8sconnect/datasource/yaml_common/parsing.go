@@ -11,6 +11,8 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/kustomize/api/krusty"
+	"sigs.k8s.io/kustomize/kyaml/filesys"
 	"sigs.k8s.io/yaml"
 )
 
@@ -180,14 +182,30 @@ func HashString(s string) string {
 	return hex.EncodeToString(h[:])
 }
 
-// LoadDocuments loads YAML documents from either inline content or file pattern.
+// LoadDocuments loads YAML documents from inline content, file pattern, or kustomize build.
 // Returns the parsed documents, a sourceID for caching, and any error.
-// If hasContent is true, loads from content string. Otherwise, loads from pattern.
-func LoadDocuments(hasContent bool, content, pattern string) ([]DocumentInfo, string, error) {
+// Exactly one of content, pattern, or kustomizePath should be non-empty.
+func LoadDocuments(hasContent bool, content, pattern, kustomizePath string) ([]DocumentInfo, string, error) {
 	var documents []DocumentInfo
 	var sourceID string
 
-	if hasContent {
+	// Determine input mode
+	hasKustomize := kustomizePath != ""
+
+	if hasKustomize {
+		// Build kustomization and parse output
+		yamlContent, err := BuildKustomization(kustomizePath)
+		if err != nil {
+			return nil, "", fmt.Errorf("kustomize build failed: %w\n\n%s", err, FormatKustomizeError(kustomizePath, err))
+		}
+
+		// Parse the built YAML
+		documents, err = ParseDocuments(yamlContent, kustomizePath)
+		if err != nil {
+			return nil, "", fmt.Errorf("kustomize build succeeded but output contains invalid YAML: %w", err)
+		}
+		sourceID = fmt.Sprintf("kustomize-%s", HashString(kustomizePath)[:8])
+	} else if hasContent {
 		// Parse inline content
 		docs, err := ParseDocuments(content, "<inline>")
 		if err != nil {
@@ -223,4 +241,51 @@ func LoadDocuments(hasContent bool, content, pattern string) ([]DocumentInfo, st
 	}
 
 	return documents, sourceID, nil
+}
+
+// BuildKustomization runs kustomize build on the given path and returns the generated YAML
+func BuildKustomization(path string) (string, error) {
+	// Create kustomizer with default secure options
+	opts := krusty.MakeDefaultOptions()
+	k := krusty.MakeKustomizer(opts)
+
+	// Run kustomize build
+	resMap, err := k.Run(filesys.MakeFsOnDisk(), path)
+	if err != nil {
+		return "", err
+	}
+
+	// Convert resource map to YAML
+	yaml, err := resMap.AsYaml()
+	if err != nil {
+		return "", fmt.Errorf("failed to convert kustomize output to YAML: %w", err)
+	}
+
+	return string(yaml), nil
+}
+
+// FormatKustomizeError formats kustomize errors following k8sconnect's WHAT/WHY/HOW pattern
+func FormatKustomizeError(path string, err error) string {
+	return fmt.Sprintf(`Unable to build kustomization at %q
+
+Kustomize build failed with error:
+%s
+
+Common causes:
+  1. Missing kustomization.yaml in the specified directory
+  2. Base path references a directory outside the kustomization root (security restriction)
+  3. Patch file references don't exist or have invalid paths
+  4. Strategic merge conflict in overlays or patches
+  5. Invalid YAML syntax in kustomization.yaml or referenced files
+
+How to fix:
+  1. Verify kustomization.yaml exists in the path: %s
+  2. Check that all base paths in kustomization.yaml are within the allowed directory
+  3. Ensure all patch files and resources referenced in kustomization.yaml exist
+  4. Run 'kustomize build %s' locally to test the configuration
+  5. Review kustomize documentation: https://kubectl.docs.kubernetes.io/references/kustomize/
+
+If you need to reference files outside the kustomization root, this is blocked for security reasons.
+Consider restructuring your kustomization to keep all files within a single directory tree.`,
+		path, err.Error(), path, path)
 }

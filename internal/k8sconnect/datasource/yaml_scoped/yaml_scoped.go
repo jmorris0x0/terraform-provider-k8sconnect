@@ -6,10 +6,10 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
-	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/validators"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/datasource/yaml_common"
 )
 
@@ -22,6 +22,7 @@ type yamlScopedDataSourceModel struct {
 	ID            types.String            `tfsdk:"id"`
 	Content       types.String            `tfsdk:"content"`
 	Pattern       types.String            `tfsdk:"pattern"`
+	KustomizePath types.String            `tfsdk:"kustomize_path"`
 	CRDs          map[string]types.String `tfsdk:"crds"`
 	ClusterScoped map[string]types.String `tfsdk:"cluster_scoped"`
 	Namespaced    map[string]types.String `tfsdk:"namespaced"`
@@ -38,10 +39,57 @@ func (d *yamlScopedDataSource) Metadata(ctx context.Context, req datasource.Meta
 // ConfigValidators implements datasource.DataSourceWithConfigValidators
 func (d *yamlScopedDataSource) ConfigValidators(ctx context.Context) []datasource.ConfigValidator {
 	return []datasource.ConfigValidator{
-		validators.ExactlyOneOf{
-			Attribute1: "content",
-			Attribute2: "pattern",
-		},
+		&exactlyOneOfThreeValidator{},
+	}
+}
+
+// exactlyOneOfThreeValidator validates that exactly one of content/pattern/kustomize_path is set
+type exactlyOneOfThreeValidator struct{}
+
+func (v *exactlyOneOfThreeValidator) Description(ctx context.Context) string {
+	return "validates that exactly one of content, pattern, or kustomize_path is specified"
+}
+
+func (v *exactlyOneOfThreeValidator) MarkdownDescription(ctx context.Context) string {
+	return "validates that exactly one of `content`, `pattern`, or `kustomize_path` is specified"
+}
+
+func (v *exactlyOneOfThreeValidator) ValidateDataSource(ctx context.Context, req datasource.ValidateConfigRequest, resp *datasource.ValidateConfigResponse) {
+	var content, pattern, kustomizePath types.String
+
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("content"), &content)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("pattern"), &pattern)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("kustomize_path"), &kustomizePath)...)
+
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	hasContent := !content.IsNull() && !content.IsUnknown() && content.ValueString() != ""
+	hasPattern := !pattern.IsNull() && !pattern.IsUnknown() && pattern.ValueString() != ""
+	hasKustomize := !kustomizePath.IsNull() && !kustomizePath.IsUnknown() && kustomizePath.ValueString() != ""
+
+	count := 0
+	if hasContent {
+		count++
+	}
+	if hasPattern {
+		count++
+	}
+	if hasKustomize {
+		count++
+	}
+
+	if count > 1 {
+		resp.Diagnostics.AddError(
+			"Conflicting Configuration",
+			"Exactly one of 'content', 'pattern', or 'kustomize_path' must be specified, not multiple.",
+		)
+	} else if count == 0 {
+		resp.Diagnostics.AddError(
+			"Missing Configuration",
+			"Exactly one of 'content', 'pattern', or 'kustomize_path' must be specified.",
+		)
 	}
 }
 
@@ -55,11 +103,15 @@ func (d *yamlScopedDataSource) Schema(ctx context.Context, req datasource.Schema
 			},
 			"content": schema.StringAttribute{
 				Optional:    true,
-				Description: "Raw YAML content containing one or more Kubernetes manifests separated by '---'. Mutually exclusive with 'pattern'.",
+				Description: "Raw YAML content containing one or more Kubernetes manifests separated by '---'. Mutually exclusive with 'pattern' and 'kustomize_path'.",
 			},
 			"pattern": schema.StringAttribute{
 				Optional:    true,
-				Description: "Glob pattern to match YAML files (e.g., './manifests/*.yaml', './configs/**/*.yml'). Supports recursive patterns. Mutually exclusive with 'content'.",
+				Description: "Glob pattern to match YAML files (e.g., './manifests/*.yaml', './configs/**/*.yml'). Supports recursive patterns. Mutually exclusive with 'content' and 'kustomize_path'.",
+			},
+			"kustomize_path": schema.StringAttribute{
+				Optional:    true,
+				Description: "Path to a kustomization directory (containing kustomization.yaml). Runs 'kustomize build' and parses the output. Mutually exclusive with 'content' and 'pattern'.",
 			},
 			"crds": schema.MapAttribute{
 				ElementType: types.StringType,
@@ -92,11 +144,12 @@ func (d *yamlScopedDataSource) Read(ctx context.Context, req datasource.ReadRequ
 	// Determine which input mode to use (validation handled by ConfigValidators)
 	hasContent := !data.Content.IsNull() && data.Content.ValueString() != ""
 
-	// Load documents from either inline content or file pattern
+	// Load documents from content, pattern, or kustomize
 	documents, sourceID, err := yaml_common.LoadDocuments(
 		hasContent,
 		data.Content.ValueString(),
 		data.Pattern.ValueString(),
+		data.KustomizePath.ValueString(),
 	)
 	if err != nil {
 		resp.Diagnostics.AddError(

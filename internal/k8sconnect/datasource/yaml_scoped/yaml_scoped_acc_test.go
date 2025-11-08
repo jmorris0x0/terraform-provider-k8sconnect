@@ -112,6 +112,30 @@ func TestAccYamlScopedDataSource_EmptyCategories(t *testing.T) {
 	})
 }
 
+func TestAccYamlScopedDataSource_Kustomize(t *testing.T) {
+	t.Parallel()
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testAccYamlScopedConfigKustomize,
+				Check: resource.ComposeTestCheckFunc(
+					// id should be set
+					resource.TestCheckResourceAttrSet("data.k8sconnect_yaml_scoped.test", "id"),
+
+					// Should have manifests from kustomize build, categorized by scope
+					resource.TestCheckResourceAttrSet("data.k8sconnect_yaml_scoped.test", "crds.%"),
+					resource.TestCheckResourceAttrSet("data.k8sconnect_yaml_scoped.test", "cluster_scoped.%"),
+					resource.TestCheckResourceAttrSet("data.k8sconnect_yaml_scoped.test", "namespaced.%"),
+				),
+			},
+		},
+	})
+}
+
 func TestAccYamlScopedDataSource_Errors(t *testing.T) {
 	t.Parallel()
 
@@ -121,16 +145,24 @@ func TestAccYamlScopedDataSource_Errors(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				Config:      testAccYamlScopedConfigBothParams,
-				ExpectError: regexp.MustCompile("Exactly one of 'content' or 'pattern' must be specified"),
+				Config:      testAccYamlScopedConfigBothContentAndPattern,
+				ExpectError: regexp.MustCompile("Exactly one of 'content', 'pattern', or 'kustomize_path' must be specified"),
+			},
+			{
+				Config:      testAccYamlScopedConfigContentAndKustomize,
+				ExpectError: regexp.MustCompile("Exactly one of 'content', 'pattern', or 'kustomize_path' must be specified"),
 			},
 			{
 				Config:      testAccYamlScopedConfigNeitherParam,
-				ExpectError: regexp.MustCompile("Either 'content' or 'pattern' must be specified"),
+				ExpectError: regexp.MustCompile("Exactly one of 'content', 'pattern', or 'kustomize_path' must be specified"),
 			},
 			{
 				Config:      testAccYamlScopedConfigDuplicates,
 				ExpectError: regexp.MustCompile("duplicate resource ID"),
+			},
+			{
+				Config:      testAccYamlScopedConfigInvalidKustomize,
+				ExpectError: regexp.MustCompile("kustomize build failed"),
 			},
 		},
 	})
@@ -297,10 +329,23 @@ YAML
 }
 `
 
-const testAccYamlScopedConfigBothParams = `
+const testAccYamlScopedConfigKustomize = `
+data "k8sconnect_yaml_scoped" "test" {
+  kustomize_path = "../../../../examples/kustomize-basic/kustomization/overlays/production"
+}
+`
+
+const testAccYamlScopedConfigBothContentAndPattern = `
 data "k8sconnect_yaml_scoped" "test" {
   content = "apiVersion: v1\nkind: Namespace"
   pattern = "*.yaml"
+}
+`
+
+const testAccYamlScopedConfigContentAndKustomize = `
+data "k8sconnect_yaml_scoped" "test" {
+  content = "apiVersion: v1\nkind: Namespace"
+  kustomize_path = "./some/path"
 }
 `
 
@@ -322,5 +367,11 @@ kind: Namespace
 metadata:
   name: duplicate
 YAML
+}
+`
+
+const testAccYamlScopedConfigInvalidKustomize = `
+data "k8sconnect_yaml_scoped" "test" {
+  kustomize_path = "/nonexistent/kustomize/path"
 }
 `
