@@ -64,6 +64,26 @@ resource "k8sconnect_object" "all" {
 }
 ```
 
+## Example Usage - Kustomize
+
+```terraform
+# Build kustomization and deploy all resources
+data "k8sconnect_yaml_split" "app" {
+  kustomize_path = "${path.module}/kustomize/overlays/production"
+}
+
+resource "k8sconnect_object" "app" {
+  for_each = data.k8sconnect_yaml_split.app.manifests
+
+  yaml_body = each.value
+  cluster   = local.cluster
+}
+```
+
+The `kustomize_path` option runs `kustomize build` on the specified directory, combining bases and overlays into final manifests. This eliminates the need for a separate kustomize data source and provides a unified interface for all YAML sources.
+
+See the [kustomize-basic](https://github.com/jmorris0x0/terraform-provider-k8sconnect/tree/main/examples/kustomize-basic) example for a complete working setup with base + overlay structure.
+
 ## Manifest IDs
 
 The datasource generates stable IDs in the format:
