@@ -83,7 +83,9 @@ func (d *yamlSplitDataSource) Read(ctx context.Context, req datasource.ReadReque
 	}
 
 	// Determine which input mode to use (validation handled by ConfigValidators)
-	hasContent := !data.Content.IsNull() && data.Content.ValueString() != ""
+	// Note: We check IsNull/IsUnknown but not empty string - empty strings are
+	// validated in LoadDocuments() with better error messages
+	hasContent := !data.Content.IsNull() && !data.Content.IsUnknown()
 
 	// Load documents from content, pattern, or kustomize
 	documents, sourceID, err := yaml_common.LoadDocuments(

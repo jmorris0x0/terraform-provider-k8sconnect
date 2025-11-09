@@ -52,10 +52,12 @@ func (v ExactlyOneOfThree) ValidateDataSource(ctx context.Context, req datasourc
 		return
 	}
 
-	// Check if each attribute is set (non-null and non-empty)
-	hasAttr1 := !attr1.IsNull() && !attr1.IsUnknown() && attr1.ValueString() != ""
-	hasAttr2 := !attr2.IsNull() && !attr2.IsUnknown() && attr2.ValueString() != ""
-	hasAttr3 := !attr3.IsNull() && !attr3.IsUnknown() && attr3.ValueString() != ""
+	// Check if each attribute is set (non-null and non-unknown)
+	// Note: We don't check for empty strings here - that's validated in LoadDocuments()
+	// where we can provide more specific error messages
+	hasAttr1 := !attr1.IsNull() && !attr1.IsUnknown()
+	hasAttr2 := !attr2.IsNull() && !attr2.IsUnknown()
+	hasAttr3 := !attr3.IsNull() && !attr3.IsUnknown()
 
 	// Count how many are set
 	count := 0
