@@ -88,7 +88,7 @@ func (d *yamlSplitDataSource) Read(ctx context.Context, req datasource.ReadReque
 	hasContent := !data.Content.IsNull() && !data.Content.IsUnknown()
 
 	// Load documents from content, pattern, or kustomize
-	documents, sourceID, err := yaml_common.LoadDocuments(
+	documents, sourceID, warnings, err := yaml_common.LoadDocuments(
 		hasContent,
 		data.Content.ValueString(),
 		data.Pattern.ValueString(),
@@ -100,6 +100,14 @@ func (d *yamlSplitDataSource) Read(ctx context.Context, req datasource.ReadReque
 			err.Error(),
 		)
 		return
+	}
+
+	// Surface any warnings from kustomize with context
+	for _, warning := range warnings {
+		resp.Diagnostics.AddWarning(
+			fmt.Sprintf("Kustomize Warning (data.k8sconnect_yaml_split at %q)", data.KustomizePath.ValueString()),
+			fmt.Sprintf("The kustomize build returned a warning:\n\n%s", warning),
+		)
 	}
 
 	// Generate manifests - this will fail on duplicates

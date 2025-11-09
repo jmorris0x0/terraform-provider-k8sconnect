@@ -1,9 +1,11 @@
 package yaml_common
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"sort"
@@ -183,36 +185,38 @@ func HashString(s string) string {
 }
 
 // LoadDocuments loads YAML documents from inline content, file pattern, or kustomize build.
-// Returns the parsed documents, a sourceID for caching, and any error.
+// Returns the parsed documents, a sourceID for caching, any warnings, and any error.
 // Exactly one of content, pattern, or kustomizePath should be non-empty.
-func LoadDocuments(hasContent bool, content, pattern, kustomizePath string) ([]DocumentInfo, string, error) {
+func LoadDocuments(hasContent bool, content, pattern, kustomizePath string) ([]DocumentInfo, string, []string, error) {
 	var documents []DocumentInfo
 	var sourceID string
+	var warnings []string
 
 	// Determine input mode
 	hasKustomize := kustomizePath != ""
 
 	if hasKustomize {
 		// Build kustomization and parse output
-		yamlContent, err := BuildKustomization(kustomizePath)
+		yamlContent, kustomizeWarnings, err := BuildKustomization(kustomizePath)
 		if err != nil {
-			return nil, "", fmt.Errorf("kustomize build failed: %w\n\n%s", err, FormatKustomizeError(kustomizePath, err))
+			return nil, "", nil, fmt.Errorf("kustomize build failed: %w\n\n%s", err, FormatKustomizeError(kustomizePath, err))
 		}
+		warnings = kustomizeWarnings
 
 		// Parse the built YAML
 		documents, err = ParseDocuments(yamlContent, kustomizePath)
 		if err != nil {
-			return nil, "", fmt.Errorf("kustomize build succeeded but output contains invalid YAML: %w", err)
+			return nil, "", nil, fmt.Errorf("kustomize build succeeded but output contains invalid YAML: %w", err)
 		}
 		sourceID = fmt.Sprintf("kustomize-%s", HashString(kustomizePath)[:8])
 	} else if hasContent {
 		// Parse inline content
 		docs, err := ParseDocuments(content, "<inline>")
 		if err != nil {
-			return nil, "", fmt.Errorf("failed to parse inline YAML content: %w", err)
+			return nil, "", nil, fmt.Errorf("failed to parse inline YAML content: %w", err)
 		}
 		if len(docs) == 0 {
-			return nil, "", fmt.Errorf("No Kubernetes resources found in YAML content. The content appears to be empty or contains only comments.")
+			return nil, "", nil, fmt.Errorf("No Kubernetes resources found in YAML content. The content appears to be empty or contains only comments.")
 		}
 		documents = docs
 		sourceID = fmt.Sprintf("content-%s", HashString(content)[:8])
@@ -220,51 +224,109 @@ func LoadDocuments(hasContent bool, content, pattern, kustomizePath string) ([]D
 		// Handle pattern-based loading
 		files, err := ExpandPattern(pattern)
 		if err != nil {
-			return nil, "", fmt.Errorf("failed to resolve pattern %q: %w", pattern, err)
+			return nil, "", nil, fmt.Errorf("failed to resolve pattern %q: %w", pattern, err)
 		}
 
 		if len(files) == 0 {
-			return nil, "", fmt.Errorf("No files matched pattern %q. Check that the path exists and contains YAML files.", pattern)
+			return nil, "", nil, fmt.Errorf("No files matched pattern %q. Check that the path exists and contains YAML files.", pattern)
 		}
 
 		// Process all matching files
 		for _, file := range files {
 			fileContent, err := ReadFile(file)
 			if err != nil {
-				return nil, "", fmt.Errorf("failed to read file %q: %w", file, err)
+				return nil, "", nil, fmt.Errorf("failed to read file %q: %w", file, err)
 			}
 
 			docs, err := ParseDocuments(fileContent, file)
 			if err != nil {
-				return nil, "", fmt.Errorf("failed to parse YAML in file %q: %w", file, err)
+				return nil, "", nil, fmt.Errorf("failed to parse YAML in file %q: %w", file, err)
 			}
 			documents = append(documents, docs...)
 		}
 		sourceID = fmt.Sprintf("pattern-%s", HashString(pattern)[:8])
 	}
 
-	return documents, sourceID, nil
+	return documents, sourceID, warnings, nil
 }
 
-// BuildKustomization runs kustomize build on the given path and returns the generated YAML
-func BuildKustomization(path string) (string, error) {
+// BuildKustomization runs kustomize build on the given path and returns the generated YAML and any warnings
+func BuildKustomization(path string) (yamlContent string, warnings []string, err error) {
+	// Capture stderr to get kustomize warnings
+	oldStderr := os.Stderr
+	r, w, pipeErr := os.Pipe()
+	if pipeErr != nil {
+		// If we can't create pipe, just run without capturing warnings
+		return buildKustomizationWithoutWarnings(path)
+	}
+	os.Stderr = w
+
 	// Create kustomizer with default secure options
 	opts := krusty.MakeDefaultOptions()
 	k := krusty.MakeKustomizer(opts)
 
 	// Run kustomize build
-	resMap, err := k.Run(filesys.MakeFsOnDisk(), path)
-	if err != nil {
-		return "", err
+	resMap, buildErr := k.Run(filesys.MakeFsOnDisk(), path)
+
+	// Restore stderr and capture warnings
+	w.Close()
+	os.Stderr = oldStderr
+	var stderrBuf bytes.Buffer
+	io.Copy(&stderrBuf, r)
+	r.Close()
+
+	if buildErr != nil {
+		return "", nil, buildErr
 	}
 
 	// Convert resource map to YAML
-	yaml, err := resMap.AsYaml()
-	if err != nil {
-		return "", fmt.Errorf("failed to convert kustomize output to YAML: %w", err)
+	yamlBytes, yamlErr := resMap.AsYaml()
+	if yamlErr != nil {
+		return "", nil, fmt.Errorf("failed to convert kustomize output to YAML: %w", yamlErr)
 	}
 
-	return string(yaml), nil
+	// Parse warnings from stderr
+	warnings = parseKustomizeWarnings(stderrBuf.String())
+
+	return string(yamlBytes), warnings, nil
+}
+
+// buildKustomizationWithoutWarnings is a fallback when stderr capture fails
+func buildKustomizationWithoutWarnings(path string) (string, []string, error) {
+	opts := krusty.MakeDefaultOptions()
+	k := krusty.MakeKustomizer(opts)
+
+	resMap, err := k.Run(filesys.MakeFsOnDisk(), path)
+	if err != nil {
+		return "", nil, err
+	}
+
+	yaml, err := resMap.AsYaml()
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to convert kustomize output to YAML: %w", err)
+	}
+
+	return string(yaml), nil, nil
+}
+
+// parseKustomizeWarnings extracts warning messages from kustomize stderr output
+func parseKustomizeWarnings(stderr string) []string {
+	if stderr == "" {
+		return nil
+	}
+
+	var warnings []string
+	lines := strings.Split(stderr, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Kustomize warnings typically start with "# Warning:" or "Warning:"
+		if strings.HasPrefix(trimmed, "# Warning:") || strings.HasPrefix(trimmed, "Warning:") {
+			// Remove the "# " prefix if present
+			warning := strings.TrimPrefix(trimmed, "# ")
+			warnings = append(warnings, warning)
+		}
+	}
+	return warnings
 }
 
 // FormatKustomizeError formats kustomize errors following k8sconnect's WHAT/WHY/HOW pattern

@@ -101,7 +101,7 @@ func (d *yamlScopedDataSource) Read(ctx context.Context, req datasource.ReadRequ
 	hasContent := !data.Content.IsNull() && !data.Content.IsUnknown()
 
 	// Load documents from content, pattern, or kustomize
-	documents, sourceID, err := yaml_common.LoadDocuments(
+	documents, sourceID, warnings, err := yaml_common.LoadDocuments(
 		hasContent,
 		data.Content.ValueString(),
 		data.Pattern.ValueString(),
@@ -113,6 +113,14 @@ func (d *yamlScopedDataSource) Read(ctx context.Context, req datasource.ReadRequ
 			err.Error(),
 		)
 		return
+	}
+
+	// Surface any warnings from kustomize with context
+	for _, warning := range warnings {
+		resp.Diagnostics.AddWarning(
+			fmt.Sprintf("Kustomize Warning (data.k8sconnect_yaml_scoped at %q)", data.KustomizePath.ValueString()),
+			fmt.Sprintf("The kustomize build returned a warning:\n\n%s", warning),
+		)
 	}
 
 	// Categorize manifests by scope
