@@ -211,6 +211,9 @@ func LoadDocuments(hasContent bool, content, pattern, kustomizePath string) ([]D
 		if err != nil {
 			return nil, "", fmt.Errorf("failed to parse inline YAML content: %w", err)
 		}
+		if len(docs) == 0 {
+			return nil, "", fmt.Errorf("No Kubernetes resources found in YAML content. The content appears to be empty or contains only comments.")
+		}
 		documents = docs
 		sourceID = fmt.Sprintf("content-%s", HashString(content)[:8])
 	} else {

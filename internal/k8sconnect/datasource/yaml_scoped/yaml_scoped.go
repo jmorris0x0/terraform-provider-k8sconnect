@@ -6,10 +6,10 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/validators"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/datasource/yaml_common"
 )
 
@@ -39,57 +39,11 @@ func (d *yamlScopedDataSource) Metadata(ctx context.Context, req datasource.Meta
 // ConfigValidators implements datasource.DataSourceWithConfigValidators
 func (d *yamlScopedDataSource) ConfigValidators(ctx context.Context) []datasource.ConfigValidator {
 	return []datasource.ConfigValidator{
-		&exactlyOneOfThreeValidator{},
-	}
-}
-
-// exactlyOneOfThreeValidator validates that exactly one of content/pattern/kustomize_path is set
-type exactlyOneOfThreeValidator struct{}
-
-func (v *exactlyOneOfThreeValidator) Description(ctx context.Context) string {
-	return "validates that exactly one of content, pattern, or kustomize_path is specified"
-}
-
-func (v *exactlyOneOfThreeValidator) MarkdownDescription(ctx context.Context) string {
-	return "validates that exactly one of `content`, `pattern`, or `kustomize_path` is specified"
-}
-
-func (v *exactlyOneOfThreeValidator) ValidateDataSource(ctx context.Context, req datasource.ValidateConfigRequest, resp *datasource.ValidateConfigResponse) {
-	var content, pattern, kustomizePath types.String
-
-	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("content"), &content)...)
-	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("pattern"), &pattern)...)
-	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("kustomize_path"), &kustomizePath)...)
-
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	hasContent := !content.IsNull() && !content.IsUnknown() && content.ValueString() != ""
-	hasPattern := !pattern.IsNull() && !pattern.IsUnknown() && pattern.ValueString() != ""
-	hasKustomize := !kustomizePath.IsNull() && !kustomizePath.IsUnknown() && kustomizePath.ValueString() != ""
-
-	count := 0
-	if hasContent {
-		count++
-	}
-	if hasPattern {
-		count++
-	}
-	if hasKustomize {
-		count++
-	}
-
-	if count > 1 {
-		resp.Diagnostics.AddError(
-			"Conflicting Configuration",
-			"Exactly one of 'content', 'pattern', or 'kustomize_path' must be specified, not multiple.",
-		)
-	} else if count == 0 {
-		resp.Diagnostics.AddError(
-			"Missing Configuration",
-			"Exactly one of 'content', 'pattern', or 'kustomize_path' must be specified.",
-		)
+		validators.ExactlyOneOfThree{
+			Attribute1: "content",
+			Attribute2: "pattern",
+			Attribute3: "kustomize_path",
+		},
 	}
 }
 

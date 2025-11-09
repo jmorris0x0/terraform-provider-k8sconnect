@@ -122,6 +122,14 @@ func TestAccYamlSplitDataSource_Errors(t *testing.T) {
 				Config:      testAccYamlSplitConfigInvalidKustomize,
 				ExpectError: regexp.MustCompile("Kustomize build failed"),
 			},
+			{
+				Config:      testAccYamlSplitConfigEmptyContent,
+				ExpectError: regexp.MustCompile("No Kubernetes resources found"),
+			},
+			{
+				Config:      testAccYamlSplitConfigEmptyPattern,
+				ExpectError: regexp.MustCompile("No files matched pattern"),
+			},
 		},
 	})
 }
@@ -214,5 +222,17 @@ YAML
 const testAccYamlSplitConfigInvalidKustomize = `
 data "k8sconnect_yaml_split" "test" {
   kustomize_path = "/nonexistent/kustomize/path"
+}
+`
+
+const testAccYamlSplitConfigEmptyContent = `
+data "k8sconnect_yaml_split" "test" {
+  content = ""
+}
+`
+
+const testAccYamlSplitConfigEmptyPattern = `
+data "k8sconnect_yaml_split" "test" {
+  pattern = "/nonexistent/empty/*.yaml"
 }
 `
