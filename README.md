@@ -175,6 +175,46 @@ The `yaml_split` data source creates stable IDs like `deployment.my-app.nginx` a
 
 ---
 
+## Dependency-Aware YAML Parsing
+
+Handle CRDs and custom resources in a single apply with automatic dependency ordering:
+
+```hcl
+# Auto-categorize by scope for correct ordering
+data "k8sconnect_yaml_scoped" "app" {
+  kustomize_path = "${path.module}/kustomize/overlays/prod"
+  # Or: content = file("manifests.yaml")
+  # Or: pattern = "./manifests/*.yaml"
+}
+
+# Apply CRDs first
+resource "k8sconnect_object" "crds" {
+  for_each = data.k8sconnect_yaml_scoped.app.crds
+  yaml_body = each.value
+  cluster = local.cluster
+}
+
+# Then cluster-scoped (Namespaces, ClusterRoles, etc.)
+resource "k8sconnect_object" "cluster" {
+  for_each = data.k8sconnect_yaml_scoped.app.cluster_scoped
+  yaml_body = each.value
+  cluster = local.cluster
+  depends_on = [k8sconnect_object.crds]
+}
+
+# Finally namespaced resources (including custom resources)
+resource "k8sconnect_object" "app" {
+  for_each = data.k8sconnect_yaml_scoped.app.namespaced
+  yaml_body = each.value
+  cluster = local.cluster
+  depends_on = [k8sconnect_object.cluster]
+}
+```
+
+**→ [Dependency ordering example](examples/#yaml-scoped-dependency-ordering)**
+
+---
+
 ## Surgical Patching
 
 Modify resources managed by others without taking full ownership. Supports Strategic Merge Patch (shown), JSON Patch, and Merge Patch.
@@ -330,7 +370,7 @@ All `cluster` fields are marked sensitive and won't appear in logs or plan outpu
 
 **Data Sources:**
 - `k8sconnect_yaml_split` - Parse multi-document YAML files ([docs](docs/data-sources/yaml_split.md))
-- `k8sconnect_yaml_scoped` - Filter resources by category ([docs](docs/data-sources/yaml_scoped.md))
+- `k8sconnect_yaml_scoped` - Auto-categorize resources for dependency ordering (CRDs → cluster → namespaced) ([docs](docs/data-sources/yaml_scoped.md))
 - `k8sconnect_object` - Read existing cluster resources ([docs](docs/data-sources/resource.md))
 
 **→ [Browse all 16 runnable examples](examples/README.md)** with test coverage
