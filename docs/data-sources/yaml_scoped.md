@@ -50,6 +50,45 @@ resource "k8sconnect_object" "namespaced" {
 }
 ```
 
+## Example Usage - Kustomize with Dependency Ordering
+
+The `kustomize_path` option works seamlessly with scoped categorization:
+
+```terraform
+# Build kustomization and categorize by scope
+data "k8sconnect_yaml_scoped" "app" {
+  kustomize_path = "${path.module}/kustomize/overlays/production"
+}
+
+# Apply CRDs first
+resource "k8sconnect_object" "crds" {
+  for_each = data.k8sconnect_yaml_scoped.app.crds
+
+  yaml_body = each.value
+  cluster   = local.cluster
+}
+
+# Then cluster-scoped resources
+resource "k8sconnect_object" "cluster_scoped" {
+  for_each = data.k8sconnect_yaml_scoped.app.cluster_scoped
+
+  yaml_body  = each.value
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.crds]
+}
+
+# Finally namespaced resources
+resource "k8sconnect_object" "namespaced" {
+  for_each = data.k8sconnect_yaml_scoped.app.namespaced
+
+  yaml_body  = each.value
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.cluster_scoped]
+}
+```
+
+This combines kustomize's template-free configuration management with automatic dependency ordering based on Kubernetes resource scope.
+
 ## Resource Categories
 
 Resources are automatically categorized into three groups:
@@ -63,8 +102,9 @@ Resources are automatically categorized into three groups:
 
 ### Optional
 
-- `content` (String) Raw YAML content containing one or more Kubernetes manifests separated by '---'. Mutually exclusive with 'pattern'.
-- `pattern` (String) Glob pattern to match YAML files (e.g., './manifests/*.yaml', './configs/**/*.yml'). Supports recursive patterns. Mutually exclusive with 'content'.
+- `content` (String) Raw YAML content containing one or more Kubernetes manifests separated by '---'. Mutually exclusive with 'pattern' and 'kustomize_path'.
+- `kustomize_path` (String) Path to a kustomization directory (containing kustomization.yaml). Runs 'kustomize build' and parses the output. Mutually exclusive with 'content' and 'pattern'.
+- `pattern` (String) Glob pattern to match YAML files (e.g., './manifests/*.yaml', './configs/**/*.yml'). Supports recursive patterns. Mutually exclusive with 'content' and 'kustomize_path'.
 
 ### Read-Only
 

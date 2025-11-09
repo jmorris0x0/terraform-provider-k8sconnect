@@ -2,12 +2,12 @@
 page_title: "Data Source k8sconnect_yaml_split - terraform-provider-k8sconnect"
 subcategory: ""
 description: |-
-  Splits multi-document YAML content into individual manifests with stable, human-readable IDs.
+  Splits multi-document YAML content into individual manifests with stable, human-readable IDs. Supports inline content, file patterns, or kustomize builds.
 ---
 
 # Data Source: k8sconnect_yaml_split
 
-Splits multi-document YAML content into individual manifests with stable, human-readable IDs.
+Splits multi-document YAML content into individual manifests with stable, human-readable IDs. Supports inline content, file patterns, or kustomize builds.
 
 ## Example Usage - Inline Content
 
@@ -64,6 +64,26 @@ resource "k8sconnect_object" "all" {
 }
 ```
 
+## Example Usage - Kustomize
+
+```terraform
+# Build kustomization and deploy all resources
+data "k8sconnect_yaml_split" "app" {
+  kustomize_path = "${path.module}/kustomize/overlays/production"
+}
+
+resource "k8sconnect_object" "app" {
+  for_each = data.k8sconnect_yaml_split.app.manifests
+
+  yaml_body = each.value
+  cluster   = local.cluster
+}
+```
+
+The `kustomize_path` option runs `kustomize build` on the specified directory, combining bases and overlays into final manifests. This eliminates the need for a separate kustomize data source and provides a unified interface for all YAML sources.
+
+See the [kustomize-basic](https://github.com/jmorris0x0/terraform-provider-k8sconnect/tree/main/examples/kustomize-basic) example for a complete working setup with base + overlay structure.
+
 ## Manifest IDs
 
 The datasource generates stable IDs in the format:
@@ -77,8 +97,9 @@ This prevents resource recreation when manifests are reordered in the YAML file.
 
 ### Optional
 
-- `content` (String) Raw YAML content containing one or more Kubernetes manifests separated by '---'. Mutually exclusive with 'pattern'.
-- `pattern` (String) Glob pattern to match YAML files (e.g., './manifests/*.yaml', './configs/**/*.yml'). Supports recursive patterns. Mutually exclusive with 'content'.
+- `content` (String) Raw YAML content containing one or more Kubernetes manifests separated by '---'. Mutually exclusive with 'pattern' and 'kustomize_path'.
+- `kustomize_path` (String) Path to a kustomization directory (containing kustomization.yaml). Runs 'kustomize build' and parses the output. Mutually exclusive with 'content' and 'pattern'.
+- `pattern` (String) Glob pattern to match YAML files (e.g., './manifests/*.yaml', './configs/**/*.yml'). Supports recursive patterns. Mutually exclusive with 'content' and 'kustomize_path'.
 
 ### Read-Only
 

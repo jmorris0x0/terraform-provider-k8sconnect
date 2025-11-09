@@ -68,6 +68,28 @@ func TestAccYamlSplitDataSource_Pattern(t *testing.T) {
 	})
 }
 
+func TestAccYamlSplitDataSource_Kustomize(t *testing.T) {
+	t.Parallel()
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testAccYamlSplitConfigKustomize,
+				Check: resource.ComposeTestCheckFunc(
+					// id should be set
+					resource.TestCheckResourceAttrSet("data.k8sconnect_yaml_split.test", "id"),
+
+					// Should have manifests from kustomize build
+					resource.TestCheckResourceAttrSet("data.k8sconnect_yaml_split.test", "manifests.%"),
+				),
+			},
+		},
+	})
+}
+
 func TestAccYamlSplitDataSource_Errors(t *testing.T) {
 	t.Parallel()
 
@@ -77,12 +99,16 @@ func TestAccYamlSplitDataSource_Errors(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				Config:      testAccYamlSplitConfigBothParams,
-				ExpectError: regexp.MustCompile("Exactly one of 'content' or 'pattern' must be specified"),
+				Config:      testAccYamlSplitConfigBothContentAndPattern,
+				ExpectError: regexp.MustCompile("Exactly one of 'content', 'pattern', or 'kustomize_path' must be specified"),
+			},
+			{
+				Config:      testAccYamlSplitConfigContentAndKustomize,
+				ExpectError: regexp.MustCompile("Exactly one of 'content', 'pattern', or 'kustomize_path' must be specified"),
 			},
 			{
 				Config:      testAccYamlSplitConfigNeitherParam,
-				ExpectError: regexp.MustCompile("Either 'content' or 'pattern' must be specified"),
+				ExpectError: regexp.MustCompile("Exactly one of 'content', 'pattern', or 'kustomize_path' must be specified"),
 			},
 			{
 				Config:      testAccYamlSplitConfigNoFiles,
@@ -91,6 +117,10 @@ func TestAccYamlSplitDataSource_Errors(t *testing.T) {
 			{
 				Config:      testAccYamlSplitConfigDuplicates,
 				ExpectError: regexp.MustCompile("duplicate resource ID"),
+			},
+			{
+				Config:      testAccYamlSplitConfigInvalidKustomize,
+				ExpectError: regexp.MustCompile("Kustomize build failed"),
 			},
 		},
 	})
@@ -134,10 +164,23 @@ data "k8sconnect_yaml_split" "test" {
 }
 `
 
-const testAccYamlSplitConfigBothParams = `
+const testAccYamlSplitConfigKustomize = `
+data "k8sconnect_yaml_split" "test" {
+  kustomize_path = "../../../../examples/kustomize-basic/kustomization/overlays/production"
+}
+`
+
+const testAccYamlSplitConfigBothContentAndPattern = `
 data "k8sconnect_yaml_split" "test" {
   content = "apiVersion: v1\nkind: Namespace"
   pattern = "*.yaml"
+}
+`
+
+const testAccYamlSplitConfigContentAndKustomize = `
+data "k8sconnect_yaml_split" "test" {
+  content = "apiVersion: v1\nkind: Namespace"
+  kustomize_path = "./some/path"
 }
 `
 
@@ -165,5 +208,11 @@ kind: Namespace
 metadata:
   name: duplicate
 YAML
+}
+`
+
+const testAccYamlSplitConfigInvalidKustomize = `
+data "k8sconnect_yaml_split" "test" {
+  kustomize_path = "/nonexistent/kustomize/path"
 }
 `

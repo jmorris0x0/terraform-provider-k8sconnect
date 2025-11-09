@@ -22,6 +22,7 @@ type yamlScopedDataSourceModel struct {
 	ID            types.String            `tfsdk:"id"`
 	Content       types.String            `tfsdk:"content"`
 	Pattern       types.String            `tfsdk:"pattern"`
+	KustomizePath types.String            `tfsdk:"kustomize_path"`
 	CRDs          map[string]types.String `tfsdk:"crds"`
 	ClusterScoped map[string]types.String `tfsdk:"cluster_scoped"`
 	Namespaced    map[string]types.String `tfsdk:"namespaced"`
@@ -38,9 +39,10 @@ func (d *yamlScopedDataSource) Metadata(ctx context.Context, req datasource.Meta
 // ConfigValidators implements datasource.DataSourceWithConfigValidators
 func (d *yamlScopedDataSource) ConfigValidators(ctx context.Context) []datasource.ConfigValidator {
 	return []datasource.ConfigValidator{
-		validators.ExactlyOneOf{
+		validators.ExactlyOneOfThree{
 			Attribute1: "content",
 			Attribute2: "pattern",
+			Attribute3: "kustomize_path",
 		},
 	}
 }
@@ -55,11 +57,15 @@ func (d *yamlScopedDataSource) Schema(ctx context.Context, req datasource.Schema
 			},
 			"content": schema.StringAttribute{
 				Optional:    true,
-				Description: "Raw YAML content containing one or more Kubernetes manifests separated by '---'. Mutually exclusive with 'pattern'.",
+				Description: "Raw YAML content containing one or more Kubernetes manifests separated by '---'. Mutually exclusive with 'pattern' and 'kustomize_path'.",
 			},
 			"pattern": schema.StringAttribute{
 				Optional:    true,
-				Description: "Glob pattern to match YAML files (e.g., './manifests/*.yaml', './configs/**/*.yml'). Supports recursive patterns. Mutually exclusive with 'content'.",
+				Description: "Glob pattern to match YAML files (e.g., './manifests/*.yaml', './configs/**/*.yml'). Supports recursive patterns. Mutually exclusive with 'content' and 'kustomize_path'.",
+			},
+			"kustomize_path": schema.StringAttribute{
+				Optional:    true,
+				Description: "Path to a kustomization directory (containing kustomization.yaml). Runs 'kustomize build' and parses the output. Mutually exclusive with 'content' and 'pattern'.",
 			},
 			"crds": schema.MapAttribute{
 				ElementType: types.StringType,
@@ -90,13 +96,16 @@ func (d *yamlScopedDataSource) Read(ctx context.Context, req datasource.ReadRequ
 	}
 
 	// Determine which input mode to use (validation handled by ConfigValidators)
-	hasContent := !data.Content.IsNull() && data.Content.ValueString() != ""
+	// Note: We check IsNull/IsUnknown but not empty string - empty strings are
+	// validated in LoadDocuments() with better error messages
+	hasContent := !data.Content.IsNull() && !data.Content.IsUnknown()
 
-	// Load documents from either inline content or file pattern
-	documents, sourceID, err := yaml_common.LoadDocuments(
+	// Load documents from content, pattern, or kustomize
+	documents, sourceID, warnings, err := yaml_common.LoadDocuments(
 		hasContent,
 		data.Content.ValueString(),
 		data.Pattern.ValueString(),
+		data.KustomizePath.ValueString(),
 	)
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -104,6 +113,14 @@ func (d *yamlScopedDataSource) Read(ctx context.Context, req datasource.ReadRequ
 			err.Error(),
 		)
 		return
+	}
+
+	// Surface any warnings from kustomize with context
+	for _, warning := range warnings {
+		resp.Diagnostics.AddWarning(
+			fmt.Sprintf("Kustomize Warning (data.k8sconnect_yaml_scoped at %q)", data.KustomizePath.ValueString()),
+			fmt.Sprintf("The kustomize build returned a warning:\n\n%s", warning),
+		)
 	}
 
 	// Categorize manifests by scope

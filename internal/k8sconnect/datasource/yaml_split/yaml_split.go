@@ -18,10 +18,11 @@ var _ datasource.DataSourceWithConfigValidators = (*yamlSplitDataSource)(nil)
 type yamlSplitDataSource struct{}
 
 type yamlSplitDataSourceModel struct {
-	ID        types.String            `tfsdk:"id"`
-	Content   types.String            `tfsdk:"content"`
-	Pattern   types.String            `tfsdk:"pattern"`
-	Manifests map[string]types.String `tfsdk:"manifests"`
+	ID            types.String            `tfsdk:"id"`
+	Content       types.String            `tfsdk:"content"`
+	Pattern       types.String            `tfsdk:"pattern"`
+	KustomizePath types.String            `tfsdk:"kustomize_path"`
+	Manifests     map[string]types.String `tfsdk:"manifests"`
 }
 
 func NewYamlSplitDataSource() datasource.DataSource {
@@ -35,16 +36,17 @@ func (d *yamlSplitDataSource) Metadata(ctx context.Context, req datasource.Metad
 // ConfigValidators implements datasource.DataSourceWithConfigValidators
 func (d *yamlSplitDataSource) ConfigValidators(ctx context.Context) []datasource.ConfigValidator {
 	return []datasource.ConfigValidator{
-		validators.ExactlyOneOf{
+		validators.ExactlyOneOfThree{
 			Attribute1: "content",
 			Attribute2: "pattern",
+			Attribute3: "kustomize_path",
 		},
 	}
 }
 
 func (d *yamlSplitDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Splits multi-document YAML content into individual manifests with stable, human-readable IDs.",
+		Description: "Splits multi-document YAML content into individual manifests with stable, human-readable IDs. Supports inline content, file patterns, or kustomize builds.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:    true,
@@ -52,11 +54,15 @@ func (d *yamlSplitDataSource) Schema(ctx context.Context, req datasource.SchemaR
 			},
 			"content": schema.StringAttribute{
 				Optional:    true,
-				Description: "Raw YAML content containing one or more Kubernetes manifests separated by '---'. Mutually exclusive with 'pattern'.",
+				Description: "Raw YAML content containing one or more Kubernetes manifests separated by '---'. Mutually exclusive with 'pattern' and 'kustomize_path'.",
 			},
 			"pattern": schema.StringAttribute{
 				Optional:    true,
-				Description: "Glob pattern to match YAML files (e.g., './manifests/*.yaml', './configs/**/*.yml'). Supports recursive patterns. Mutually exclusive with 'content'.",
+				Description: "Glob pattern to match YAML files (e.g., './manifests/*.yaml', './configs/**/*.yml'). Supports recursive patterns. Mutually exclusive with 'content' and 'kustomize_path'.",
+			},
+			"kustomize_path": schema.StringAttribute{
+				Optional:    true,
+				Description: "Path to a kustomization directory (containing kustomization.yaml). Runs 'kustomize build' and parses the output. Mutually exclusive with 'content' and 'pattern'.",
 			},
 			"manifests": schema.MapAttribute{
 				ElementType: types.StringType,
@@ -77,13 +83,16 @@ func (d *yamlSplitDataSource) Read(ctx context.Context, req datasource.ReadReque
 	}
 
 	// Determine which input mode to use (validation handled by ConfigValidators)
-	hasContent := !data.Content.IsNull() && data.Content.ValueString() != ""
+	// Note: We check IsNull/IsUnknown but not empty string - empty strings are
+	// validated in LoadDocuments() with better error messages
+	hasContent := !data.Content.IsNull() && !data.Content.IsUnknown()
 
-	// Load documents from either inline content or file pattern
-	documents, sourceID, err := yaml_common.LoadDocuments(
+	// Load documents from content, pattern, or kustomize
+	documents, sourceID, warnings, err := yaml_common.LoadDocuments(
 		hasContent,
 		data.Content.ValueString(),
 		data.Pattern.ValueString(),
+		data.KustomizePath.ValueString(),
 	)
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -91,6 +100,14 @@ func (d *yamlSplitDataSource) Read(ctx context.Context, req datasource.ReadReque
 			err.Error(),
 		)
 		return
+	}
+
+	// Surface any warnings from kustomize with context
+	for _, warning := range warnings {
+		resp.Diagnostics.AddWarning(
+			fmt.Sprintf("Kustomize Warning (data.k8sconnect_yaml_split at %q)", data.KustomizePath.ValueString()),
+			fmt.Sprintf("The kustomize build returned a warning:\n\n%s", warning),
+		)
 	}
 
 	// Generate manifests - this will fail on duplicates
