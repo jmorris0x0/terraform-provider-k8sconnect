@@ -14,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/factory"
@@ -23,6 +24,7 @@ import (
 
 var _ resource.Resource = (*waitResource)(nil)
 var _ resource.ResourceWithConfigure = (*waitResource)(nil)
+var _ resource.ResourceWithConfigValidators = (*waitResource)(nil)
 
 // ClientGetter function type for dependency injection
 type ClientGetter func(auth.ClusterModel) (k8sclient.K8sClient, error)
@@ -204,6 +206,92 @@ func (r *waitResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 	// No actual cluster cleanup needed since we don't create anything
 }
 
+func (r *waitResource) ConfigValidators(ctx context.Context) []resource.ConfigValidator {
+	return []resource.ConfigValidator{
+		&rolloutKindValidator{},
+	}
+}
+
+// rolloutKindValidator validates that rollout waits are only used on appropriate resource kinds
+type rolloutKindValidator struct{}
+
+func (v rolloutKindValidator) Description(ctx context.Context) string {
+	return "validates that rollout waits are not used on resource kinds that don't support rollouts"
+}
+
+func (v rolloutKindValidator) MarkdownDescription(ctx context.Context) string {
+	return "validates that rollout waits are not used on resource kinds that don't support rollouts"
+}
+
+func (v rolloutKindValidator) ValidateResource(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var data waitResourceModel
+	diags := req.Config.Get(ctx, &data)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Skip validation if wait_for or object_ref contain unknown values
+	if data.WaitFor.IsUnknown() || data.ObjectRef.IsUnknown() {
+		return
+	}
+
+	// Extract wait_for and object_ref
+	var waitFor waitForModel
+	diags = data.WaitFor.As(ctx, &waitFor, basetypes.ObjectAsOptions{})
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	var objRef objectRefModel
+	diags = data.ObjectRef.As(ctx, &objRef, basetypes.ObjectAsOptions{})
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Only validate if rollout is true
+	if waitFor.Rollout.IsNull() || !waitFor.Rollout.ValueBool() {
+		return
+	}
+
+	kind := objRef.Kind.ValueString()
+
+	// Blocklist of known resource kinds that definitely don't support rollouts
+	nonRolloutKinds := map[string]bool{
+		"ConfigMap":               true,
+		"Secret":                  true,
+		"Service":                 true,
+		"Namespace":               true,
+		"ServiceAccount":          true,
+		"PersistentVolumeClaim":   true,
+		"PersistentVolume":        true,
+		"Ingress":                 true,
+		"NetworkPolicy":           true,
+		"ResourceQuota":           true,
+		"LimitRange":              true,
+		"PodDisruptionBudget":     true,
+		"HorizontalPodAutoscaler": true,
+		"ClusterRole":             true,
+		"ClusterRoleBinding":      true,
+		"Role":                    true,
+		"RoleBinding":             true,
+		"StorageClass":            true,
+		"Node":                    true,
+		"Pod":                     true, // Pods don't rollout - they just exist or don't
+	}
+
+	if nonRolloutKinds[kind] {
+		resp.Diagnostics.AddError(
+			"Rollout Not Supported",
+			fmt.Sprintf("%s resources do not support rollout waits. "+
+				"Rollout waits are only supported for resources that track rollout status (like Deployment, StatefulSet, DaemonSet). "+
+				"Use wait_for.condition or wait_for.field instead.", kind),
+		)
+	}
+}
+
 // durationValidator validates that a string is a valid duration
 type durationValidator struct{}
 
@@ -221,12 +309,22 @@ func (v durationValidator) ValidateString(ctx context.Context, req validator.Str
 	}
 
 	value := req.ConfigValue.ValueString()
-	_, err := time.ParseDuration(value)
+	duration, err := time.ParseDuration(value)
 	if err != nil {
 		resp.Diagnostics.AddAttributeError(
 			req.Path,
 			"Invalid Duration",
 			fmt.Sprintf("The value '%s' is not a valid duration: %s. Use format like '30s', '5m', '1h'", value, err),
+		)
+		return
+	}
+
+	// Reject zero or negative durations
+	if duration <= 0 {
+		resp.Diagnostics.AddAttributeError(
+			req.Path,
+			"Invalid Timeout",
+			fmt.Sprintf("Timeout must be positive, got '%s'. Use a positive duration like '30s', '5m', or '1h'", value),
 		)
 	}
 }

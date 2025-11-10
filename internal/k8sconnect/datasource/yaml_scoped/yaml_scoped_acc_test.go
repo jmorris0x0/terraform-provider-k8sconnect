@@ -162,7 +162,7 @@ func TestAccYamlScopedDataSource_Errors(t *testing.T) {
 			},
 			{
 				Config:      testAccYamlScopedConfigInvalidKustomize,
-				ExpectError: regexp.MustCompile("kustomize build failed"),
+				ExpectError: regexp.MustCompile("failed to build kustomization"),
 			},
 		},
 	})

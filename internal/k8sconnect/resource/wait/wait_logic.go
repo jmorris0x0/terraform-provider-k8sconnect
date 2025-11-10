@@ -621,13 +621,13 @@ func (r *waitResource) buildConditionTimeoutError(ctx context.Context, client k8
 
 	errMsg += "\n\n"
 
-	// WHY section
+	// Explain the issue
 	if targetFound {
 		statusVal, _ := targetCondition["status"].(string)
 		reason, _ := targetCondition["reason"].(string)
 		message, _ := targetCondition["message"].(string)
 
-		errMsg += fmt.Sprintf("WHY: Condition %q exists but is %s", conditionType, statusVal)
+		errMsg += fmt.Sprintf("Condition %q exists but is %s", conditionType, statusVal)
 		if reason != "" {
 			errMsg += fmt.Sprintf(" (reason: %s)", reason)
 		}
@@ -636,12 +636,12 @@ func (r *waitResource) buildConditionTimeoutError(ctx context.Context, client k8
 		}
 		errMsg += "\n\n"
 	} else {
-		errMsg += fmt.Sprintf("WHY: Condition %q never appeared in status. ", conditionType)
+		errMsg += fmt.Sprintf("Condition %q never appeared in status. ", conditionType)
 		errMsg += "The resource controller may not be running or the condition may not exist for this resource type.\n\n"
 	}
 
-	// WHAT TO DO section - generic with workload-specific additions
-	errMsg += "WHAT TO DO:\n"
+	// Troubleshooting options
+	errMsg += "Troubleshooting:\n"
 
 	// Add workload-specific guidance only for known workload types
 	if r.isWorkloadResource(kind) {
@@ -720,16 +720,16 @@ func (r *waitResource) buildNoConditionsError(resourceRef, kind, name, namespace
 	if r.isWorkloadResource(kind) {
 		// For workload resources, provide more specific guidance
 		errMsg += fmt.Sprintf("No %q condition found in status.\n\n", conditionType)
-		errMsg += "WHY: The resource may not be creating pods, or the controller may not be running.\n\n"
-		errMsg += "WHAT TO DO:\n"
+		errMsg += "The resource may not be creating pods, or the controller may not be running.\n\n"
+		errMsg += "Troubleshooting:\n"
 		errMsg += fmt.Sprintf("• Check if pods are being created:\n    kubectl get pods -n %s -l [selector]\n", namespace)
 		errMsg += fmt.Sprintf("• Check resource status:\n    kubectl describe %s %s -n %s\n", kind, name, namespace)
 		errMsg += fmt.Sprintf("• Check controller events:\n    kubectl get events -n %s --sort-by='.lastTimestamp'\n", namespace)
 	} else {
 		// For other resources (CRDs, etc), provide generic guidance
 		errMsg += fmt.Sprintf("No conditions found in status. The resource may not report conditions, or the controller may not be running.\n\n")
-		errMsg += fmt.Sprintf("WHY: Not all Kubernetes resources have conditions. Condition %q may not exist for %s.\n\n", conditionType, kind)
-		errMsg += "WHAT TO DO:\n"
+		errMsg += fmt.Sprintf("Not all Kubernetes resources have conditions. Condition %q may not exist for %s.\n\n", conditionType, kind)
+		errMsg += "Troubleshooting:\n"
 		if namespace != "" {
 			errMsg += fmt.Sprintf("• Check resource status:\n    kubectl get %s %s -n %s -o yaml\n", kind, name, namespace)
 			errMsg += fmt.Sprintf("• Check for errors:\n    kubectl describe %s %s -n %s\n", kind, name, namespace)

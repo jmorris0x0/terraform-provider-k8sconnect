@@ -177,10 +177,7 @@ func (d *objectDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Failed to Convert Resource Object",
-			fmt.Sprintf("Could not convert the Kubernetes resource to a Terraform object for field access.\n\n"+
-				"This is an internal error. The resource exists and was read successfully, but could not be converted "+
-				"for use in Terraform expressions.\n\n"+
-				"Error: %s", err.Error()),
+			fmt.Sprintf("Could not convert Kubernetes resource to Terraform object for field access: %s", err),
 		)
 		return
 	}

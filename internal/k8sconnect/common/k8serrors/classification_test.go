@@ -693,3 +693,253 @@ func TestExtractConflictDetails(t *testing.T) {
 		})
 	}
 }
+
+// TestIsBuiltInKind tests the detection of built-in Kubernetes resource kinds
+func TestIsBuiltInKind(t *testing.T) {
+	tests := []struct {
+		name     string
+		kind     string
+		expected bool
+	}{
+		// Core API resources
+		{name: "ConfigMap", kind: "ConfigMap", expected: true},
+		{name: "Secret", kind: "Secret", expected: true},
+		{name: "Service", kind: "Service", expected: true},
+		{name: "Pod", kind: "Pod", expected: true},
+		{name: "Namespace", kind: "Namespace", expected: true},
+
+		// apps/v1 resources
+		{name: "Deployment", kind: "Deployment", expected: true},
+		{name: "StatefulSet", kind: "StatefulSet", expected: true},
+		{name: "DaemonSet", kind: "DaemonSet", expected: true},
+
+		// batch/v1 resources
+		{name: "Job", kind: "Job", expected: true},
+		{name: "CronJob", kind: "CronJob", expected: true},
+
+		// networking resources
+		{name: "Ingress", kind: "Ingress", expected: true},
+		{name: "NetworkPolicy", kind: "NetworkPolicy", expected: true},
+
+		// Custom resources (NOT built-in)
+		{name: "Widget", kind: "Widget", expected: false},
+		{name: "Database", kind: "Database", expected: false},
+		{name: "MyCustomResource", kind: "MyCustomResource", expected: false},
+
+		// Edge cases
+		{name: "empty string", kind: "", expected: false},
+		{name: "lowercase", kind: "configmap", expected: false}, // Case-sensitive
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isBuiltInKind(tt.kind)
+			if result != tt.expected {
+				t.Errorf("isBuiltInKind(%q) = %v, expected %v", tt.kind, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestExtractKindFromResourceDesc tests extraction of kind from resourceDesc
+func TestExtractKindFromResourceDesc(t *testing.T) {
+	tests := []struct {
+		name         string
+		resourceDesc string
+		expected     string
+	}{
+		{
+			name:         "simple format",
+			resourceDesc: "ConfigMap test-config",
+			expected:     "ConfigMap",
+		},
+		{
+			name:         "with namespace",
+			resourceDesc: "Deployment default/web-deployment",
+			expected:     "Deployment",
+		},
+		{
+			name:         "CRD format",
+			resourceDesc: "Widget test-widget",
+			expected:     "Widget",
+		},
+		{
+			name:         "single word",
+			resourceDesc: "ConfigMap",
+			expected:     "ConfigMap",
+		},
+		{
+			name:         "empty string",
+			resourceDesc: "",
+			expected:     "",
+		},
+		{
+			name:         "with extra spaces",
+			resourceDesc: "Service   my-service",
+			expected:     "Service",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractKindFromResourceDesc(tt.resourceDesc)
+			if result != tt.expected {
+				t.Errorf("extractKindFromResourceDesc(%q) = %q, expected %q", tt.resourceDesc, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestIsInvalidAPIGroupError tests detection of invalid API group errors
+func TestIsInvalidAPIGroupError(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		apiVersion string
+		kind       string
+		expected   bool
+	}{
+		{
+			name: "ConfigMap with invalid API group",
+			err: &errors.StatusError{
+				ErrStatus: metav1.Status{
+					Message: `no matches for kind "ConfigMap" in version "nonexistent.example.com/v1"`,
+				},
+			},
+			apiVersion: "nonexistent.example.com/v1",
+			kind:       "ConfigMap",
+			expected:   true,
+		},
+		{
+			name: "Deployment with invalid API group",
+			err: &errors.StatusError{
+				ErrStatus: metav1.Status{
+					Message: `could not find the requested resource`,
+				},
+			},
+			apiVersion: "wrong.example.com/v1",
+			kind:       "Deployment",
+			expected:   true,
+		},
+		{
+			name: "Custom resource with custom API group (NOT an error)",
+			err: &errors.StatusError{
+				ErrStatus: metav1.Status{
+					Message: `no matches for kind "Widget" in version "example.com/v1"`,
+				},
+			},
+			apiVersion: "example.com/v1",
+			kind:       "Widget",
+			expected:   false, // Widget is not built-in, so this is a CRD issue
+		},
+		{
+			name: "ConfigMap with correct API group (NOT an error)",
+			err: &errors.StatusError{
+				ErrStatus: metav1.Status{
+					Message: `some other error`,
+				},
+			},
+			apiVersion: "v1",
+			kind:       "ConfigMap",
+			expected:   false, // Correct API group
+		},
+		{
+			name: "Different error message",
+			err: &errors.StatusError{
+				ErrStatus: metav1.Status{
+					Message: `permission denied`,
+				},
+			},
+			apiVersion: "nonexistent.example.com/v1",
+			kind:       "ConfigMap",
+			expected:   false, // Not a "not found" error
+		},
+		{
+			name: "Service with k8s.io group",
+			err: &errors.StatusError{
+				ErrStatus: metav1.Status{
+					Message: `no matches for kind`,
+				},
+			},
+			apiVersion: "networking.k8s.io/v1",
+			kind:       "Service",
+			expected:   false, // .k8s.io is built-in
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := IsInvalidAPIGroupError(tt.err, tt.apiVersion, tt.kind)
+			if result != tt.expected {
+				t.Errorf("IsInvalidAPIGroupError() = %v, expected %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestClassifyError_InvalidAPIGroup tests the invalid API group classification
+func TestClassifyError_InvalidAPIGroup(t *testing.T) {
+	tests := []struct {
+		name             string
+		err              error
+		operation        string
+		resourceDesc     string
+		apiVersion       string
+		expectedInTitle  string
+		expectedInDetail string
+	}{
+		{
+			name: "ConfigMap with invalid API group",
+			err: &errors.StatusError{
+				ErrStatus: metav1.Status{
+					Message: `no matches for kind "ConfigMap" in version "nonexistent.example.com/v1"`,
+				},
+			},
+			operation:        "Create",
+			resourceDesc:     "ConfigMap test-config",
+			apiVersion:       "nonexistent.example.com/v1",
+			expectedInTitle:  "Invalid API Group",
+			expectedInDetail: "ConfigMap is a built-in Kubernetes resource",
+		},
+		{
+			name: "Deployment with wrong API group",
+			err: &errors.StatusError{
+				ErrStatus: metav1.Status{
+					Message: `could not find the requested resource`,
+				},
+			},
+			operation:        "Create",
+			resourceDesc:     "Deployment web-deployment",
+			apiVersion:       "wrong.example.com/v1",
+			expectedInTitle:  "Invalid API Group",
+			expectedInDetail: "apps/v1",
+		},
+		{
+			name: "Custom resource should NOT match",
+			err: &errors.StatusError{
+				ErrStatus: metav1.Status{
+					Message: `no matches for kind "Widget" in version "example.com/v1"`,
+				},
+			},
+			operation:        "Create",
+			resourceDesc:     "Widget test-widget",
+			apiVersion:       "example.com/v1",
+			expectedInTitle:  "Custom Resource Definition Not Found", // Should be CRD error, not API group error
+			expectedInDetail: "Custom Resource Definition (CRD)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, title, detail := ClassifyError(tt.err, tt.operation, tt.resourceDesc, tt.apiVersion)
+
+			if !strings.Contains(title, tt.expectedInTitle) {
+				t.Errorf("ClassifyError() title = %q, expected to contain %q", title, tt.expectedInTitle)
+			}
+
+			if !strings.Contains(detail, tt.expectedInDetail) {
+				t.Errorf("ClassifyError() detail = %q, expected to contain %q", detail, tt.expectedInDetail)
+			}
+		})
+	}
+}
