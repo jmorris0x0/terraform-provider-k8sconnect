@@ -120,7 +120,7 @@ func TestAccYamlSplitDataSource_Errors(t *testing.T) {
 			},
 			{
 				Config:      testAccYamlSplitConfigInvalidKustomize,
-				ExpectError: regexp.MustCompile("Kustomize build failed"),
+				ExpectError: regexp.MustCompile("failed to build kustomization"),
 			},
 		},
 	})

@@ -199,7 +199,7 @@ func LoadDocuments(hasContent bool, content, pattern, kustomizePath string) ([]D
 		// Build kustomization and parse output
 		yamlContent, kustomizeWarnings, err := BuildKustomization(kustomizePath)
 		if err != nil {
-			return nil, "", nil, fmt.Errorf("kustomize build failed: %w\n\n%s", err, FormatKustomizeError(kustomizePath, err))
+			return nil, "", nil, fmt.Errorf("failed to build kustomization at %q: %w", kustomizePath, err)
 		}
 		warnings = kustomizeWarnings
 
@@ -327,30 +327,4 @@ func parseKustomizeWarnings(stderr string) []string {
 		}
 	}
 	return warnings
-}
-
-// FormatKustomizeError formats kustomize errors following k8sconnect's WHAT/WHY/HOW pattern
-func FormatKustomizeError(path string, err error) string {
-	return fmt.Sprintf(`Unable to build kustomization at %q
-
-Kustomize build failed with error:
-%s
-
-Common causes:
-  1. Missing kustomization.yaml in the specified directory
-  2. Base path references a directory outside the kustomization root (security restriction)
-  3. Patch file references don't exist or have invalid paths
-  4. Strategic merge conflict in overlays or patches
-  5. Invalid YAML syntax in kustomization.yaml or referenced files
-
-How to fix:
-  1. Verify kustomization.yaml exists in the path: %s
-  2. Check that all base paths in kustomization.yaml are within the allowed directory
-  3. Ensure all patch files and resources referenced in kustomization.yaml exist
-  4. Run 'kustomize build %s' locally to test the configuration
-  5. Review kustomize documentation: https://kubectl.docs.kubernetes.io/references/kustomize/
-
-If you need to reference files outside the kustomization root, this is blocked for security reasons.
-Consider restructuring your kustomization to keep all files within a single directory tree.`,
-		path, err.Error(), path, path)
 }
