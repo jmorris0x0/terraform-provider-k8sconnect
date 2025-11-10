@@ -67,6 +67,17 @@ func IsConnectionError(err error) bool {
 	return false
 }
 
+// extractKindFromResourceDesc extracts the kind from a resourceDesc like "ConfigMap test-config"
+func extractKindFromResourceDesc(resourceDesc string) string {
+	// resourceDesc format is typically "Kind name" or "Kind namespace/name"
+	// Extract the first word (the kind)
+	parts := strings.Fields(resourceDesc)
+	if len(parts) > 0 {
+		return parts[0]
+	}
+	return ""
+}
+
 // ClassifyError categorizes Kubernetes API errors for better user experience
 // Returns (severity, title, detail) suitable for Terraform diagnostics
 func ClassifyError(err error, operation, resourceDesc, apiVersion string) (severity, title, detail string) {
@@ -192,6 +203,36 @@ func ClassifyError(err error, operation, resourceDesc, apiVersion string) (sever
 			fmt.Sprintf("The %s already exists in the cluster and cannot be created. Use import to manage existing resources with Terraform. Details: %v",
 				resourceDesc, err)
 
+	// Check for invalid API group errors BEFORE CRD not found (Issue #1 fix)
+	// This handles cases like using "nonexistent.example.com/v1" with built-in kinds like ConfigMap
+	case IsInvalidAPIGroupError(err, apiVersion, extractKindFromResourceDesc(resourceDesc)):
+		kind := extractKindFromResourceDesc(resourceDesc)
+		// Suggest correct apiVersion based on kind
+		var correctVersion string
+		switch kind {
+		case "ConfigMap", "Secret", "Service", "Pod", "Namespace", "ServiceAccount", "PersistentVolume", "PersistentVolumeClaim", "Node", "Endpoints", "Event", "LimitRange", "ResourceQuota":
+			correctVersion = "v1"
+		case "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet":
+			correctVersion = "apps/v1"
+		case "Job", "CronJob":
+			correctVersion = "batch/v1"
+		case "Ingress", "NetworkPolicy", "IngressClass":
+			correctVersion = "networking.k8s.io/v1"
+		case "Role", "RoleBinding", "ClusterRole", "ClusterRoleBinding":
+			correctVersion = "rbac.authorization.k8s.io/v1"
+		case "StorageClass", "VolumeAttachment":
+			correctVersion = "storage.k8s.io/v1"
+		case "PodDisruptionBudget":
+			correctVersion = "policy/v1"
+		case "HorizontalPodAutoscaler":
+			correctVersion = "autoscaling/v2"
+		default:
+			correctVersion = "(check Kubernetes documentation)"
+		}
+		return "error", fmt.Sprintf("%s: Invalid API Group", operation),
+			fmt.Sprintf("%s is a built-in Kubernetes resource and cannot use apiVersion '%s'. Use apiVersion '%s' instead.",
+				kind, apiVersion, correctVersion)
+
 	case IsCRDNotFoundError(err):
 		return "error", fmt.Sprintf("%s: Custom Resource Definition Not Found", operation),
 			fmt.Sprintf("The Custom Resource Definition (CRD) for %s does not exist in the cluster.\n\n"+
@@ -288,10 +329,74 @@ func checkErrorContainsAny(err error, substrings ...string) bool {
 	return false
 }
 
+// isBuiltInKind checks if a kind name is a well-known built-in Kubernetes resource
+// This helps distinguish between missing CRDs and incorrect API groups for built-in resources
+func isBuiltInKind(kind string) bool {
+	// Common built-in resource kinds across all API groups
+	builtInKinds := map[string]bool{
+		// Core API (v1)
+		"ConfigMap":             true,
+		"Secret":                true,
+		"Service":               true,
+		"Pod":                   true,
+		"Namespace":             true,
+		"ServiceAccount":        true,
+		"PersistentVolume":      true,
+		"PersistentVolumeClaim": true,
+		"Node":                  true,
+		"Endpoints":             true,
+		"Event":                 true,
+		"LimitRange":            true,
+		"ResourceQuota":         true,
+		// apps/v1
+		"Deployment":  true,
+		"StatefulSet": true,
+		"DaemonSet":   true,
+		"ReplicaSet":  true,
+		// batch/v1
+		"Job":     true,
+		"CronJob": true,
+		// networking.k8s.io/v1
+		"Ingress":       true,
+		"NetworkPolicy": true,
+		"IngressClass":  true,
+		// rbac.authorization.k8s.io/v1
+		"Role":               true,
+		"RoleBinding":        true,
+		"ClusterRole":        true,
+		"ClusterRoleBinding": true,
+		// storage.k8s.io/v1
+		"StorageClass":     true,
+		"VolumeAttachment": true,
+		// policy/v1
+		"PodDisruptionBudget": true,
+		// autoscaling
+		"HorizontalPodAutoscaler": true,
+	}
+	return builtInKinds[kind]
+}
+
 // IsCRDNotFoundError detects when a Custom Resource Definition doesn't exist yet
 func IsCRDNotFoundError(err error) bool {
 	// Kubernetes returns these messages when the CRD doesn't exist
 	return checkErrorContainsAny(err, "no matches for kind", "could not find the requested resource")
+}
+
+// IsInvalidAPIGroupError detects when a built-in resource is used with an incorrect API group
+// Example: Using ConfigMap with apiVersion "nonexistent.example.com/v1" instead of "v1"
+func IsInvalidAPIGroupError(err error, apiVersion, kind string) bool {
+	// Check if error indicates resource not found
+	if !checkErrorContainsAny(err, "no matches for kind", "could not find the requested resource") {
+		return false
+	}
+
+	// Check if apiVersion is NOT a built-in group
+	if isBuiltInAPIGroup(apiVersion) {
+		return false
+	}
+
+	// Check if kind IS a built-in resource
+	return isBuiltInKind(kind)
 }
 
 // IsNamespaceNotFoundError detects when a namespace doesn't exist yet
