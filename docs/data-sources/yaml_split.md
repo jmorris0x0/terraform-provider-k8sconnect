@@ -80,7 +80,7 @@ resource "k8sconnect_object" "app" {
 }
 ```
 
-The `kustomize_path` option runs `kustomize build` on the specified directory, combining bases and overlays into final manifests. This eliminates the need for a separate kustomize data source and provides a unified interface for all YAML sources.
+The `kustomize_path` option runs `kustomize build` on the specified directory, combining bases and overlays into final manifests.
 
 See the [kustomize-basic](https://github.com/jmorris0x0/terraform-provider-k8sconnect/tree/main/examples/kustomize-basic) example for a complete working setup with base + overlay structure.
 
