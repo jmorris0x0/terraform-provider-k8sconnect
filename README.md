@@ -332,7 +332,6 @@ All `cluster` fields are marked sensitive and won't appear in logs or plan outpu
 
 **Data Sources:**
 - `k8sconnect_yaml_split` - Parse multi-document YAML files ([docs](docs/data-sources/yaml_split.md))
-- `k8sconnect_yaml_scoped` - Auto-categorize resources for dependency ordering (CRDs → cluster → namespaced) ([docs](docs/data-sources/yaml_scoped.md)). *Note* k8sconnect already does retries for 
 - `k8sconnect_object` - Read existing cluster resources ([docs](docs/data-sources/resource.md))
 
 **→ [Browse all 16 runnable examples](examples/README.md)** with test coverage
