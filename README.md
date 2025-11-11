@@ -155,6 +155,8 @@ Split YAML files containing multiple Kubernetes manifests:
 # Split multi-document YAML
 data "k8sconnect_yaml_split" "app" {
   content = file("${path.module}/app-manifests.yaml")
+  # Or: kustomize_path = "${path.module}/kustomize/overlays/prod"
+  # Or: pattern = "${path.module}/manifests/*.yaml"
 }
 
 # Apply each manifest individually  
@@ -184,7 +186,7 @@ Handle CRDs and custom resources in a single apply with automatic dependency ord
 data "k8sconnect_yaml_scoped" "app" {
   kustomize_path = "${path.module}/kustomize/overlays/prod"
   # Or: content = file("manifests.yaml")
-  # Or: pattern = "./manifests/*.yaml"
+  # Or: pattern = "${path.module}/manifests/*.yaml"
 }
 
 # Apply CRDs first
