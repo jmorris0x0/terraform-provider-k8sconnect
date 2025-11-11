@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.5] - 2025-11-10
+
+### Added
+
+- **Kustomize support in YAML data sources**
+  - `yaml_split` and `yaml_scoped` now support `kustomize_path` parameter to build and deploy kustomizations directly
+
+### Fixed
+
+- **Invalid API group error classification**
+  - Built-in Kubernetes resources with incorrect apiVersion now show clear error with suggested correction
+
 ## [0.3.4] - 2025-11-04
 
 ### Improved
