@@ -2,6 +2,12 @@
 
 Demonstrates bootstrapping clusters with Helm charts by templating them and deploying via k8sconnect instead of the Helm provider.
 
+## Requirements
+
+This example requires two providers:
+- **k8sconnect** - For deploying resources to the cluster
+- **hashicorp/helm** - For the `helm_template` data source (templates charts locally, no cluster access needed)
+
 ## Use Case
 
 The Helm provider can't deploy to a cluster that doesn't exist yet because providers are configured before resources. This example shows how to:
@@ -59,7 +65,7 @@ You need `yaml_scoped` to:
 ## The Pattern
 
 ```hcl
-# 1. Template the Helm chart
+# 1. Template the Helm chart (using hashicorp/helm provider)
 data "helm_template" "app" {
   chart      = "..."
   repository = "..."
@@ -116,7 +122,7 @@ locals {
   }
 }
 
-# Template cert-manager Helm chart
+# Template cert-manager Helm chart (using hashicorp/helm provider)
 data "helm_template" "cert_manager" {
   name       = "cert-manager"
   chart      = "cert-manager"

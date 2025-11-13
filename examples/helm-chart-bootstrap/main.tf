@@ -1,22 +1,15 @@
 # To run this example, define your cluster connection in locals.tf
 # See ../README.md for setup instructions
 
-terraform {
-  required_providers {
-    helm = {
-      source  = "hashicorp/helm"
-      version = "~> 2.0"
-    }
-    k8sconnect = {
-      source = "jmorris0x0/k8sconnect"
-    }
-  }
-}
-
 provider "k8sconnect" {}
+
+# Note: helm provider doesn't need cluster access for helm_template data source
+# It only templates the chart locally, doesn't install anything
+provider "helm" {}
 
 # Template a Helm chart without installing it
 # The output is a single string with all manifests separated by '---'
+# NOTE: This data source comes from the Helm provider (hashicorp/helm), not k8sconnect
 data "helm_template" "cert_manager" {
   name       = "cert-manager"
   namespace  = "cert-manager"
