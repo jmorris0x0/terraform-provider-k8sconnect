@@ -43,7 +43,6 @@ Workload resources that just need readiness confirmation for sequencing:
 
 ## YAML Scoped Data Source
 - [`yaml-scoped-dependency-ordering/`](yaml-scoped-dependency-ordering/) - Automatic dependency ordering by scope (CRDs → cluster-scoped → namespaced)
-- [`helm-chart-bootstrap/`](helm-chart-bootstrap/) - Bootstrap clusters with Helm charts via helm_template data source
 
 ## Resource Data Source
 - [`object-datasource-kubernetes-service/`](object-datasource-kubernetes-service/) - Read existing cluster resources and use their data

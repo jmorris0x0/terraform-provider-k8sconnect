@@ -151,10 +151,6 @@ func writeTestFiles(t *testing.T, dir string, kubeconfig string) {
       source  = "local/k8sconnect"
       version = "0.1.0"
     }
-    helm = {
-      source  = "hashicorp/helm"
-      version = "~> 2.0"
-    }
   }
 }`
 	os.WriteFile(filepath.Join(dir, "versions.tf"), []byte(versions), 0644)
