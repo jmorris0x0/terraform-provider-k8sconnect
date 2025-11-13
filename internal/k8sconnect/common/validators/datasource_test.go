@@ -96,11 +96,20 @@ func TestExactlyOneOfThree(t *testing.T) {
 			expectError:   false,
 		},
 		{
-			name:          "content known + pattern unknown - should NOT error",
+			name:          "content known + pattern unknown - SHOULD error (multiple specified)",
 			content:       types.StringValue("yaml"),
 			pattern:       types.StringUnknown(),
 			kustomizePath: types.StringNull(),
-			expectError:   false, // Unknown values should not trigger conflict validation
+			expectError:   true, // Multiple attributes specified, even if one is unknown
+			errorContains: "Conflicting Configuration",
+		},
+		{
+			name:          "content unknown + pattern unknown - SHOULD error (multiple specified)",
+			content:       types.StringUnknown(),
+			pattern:       types.StringUnknown(),
+			kustomizePath: types.StringNull(),
+			expectError:   true, // Multiple attributes specified, even if both are unknown
+			errorContains: "Conflicting Configuration",
 		},
 	}
 
