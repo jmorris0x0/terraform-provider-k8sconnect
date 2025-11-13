@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Validation timing bug in YAML data sources** ([#127](https://github.com/jmorris0x0/terraform-provider-k8sconnect/issues/127))
+  - Fixed regression where `yaml_split` and `yaml_scoped` failed validation when using `helm_template` data source or `templatefile()` with variables
+  - Validator now correctly handles unknown values during config validation phase
+
 ## [0.3.5] - 2025-11-10
 
 ### Added

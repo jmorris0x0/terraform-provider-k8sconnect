@@ -52,12 +52,19 @@ func (v ExactlyOneOfThree) ValidateDataSource(ctx context.Context, req datasourc
 		return
 	}
 
-	// Check if each attribute is set (non-null and non-unknown)
+	// If any attribute is unknown, we can't validate yet - defer to runtime
+	// This happens when values come from resources, data sources, or functions with variables
+	// (e.g., helm_template data source, templatefile() with variables)
+	if attr1.IsUnknown() || attr2.IsUnknown() || attr3.IsUnknown() {
+		return
+	}
+
+	// Check if each attribute is set (non-null)
 	// Note: We don't check for empty strings here - that's validated in LoadDocuments()
 	// where we can provide more specific error messages
-	hasAttr1 := !attr1.IsNull() && !attr1.IsUnknown()
-	hasAttr2 := !attr2.IsNull() && !attr2.IsUnknown()
-	hasAttr3 := !attr3.IsNull() && !attr3.IsUnknown()
+	hasAttr1 := !attr1.IsNull()
+	hasAttr2 := !attr2.IsNull()
+	hasAttr3 := !attr3.IsNull()
 
 	// Count how many are set
 	count := 0
