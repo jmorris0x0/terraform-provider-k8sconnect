@@ -99,6 +99,18 @@ func (d *yamlScopedDataSource) Read(ctx context.Context, req datasource.ReadRequ
 	// Note: We check IsNull/IsUnknown but not empty string - empty strings are
 	// validated in LoadDocuments() with better error messages
 	hasContent := !data.Content.IsNull() && !data.Content.IsUnknown()
+	hasPattern := !data.Pattern.IsNull() && !data.Pattern.IsUnknown()
+	hasKustomizePath := !data.KustomizePath.IsNull() && !data.KustomizePath.IsUnknown()
+
+	// Check if all inputs are unknown/null
+	if !hasContent && !hasPattern && !hasKustomizePath {
+		resp.Diagnostics.AddError(
+			"Unknown Input Value",
+			"All input values (content, pattern, kustomize_path) are unknown or null. "+
+				"At least one input must have a known value during the plan phase.",
+		)
+		return
+	}
 
 	// Load documents from content, pattern, or kustomize
 	documents, sourceID, warnings, err := yaml_common.LoadDocuments(

@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fixed regression where `yaml_split` and `yaml_scoped` incorrectly rejected unknown values from `helm_template` data source or `templatefile()` with variables
   - Validator now correctly validates that exactly one input is *specified* (non-null), regardless of whether value is known or unknown
 
+### Improved
+
+- **Better error messages for unknown values in YAML data sources**
+  - When all inputs are unknown during plan phase, data sources now return a clear error instead of confusing "No files matched pattern" message
+
 ## [0.3.5] - 2025-11-10
 
 ### Added
