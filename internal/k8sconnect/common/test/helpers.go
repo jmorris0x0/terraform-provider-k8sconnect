@@ -52,7 +52,7 @@ func CheckNamespaceExists(client kubernetes.Interface, name string) resource.Tes
 func CheckNamespaceDestroy(client kubernetes.Interface, name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()
-		for i := 0; i < 10; i++ {
+		for i := 0; i < 30; i++ {
 			_, err := client.CoreV1().Namespaces().Get(ctx, name, metav1.GetOptions{})
 			if err != nil {
 				if strings.Contains(err.Error(), "not found") {
@@ -1043,5 +1043,104 @@ func RemoveAnnotation(t *testing.T, client kubernetes.Interface, namespace, kind
 
 	default:
 		t.Fatalf("Unsupported kind for RemoveAnnotation: %s", kind)
+	}
+}
+
+// Helm release verification helpers
+
+// CheckHelmReleaseExists verifies a Helm release exists using helm CLI
+func CheckHelmReleaseExists(kubeconfigRaw, namespace, releaseName string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		tmpfile, err := os.CreateTemp("", "kubeconfig-*.yaml")
+		if err != nil {
+			return fmt.Errorf("failed to create temp kubeconfig: %v", err)
+		}
+		defer os.Remove(tmpfile.Name())
+
+		if _, err := tmpfile.Write([]byte(kubeconfigRaw)); err != nil {
+			return fmt.Errorf("failed to write temp kubeconfig: %v", err)
+		}
+		if err := tmpfile.Close(); err != nil {
+			return fmt.Errorf("failed to close temp kubeconfig: %v", err)
+		}
+
+		cmd := exec.Command("helm", "list", "-n", namespace, "-o", "json", "--kubeconfig", tmpfile.Name())
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("failed to list helm releases: %v\nOutput: %s", err, string(output))
+		}
+
+		if !strings.Contains(string(output), fmt.Sprintf(`"name":"%s"`, releaseName)) {
+			return fmt.Errorf("helm release %s not found in namespace %s\nOutput: %s", releaseName, namespace, string(output))
+		}
+
+		fmt.Printf("✅ Verified Helm release %s/%s exists\n", namespace, releaseName)
+		return nil
+	}
+}
+
+// CheckHelmReleaseDestroy verifies a Helm release was uninstalled
+func CheckHelmReleaseDestroy(kubeconfigRaw, namespace, releaseName string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		tmpfile, err := os.CreateTemp("", "kubeconfig-*.yaml")
+		if err != nil {
+			return fmt.Errorf("failed to create temp kubeconfig: %v", err)
+		}
+		defer os.Remove(tmpfile.Name())
+
+		if _, err := tmpfile.Write([]byte(kubeconfigRaw)); err != nil {
+			return fmt.Errorf("failed to write temp kubeconfig: %v", err)
+		}
+		if err := tmpfile.Close(); err != nil {
+			return fmt.Errorf("failed to close temp kubeconfig: %v", err)
+		}
+
+		for i := 0; i < 10; i++ {
+			cmd := exec.Command("helm", "list", "-n", namespace, "-o", "json", "--kubeconfig", tmpfile.Name())
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				return fmt.Errorf("failed to list helm releases: %v\nOutput: %s", err, string(output))
+			}
+
+			if !strings.Contains(string(output), fmt.Sprintf(`"name":"%s"`, releaseName)) {
+				fmt.Printf("✅ Verified Helm release %s/%s was uninstalled\n", namespace, releaseName)
+				return nil
+			}
+
+			time.Sleep(1 * time.Second)
+		}
+
+		return fmt.Errorf("helm release %s/%s still exists after deletion", namespace, releaseName)
+	}
+}
+
+// CheckHelmReleaseStatus verifies a Helm release has a specific status
+func CheckHelmReleaseStatus(kubeconfigRaw, namespace, releaseName, expectedStatus string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		tmpfile, err := os.CreateTemp("", "kubeconfig-*.yaml")
+		if err != nil {
+			return fmt.Errorf("failed to create temp kubeconfig: %v", err)
+		}
+		defer os.Remove(tmpfile.Name())
+
+		if _, err := tmpfile.Write([]byte(kubeconfigRaw)); err != nil {
+			return fmt.Errorf("failed to write temp kubeconfig: %v", err)
+		}
+		if err := tmpfile.Close(); err != nil {
+			return fmt.Errorf("failed to close temp kubeconfig: %v", err)
+		}
+
+		cmd := exec.Command("helm", "status", releaseName, "-n", namespace, "-o", "json", "--kubeconfig", tmpfile.Name())
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("failed to get helm status: %v\nOutput: %s", err, string(output))
+		}
+
+		if !strings.Contains(string(output), fmt.Sprintf(`"status":"%s"`, expectedStatus)) {
+			return fmt.Errorf("helm release %s/%s does not have status %s\nOutput: %s", namespace, releaseName, expectedStatus, string(output))
+		}
+
+		fmt.Printf("✅ Verified Helm release %s/%s has status %s\n", namespace, releaseName, expectedStatus)
+		return nil
 	}
 }

@@ -57,6 +57,18 @@ data "k8sconnect_yaml_scoped" "mixed_scope" {
   content = file("${path.module}/mixed-scope.yaml")
 }
 
+# Issue #127 Test: Chaining data sources with unknown values during config validation
+# This simulates helm_template → yaml_split/yaml_scoped pattern
+# During config validation, cluster.host is unknown, so templatefile output is unknown
+# Validator should allow this (check for specified, not known)
+# During plan, values become known and datasource executes successfully
+data "k8sconnect_yaml_split" "chained_with_unknown" {
+  content = templatefile("${path.module}/template-test.yaml.tpl", {
+    cluster_host = kind_cluster.kind_validation.endpoint
+    namespace    = "kind-validation"
+  })
+}
+
 #############################################
 # NAMESPACE CREATION
 #############################################
@@ -72,6 +84,15 @@ resource "k8sconnect_object" "namespace" {
         version: v0.1.0
   YAML
   cluster = local.cluster
+}
+
+# Issue #127 Test Resource: Apply resource from chained datasource
+# This verifies the entire chain works: templatefile (unknown) → yaml_split → resource
+# We use values() to get the first (and only) manifest from the map
+resource "k8sconnect_object" "issue_127_test" {
+  yaml_body          = values(data.k8sconnect_yaml_split.chained_with_unknown.manifests)[0]
+  cluster = local.cluster
+  depends_on         = [k8sconnect_object.namespace]
 }
 
 #############################################
