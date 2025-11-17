@@ -66,8 +66,11 @@ func (r *helmReleaseResource) Create(ctx context.Context, req resource.CreateReq
 	install.CreateNamespace = data.CreateNamespace.ValueBool()
 
 	// Helm v4: Wait is now WaitStrategy (string), Atomic is now RollbackOnFailure (bool)
+	// WaitStrategy must always be set in Helm v4 (cannot be empty)
 	if data.Wait.ValueBool() {
 		install.WaitStrategy = "watcher" // Use kstatus-based watcher strategy
+	} else {
+		install.WaitStrategy = "hookOnly" // Only wait for hooks, not resources
 	}
 	install.WaitForJobs = data.WaitForJobs.ValueBool()
 	install.RollbackOnFailure = data.Atomic.ValueBool()
@@ -261,8 +264,11 @@ func (r *helmReleaseResource) Update(ctx context.Context, req resource.UpdateReq
 	upgrade.Namespace = plan.Namespace.ValueString()
 
 	// Helm v4: Wait is now WaitStrategy (string), Atomic is now RollbackOnFailure (bool)
+	// WaitStrategy must always be set in Helm v4 (cannot be empty)
 	if plan.Wait.ValueBool() {
 		upgrade.WaitStrategy = "watcher" // Use kstatus-based watcher strategy
+	} else {
+		upgrade.WaitStrategy = "hookOnly" // Only wait for hooks, not resources
 	}
 	upgrade.WaitForJobs = plan.WaitForJobs.ValueBool()
 	upgrade.RollbackOnFailure = plan.Atomic.ValueBool()
