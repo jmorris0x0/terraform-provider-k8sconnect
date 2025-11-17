@@ -1,0 +1,4 @@
+image:
+  repository: public.ecr.aws/nginx/nginx
+  tag: latest
+  pullPolicy: IfNotPresent

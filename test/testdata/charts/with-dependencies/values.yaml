@@ -1,0 +1,4 @@
+replicaCount: 1
+
+simple-test:
+  replicaCount: 1
