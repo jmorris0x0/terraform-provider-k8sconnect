@@ -15,16 +15,16 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"gopkg.in/yaml.v3"
 
-	"helm.sh/helm/v3/pkg/action"
-	"helm.sh/helm/v3/pkg/chart"
-	"helm.sh/helm/v3/pkg/chart/loader"
-	"helm.sh/helm/v3/pkg/cli"
-	"helm.sh/helm/v3/pkg/downloader"
-	"helm.sh/helm/v3/pkg/getter"
-	"helm.sh/helm/v3/pkg/registry"
-	"helm.sh/helm/v3/pkg/release"
-	"helm.sh/helm/v3/pkg/repo"
-	"helm.sh/helm/v3/pkg/storage/driver"
+	"helm.sh/helm/v4/pkg/action"
+	chart "helm.sh/helm/v4/pkg/chart/v2"
+	"helm.sh/helm/v4/pkg/chart/v2/loader"
+	"helm.sh/helm/v4/pkg/cli"
+	"helm.sh/helm/v4/pkg/downloader"
+	"helm.sh/helm/v4/pkg/getter"
+	"helm.sh/helm/v4/pkg/registry"
+	release "helm.sh/helm/v4/pkg/release/v1"
+	repo "helm.sh/helm/v4/pkg/repo/v1"
+	"helm.sh/helm/v4/pkg/storage/driver"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
@@ -64,11 +64,19 @@ func (r *helmReleaseResource) Create(ctx context.Context, req resource.CreateReq
 	install.ReleaseName = data.Name.ValueString()
 	install.Namespace = data.Namespace.ValueString()
 	install.CreateNamespace = data.CreateNamespace.ValueBool()
-	install.Wait = data.Wait.ValueBool()
+
+	// Helm v4: Wait is now WaitStrategy (string), Atomic is now RollbackOnFailure (bool)
+	if data.Wait.ValueBool() {
+		install.WaitStrategy = "watcher" // Use kstatus-based watcher strategy
+	}
 	install.WaitForJobs = data.WaitForJobs.ValueBool()
-	install.Atomic = data.Atomic.ValueBool()
+	install.RollbackOnFailure = data.Atomic.ValueBool()
 	install.SkipCRDs = data.SkipCRDs.ValueBool()
 	install.DisableHooks = data.DisableWebhooks.ValueBool()
+
+	// Enable SSA with force conflicts (ADR-005 pattern, matches k8sconnect_object behavior)
+	install.ServerSideApply = true
+	install.ForceConflicts = true
 
 	// Parse timeout
 	if !data.Timeout.IsNull() {
@@ -104,11 +112,21 @@ func (r *helmReleaseResource) Create(ctx context.Context, req resource.CreateReq
 	}
 
 	// 7. Run install
-	rel, err := install.Run(chart, values)
+	releaser, err := install.Run(chart, values)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Failed to Install Helm Release",
 			fmt.Sprintf("Could not install Helm release '%s': %s", data.Name.ValueString(), err.Error()),
+		)
+		return
+	}
+
+	// Helm v4: Run() returns release.Releaser interface, need type assertion
+	rel, ok := releaser.(*release.Release)
+	if !ok {
+		resp.Diagnostics.AddError(
+			"Internal Error",
+			"Failed to convert Helm release to concrete type",
 		)
 		return
 	}
@@ -159,7 +177,7 @@ func (r *helmReleaseResource) Read(ctx context.Context, req resource.ReadRequest
 
 	// 3. Get the release
 	get := action.NewGet(actionConfig)
-	rel, err := get.Run(data.Name.ValueString())
+	releaser, err := get.Run(data.Name.ValueString())
 	if err != nil {
 		// Release not found - remove from state
 		if err == driver.ErrReleaseNotFound {
@@ -174,6 +192,16 @@ func (r *helmReleaseResource) Read(ctx context.Context, req resource.ReadRequest
 		resp.Diagnostics.AddError(
 			"Failed to Read Helm Release",
 			fmt.Sprintf("Could not read Helm release '%s': %s", data.Name.ValueString(), err.Error()),
+		)
+		return
+	}
+
+	// Helm v4: Get() returns release.Releaser interface, need type assertion
+	rel, ok := releaser.(*release.Release)
+	if !ok {
+		resp.Diagnostics.AddError(
+			"Internal Error",
+			"Failed to convert Helm release to concrete type",
 		)
 		return
 	}
@@ -231,12 +259,20 @@ func (r *helmReleaseResource) Update(ctx context.Context, req resource.UpdateReq
 	// 3. Create Upgrade action
 	upgrade := action.NewUpgrade(actionConfig)
 	upgrade.Namespace = plan.Namespace.ValueString()
-	upgrade.Wait = plan.Wait.ValueBool()
+
+	// Helm v4: Wait is now WaitStrategy (string), Atomic is now RollbackOnFailure (bool)
+	if plan.Wait.ValueBool() {
+		upgrade.WaitStrategy = "watcher" // Use kstatus-based watcher strategy
+	}
 	upgrade.WaitForJobs = plan.WaitForJobs.ValueBool()
-	upgrade.Atomic = plan.Atomic.ValueBool()
+	upgrade.RollbackOnFailure = plan.Atomic.ValueBool()
 	upgrade.SkipCRDs = plan.SkipCRDs.ValueBool()
 	upgrade.DisableHooks = plan.DisableWebhooks.ValueBool()
 	// Note: RecreatePods is deprecated in Helm v3 and not available in action.Upgrade
+
+	// Enable SSA with force conflicts (ADR-005 pattern, matches k8sconnect_object behavior)
+	upgrade.ServerSideApply = "true" // Explicit SSA mode (not "auto")
+	upgrade.ForceConflicts = true
 
 	// Parse timeout
 	if !plan.Timeout.IsNull() {
@@ -272,11 +308,21 @@ func (r *helmReleaseResource) Update(ctx context.Context, req resource.UpdateReq
 	}
 
 	// 6. Run upgrade
-	rel, err := upgrade.Run(plan.Name.ValueString(), chart, values)
+	releaser, err := upgrade.Run(plan.Name.ValueString(), chart, values)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Failed to Upgrade Helm Release",
 			fmt.Sprintf("Could not upgrade Helm release '%s': %s", plan.Name.ValueString(), err.Error()),
+		)
+		return
+	}
+
+	// Helm v4: Run() returns release.Releaser interface, need type assertion
+	rel, ok := releaser.(*release.Release)
+	if !ok {
+		resp.Diagnostics.AddError(
+			"Internal Error",
+			"Failed to convert Helm release to concrete type",
 		)
 		return
 	}
@@ -462,7 +508,7 @@ func (r *helmReleaseResource) ImportState(ctx context.Context, req resource.Impo
 
 	// Get the release from cluster
 	get := action.NewGet(actionConfig)
-	rel, err := get.Run(releaseName)
+	releaser, err := get.Run(releaseName)
 	if err != nil {
 		if err == driver.ErrReleaseNotFound {
 			resp.Diagnostics.AddError(
@@ -478,6 +524,16 @@ func (r *helmReleaseResource) ImportState(ctx context.Context, req resource.Impo
 				fmt.Sprintf("Failed to get Helm release: %s", err.Error()),
 			)
 		}
+		return
+	}
+
+	// Helm v4: Get() returns release.Releaser interface, need type assertion
+	rel, ok := releaser.(*release.Release)
+	if !ok {
+		resp.Diagnostics.AddError(
+			"Internal Error",
+			"Failed to convert Helm release to concrete type",
+		)
 		return
 	}
 
@@ -581,7 +637,8 @@ func (r *helmReleaseResource) getActionConfig(ctx context.Context, data *helmRel
 
 	// Create Helm action configuration
 	actionConfig := new(action.Configuration)
-	if err := actionConfig.Init(restClientGetter, data.Namespace.ValueString(), "secret", helmLogger(ctx)); err != nil {
+	// Helm v4: Init no longer takes logger function (logging is handled internally)
+	if err := actionConfig.Init(restClientGetter, data.Namespace.ValueString(), "secret"); err != nil {
 		return nil, fmt.Errorf("failed to initialize Helm action configuration: %w", err)
 	}
 
@@ -744,7 +801,8 @@ func (r *helmReleaseResource) loadOCIChart(ctx context.Context, cfg *action.Conf
 	cfg.RegistryClient = registryClient
 
 	// Pull chart from OCI registry
-	pull := action.NewPullWithOpts(action.WithConfig(cfg))
+	// Helm v4: NewPull still uses WithConfig pattern
+	pull := action.NewPull(action.WithConfig(cfg))
 	pull.Settings = cli.New()
 	if opts.Version != "" {
 		pull.Version = opts.Version

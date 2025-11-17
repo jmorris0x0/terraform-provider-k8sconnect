@@ -1,7 +1,8 @@
 # ADR-022: Helm Release Resource with Inline Cluster Configuration
 
 ## Status
-Accepted - Implementation Pending (2025-11-14)
+Accepted - In Progress (2025-11-14)
+Updated (2025-11-16): Helm v4 SSA Integration
 
 ## Context
 
@@ -12,7 +13,7 @@ Accepted - Implementation Pending (2025-11-14)
 
 **User demand**: [Issue #127](https://github.com/jmorris0x0/terraform-provider-k8sconnect/issues/127) demonstrates real users trying to bootstrap foundation services (Cilium, cert-manager, ArgoCD) alongside cluster creation.
 
-**The Helm provider's fatal limitation**: Provider configuration happens before resources are created, so you can't reference cluster credentials from a cluster being created in the same apply. This makes bootstrapping impossible.
+**The Helm provider's limitation**: Provider configuration happens before resources are created, so you can't reference cluster credentials from a cluster being created in the same apply. This makes bootstrapping impossible.
 
 **Real-world use case from #127**:
 ```hcl
@@ -47,7 +48,7 @@ This is NOT a templating-only solution. This is a full Helm release manager that
 - Helm hooks execute (pre-install, post-upgrade, etc.)
 - Helm rollback works from CLI
 - Release history maintained in cluster
-- Three-way merge strategy (Helm's native behavior)
+- Server-Side Apply (SSA) with field ownership tracking (Helm v4)
 - Atomic upgrades/rollbacks
 
 **3. Exceed HashiCorp Quality** - Learn from their mistakes:
@@ -56,6 +57,70 @@ This is NOT a templating-only solution. This is a full Helm release manager that
 - Correct wait behavior for all workload types
 - Secure sensitive value handling
 - Better error messages
+
+### Helm v4 Server-Side Apply Integration
+
+**Decision (2025-11-16)**: Use Helm v4 with Server-Side Apply instead of Helm v3's three-way merge.
+
+**Why Helm v4:**
+- Released November 12, 2025 (GA, not beta)
+- SSA is the default behavior in Helm v4, with automatic fallback to three-way merge on older K8s
+- We require K8s >= 1.28, SSA requires K8s >= 1.22 → Perfect alignment
+- Fixes fundamental three-way merge issues documented in HashiCorp provider bugs
+- **Architectural alignment**: Matches k8sconnect's core SSA philosophy (ADR-005)
+
+**Implementation Strategy:**
+```go
+// In Create() - internal/k8sconnect/resource/helm_release/crud.go
+install := action.NewInstall(actionConfig)
+install.ServerSideApply = true        // Enable SSA (default in v4)
+install.ForceConflicts = true         // Force ownership (ADR-005 pattern)
+// ... rest of configuration
+
+// In Update()
+upgrade := action.NewUpgrade(actionConfig)
+upgrade.ServerSideApply = "true"      // Explicit SSA (not "auto")
+upgrade.ForceConflicts = true         // Force ownership
+// ... rest of configuration
+```
+
+**No Schema Changes**: This is SDK-level configuration, not user-facing. Users get SSA behavior automatically with no configuration required.
+
+**Philosophy Alignment:**
+```
+k8sconnect_object:       SSA with Force=true in ApplyOptions
+k8sconnect_helm_release: SSA with ForceConflicts=true in Helm SDK
+                         ↑ SAME SEMANTIC: Take ownership, resolve conflicts
+```
+
+**Why ForceConflicts=true Always:**
+
+Following ADR-005, we ALWAYS force ownership of conflicted fields. This means:
+- Consistent behavior across k8sconnect resources
+- No user configuration needed (we do the right thing automatically)
+- Helm releases take ownership of their fields (like k8sconnect_object does)
+- Clear, predictable behavior: "k8sconnect manages what it deploys"
+
+**Benefits Over Helm v3 Three-Way Merge:**
+1. **Field-level ownership tracking** - Can coexist with HPA, operators, webhooks
+2. **No false positives** - Only track fields we actually manage
+3. **Explicit conflict errors** - Clear messages instead of silent overwrites
+4. **Fixes HashiCorp Issues**: Many documented bugs (Issue #1669, #472, #1349) stem from three-way merge limitations
+
+**Kubernetes Version Compatibility:**
+- K8s >= 1.22: Uses SSA (we require >= 1.28, so always available)
+- K8s < 1.22: Helm v4 auto-falls back to three-way merge (defensive, won't affect our users)
+
+**Risk Assessment:**
+- **Low risk**: Helm v4.0.0 is GA (released 4 days ago), not experimental
+- **High reward**: Fundamental architectural improvement, fixes known bugs
+- **Easy rollback**: Can revert go.mod if unforeseen issues
+- **Test coverage**: 23 acceptance tests verify correctness
+
+**Migration Impact:**
+- Existing Helm v3 releases are compatible with Helm v4
+- Release history is preserved
+- No user action required - internal implementation change only
 
 ### Schema
 
@@ -224,7 +289,7 @@ We're not just replicating hashicorp/helm - we're fixing their fundamental probl
 ## Implementation Plan
 
 ### Phase 1: Core Release Management
-- Embed Helm SDK (helm.sh/helm/v3)
+- Embed Helm SDK (helm.sh/helm/v4)
 - Implement Create (helm install), Update (helm upgrade), Delete (helm uninstall)
 - Support: repository, chart, version, values, set/set_sensitive list attributes
 - Inline cluster configuration (same auth methods as k8sconnect_object)
@@ -261,12 +326,13 @@ We're not just replicating hashicorp/helm - we're fixing their fundamental probl
 
 ## Critical Implementation Details
 
-**Helm SDK Usage**: Use `helm.sh/helm/v3/pkg/action` package:
-- `action.NewInstall()` for Create operations
-- `action.NewUpgrade()` for Update operations
+**Helm SDK Usage**: Use `helm.sh/helm/v4/pkg/action` package:
+- `action.NewInstall()` for Create operations with ServerSideApply=true, ForceConflicts=true
+- `action.NewUpgrade()` for Update operations with ServerSideApply="true", ForceConflicts=true
 - `action.NewUninstall()` for Delete operations
 - Proper RESTClientGetter implementation using our cluster config
 - No kubeconfig required
+- SSA with force conflicts enabled by default (aligns with ADR-005)
 
 **State Management**:
 - Store release name, namespace, chart, version, revision
@@ -359,13 +425,14 @@ We considered building `k8sconnect_helm_template` (templating-only) but decided 
 - No `helm list`, `helm history`, `helm rollback`
 - Hooks don't execute (pre-install, post-upgrade, etc.)
 - No atomic upgrades
-- No three-way merge
+- No Server-Side Apply field ownership tracking
 - Can't use helm CLI to inspect/manage releases
 
 **Our helm_release resource gives you:**
 - Full Helm compatibility (it's a real release)
 - CLI interop (helm list/rollback work)
 - Hooks execute correctly
+- Server-Side Apply with field ownership (Helm v4)
 - **PLUS** bootstrapping (inline cluster config)
 - **PLUS** fixes for all HashiCorp bugs
 

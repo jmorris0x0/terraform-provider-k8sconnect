@@ -7,7 +7,7 @@
 
 Bootstrap Kubernetes clusters and workloads in a **single `terraform apply`**. No two-phase deployments.
 
-**k8sconnect** uses inline, per-resource connections to break Terraform's provider dependency hell. Create a cluster and deploy to it immediately, target multiple clusters from one module, or use dynamic outputs for authentication.
+**k8sconnect** uses inline, per-resource connections to break Terraform's provider dependency hell. Create a cluster and deploy to it immediately, install Helm charts alongside cluster creation, target multiple clusters from one module, or use dynamic outputs for authentication.
 
 ---
 
@@ -214,6 +214,77 @@ Perfect for EKS/GKE defaults, Helm deployments, and operator-managed resources. 
 
 ---
 
+## Helm Charts with Bootstrap Support
+
+Deploy Helm charts using the same inline cluster configuration as other resources. Unlike `hashicorp/helm`, you can reference cluster outputs that are unknown at plan time:
+
+```hcl
+# Create cluster and deploy Helm chart in one apply
+resource "aws_eks_cluster" "main" {
+  name = "production"
+  # ...
+}
+
+resource "aws_eks_node_group" "main" {
+  cluster_name = aws_eks_cluster.main.name
+  # ...
+}
+
+# Deploy CNI immediately - no waiting for provider configuration
+resource "k8sconnect_helm_release" "cilium" {
+  name       = "cilium"
+  namespace  = "kube-system"
+  repository = "https://helm.cilium.io/"
+  chart      = "cilium"
+  version    = "1.15.5"
+
+  values = <<-YAML
+    ipam:
+      mode: kubernetes
+    hubble:
+      relay:
+        enabled: true
+  YAML
+
+  set = [
+    {
+      name  = "kubeProxyReplacement"
+      value = "true"
+    }
+  ]
+
+  cluster = {
+    host                   = aws_eks_cluster.main.endpoint
+    cluster_ca_certificate = aws_eks_cluster.main.certificate_authority[0].data
+    exec = {
+      api_version = "client.authentication.k8s.io/v1"
+      command     = "aws"
+      args        = ["eks", "get-token", "--cluster-name", aws_eks_cluster.main.name]
+    }
+  }
+
+  create_namespace = true
+  wait             = true
+  timeout          = "10m"
+
+  depends_on = [aws_eks_node_group.main]
+}
+```
+
+This is a **real Helm release** - not just templating. It shows up in `helm list`, supports `helm rollback`, and executes hooks. The only difference from `hashicorp/helm` is inline cluster configuration, which enables single-apply bootstrapping.
+
+**Key features:**
+- ✅ Works with repository charts (HTTP/HTTPS, OCI) and local charts
+- ✅ Full Helm release semantics (hooks, history, rollback support)
+- ✅ Drift detection for manual `helm upgrade`/`helm rollback` operations
+- ✅ Proper wait logic for all workload types (Deployments, DaemonSets, StatefulSets, Jobs)
+- ✅ Sensitive value support with `set_sensitive`
+- ✅ Dependency management with `dependency_update`
+
+**→ [Helm release documentation](docs/resources/helm_release.md)**
+
+---
+
 ## Wait for Resources and Use Status
 
 Wait for resources and extract status fields without drift. The separate `k8sconnect_wait` resource gives you fine-grained control over what you track and works with resources you don't even manage:
@@ -327,6 +398,7 @@ All `cluster` fields are marked sensitive and won't appear in logs or plan outpu
 
 **Resources:**
 - `k8sconnect_object` - Full lifecycle management for any Kubernetes resource ([docs](docs/resources/manifest.md))
+- `k8sconnect_helm_release` - Helm chart deployments with inline cluster config ([docs](docs/resources/helm_release.md))
 - `k8sconnect_wait` - Wait for resources to reach desired state with extractable results ([docs](docs/resources/wait.md))
 - `k8sconnect_patch` - Surgical modifications to existing resources ([docs](docs/resources/patch.md))
 
