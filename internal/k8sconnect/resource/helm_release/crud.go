@@ -374,6 +374,10 @@ func (r *helmReleaseResource) Delete(ctx context.Context, req resource.DeleteReq
 	// 3. Create Uninstall action
 	uninstall := action.NewUninstall(actionConfig)
 
+	// Helm v4: Use hookOnly strategy for uninstall (default behavior)
+	// We don't need to wait for resource deletion, just hooks
+	uninstall.WaitStrategy = "hookOnly"
+
 	// Parse timeout
 	if !data.Timeout.IsNull() {
 		timeout, err := time.ParseDuration(data.Timeout.ValueString())
