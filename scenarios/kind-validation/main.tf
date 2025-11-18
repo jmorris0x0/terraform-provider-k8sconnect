@@ -37,9 +37,9 @@ provider "k8sconnect" {}
 locals {
   cluster = {
     host                   = kind_cluster.kind_validation.endpoint
-    cluster_ca_certificate = base64encode(kind_cluster.kind_validation.cluster_ca_certificate)
-    client_certificate     = base64encode(kind_cluster.kind_validation.client_certificate)
-    client_key             = base64encode(kind_cluster.kind_validation.client_key)
+    cluster_ca_certificate = kind_cluster.kind_validation.cluster_ca_certificate
+    client_certificate     = kind_cluster.kind_validation.client_certificate
+    client_key             = kind_cluster.kind_validation.client_key
   }
 }
 
@@ -74,7 +74,7 @@ data "k8sconnect_yaml_split" "chained_with_unknown" {
 #############################################
 
 resource "k8sconnect_object" "namespace" {
-  yaml_body          = <<-YAML
+  yaml_body = <<-YAML
     apiVersion: v1
     kind: Namespace
     metadata:
@@ -83,16 +83,16 @@ resource "k8sconnect_object" "namespace" {
         purpose: validation
         version: v0.1.0
   YAML
-  cluster = local.cluster
+  cluster   = local.cluster
 }
 
 # Issue #127 Test Resource: Apply resource from chained datasource
 # This verifies the entire chain works: templatefile (unknown) → yaml_split → resource
 # We use values() to get the first (and only) manifest from the map
 resource "k8sconnect_object" "issue_127_test" {
-  yaml_body          = values(data.k8sconnect_yaml_split.chained_with_unknown.manifests)[0]
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.namespace]
+  yaml_body  = values(data.k8sconnect_yaml_split.chained_with_unknown.manifests)[0]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace]
 }
 
 #############################################
@@ -101,8 +101,8 @@ resource "k8sconnect_object" "issue_127_test" {
 
 # Create a CRD with non-standard plural (cacti) to test DiscoverGVR
 resource "k8sconnect_object" "cactus_crd" {
-  yaml_body          = file("${path.module}/cactus-crd.yaml")
-  cluster = local.cluster
+  yaml_body = file("${path.module}/cactus-crd.yaml")
+  cluster   = local.cluster
 }
 
 # Create CR immediately - should auto-retry until CRD is ready
@@ -129,9 +129,9 @@ resource "k8sconnect_object" "my_cactus" {
 
 # Apply cluster-scoped resources from yaml_scoped datasource
 resource "k8sconnect_object" "cluster_scoped" {
-  for_each           = data.k8sconnect_yaml_scoped.mixed_scope.cluster_scoped
-  yaml_body          = each.value
-  cluster = local.cluster
+  for_each  = data.k8sconnect_yaml_scoped.mixed_scope.cluster_scoped
+  yaml_body = each.value
+  cluster   = local.cluster
 }
 
 #############################################
@@ -140,10 +140,10 @@ resource "k8sconnect_object" "cluster_scoped" {
 
 # Apply all resources from multi-resources.yaml using yaml_split
 resource "k8sconnect_object" "split_resources" {
-  for_each           = data.k8sconnect_yaml_split.multi_resources.manifests
-  yaml_body          = each.value
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.namespace]
+  for_each   = data.k8sconnect_yaml_split.multi_resources.manifests
+  yaml_body  = each.value
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace]
 }
 
 #############################################
@@ -152,10 +152,10 @@ resource "k8sconnect_object" "split_resources" {
 
 # Apply namespace-scoped resources from yaml_scoped datasource
 resource "k8sconnect_object" "namespaced_scoped" {
-  for_each           = data.k8sconnect_yaml_scoped.mixed_scope.namespaced
-  yaml_body          = each.value
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.cluster_scoped]
+  for_each   = data.k8sconnect_yaml_scoped.mixed_scope.namespaced
+  yaml_body  = each.value
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.cluster_scoped]
 }
 
 #############################################
@@ -164,7 +164,7 @@ resource "k8sconnect_object" "namespaced_scoped" {
 
 # Create a PVC (kind provides local-path storage)
 resource "k8sconnect_object" "test_pvc" {
-  yaml_body          = <<-YAML
+  yaml_body  = <<-YAML
     apiVersion: v1
     kind: PersistentVolumeClaim
     metadata:
@@ -178,13 +178,13 @@ resource "k8sconnect_object" "test_pvc" {
           storage: 100Mi
       storageClassName: standard
   YAML
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.namespace]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace]
 }
 
 # Create a pod that uses the PVC (required for WaitForFirstConsumer binding)
 resource "k8sconnect_object" "pvc_consumer_pod" {
-  yaml_body          = <<-YAML
+  yaml_body  = <<-YAML
     apiVersion: v1
     kind: Pod
     metadata:
@@ -212,8 +212,8 @@ resource "k8sconnect_object" "pvc_consumer_pod" {
         persistentVolumeClaim:
           claimName: test-pvc
   YAML
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.test_pvc]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.test_pvc]
 }
 
 # Wait for PVC to be bound and extract volume name
@@ -249,7 +249,7 @@ output "extracted_volume_name" {
 #############################################
 
 resource "k8sconnect_object" "migration_job" {
-  yaml_body          = <<-YAML
+  yaml_body  = <<-YAML
     apiVersion: batch/v1
     kind: Job
     metadata:
@@ -274,8 +274,8 @@ resource "k8sconnect_object" "migration_job" {
           restartPolicy: Never
       backoffLimit: 2
   YAML
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.namespace]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace]
 }
 
 # Wait for job completion using condition wait
@@ -283,7 +283,7 @@ resource "k8sconnect_wait" "migration_complete" {
   object_ref = k8sconnect_object.migration_job.object_ref
   wait_for = {
     condition = "Complete"
-    timeout   = "120s"  # Testing race condition fix - Job completes in ~6s
+    timeout   = "120s" # Testing race condition fix - Job completes in ~6s
   }
   cluster = local.cluster
 }
@@ -293,7 +293,7 @@ resource "k8sconnect_wait" "migration_complete" {
 #############################################
 
 resource "k8sconnect_object" "backup_cronjob" {
-  yaml_body          = <<-YAML
+  yaml_body  = <<-YAML
     apiVersion: batch/v1
     kind: CronJob
     metadata:
@@ -320,8 +320,8 @@ resource "k8sconnect_object" "backup_cronjob" {
                     cpu: "100m"
               restartPolicy: OnFailure
   YAML
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.namespace]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace]
 }
 
 #############################################
@@ -329,7 +329,7 @@ resource "k8sconnect_object" "backup_cronjob" {
 #############################################
 
 resource "k8sconnect_object" "replicaset" {
-  yaml_body          = <<-YAML
+  yaml_body  = <<-YAML
     apiVersion: apps/v1
     kind: ReplicaSet
     metadata:
@@ -362,8 +362,8 @@ resource "k8sconnect_object" "replicaset" {
                 memory: "64Mi"
                 cpu: "100m"
   YAML
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.namespace]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace]
 }
 
 #############################################
@@ -371,7 +371,7 @@ resource "k8sconnect_object" "replicaset" {
 #############################################
 
 resource "k8sconnect_object" "standalone_pod" {
-  yaml_body          = <<-YAML
+  yaml_body  = <<-YAML
     apiVersion: v1
     kind: Pod
     metadata:
@@ -394,8 +394,8 @@ resource "k8sconnect_object" "standalone_pod" {
             cpu: "50m"
       restartPolicy: Always
   YAML
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.namespace]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace]
 }
 
 # Wait for pod to be running
@@ -415,7 +415,7 @@ resource "k8sconnect_wait" "pod_running" {
 #############################################
 
 resource "k8sconnect_object" "web_deployment" {
-  yaml_body          = <<-YAML
+  yaml_body  = <<-YAML
     apiVersion: apps/v1
     kind: Deployment
     metadata:
@@ -454,8 +454,8 @@ resource "k8sconnect_object" "web_deployment" {
               initialDelaySeconds: 5
               periodSeconds: 5
   YAML
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.namespace, k8sconnect_wait.migration_complete]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace, k8sconnect_wait.migration_complete]
 }
 
 # Wait for deployment rollout using rollout wait
@@ -473,7 +473,7 @@ resource "k8sconnect_wait" "web_rollout" {
 #############################################
 
 resource "k8sconnect_object" "web_service" {
-  yaml_body          = <<-YAML
+  yaml_body  = <<-YAML
     apiVersion: v1
     kind: Service
     metadata:
@@ -492,8 +492,8 @@ resource "k8sconnect_object" "web_service" {
         protocol: TCP
         name: http
   YAML
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.namespace]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace]
 }
 
 #############################################
@@ -501,7 +501,7 @@ resource "k8sconnect_object" "web_service" {
 #############################################
 
 resource "k8sconnect_object" "network_policy" {
-  yaml_body          = <<-YAML
+  yaml_body  = <<-YAML
     apiVersion: networking.k8s.io/v1
     kind: NetworkPolicy
     metadata:
@@ -531,8 +531,8 @@ resource "k8sconnect_object" "network_policy" {
         - protocol: TCP
           port: 5432
   YAML
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.namespace]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace]
 }
 
 #############################################
@@ -540,7 +540,7 @@ resource "k8sconnect_object" "network_policy" {
 #############################################
 
 resource "k8sconnect_object" "database_statefulset" {
-  yaml_body          = <<-YAML
+  yaml_body = <<-YAML
     apiVersion: apps/v1
     kind: StatefulSet
     metadata:
@@ -588,7 +588,7 @@ resource "k8sconnect_object" "database_statefulset" {
             requests:
               storage: 500Mi
   YAML
-  cluster = local.cluster
+  cluster   = local.cluster
   depends_on = [
     k8sconnect_object.namespace,
     k8sconnect_object.split_resources
@@ -607,7 +607,7 @@ resource "k8sconnect_wait" "postgres_ready" {
 
 # StatefulSet headless service
 resource "k8sconnect_object" "postgres_service" {
-  yaml_body          = <<-YAML
+  yaml_body  = <<-YAML
     apiVersion: v1
     kind: Service
     metadata:
@@ -622,8 +622,8 @@ resource "k8sconnect_object" "postgres_service" {
         targetPort: 5432
         name: postgres
   YAML
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.namespace]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace]
 }
 
 #############################################
@@ -631,7 +631,7 @@ resource "k8sconnect_object" "postgres_service" {
 #############################################
 
 resource "k8sconnect_object" "log_collector" {
-  yaml_body          = <<-YAML
+  yaml_body  = <<-YAML
     apiVersion: apps/v1
     kind: DaemonSet
     metadata:
@@ -665,8 +665,8 @@ resource "k8sconnect_object" "log_collector" {
             hostPath:
               path: /var/log
   YAML
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.namespace]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace]
 }
 
 #############################################
@@ -674,7 +674,7 @@ resource "k8sconnect_object" "log_collector" {
 #############################################
 
 resource "k8sconnect_object" "web_ingress" {
-  yaml_body          = <<-YAML
+  yaml_body  = <<-YAML
     apiVersion: networking.k8s.io/v1
     kind: Ingress
     metadata:
@@ -696,8 +696,8 @@ resource "k8sconnect_object" "web_ingress" {
                 port:
                   number: 80
   YAML
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.web_service]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.web_service]
 }
 
 #############################################
@@ -705,7 +705,7 @@ resource "k8sconnect_object" "web_ingress" {
 #############################################
 
 resource "k8sconnect_object" "web_pdb" {
-  yaml_body          = <<-YAML
+  yaml_body  = <<-YAML
     apiVersion: policy/v1
     kind: PodDisruptionBudget
     metadata:
@@ -717,8 +717,8 @@ resource "k8sconnect_object" "web_pdb" {
         matchLabels:
           app: web
   YAML
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.web_deployment]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.web_deployment]
 }
 
 #############################################
@@ -726,7 +726,7 @@ resource "k8sconnect_object" "web_pdb" {
 #############################################
 
 resource "k8sconnect_object" "metrics_reader_role" {
-  yaml_body          = <<-YAML
+  yaml_body = <<-YAML
     apiVersion: rbac.authorization.k8s.io/v1
     kind: ClusterRole
     metadata:
@@ -739,11 +739,11 @@ resource "k8sconnect_object" "metrics_reader_role" {
       resources: ["pods", "nodes"]
       verbs: ["get", "list"]
   YAML
-  cluster = local.cluster
+  cluster   = local.cluster
 }
 
 resource "k8sconnect_object" "metrics_reader_binding" {
-  yaml_body          = <<-YAML
+  yaml_body = <<-YAML
     apiVersion: rbac.authorization.k8s.io/v1
     kind: ClusterRoleBinding
     metadata:
@@ -757,7 +757,7 @@ resource "k8sconnect_object" "metrics_reader_binding" {
       name: kind-validation-metrics-reader
       apiGroup: rbac.authorization.k8s.io
   YAML
-  cluster = local.cluster
+  cluster   = local.cluster
   depends_on = [
     k8sconnect_object.metrics_reader_role,
     k8sconnect_object.split_resources
@@ -769,7 +769,7 @@ resource "k8sconnect_object" "metrics_reader_binding" {
 #############################################
 
 resource "k8sconnect_object" "fast_storage" {
-  yaml_body          = <<-YAML
+  yaml_body = <<-YAML
     apiVersion: storage.k8s.io/v1
     kind: StorageClass
     metadata:
@@ -778,7 +778,7 @@ resource "k8sconnect_object" "fast_storage" {
     volumeBindingMode: WaitForFirstConsumer
     reclaimPolicy: Delete
   YAML
-  cluster = local.cluster
+  cluster   = local.cluster
 }
 
 #############################################
@@ -786,7 +786,7 @@ resource "k8sconnect_object" "fast_storage" {
 #############################################
 
 resource "k8sconnect_object" "high_priority" {
-  yaml_body          = <<-YAML
+  yaml_body = <<-YAML
     apiVersion: scheduling.k8s.io/v1
     kind: PriorityClass
     metadata:
@@ -795,12 +795,12 @@ resource "k8sconnect_object" "high_priority" {
     globalDefault: false
     description: "High priority workloads"
   YAML
-  cluster = local.cluster
+  cluster   = local.cluster
 }
 
 # Create a deployment using the priority class
 resource "k8sconnect_object" "priority_deployment" {
-  yaml_body          = <<-YAML
+  yaml_body = <<-YAML
     apiVersion: apps/v1
     kind: Deployment
     metadata:
@@ -829,7 +829,7 @@ resource "k8sconnect_object" "priority_deployment" {
                 memory: "32Mi"
                 cpu: "50m"
   YAML
-  cluster = local.cluster
+  cluster   = local.cluster
   depends_on = [
     k8sconnect_object.namespace,
     k8sconnect_object.high_priority
@@ -841,7 +841,7 @@ resource "k8sconnect_object" "priority_deployment" {
 #############################################
 
 resource "k8sconnect_object" "web_hpa" {
-  yaml_body          = <<-YAML
+  yaml_body  = <<-YAML
     apiVersion: autoscaling/v2
     kind: HorizontalPodAutoscaler
     metadata:
@@ -862,8 +862,8 @@ resource "k8sconnect_object" "web_hpa" {
             type: Utilization
             averageUtilization: 80
   YAML
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.web_deployment]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.web_deployment]
   ignore_fields = [
     "spec.replicas" # HPA will manage this
   ]
@@ -876,7 +876,7 @@ resource "k8sconnect_object" "web_hpa" {
 # Note: EndpointSlices are typically auto-created by K8s from Services,
 # but we can create custom ones for testing
 resource "k8sconnect_object" "custom_endpoints" {
-  yaml_body          = <<-YAML
+  yaml_body  = <<-YAML
     apiVersion: v1
     kind: Endpoints
     metadata:
@@ -889,13 +889,13 @@ resource "k8sconnect_object" "custom_endpoints" {
       - port: 80
         protocol: TCP
   YAML
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.namespace]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace]
 }
 
 # Service for the custom endpoints
 resource "k8sconnect_object" "external_service" {
-  yaml_body          = <<-YAML
+  yaml_body  = <<-YAML
     apiVersion: v1
     kind: Service
     metadata:
@@ -908,8 +908,8 @@ resource "k8sconnect_object" "external_service" {
         targetPort: 80
         protocol: TCP
   YAML
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.namespace]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.namespace]
 }
 
 #############################################
@@ -1063,8 +1063,8 @@ resource "k8sconnect_patch" "deployment_strategic" {
       replicas = 2 # Scale up from 1 to 2
     }
   })
-  cluster = local.cluster
-  depends_on         = [null_resource.external_deployment_strategic]
+  cluster    = local.cluster
+  depends_on = [null_resource.external_deployment_strategic]
 }
 
 # Test 2: JSON Patch on External ConfigMap
@@ -1087,8 +1087,8 @@ resource "k8sconnect_patch" "configmap_json" {
       value = "3600"
     }
   ])
-  cluster = local.cluster
-  depends_on         = [null_resource.external_configmap]
+  cluster    = local.cluster
+  depends_on = [null_resource.external_configmap]
 }
 
 # Test 3: Merge Patch on External Service
@@ -1108,8 +1108,8 @@ resource "k8sconnect_patch" "service_merge" {
       }
     }
   })
-  cluster = local.cluster
-  depends_on         = [null_resource.external_service]
+  cluster    = local.cluster
+  depends_on = [null_resource.external_service]
 }
 
 # Test 4: Patch on external-app Deployment (already existed)
@@ -1128,8 +1128,8 @@ resource "k8sconnect_patch" "external_deployment_patch" {
       }
     }
   })
-  cluster = local.cluster
-  depends_on         = [k8sconnect_wait.external_app_rollout]
+  cluster    = local.cluster
+  depends_on = [k8sconnect_wait.external_app_rollout]
 }
 
 #############################################
@@ -1199,8 +1199,8 @@ resource "k8sconnect_wait" "external_app_rollout" {
     rollout = true
     timeout = "120s"
   }
-  cluster = local.cluster
-  depends_on         = [null_resource.external_deployment]
+  cluster    = local.cluster
+  depends_on = [null_resource.external_deployment]
 }
 
 #############################################
@@ -1209,49 +1209,49 @@ resource "k8sconnect_wait" "external_app_rollout" {
 
 # Read back a deployed resource using object datasource
 data "k8sconnect_object" "namespace_info" {
-  api_version        = "v1"
-  kind               = "Namespace"
-  name               = "kind-validation"
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.namespace]
+  api_version = "v1"
+  kind        = "Namespace"
+  name        = "kind-validation"
+  cluster     = local.cluster
+  depends_on  = [k8sconnect_object.namespace]
 }
 
 # Read the ConfigMap we manage to verify it exists
 data "k8sconnect_object" "app_config" {
-  api_version        = "v1"
-  kind               = "ConfigMap"
-  name               = "app-config"
-  namespace          = "kind-validation"
-  cluster = local.cluster
-  depends_on         = [k8sconnect_object.split_resources]
+  api_version = "v1"
+  kind        = "ConfigMap"
+  name        = "app-config"
+  namespace   = "kind-validation"
+  cluster     = local.cluster
+  depends_on  = [k8sconnect_object.split_resources]
 }
 
 # Read back patched external resources to verify patches were applied
 data "k8sconnect_object" "external_config_patched" {
-  api_version        = "v1"
-  kind               = "ConfigMap"
-  name               = "external-config"
-  namespace          = "kind-validation"
-  cluster = local.cluster
-  depends_on         = [k8sconnect_patch.configmap_json]
+  api_version = "v1"
+  kind        = "ConfigMap"
+  name        = "external-config"
+  namespace   = "kind-validation"
+  cluster     = local.cluster
+  depends_on  = [k8sconnect_patch.configmap_json]
 }
 
 data "k8sconnect_object" "external_service_patched" {
-  api_version        = "v1"
-  kind               = "Service"
-  name               = "external-service-patch-test"
-  namespace          = "kind-validation"
-  cluster = local.cluster
-  depends_on         = [k8sconnect_patch.service_merge]
+  api_version = "v1"
+  kind        = "Service"
+  name        = "external-service-patch-test"
+  namespace   = "kind-validation"
+  cluster     = local.cluster
+  depends_on  = [k8sconnect_patch.service_merge]
 }
 
 data "k8sconnect_object" "external_deployment_patched" {
-  api_version        = "apps/v1"
-  kind               = "Deployment"
-  name               = "external-deployment-strategic"
-  namespace          = "kind-validation"
-  cluster = local.cluster
-  depends_on         = [k8sconnect_patch.deployment_strategic]
+  api_version = "apps/v1"
+  kind        = "Deployment"
+  name        = "external-deployment-strategic"
+  namespace   = "kind-validation"
+  cluster     = local.cluster
+  depends_on  = [k8sconnect_patch.deployment_strategic]
 }
 
 #############################################

@@ -153,7 +153,7 @@ resource "k8sconnect_helm_release" "cilium" {
   # THE KEY DIFFERENCE: Inline cluster config
   cluster = {
     host                   = aws_eks_cluster.main.endpoint  # Can reference being created!
-    cluster_ca_certificate = base64encode(aws_eks_cluster.main.certificate_authority[0].data)
+    cluster_ca_certificate = aws_eks_cluster.main.certificate_authority[0].data
     token                  = data.aws_eks_cluster_auth.main.token
   }
 

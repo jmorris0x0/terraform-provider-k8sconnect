@@ -29,9 +29,9 @@ resource "kind_cluster" "test" {
 locals {
   cluster = {
     host                   = kind_cluster.test.endpoint
-    cluster_ca_certificate = base64encode(kind_cluster.test.cluster_ca_certificate)
-    client_certificate     = base64encode(kind_cluster.test.client_certificate)
-    client_key             = base64encode(kind_cluster.test.client_key)
+    cluster_ca_certificate = kind_cluster.test.cluster_ca_certificate
+    client_certificate     = kind_cluster.test.client_certificate
+    client_key             = kind_cluster.test.client_key
   }
 }
 
@@ -43,12 +43,12 @@ resource "k8sconnect_object" "test_namespace" {
     metadata:
       name: identity-test
   YAML
-  cluster = local.cluster
+  cluster   = local.cluster
 }
 
 # Test resource for identity changes
 resource "k8sconnect_object" "test_configmap" {
-  yaml_body = <<-YAML
+  yaml_body  = <<-YAML
     apiVersion: v1
     kind: ConfigMap
     metadata:
@@ -57,13 +57,13 @@ resource "k8sconnect_object" "test_configmap" {
     data:
       foo: bar
   YAML
-  cluster = local.cluster
+  cluster    = local.cluster
   depends_on = [k8sconnect_object.test_namespace]
 }
 
 # Test resource for immutable field changes
 resource "k8sconnect_object" "test_service" {
-  yaml_body = <<-YAML
+  yaml_body  = <<-YAML
     apiVersion: v1
     kind: Service
     metadata:
@@ -78,18 +78,18 @@ resource "k8sconnect_object" "test_service" {
       - port: 80
         targetPort: 8080
   YAML
-  cluster = local.cluster
+  cluster    = local.cluster
   depends_on = [k8sconnect_object.test_namespace]
 }
 
 # Test reading external resource (alternative to import)
 data "k8sconnect_object" "import_test_read" {
   api_version = "v1"
-  kind = "ConfigMap"
-  name = "external-import-test"
-  namespace = "identity-test"
-  cluster = local.cluster
-  depends_on = [k8sconnect_object.test_namespace]
+  kind        = "ConfigMap"
+  name        = "external-import-test"
+  namespace   = "identity-test"
+  cluster     = local.cluster
+  depends_on  = [k8sconnect_object.test_namespace]
 }
 
 output "external_resource_data" {
