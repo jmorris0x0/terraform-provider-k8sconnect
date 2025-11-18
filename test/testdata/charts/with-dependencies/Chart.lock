@@ -1,0 +1,6 @@
+dependencies:
+- name: simple-test
+  repository: file://../simple-test
+  version: 0.1.0
+digest: sha256:47776f4c4b9c5b0b17cc804ae51eb9016064861626c4dfdab8b1a53bb2b84568
+generated: "2025-11-16T19:06:06.957916-08:00"

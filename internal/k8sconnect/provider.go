@@ -14,6 +14,7 @@ import (
 	objectds "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/datasource/object"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/datasource/yaml_scoped"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/datasource/yaml_split"
+	helmreleaseres "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/resource/helm_release"
 	objectres "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/resource/object"
 	patchres "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/resource/patch"
 	waitres "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/resource/wait"
@@ -88,6 +89,7 @@ func (p *k8sconnectProvider) Resources(ctx context.Context) []func() resource.Re
 				return p.clientFactory.GetClient(conn)
 			})
 		},
+		helmreleaseres.NewHelmReleaseResource,
 	}
 }
 

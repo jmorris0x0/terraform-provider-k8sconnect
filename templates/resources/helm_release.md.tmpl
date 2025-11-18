@@ -1,0 +1,250 @@
+---
+page_title: "{{.Type}} {{.Name}} - {{.ProviderName}}"
+subcategory: ""
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{.Type}}: {{.Name}}
+
+{{ .Description | trimspace }}
+
+## Example Usage - Bootstrap Cluster with Cilium
+
+Single terraform apply to create cluster and install CNI:
+
+```terraform
+provider "k8sconnect" {}
+
+resource "aws_eks_cluster" "main" {
+  name = "my-cluster"
+  # ... cluster configuration
+}
+
+resource "aws_eks_node_group" "main" {
+  cluster_name = aws_eks_cluster.main.name
+  # ... node group configuration
+}
+
+# Install Cilium CNI immediately - no waiting for provider configuration
+resource "k8sconnect_helm_release" "cilium" {
+  name       = "cilium"
+  namespace  = "kube-system"
+  repository = "https://helm.cilium.io/"
+  chart      = "cilium"
+  version    = "1.15.5"
+
+  cluster = {
+    host                   = aws_eks_cluster.main.endpoint
+    cluster_ca_certificate = aws_eks_cluster.main.certificate_authority[0].data
+    exec = {
+      api_version = "client.authentication.k8s.io/v1"
+      command     = "aws"
+      args        = ["eks", "get-token", "--cluster-name", aws_eks_cluster.main.name]
+    }
+  }
+
+  values = file("${path.module}/cilium-values.yaml")
+
+  set = [
+    {
+      name  = "ipam.mode"
+      value = "kubernetes"
+    }
+  ]
+
+  create_namespace = true
+  wait             = true
+  atomic           = true
+
+  depends_on = [aws_eks_node_group.main]
+}
+```
+
+## Example Usage - Install from OCI Registry
+
+```terraform
+resource "k8sconnect_helm_release" "cert_manager" {
+  name       = "cert-manager"
+  namespace  = "cert-manager"
+  repository = "oci://registry.example.com/charts"
+  chart      = "cert-manager"
+  version    = "v1.14.0"
+
+  repository_username = var.oci_username
+  repository_password = var.oci_password
+
+  cluster            = local.cluster_connection
+  create_namespace   = true
+  wait               = true
+}
+```
+
+## Example Usage - Local Chart with Dependencies
+
+```terraform
+resource "k8sconnect_helm_release" "app" {
+  name      = "my-app"
+  namespace = "default"
+  chart     = "./charts/my-app"  # Local path
+
+  dependency_update = true  # Download chart dependencies
+
+  values = file("${path.module}/values.yaml")
+
+  set_sensitive = [
+    {
+      name  = "database.password"
+      value = var.db_password
+    }
+  ]
+
+  cluster = local.cluster_connection
+}
+```
+
+## Example Usage - Multi-Cluster Deployment
+
+Deploy the same release to multiple clusters:
+
+```terraform
+locals {
+  release_config = {
+    name       = "nginx-ingress"
+    namespace  = "ingress-nginx"
+    repository = "https://kubernetes.github.io/ingress-nginx"
+    chart      = "ingress-nginx"
+    version    = "4.10.0"
+  }
+}
+
+resource "k8sconnect_helm_release" "prod" {
+  name       = local.release_config.name
+  namespace  = local.release_config.namespace
+  repository = local.release_config.repository
+  chart      = local.release_config.chart
+  version    = local.release_config.version
+
+  cluster = local.prod_connection
+  wait    = true
+}
+
+resource "k8sconnect_helm_release" "staging" {
+  name       = local.release_config.name
+  namespace  = local.release_config.namespace
+  repository = local.release_config.repository
+  chart      = local.release_config.chart
+  version    = local.release_config.version
+
+  cluster = local.staging_connection
+  wait    = true
+}
+```
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Import
+
+Import existing Helm releases into Terraform management.
+
+### Import Format
+
+```
+context:namespace:release-name
+```
+
+Or for releases in the default namespace:
+
+```
+context:release-name
+```
+
+### Prerequisites
+
+Set the `KUBECONFIG` environment variable:
+
+```shell
+export KUBECONFIG=~/.kube/config
+```
+
+### Import Examples
+
+```shell
+# Import from specific namespace
+terraform import k8sconnect_helm_release.cilium "prod:kube-system:cilium"
+
+# Import from default namespace
+terraform import k8sconnect_helm_release.app "prod:my-app"
+
+# Verify import
+terraform plan
+```
+
+### After Import
+
+The import will populate:
+- `chart` - Chart name from the release
+- `version` - Chart version
+- `revision` - Current release revision
+- Computed fields (manifest, status, metadata)
+
+You must add to your configuration:
+- `repository` - The Helm repository URL
+- `cluster` - Connection configuration
+- `values` - Any custom values (check with `helm get values <release> -n <namespace>`)
+
+### Complete Import Example
+
+```hcl
+# 1. Run import
+# export KUBECONFIG=~/.kube/config
+# terraform import k8sconnect_helm_release.imported prod:default:my-app
+
+# 2. Add resource configuration based on import output
+resource "k8sconnect_helm_release" "imported" {
+  name       = "my-app"
+  namespace  = "default"
+  repository = "https://charts.example.com"  # Add this
+  chart      = "my-app"                       # Populated by import
+  version    = "1.2.3"                        # Populated by import
+
+  # Add custom values
+  values = file("${path.module}/values.yaml")
+
+  cluster = {
+    kubeconfig = file("~/.kube/config")
+    context    = "prod"
+  }
+}
+
+# 3. Run plan to verify
+# terraform plan  # Should show minimal or no changes
+```
+
+### Troubleshooting Import
+
+**Release not found:**
+
+Verify the release exists:
+
+```shell
+helm list -n <namespace> --kube-context <context>
+```
+
+**Context not found:**
+
+Check available contexts:
+
+```shell
+kubectl config get-contexts
+```
+
+**After import, plan shows changes:**
+
+Check the current values:
+
+```shell
+helm get values <release> -n <namespace>
+```
+
+Compare with your `values` configuration and adjust accordingly.

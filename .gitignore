@@ -49,6 +49,9 @@ test/oidc-setup/ssl/
 bin/
 scenarios/*/*-config
 
+# Helm chart dependencies (downloaded)
+test/testdata/charts/*/charts/
+
 # Build
 dist/
 

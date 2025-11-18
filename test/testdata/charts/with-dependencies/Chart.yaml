@@ -1,0 +1,11 @@
+apiVersion: v2
+name: with-dependencies
+description: A chart with local dependencies for testing dependency_update
+type: application
+version: 0.1.0
+appVersion: "1.0"
+
+dependencies:
+  - name: simple-test
+    version: "0.1.0"
+    repository: "file://../simple-test"

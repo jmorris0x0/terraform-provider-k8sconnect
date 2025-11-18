@@ -1,0 +1,6 @@
+apiVersion: v2
+name: simple-test
+description: A minimal test chart with no container images
+type: application
+version: 0.1.0
+appVersion: "1.0"

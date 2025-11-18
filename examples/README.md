@@ -5,6 +5,9 @@ Working examples showing k8sconnect provider usage patterns.
 ## Basic Resources
 - [`basic-deployment/`](basic-deployment/) - Simple namespace and deployment
 
+## Helm Release
+- [`helm-release-nginx/`](helm-release-nginx/) - Deploy Helm charts with inline cluster configuration
+
 ## Wait For Feature
 
 The `wait_for` block supports four strategies. **Only `field` waits populate `.result` for resource chaining.**
