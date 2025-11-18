@@ -483,6 +483,7 @@ func TestAccHelmReleaseResource_Import(t *testing.T) {
 				ImportStateId:     fmt.Sprintf("k3d-k8sconnect-test:%s:%s", namespace, releaseName),
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
+					"id",                // Random ID generated on create/import
 					"cluster",           // Cluster config not in helm state
 					"wait",              // Runtime config
 					"timeout",           // Runtime config

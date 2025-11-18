@@ -759,6 +759,55 @@ resource "k8sconnect_helm_release" "test" {
 `)
 }
 
+func testAccHelmReleaseConfigUnknownRepository(releaseName, namespace string) string {
+	return fmt.Sprintf(`
+variable "kubeconfig" {
+  type = string
+}
+variable "release_name" {
+  type = string
+}
+variable "namespace" {
+  type = string
+}
+
+provider "k8sconnect" {}
+
+# ConfigMap stores repository URL (unknown at plan time)
+resource "k8sconnect_object" "repo_source" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: repo-url
+  namespace: ${var.namespace}
+data:
+  url: "https://charts.bitnami.com/bitnami"
+YAML
+
+  cluster = {
+    kubeconfig = var.kubeconfig
+  }
+}
+
+resource "k8sconnect_helm_release" "test" {
+  depends_on = [k8sconnect_object.repo_source]
+
+  name       = var.release_name
+  namespace  = var.namespace
+  chart      = "nginx"
+  repository = k8sconnect_object.repo_source.managed_state_projection["data.url"]
+
+  cluster = {
+    kubeconfig = var.kubeconfig
+  }
+
+  wait    = true
+  timeout = "300s"
+}
+`)
+}
+
 func testAccBothResourcesBootstrap(releaseName, objectName, namespace string) string {
 	chartPath := "../../../../test/testdata/charts/simple-test"
 	return fmt.Sprintf(`
