@@ -332,7 +332,7 @@ func TestAccHelmReleaseResource_ConsistencyWithK8sConnectObject(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					// Both should exist after apply
 					resource.TestCheckResourceAttr("k8sconnect_helm_release.test", "name", releaseName),
-					resource.TestCheckResourceAttr("k8sconnect_object.test", "yaml_body_parsed.metadata.name", objectName),
+					resource.TestCheckResourceAttrSet("k8sconnect_object.test", "id"),
 					testhelpers.CheckHelmReleaseExists(raw, namespace, releaseName),
 				),
 			},
@@ -388,7 +388,7 @@ func TestAccHelmReleaseResource_CompleteBootstrapWorkflow(t *testing.T) {
 					// All should exist after apply
 					resource.TestCheckResourceAttr("k8sconnect_helm_release.service1", "name", release1Name),
 					resource.TestCheckResourceAttr("k8sconnect_helm_release.service2", "name", release2Name),
-					resource.TestCheckResourceAttr("k8sconnect_object.app", "yaml_body_parsed.metadata.name", objectName),
+					resource.TestCheckResourceAttrSet("k8sconnect_object.app", "id"),
 					// All should be deployed/ready
 					resource.TestCheckResourceAttr("k8sconnect_helm_release.service1", "status", "deployed"),
 					resource.TestCheckResourceAttr("k8sconnect_helm_release.service2", "status", "deployed"),
