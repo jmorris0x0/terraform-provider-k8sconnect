@@ -22,9 +22,16 @@ import (
 func TestAccHelmReleaseResource_BootstrapWithUnknownCluster(t *testing.T) {
 	t.Parallel()
 
-	clusterName := fmt.Sprintf("test-bootstrap-%d", time.Now().UnixNano()%1000000)
-	releaseName := fmt.Sprintf("test-release-%d", time.Now().UnixNano()%1000000)
-	namespace := "default"
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	releaseName := fmt.Sprintf("test-bootstrap-%d", time.Now().UnixNano()%1000000)
+	namespace := fmt.Sprintf("helm-test-%d", time.Now().UnixNano()%1000000)
+
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+	testhelpers.CreateNamespaceDirectly(t, k8sClient, namespace)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -32,12 +39,12 @@ func TestAccHelmReleaseResource_BootstrapWithUnknownCluster(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				// Cluster + Helm release in same apply
-				// Cluster endpoint/certs are unknown at plan time
-				Config: testAccHelmReleaseConfigBootstrap(clusterName, releaseName, namespace),
+				// Helm release with unknown connection values at plan time
+				Config: testAccHelmReleaseConfigBootstrap(releaseName, namespace),
 				ConfigVariables: config.Variables{
-					"cluster_name": config.StringVariable(clusterName),
+					"kubeconfig":   config.StringVariable(raw),
 					"release_name": config.StringVariable(releaseName),
+					"namespace":    config.StringVariable(namespace),
 				},
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
@@ -54,9 +61,11 @@ func TestAccHelmReleaseResource_BootstrapWithUnknownCluster(t *testing.T) {
 					resource.TestCheckResourceAttr("k8sconnect_helm_release.test", "status", "deployed"),
 					resource.TestCheckResourceAttrSet("k8sconnect_helm_release.test", "id"),
 					resource.TestCheckResourceAttrSet("k8sconnect_helm_release.test", "revision"),
+					testhelpers.CheckHelmReleaseExists(raw, namespace, releaseName),
 				),
 			},
 		},
+		CheckDestroy: testhelpers.CheckHelmReleaseDestroy(raw, namespace, releaseName),
 	})
 }
 
@@ -106,14 +115,48 @@ func TestAccHelmReleaseResource_UnknownChartVersion(t *testing.T) {
 }
 
 // TestAccHelmReleaseResource_UnknownRepository tests unknown repository URL handling
-// For this test, we simulate an unknown repository URL using a local chart path from null_resource
+// For this test, we simulate an unknown repository URL using a local chart path from ConfigMap
 // In real scenarios, this would be an OCI registry URL from ECR/ACR, but for testing we use local charts
 func TestAccHelmReleaseResource_UnknownRepository(t *testing.T) {
-	// This test is redundant with UnknownChartVersion above
-	// In practice, repository + chart are used together for remote charts
-	// For local charts (what we test with), the path is what matters
-	// The UnknownChartVersion test already covers this scenario
-	t.Skip("Covered by UnknownChartVersion test - repository is for remote charts only")
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	releaseName := fmt.Sprintf("test-unknown-repo-%d", time.Now().UnixNano()%1000000)
+	namespace := fmt.Sprintf("helm-test-%d", time.Now().UnixNano()%1000000)
+
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+	testhelpers.CreateNamespaceDirectly(t, k8sClient, namespace)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			{
+				// Repository URL comes from ConfigMap (unknown at plan)
+				Config: testAccHelmReleaseConfigUnknownRepository(releaseName, namespace),
+				ConfigVariables: config.Variables{
+					"kubeconfig":   config.StringVariable(raw),
+					"release_name": config.StringVariable(releaseName),
+					"namespace":    config.StringVariable(namespace),
+				},
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectNonEmptyPlan(),
+					},
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("k8sconnect_helm_release.test", "name", releaseName),
+					testhelpers.CheckHelmReleaseExists(raw, namespace, releaseName),
+				),
+			},
+		},
+		CheckDestroy: testhelpers.CheckHelmReleaseDestroy(raw, namespace, releaseName),
+	})
 }
 
 // TestAccHelmReleaseResource_UnknownValuesInYAML tests unknown interpolations in values
@@ -252,10 +295,17 @@ func TestAccHelmReleaseResource_SensitiveUnknownValues(t *testing.T) {
 func TestAccHelmReleaseResource_ConsistencyWithK8sConnectObject(t *testing.T) {
 	t.Parallel()
 
-	clusterName := fmt.Sprintf("test-consistency-%d", time.Now().UnixNano()%1000000)
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
 	releaseName := fmt.Sprintf("test-release-%d", time.Now().UnixNano()%1000000)
 	objectName := fmt.Sprintf("test-cm-%d", time.Now().UnixNano()%1000000)
-	namespace := "default"
+	namespace := fmt.Sprintf("helm-test-%d", time.Now().UnixNano()%1000000)
+
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+	testhelpers.CreateNamespaceDirectly(t, k8sClient, namespace)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -263,12 +313,13 @@ func TestAccHelmReleaseResource_ConsistencyWithK8sConnectObject(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				// Both helm_release and object with unknown cluster
-				Config: testAccBothResourcesBootstrap(clusterName, releaseName, objectName, namespace),
+				// Both helm_release and object with unknown cluster values
+				Config: testAccBothResourcesBootstrap(releaseName, objectName, namespace),
 				ConfigVariables: config.Variables{
-					"cluster_name": config.StringVariable(clusterName),
+					"kubeconfig":   config.StringVariable(raw),
 					"release_name": config.StringVariable(releaseName),
 					"object_name":  config.StringVariable(objectName),
+					"namespace":    config.StringVariable(namespace),
 				},
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
@@ -282,9 +333,11 @@ func TestAccHelmReleaseResource_ConsistencyWithK8sConnectObject(t *testing.T) {
 					// Both should exist after apply
 					resource.TestCheckResourceAttr("k8sconnect_helm_release.test", "name", releaseName),
 					resource.TestCheckResourceAttr("k8sconnect_object.test", "yaml_body_parsed.metadata.name", objectName),
+					testhelpers.CheckHelmReleaseExists(raw, namespace, releaseName),
 				),
 			},
 		},
+		CheckDestroy: testhelpers.CheckHelmReleaseDestroy(raw, namespace, releaseName),
 	})
 }
 
@@ -294,11 +347,18 @@ func TestAccHelmReleaseResource_ConsistencyWithK8sConnectObject(t *testing.T) {
 func TestAccHelmReleaseResource_CompleteBootstrapWorkflow(t *testing.T) {
 	t.Parallel()
 
-	clusterName := fmt.Sprintf("test-full-boot-%d", time.Now().UnixNano()%1000000)
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
 	release1Name := fmt.Sprintf("test-svc1-%d", time.Now().UnixNano()%1000000)
 	release2Name := fmt.Sprintf("test-svc2-%d", time.Now().UnixNano()%1000000)
 	objectName := fmt.Sprintf("test-app-%d", time.Now().UnixNano()%1000000)
-	namespace := "default"
+	namespace := fmt.Sprintf("helm-test-%d", time.Now().UnixNano()%1000000)
+
+	k8sClient := testhelpers.CreateK8sClient(t, raw)
+	testhelpers.CreateNamespaceDirectly(t, k8sClient, namespace)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
@@ -306,14 +366,14 @@ func TestAccHelmReleaseResource_CompleteBootstrapWorkflow(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				// Complete bootstrap: cluster + 2 helm releases + 1 object
-				// All in single apply, all with unknown cluster values
-				Config: testAccCompleteBootstrapWorkflow(clusterName, release1Name, release2Name, objectName, namespace),
+				// Complete bootstrap: 2 helm releases + 1 object with unknown cluster values
+				Config: testAccCompleteBootstrapWorkflow(release1Name, release2Name, objectName, namespace),
 				ConfigVariables: config.Variables{
-					"cluster_name":  config.StringVariable(clusterName),
+					"kubeconfig":    config.StringVariable(raw),
 					"release1_name": config.StringVariable(release1Name),
 					"release2_name": config.StringVariable(release2Name),
 					"object_name":   config.StringVariable(objectName),
+					"namespace":     config.StringVariable(namespace),
 				},
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
@@ -332,9 +392,12 @@ func TestAccHelmReleaseResource_CompleteBootstrapWorkflow(t *testing.T) {
 					// All should be deployed/ready
 					resource.TestCheckResourceAttr("k8sconnect_helm_release.service1", "status", "deployed"),
 					resource.TestCheckResourceAttr("k8sconnect_helm_release.service2", "status", "deployed"),
+					testhelpers.CheckHelmReleaseExists(raw, namespace, release1Name),
+					testhelpers.CheckHelmReleaseExists(raw, namespace, release2Name),
 				),
 			},
 		},
+		CheckDestroy: testhelpers.CheckHelmReleaseDestroy(raw, namespace, release1Name),
 	})
 }
 
@@ -374,40 +437,61 @@ func TestAccHelmReleaseResource_UnknownChartPathError(t *testing.T) {
 
 // Helper config functions
 
-func testAccHelmReleaseConfigBootstrap(clusterName, releaseName, namespace string) string {
+func testAccHelmReleaseConfigBootstrap(releaseName, namespace string) string {
 	chartPath := "../../../../test/testdata/charts/simple-test"
 	return fmt.Sprintf(`
-variable "cluster_name" {
+variable "kubeconfig" {
   type = string
 }
 variable "release_name" {
   type = string
 }
+variable "namespace" {
+  type = string
+}
 
 provider "k8sconnect" {}
 
-# Cluster created in same apply - endpoint/certs unknown at plan time
-resource "kind_cluster" "test" {
-  name = var.cluster_name
-}
-
-# Helm release references unknown cluster values
-resource "k8sconnect_helm_release" "test" {
-  name      = var.release_name
-  namespace = "%s"
-  chart     = "%s"
+# Create ConfigMap to store simple value (simulates cluster creation)
+resource "k8sconnect_object" "connection_info" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: helm-conn-info
+  namespace: ${var.namespace}
+data:
+  connection_ready: "true"
+YAML
 
   cluster = {
-    host                   = kind_cluster.test.endpoint
-    cluster_ca_certificate = base64encode(kind_cluster.test.cluster_ca_certificate)
-    client_certificate     = base64encode(kind_cluster.test.client_certificate)
-    client_key             = base64encode(kind_cluster.test.client_key)
+    kubeconfig = var.kubeconfig
+  }
+}
+
+# Helm release with values referencing ConfigMap (unknown during initial plan)
+resource "k8sconnect_helm_release" "test" {
+  depends_on = [k8sconnect_object.connection_info]
+
+  name      = var.release_name
+  namespace = var.namespace
+  chart     = "%s"
+
+  # Values contains unknown interpolation from ConfigMap
+  # During initial plan, connection_info doesn't exist, so projection is unknown
+  values = <<-YAML
+    # Add a comment with unknown value to test bootstrap handling
+    bootstrapReady: ${k8sconnect_object.connection_info.managed_state_projection["data.connection_ready"]}
+  YAML
+
+  cluster = {
+    kubeconfig = var.kubeconfig
   }
 
   wait    = true
   timeout = "300s"
 }
-`, namespace, chartPath)
+`, chartPath)
 }
 
 func testAccHelmReleaseConfigUnknownValues(releaseName, namespace string) string {
@@ -425,20 +509,33 @@ variable "namespace" {
 
 provider "k8sconnect" {}
 
-# Random integer - unknown at plan time
-resource "random_integer" "replicas" {
-  min = 1
-  max = 5
+# Create ConfigMap storing a value (simulates value from another resource)
+resource "k8sconnect_object" "value_source" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: value-source
+  namespace: ${var.namespace}
+data:
+  replicas: "2"
+YAML
+
+  cluster = {
+    kubeconfig = var.kubeconfig
+  }
 }
 
 resource "k8sconnect_helm_release" "test" {
+  depends_on = [k8sconnect_object.value_source]
+
   name      = var.release_name
   namespace = var.namespace
   chart     = "%s"
 
-  # Values contains unknown interpolation
+  # Values contains unknown interpolation (projection unknown during initial plan)
   values = <<-YAML
-    replicaCount: ${random_integer.replicas.result}
+    replicaCount: ${k8sconnect_object.value_source.managed_state_projection["data.replicas"]}
   YAML
 
   cluster = {
@@ -466,22 +563,35 @@ variable "namespace" {
 
 provider "k8sconnect" {}
 
-# Random integer - unknown at plan time
-resource "random_integer" "replicas" {
-  min = 1
-  max = 5
+# Create ConfigMap storing a value
+resource "k8sconnect_object" "value_source" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: value-source
+  namespace: ${var.namespace}
+data:
+  replicas: "3"
+YAML
+
+  cluster = {
+    kubeconfig = var.kubeconfig
+  }
 }
 
 resource "k8sconnect_helm_release" "test" {
+  depends_on = [k8sconnect_object.value_source]
+
   name      = var.release_name
   namespace = var.namespace
   chart     = "%s"
 
-  # Set parameter with unknown value
+  # Set parameter with unknown value (projection unknown during initial plan)
   set = [
     {
       name  = "replicaCount"
-      value = tostring(random_integer.replicas.result)
+      value = k8sconnect_object.value_source.managed_state_projection["data.replicas"]
     }
   ]
 
@@ -510,22 +620,35 @@ variable "namespace" {
 
 provider "k8sconnect" {}
 
-# Random password - unknown at plan time, sensitive
-resource "random_password" "secret" {
-  length  = 16
-  special = false
+# Create ConfigMap storing sensitive value (simpler than Secret for testing)
+resource "k8sconnect_object" "secret_source" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: secret-source
+  namespace: ${var.namespace}
+data:
+  password: "test-password-123"
+YAML
+
+  cluster = {
+    kubeconfig = var.kubeconfig
+  }
 }
 
 resource "k8sconnect_helm_release" "test" {
+  depends_on = [k8sconnect_object.secret_source]
+
   name      = var.release_name
   namespace = var.namespace
   chart     = "%s"
 
-  # Sensitive unknown value
+  # Sensitive unknown value (projection unknown during initial plan)
   set_sensitive = [
     {
       name  = "secretPassword"
-      value = random_password.secret.result
+      value = k8sconnect_object.secret_source.managed_state_projection["data.password"]
     }
   ]
 
@@ -554,17 +677,29 @@ variable "namespace" {
 
 provider "k8sconnect" {}
 
-# Null resource outputs chart path (unknown at plan time)
-resource "null_resource" "chart_path" {
-  triggers = {
-    path = "%s"
+# ConfigMap stores chart path (unknown at plan time)
+resource "k8sconnect_object" "chart_path_source" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chart-path
+  namespace: ${var.namespace}
+data:
+  path: "%s"
+YAML
+
+  cluster = {
+    kubeconfig = var.kubeconfig
   }
 }
 
 resource "k8sconnect_helm_release" "test" {
+  depends_on = [k8sconnect_object.chart_path_source]
+
   name      = var.release_name
   namespace = var.namespace
-  chart     = null_resource.chart_path.triggers["path"]
+  chart     = k8sconnect_object.chart_path_source.managed_state_projection["data.path"]
 
   cluster = {
     kubeconfig = var.kubeconfig
@@ -590,17 +725,29 @@ variable "namespace" {
 
 provider "k8sconnect" {}
 
-# Null resource outputs invalid path (unknown at plan time)
-resource "null_resource" "chart_path" {
-  triggers = {
-    path = "/this/path/does/not/exist"
+# ConfigMap stores invalid path (unknown at plan time)
+resource "k8sconnect_object" "chart_path_source" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chart-path
+  namespace: ${var.namespace}
+data:
+  path: "/this/path/does/not/exist"
+YAML
+
+  cluster = {
+    kubeconfig = var.kubeconfig
   }
 }
 
 resource "k8sconnect_helm_release" "test" {
+  depends_on = [k8sconnect_object.chart_path_source]
+
   name      = var.release_name
   namespace = var.namespace
-  chart     = null_resource.chart_path.triggers["path"]
+  chart     = k8sconnect_object.chart_path_source.managed_state_projection["data.path"]
 
   cluster = {
     kubeconfig = var.kubeconfig
@@ -612,10 +759,10 @@ resource "k8sconnect_helm_release" "test" {
 `)
 }
 
-func testAccBothResourcesBootstrap(clusterName, releaseName, objectName, namespace string) string {
+func testAccBothResourcesBootstrap(releaseName, objectName, namespace string) string {
 	chartPath := "../../../../test/testdata/charts/simple-test"
 	return fmt.Sprintf(`
-variable "cluster_name" {
+variable "kubeconfig" {
   type = string
 }
 variable "release_name" {
@@ -624,57 +771,76 @@ variable "release_name" {
 variable "object_name" {
   type = string
 }
+variable "namespace" {
+  type = string
+}
 
 provider "k8sconnect" {}
 
-# Cluster created in same apply - endpoint/certs unknown at plan time
-resource "kind_cluster" "test" {
-  name = var.cluster_name
-}
-
-# Helm release with unknown cluster
-resource "k8sconnect_helm_release" "test" {
-  name      = var.release_name
-  namespace = "%s"
-  chart     = "%s"
+# Create ConfigMap to store simple value
+resource "k8sconnect_object" "connection_info" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: conn-info
+  namespace: ${var.namespace}
+data:
+  ready: "true"
+YAML
 
   cluster = {
-    host                   = kind_cluster.test.endpoint
-    cluster_ca_certificate = base64encode(kind_cluster.test.cluster_ca_certificate)
-    client_certificate     = base64encode(kind_cluster.test.client_certificate)
-    client_key             = base64encode(kind_cluster.test.client_key)
+    kubeconfig = var.kubeconfig
+  }
+}
+
+# Helm release with unknown value in values
+resource "k8sconnect_helm_release" "test" {
+  depends_on = [k8sconnect_object.connection_info]
+
+  name      = var.release_name
+  namespace = var.namespace
+  chart     = "%s"
+
+  # Values contains unknown interpolation
+  values = <<-YAML
+    bootstrapReady: ${k8sconnect_object.connection_info.managed_state_projection["data.ready"]}
+  YAML
+
+  cluster = {
+    kubeconfig = var.kubeconfig
   }
 
   wait    = true
   timeout = "300s"
 }
 
-# Object with same unknown cluster
+# Object that also uses unknown value via set_string (not inline YAML)
+# Can't use inline interpolation in yaml_body because it creates invalid YAML during plan
 resource "k8sconnect_object" "test" {
+  depends_on = [k8sconnect_object.connection_info, k8sconnect_helm_release.test]
+
   yaml_body = <<-YAML
     apiVersion: v1
     kind: ConfigMap
     metadata:
       name: ${var.object_name}
-      namespace: %s
+      namespace: ${var.namespace}
     data:
       foo: bar
   YAML
 
   cluster = {
-    host                   = kind_cluster.test.endpoint
-    cluster_ca_certificate = base64encode(kind_cluster.test.cluster_ca_certificate)
-    client_certificate     = base64encode(kind_cluster.test.client_certificate)
-    client_key             = base64encode(kind_cluster.test.client_key)
+    kubeconfig = var.kubeconfig
   }
 }
-`, namespace, chartPath, namespace)
+`, chartPath)
 }
 
-func testAccCompleteBootstrapWorkflow(clusterName, release1Name, release2Name, objectName, namespace string) string {
+func testAccCompleteBootstrapWorkflow(release1Name, release2Name, objectName, namespace string) string {
 	chartPath := "../../../../test/testdata/charts/simple-test"
 	return fmt.Sprintf(`
-variable "cluster_name" {
+variable "kubeconfig" {
   type = string
 }
 variable "release1_name" {
@@ -686,63 +852,89 @@ variable "release2_name" {
 variable "object_name" {
   type = string
 }
+variable "namespace" {
+  type = string
+}
 
 provider "k8sconnect" {}
 
-# Cluster created in same apply - endpoint/certs unknown at plan time
-resource "kind_cluster" "test" {
-  name = var.cluster_name
-}
+# Create ConfigMap to store simple value
+resource "k8sconnect_object" "connection_info" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: conn-info
+  namespace: ${var.namespace}
+data:
+  ready: "true"
+YAML
 
-locals {
-  cluster_config = {
-    host                   = kind_cluster.test.endpoint
-    cluster_ca_certificate = base64encode(kind_cluster.test.cluster_ca_certificate)
-    client_certificate     = base64encode(kind_cluster.test.client_certificate)
-    client_key             = base64encode(kind_cluster.test.client_key)
+  cluster = {
+    kubeconfig = var.kubeconfig
   }
 }
 
 # First foundation service (simulates CNI)
 resource "k8sconnect_helm_release" "service1" {
+  depends_on = [k8sconnect_object.connection_info]
+
   name      = var.release1_name
-  namespace = "%s"
+  namespace = var.namespace
   chart     = "%s"
 
-  cluster = local.cluster_config
+  # Values contains unknown interpolation
+  values = <<-YAML
+    bootstrapReady: ${k8sconnect_object.connection_info.managed_state_projection["data.ready"]}
+  YAML
+
+  cluster = {
+    kubeconfig = var.kubeconfig
+  }
+
   wait    = true
   timeout = "300s"
 }
 
 # Second foundation service (simulates cert-manager)
 resource "k8sconnect_helm_release" "service2" {
+  depends_on = [k8sconnect_helm_release.service1]
+
   name      = var.release2_name
-  namespace = "%s"
+  namespace = var.namespace
   chart     = "%s"
 
-  cluster = local.cluster_config
+  # Values contains unknown interpolation
+  values = <<-YAML
+    bootstrapReady: ${k8sconnect_object.connection_info.managed_state_projection["data.ready"]}
+  YAML
+
+  cluster = {
+    kubeconfig = var.kubeconfig
+  }
+
   wait    = true
   timeout = "300s"
-
-  depends_on = [k8sconnect_helm_release.service1]
 }
 
 # Application resource (simulates app using CRDs from services)
 resource "k8sconnect_object" "app" {
+  depends_on = [k8sconnect_helm_release.service2]
+
   yaml_body = <<-YAML
     apiVersion: v1
     kind: ConfigMap
     metadata:
       name: ${var.object_name}
-      namespace: %s
+      namespace: ${var.namespace}
     data:
       app: "production"
       version: "1.0.0"
   YAML
 
-  cluster = local.cluster_config
-
-  depends_on = [k8sconnect_helm_release.service2]
+  cluster = {
+    kubeconfig = var.kubeconfig
+  }
 }
-`, namespace, chartPath, namespace, chartPath, namespace)
+`, chartPath, chartPath)
 }

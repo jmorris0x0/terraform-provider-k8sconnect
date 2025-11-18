@@ -193,17 +193,19 @@ func TestAccHelmReleaseResource_ManualRollbackDetection(t *testing.T) {
 					},
 				),
 			},
-			// Re-apply should detect rollback and re-upgrade to revision 2
+			// Re-apply with a small change should trigger update after rollback
+			// Since Terraform doesn't auto-correct drift without input changes,
+			// we make a small change (add a label) to trigger the update
 			{
-				Config: testAccHelmReleaseConfigWithReplicas(releaseName, namespace, 2),
+				Config: testAccHelmReleaseConfigWithReplicasAndLabel(releaseName, namespace, 2, "drift-test"),
 				ConfigVariables: config.Variables{
 					"kubeconfig":   config.StringVariable(raw),
 					"release_name": config.StringVariable(releaseName),
 					"namespace":    config.StringVariable(namespace),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					// After Terraform corrects the drift, we should be back at revision 4
-					// (rev 1: initial, rev 2: upgrade, rev 3: manual rollback, rev 4: TF corrects)
+					// After Terraform applies the change, we should be at revision 4
+					// (rev 1: initial, rev 2: upgrade, rev 3: manual rollback, rev 4: TF update with new label)
 					resource.TestCheckResourceAttr("k8sconnect_helm_release.test", "revision", "4"),
 					testhelpers.CheckHelmReleaseExists(raw, namespace, releaseName),
 				),
@@ -445,40 +447,30 @@ func TestAccHelmReleaseResource_Import(t *testing.T) {
 
 	releaseName := fmt.Sprintf("test-import-%d", time.Now().UnixNano()%1000000)
 	namespace := fmt.Sprintf("helm-test-%d", time.Now().UnixNano()%1000000)
-	chartPath := "../../../../test/testdata/charts/simple-test"
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 	testhelpers.CreateNamespaceDirectly(t, k8sClient, namespace)
-
-	// Manually install helm release before test
-	tmpfile, err := os.CreateTemp("", "kubeconfig-*.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.Remove(tmpfile.Name())
-
-	if _, err := tmpfile.Write([]byte(raw)); err != nil {
-		t.Fatal(err)
-	}
-	tmpfile.Close()
-
-	cmd := exec.Command("helm", "install", releaseName, chartPath, "-n", namespace, "--kubeconfig", tmpfile.Name())
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("helm install failed: %v\nOutput: %s", err, output)
-	}
-
-	// Cleanup on test completion
-	defer func() {
-		cmd := exec.Command("helm", "uninstall", releaseName, "-n", namespace, "--kubeconfig", tmpfile.Name())
-		cmd.Run()
-	}()
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
 			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
 		},
 		Steps: []resource.TestStep{
-			// Import existing release
+			// Step 1: Create helm release with Terraform
+			{
+				Config: testAccHelmReleaseConfigBasic(releaseName, namespace),
+				ConfigVariables: config.Variables{
+					"kubeconfig":   config.StringVariable(raw),
+					"release_name": config.StringVariable(releaseName),
+					"namespace":    config.StringVariable(namespace),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("k8sconnect_helm_release.test", "name", releaseName),
+					resource.TestCheckResourceAttr("k8sconnect_helm_release.test", "namespace", namespace),
+					testhelpers.CheckHelmReleaseExists(raw, namespace, releaseName),
+				),
+			},
+			// Step 2: Import the helm release
 			{
 				Config: testAccHelmReleaseConfigBasic(releaseName, namespace),
 				ConfigVariables: config.Variables{
@@ -488,7 +480,7 @@ func TestAccHelmReleaseResource_Import(t *testing.T) {
 				},
 				ResourceName:      "k8sconnect_helm_release.test",
 				ImportState:       true,
-				ImportStateId:     fmt.Sprintf("kind-validation:%s:%s", namespace, releaseName),
+				ImportStateId:     fmt.Sprintf("k3d-k8sconnect-test:%s:%s", namespace, releaseName),
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
 					"cluster",           // Cluster config not in helm state
@@ -498,7 +490,7 @@ func TestAccHelmReleaseResource_Import(t *testing.T) {
 					"dependency_update", // Runtime config
 				},
 			},
-			// Verify no drift after import
+			// Step 3: Verify no drift after import
 			{
 				Config: testAccHelmReleaseConfigBasic(releaseName, namespace),
 				ConfigVariables: config.Variables{
@@ -509,6 +501,7 @@ func TestAccHelmReleaseResource_Import(t *testing.T) {
 				PlanOnly: true,
 			},
 		},
+		CheckDestroy: testhelpers.CheckHelmReleaseDestroy(raw, namespace, releaseName),
 	})
 }
 
@@ -816,6 +809,47 @@ resource "k8sconnect_helm_release" "test" {
   timeout = "300s"
 }
 `, chartPath, replicas)
+}
+
+func testAccHelmReleaseConfigWithReplicasAndLabel(releaseName, namespace string, replicas int, label string) string {
+	chartPath := "../../../../test/testdata/charts/simple-test"
+	return fmt.Sprintf(`
+variable "kubeconfig" {
+  type = string
+}
+variable "release_name" {
+  type = string
+}
+variable "namespace" {
+  type = string
+}
+
+provider "k8sconnect" {}
+
+resource "k8sconnect_helm_release" "test" {
+  name      = var.release_name
+  namespace = var.namespace
+  chart     = "%s"
+
+  set = [
+    {
+      name  = "replicaCount"
+      value = "%d"
+    },
+    {
+      name  = "testLabel"
+      value = "%s"
+    }
+  ]
+
+  cluster = {
+    kubeconfig = var.kubeconfig
+  }
+
+  wait    = true
+  timeout = "300s"
+}
+`, chartPath, replicas, label)
 }
 
 func testAccHelmReleaseConfigSensitive(releaseName, namespace, secretValue string) string {
