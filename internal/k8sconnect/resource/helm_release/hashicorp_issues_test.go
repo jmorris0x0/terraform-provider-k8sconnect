@@ -29,7 +29,7 @@ func TestAccHelmReleaseResource_StatePersistence(t *testing.T) {
 	}
 
 	releaseName := fmt.Sprintf("test-state-%d", time.Now().UnixNano()%1000000)
-	namespace := fmt.Sprintf("helm-test-%d", time.Now().UnixNano()%1000000)
+	namespace := fmt.Sprintf("helm-release-state-persistence-%d", time.Now().UnixNano()%1000000)
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 	testhelpers.CreateNamespaceDirectly(t, k8sClient, namespace)
@@ -95,7 +95,7 @@ func TestAccHelmReleaseResource_FailedReleaseNoStateUpdate(t *testing.T) {
 	}
 
 	releaseName := fmt.Sprintf("test-failed-%d", time.Now().UnixNano()%1000000)
-	namespace := fmt.Sprintf("helm-test-%d", time.Now().UnixNano()%1000000)
+	namespace := fmt.Sprintf("helm-release-failed-no-update-%d", time.Now().UnixNano()%1000000)
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 	testhelpers.CreateNamespaceDirectly(t, k8sClient, namespace)
@@ -139,7 +139,7 @@ func TestAccHelmReleaseResource_ManualRollbackDetection(t *testing.T) {
 	}
 
 	releaseName := fmt.Sprintf("test-rollback-%d", time.Now().UnixNano()%1000000)
-	namespace := fmt.Sprintf("helm-test-%d", time.Now().UnixNano()%1000000)
+	namespace := fmt.Sprintf("helm-release-manual-rollback-%d", time.Now().UnixNano()%1000000)
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 	testhelpers.CreateNamespaceDirectly(t, k8sClient, namespace)
@@ -226,7 +226,7 @@ func TestAccHelmReleaseResource_DaemonSetWait(t *testing.T) {
 	}
 
 	releaseName := fmt.Sprintf("test-ds-%d", time.Now().UnixNano()%1000000)
-	namespace := fmt.Sprintf("helm-test-%d", time.Now().UnixNano()%1000000)
+	namespace := fmt.Sprintf("helm-release-daemonset-wait-%d", time.Now().UnixNano()%1000000)
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 	testhelpers.CreateNamespaceDirectly(t, k8sClient, namespace)
@@ -320,7 +320,7 @@ func TestAccHelmReleaseResource_FirstDeployTimeout(t *testing.T) {
 	}
 
 	releaseName := fmt.Sprintf("test-timeout-%d", time.Now().UnixNano()%1000000)
-	namespace := fmt.Sprintf("helm-test-%d", time.Now().UnixNano()%1000000)
+	namespace := fmt.Sprintf("helm-release-first-timeout-%d", time.Now().UnixNano()%1000000)
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 	testhelpers.CreateNamespaceDirectly(t, k8sClient, namespace)
@@ -369,7 +369,7 @@ func TestAccHelmReleaseResource_TimeoutParameterRespected(t *testing.T) {
 	}
 
 	releaseName := fmt.Sprintf("test-timeout2-%d", time.Now().UnixNano()%1000000)
-	namespace := fmt.Sprintf("helm-test-%d", time.Now().UnixNano()%1000000)
+	namespace := fmt.Sprintf("helm-release-timeout-param-%d", time.Now().UnixNano()%1000000)
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 	testhelpers.CreateNamespaceDirectly(t, k8sClient, namespace)
@@ -404,7 +404,7 @@ func TestAccHelmReleaseResource_SensitiveValuesNotLeaked(t *testing.T) {
 	}
 
 	releaseName := fmt.Sprintf("test-sensitive-%d", time.Now().UnixNano()%1000000)
-	namespace := fmt.Sprintf("helm-test-%d", time.Now().UnixNano()%1000000)
+	namespace := fmt.Sprintf("helm-release-sensitive-no-leak-%d", time.Now().UnixNano()%1000000)
 	secretValue := "super-secret-password-123"
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
@@ -446,7 +446,7 @@ func TestAccHelmReleaseResource_Import(t *testing.T) {
 	}
 
 	releaseName := fmt.Sprintf("test-import-%d", time.Now().UnixNano()%1000000)
-	namespace := fmt.Sprintf("helm-test-%d", time.Now().UnixNano()%1000000)
+	namespace := fmt.Sprintf("helm-release-import-%d", time.Now().UnixNano()%1000000)
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 	testhelpers.CreateNamespaceDirectly(t, k8sClient, namespace)
@@ -510,7 +510,7 @@ func TestAccHelmReleaseResource_DependencyUpdate(t *testing.T) {
 	}
 
 	releaseName := fmt.Sprintf("test-dep-%d", time.Now().UnixNano()%1000000)
-	namespace := fmt.Sprintf("helm-test-%d", time.Now().UnixNano()%1000000)
+	namespace := fmt.Sprintf("helm-release-dependency-update-%d", time.Now().UnixNano()%1000000)
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 	testhelpers.CreateNamespaceDirectly(t, k8sClient, namespace)
@@ -601,7 +601,7 @@ func TestAccHelmReleaseResource_ValuesAndSetMixed(t *testing.T) {
 	}
 
 	releaseName := fmt.Sprintf("test-mixed-%d", time.Now().UnixNano()%1000000)
-	namespace := fmt.Sprintf("helm-test-%d", time.Now().UnixNano()%1000000)
+	namespace := fmt.Sprintf("helm-release-values-set-mixed-%d", time.Now().UnixNano()%1000000)
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 	testhelpers.CreateNamespaceDirectly(t, k8sClient, namespace)
@@ -653,7 +653,7 @@ func TestAccHelmReleaseResource_NoUnnecessaryRevisions(t *testing.T) {
 	}
 
 	releaseName := fmt.Sprintf("test-revisions-%d", time.Now().UnixNano()%1000000)
-	namespace := fmt.Sprintf("helm-test-%d", time.Now().UnixNano()%1000000)
+	namespace := fmt.Sprintf("helm-release-no-extra-revisions-%d", time.Now().UnixNano()%1000000)
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 	testhelpers.CreateNamespaceDirectly(t, k8sClient, namespace)

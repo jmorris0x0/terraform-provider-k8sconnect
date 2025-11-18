@@ -137,7 +137,7 @@ func (r *helmReleaseResource) Schema(ctx context.Context, req resource.SchemaReq
 			},
 			"version": schema.StringAttribute{
 				Optional:    true,
-				Description: "Chart version. Can include digest for OCI charts (e.g., '1.0.0@sha256:...'). If not specified, uses the latest version.",
+				Description: "Chart version. Can include digest for OCI charts (e.g., '1.0.0@sha256:...'). Required for OCI registries.",
 			},
 			"values": schema.StringAttribute{
 				Optional:    true,

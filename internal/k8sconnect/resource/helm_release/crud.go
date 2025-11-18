@@ -1,6 +1,7 @@
 package helm_release
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -690,6 +691,12 @@ func (r *helmReleaseResource) loadChart(ctx context.Context, cfg *action.Configu
 
 	// Case 2: Repository chart (HTTP/HTTPS or OCI)
 	repository := data.Repository.ValueString()
+	tflog.Debug(ctx, "Loading remote chart", map[string]interface{}{
+		"chart":      chartName,
+		"repository": repository,
+		"isNull":     data.Repository.IsNull(),
+		"isUnknown":  data.Repository.IsUnknown(),
+	})
 	if repository == "" {
 		return nil, fmt.Errorf("repository must be specified for remote charts")
 	}
@@ -795,6 +802,17 @@ func (r *helmReleaseResource) updateDependencies(ctx context.Context, chartPath 
 }
 
 func (r *helmReleaseResource) loadOCIChart(ctx context.Context, cfg *action.Configuration, chartName string, opts *action.ChartPathOptions, updateDeps bool) (*chart.Chart, error) {
+	tflog.Debug(ctx, "Loading OCI chart", map[string]interface{}{
+		"chartName": chartName,
+		"repoURL":   opts.RepoURL,
+		"version":   opts.Version,
+	})
+
+	// OCI registries require explicit version
+	if opts.Version == "" {
+		return nil, fmt.Errorf("version is required for OCI registry charts (repository: %s). Specify an explicit version in your Terraform configuration", opts.RepoURL)
+	}
+
 	// Setup OCI registry client
 	registryClient, err := registry.NewClient()
 	if err != nil {
@@ -808,36 +826,88 @@ func (r *helmReleaseResource) loadOCIChart(ctx context.Context, cfg *action.Conf
 		}
 	}
 
+	// Set registry client on config
 	cfg.RegistryClient = registryClient
 
-	// Pull chart from OCI registry
-	// Helm v4: NewPull still uses WithConfig pattern
-	pull := action.NewPull(action.WithConfig(cfg))
-	pull.Settings = cli.New()
-	if opts.Version != "" {
-		pull.Version = opts.Version
-	}
+	version := opts.Version
 
-	// Construct full OCI reference
-	chartRef := fmt.Sprintf("%s/%s", strings.TrimPrefix(opts.RepoURL, "oci://"), chartName)
+	// Pull chart using registry client
+	// Note: registry.Client.Pull() requires explicit version tag
+	registryPath := strings.TrimPrefix(opts.RepoURL, "oci://")
+	chartRef := fmt.Sprintf("%s/%s:%s", registryPath, chartName, version)
 
-	output, err := pull.Run(chartRef)
+	tflog.Debug(ctx, "Pulling OCI chart", map[string]interface{}{
+		"chartRef": chartRef,
+	})
+
+	// Pull chart data
+	pullResult, err := registryClient.Pull(chartRef,
+		registry.PullOptWithChart(true),
+		registry.PullOptIgnoreMissingProv(true),
+	)
 	if err != nil {
+		tflog.Error(ctx, "Failed to pull OCI chart", map[string]interface{}{
+			"error":    err.Error(),
+			"chartRef": chartRef,
+		})
 		return nil, fmt.Errorf("failed to pull OCI chart: %w", err)
 	}
 
-	// Update dependencies if requested
+	tflog.Debug(ctx, "OCI chart pulled successfully", map[string]interface{}{
+		"size":   pullResult.Chart.Size,
+		"digest": pullResult.Chart.Digest,
+	})
+
+	// Load chart from archive data
+	chart, err := loader.LoadArchive(bytes.NewReader(pullResult.Chart.Data))
+	if err != nil {
+		return nil, fmt.Errorf("failed to load OCI chart archive: %w", err)
+	}
+
+	// Handle dependency updates if requested
 	if updateDeps {
-		if err := r.updateDependencies(ctx, output); err != nil {
+		// Save chart to temp file for dependency processing
+		tempDir, err := os.MkdirTemp("", "helm-chart-*")
+		if err != nil {
+			return nil, fmt.Errorf("failed to create temp directory: %w", err)
+		}
+		defer os.RemoveAll(tempDir)
+
+		chartPath := filepath.Join(tempDir, fmt.Sprintf("%s-%s.tgz", chartName, version))
+		if err := os.WriteFile(chartPath, pullResult.Chart.Data, 0644); err != nil {
+			return nil, fmt.Errorf("failed to write chart archive: %w", err)
+		}
+
+		// Update dependencies
+		if err := r.updateDependencies(ctx, chartPath); err != nil {
 			return nil, err
+		}
+
+		// Reload chart after dependency update
+		chart, err = loader.Load(chartPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to reload chart after dependency update: %w", err)
 		}
 	}
 
-	// Load the pulled chart (with dependencies if updated)
-	return loader.Load(output)
+	return chart, nil
 }
 
 func (r *helmReleaseResource) loadRepoChart(ctx context.Context, cfg *action.Configuration, chartName string, opts *action.ChartPathOptions, updateDeps bool) (*chart.Chart, error) {
+	tflog.Debug(ctx, "Loading chart from HTTP/HTTPS repository", map[string]interface{}{
+		"chartName": chartName,
+		"repoURL":   opts.RepoURL,
+		"version":   opts.Version,
+	})
+
+	// Setup OCI registry client for hybrid repos (e.g., Bitnami moved to OCI in Nov 2024)
+	// Even if the repository uses HTTP/HTTPS index, chart downloads may require OCI
+	registryClient, err := registry.NewClient()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create registry client: %w", err)
+	}
+	cfg.RegistryClient = registryClient
+
 	// Add repository
 	chartRepo, err := repo.NewChartRepository(&repo.Entry{
 		Name:     "temp-repo",
@@ -853,18 +923,34 @@ func (r *helmReleaseResource) loadRepoChart(ctx context.Context, cfg *action.Con
 	}
 
 	// Download index
+	tflog.Debug(ctx, "Downloading repository index", map[string]interface{}{"repoURL": opts.RepoURL})
 	if _, err := chartRepo.DownloadIndexFile(); err != nil {
 		return nil, fmt.Errorf("failed to download repository index: %w", err)
 	}
 
+	// Create settings with registry client support for OCI-backed repos
+	settings := cli.New()
+
 	// Use ChartPathOptions to locate and download chart
+	// Note: For OCI-backed HTTP repos (like Bitnami post-Nov 2024), LocateChart
+	// will detect the OCI reference and use the registry client from cfg
 	client := action.NewInstall(cfg)
 	client.ChartPathOptions = *opts
 
-	chartPath, err := client.ChartPathOptions.LocateChart(chartName, cli.New())
+	tflog.Debug(ctx, "Locating chart in repository", map[string]interface{}{
+		"chartName": chartName,
+		"repoURL":   opts.RepoURL,
+	})
+	chartPath, err := client.ChartPathOptions.LocateChart(chartName, settings)
 	if err != nil {
+		tflog.Error(ctx, "Failed to locate chart", map[string]interface{}{
+			"error":     err.Error(),
+			"chartName": chartName,
+			"repoURL":   opts.RepoURL,
+		})
 		return nil, fmt.Errorf("failed to locate chart: %w", err)
 	}
+	tflog.Debug(ctx, "Chart located successfully", map[string]interface{}{"chartPath": chartPath})
 
 	// Update dependencies if requested
 	if updateDeps {

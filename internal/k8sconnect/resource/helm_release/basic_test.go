@@ -24,7 +24,7 @@ func TestAccHelmReleaseResource_Basic(t *testing.T) {
 	}
 
 	releaseName := fmt.Sprintf("test-release-%d", time.Now().UnixNano()%1000000)
-	namespace := fmt.Sprintf("helm-test-%d", time.Now().UnixNano()%1000000)
+	namespace := fmt.Sprintf("helm-test-basic-%d", time.Now().UnixNano()%1000000)
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 

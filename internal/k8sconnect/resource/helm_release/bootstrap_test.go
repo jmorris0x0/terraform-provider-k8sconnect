@@ -28,7 +28,7 @@ func TestAccHelmReleaseResource_BootstrapWithUnknownCluster(t *testing.T) {
 	}
 
 	releaseName := fmt.Sprintf("test-bootstrap-%d", time.Now().UnixNano()%1000000)
-	namespace := fmt.Sprintf("helm-test-%d", time.Now().UnixNano()%1000000)
+	namespace := fmt.Sprintf("helm-release-bootstrap-unknown-cluster-%d", time.Now().UnixNano()%1000000)
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 	testhelpers.CreateNamespaceDirectly(t, k8sClient, namespace)
@@ -81,7 +81,7 @@ func TestAccHelmReleaseResource_UnknownChartVersion(t *testing.T) {
 	}
 
 	releaseName := fmt.Sprintf("test-ver-%d", time.Now().UnixNano()%1000000)
-	namespace := fmt.Sprintf("helm-test-%d", time.Now().UnixNano()%1000000)
+	namespace := fmt.Sprintf("helm-release-unknown-version-%d", time.Now().UnixNano()%1000000)
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 	testhelpers.CreateNamespaceDirectly(t, k8sClient, namespace)
@@ -118,7 +118,6 @@ func TestAccHelmReleaseResource_UnknownChartVersion(t *testing.T) {
 // For this test, we simulate an unknown repository URL using a local chart path from ConfigMap
 // In real scenarios, this would be an OCI registry URL from ECR/ACR, but for testing we use local charts
 func TestAccHelmReleaseResource_UnknownRepository(t *testing.T) {
-	t.Skip("TODO: Need to investigate failure - repository URL from ConfigMap")
 	t.Parallel()
 
 	raw := os.Getenv("TF_ACC_KUBECONFIG")
@@ -127,7 +126,7 @@ func TestAccHelmReleaseResource_UnknownRepository(t *testing.T) {
 	}
 
 	releaseName := fmt.Sprintf("test-unknown-repo-%d", time.Now().UnixNano()%1000000)
-	namespace := fmt.Sprintf("helm-test-%d", time.Now().UnixNano()%1000000)
+	namespace := fmt.Sprintf("helm-release-unknown-repo-%d", time.Now().UnixNano()%1000000)
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 	testhelpers.CreateNamespaceDirectly(t, k8sClient, namespace)
@@ -170,7 +169,7 @@ func TestAccHelmReleaseResource_UnknownValuesInYAML(t *testing.T) {
 	}
 
 	releaseName := fmt.Sprintf("test-unknown-val-%d", time.Now().UnixNano()%1000000)
-	namespace := fmt.Sprintf("helm-test-%d", time.Now().UnixNano()%1000000)
+	namespace := fmt.Sprintf("helm-release-unknown-values-yaml-%d", time.Now().UnixNano()%1000000)
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 	testhelpers.CreateNamespaceDirectly(t, k8sClient, namespace)
@@ -214,7 +213,7 @@ func TestAccHelmReleaseResource_UnknownSetParameters(t *testing.T) {
 	}
 
 	releaseName := fmt.Sprintf("test-unknown-set-%d", time.Now().UnixNano()%1000000)
-	namespace := fmt.Sprintf("helm-test-%d", time.Now().UnixNano()%1000000)
+	namespace := fmt.Sprintf("helm-release-unknown-set-params-%d", time.Now().UnixNano()%1000000)
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 	testhelpers.CreateNamespaceDirectly(t, k8sClient, namespace)
@@ -257,7 +256,7 @@ func TestAccHelmReleaseResource_SensitiveUnknownValues(t *testing.T) {
 	}
 
 	releaseName := fmt.Sprintf("test-sens-unknown-%d", time.Now().UnixNano()%1000000)
-	namespace := fmt.Sprintf("helm-test-%d", time.Now().UnixNano()%1000000)
+	namespace := fmt.Sprintf("helm-release-sensitive-unknown-%d", time.Now().UnixNano()%1000000)
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 	testhelpers.CreateNamespaceDirectly(t, k8sClient, namespace)
@@ -303,7 +302,7 @@ func TestAccHelmReleaseResource_ConsistencyWithK8sConnectObject(t *testing.T) {
 
 	releaseName := fmt.Sprintf("test-release-%d", time.Now().UnixNano()%1000000)
 	objectName := fmt.Sprintf("test-cm-%d", time.Now().UnixNano()%1000000)
-	namespace := fmt.Sprintf("helm-test-%d", time.Now().UnixNano()%1000000)
+	namespace := fmt.Sprintf("helm-release-consistency-with-object-%d", time.Now().UnixNano()%1000000)
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 	testhelpers.CreateNamespaceDirectly(t, k8sClient, namespace)
@@ -356,7 +355,7 @@ func TestAccHelmReleaseResource_CompleteBootstrapWorkflow(t *testing.T) {
 	release1Name := fmt.Sprintf("test-svc1-%d", time.Now().UnixNano()%1000000)
 	release2Name := fmt.Sprintf("test-svc2-%d", time.Now().UnixNano()%1000000)
 	objectName := fmt.Sprintf("test-app-%d", time.Now().UnixNano()%1000000)
-	namespace := fmt.Sprintf("helm-test-%d", time.Now().UnixNano()%1000000)
+	namespace := fmt.Sprintf("helm-release-complete-bootstrap-%d", time.Now().UnixNano()%1000000)
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 	testhelpers.CreateNamespaceDirectly(t, k8sClient, namespace)
@@ -412,7 +411,7 @@ func TestAccHelmReleaseResource_UnknownChartPathError(t *testing.T) {
 	}
 
 	releaseName := fmt.Sprintf("test-err-unknown-%d", time.Now().UnixNano()%1000000)
-	namespace := fmt.Sprintf("helm-test-%d", time.Now().UnixNano()%1000000)
+	namespace := fmt.Sprintf("helm-release-unknown-path-error-%d", time.Now().UnixNano()%1000000)
 
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
 	testhelpers.CreateNamespaceDirectly(t, k8sClient, namespace)
@@ -783,7 +782,7 @@ metadata:
   name: repo-url
   namespace: ${var.namespace}
 data:
-  url: "https://charts.bitnami.com/bitnami"
+  url: "oci://registry-1.docker.io/bitnamicharts"
 YAML
 
   cluster = {
@@ -798,6 +797,12 @@ resource "k8sconnect_helm_release" "test" {
   namespace  = var.namespace
   chart      = "nginx"
   repository = k8sconnect_object.repo_source.managed_state_projection["data.url"]
+  version    = "18.2.4"
+
+  values = <<-EOT
+    service:
+      type: ClusterIP
+  EOT
 
   cluster = {
     kubeconfig = var.kubeconfig
