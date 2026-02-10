@@ -63,6 +63,8 @@ resource "k8sconnect_helm_release" "cilium" {
 
 ## Example Usage - Install from OCI Registry
 
+Explicit credentials (CI/CD, automation):
+
 ```terraform
 resource "k8sconnect_helm_release" "cert_manager" {
   name       = "cert-manager"
@@ -77,6 +79,26 @@ resource "k8sconnect_helm_release" "cert_manager" {
   cluster            = local.cluster_connection
   create_namespace   = true
   wait               = true
+}
+```
+
+## Example Usage - OCI with Docker Credential Helpers
+
+Zero-config authentication using the Docker credential chain (ECR, GCR, ACR, GHCR).
+When no explicit credentials are provided, Helm v4 automatically uses `~/.docker/config.json`
+and any configured credential helpers (`docker-credential-ecr-login`, `docker-credential-gcloud`, etc.):
+
+```terraform
+resource "k8sconnect_helm_release" "app" {
+  name       = "my-app"
+  namespace  = "default"
+  repository = "oci://123456.dkr.ecr.us-east-1.amazonaws.com"
+  chart      = "my-app"
+  version    = "1.0.0"
+
+  # No username/password needed - uses docker-credential-ecr-login
+  cluster          = local.cluster_connection
+  create_namespace = true
 }
 ```
 

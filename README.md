@@ -245,9 +245,9 @@ Perfect for EKS/GKE defaults, Helm deployments, and operator-managed resources. 
 
 ---
 
-## Helm Charts with Bootstrap Support
+## Native Helm v4 Releases
 
-Deploy Helm charts using the same inline cluster configuration as other resources. Unlike `hashicorp/helm`, you can reference cluster outputs that are unknown at plan time:
+Built on the Helm v4 SDK with per-resource cluster configuration. Create a cluster and deploy charts in a single apply, with no provider-level config blocking your workflow.
 
 ```hcl
 # Create cluster and deploy Helm chart in one apply
@@ -302,17 +302,20 @@ resource "k8sconnect_helm_release" "cilium" {
 }
 ```
 
-This is a **real Helm release** - not just templating. It shows up in `helm list`, supports `helm rollback`, and executes hooks. The only difference from `hashicorp/helm` is inline cluster configuration, which enables single-apply bootstrapping.
+This is a **real Helm release**. It shows up in `helm list`, supports `helm rollback`, and executes hooks.
 
 **Key features:**
-- ✅ Works with repository charts (HTTP/HTTPS, OCI) and local charts
-- ✅ Full Helm release semantics (hooks, history, rollback support)
-- ✅ Drift detection for manual `helm upgrade`/`helm rollback` operations
-- ✅ Proper wait logic for all workload types (Deployments, DaemonSets, StatefulSets, Jobs)
+- ✅ **Plan-time validation** catches local chart, OCI version, and timeout errors at `terraform plan`
+- ✅ **OCI credential helpers** support the full Docker credential chain (ECR, GCR, ACR, GHCR) with zero config
+- ✅ **Failed release recovery** detects and cleans up stuck releases before retrying
+- ✅ **Actionable error messages** with pod diagnostics, kubectl commands, and specific fix suggestions
+- ✅ **kstatus wait logic** for all workload types (Deployments, DaemonSets, StatefulSets, Jobs)
+- ✅ Repository charts (HTTP/HTTPS, OCI), local charts, and `pass_credentials` for proxied repos
+- ✅ Full release semantics (hooks, history, rollback, `max_history` defaulting to 10)
 - ✅ Sensitive value support with `set_sensitive`
-- ✅ Dependency management with `dependency_update`
+- ✅ Drift detection for manual `helm upgrade`/`helm rollback` operations
 
-**→ [Helm release documentation](docs/resources/helm_release.md)**
+**→ [Helm release documentation](docs/resources/helm_release.md)** | **[Helm example](examples/helm-release-nginx/)** - Deploy nginx with inline cluster config
 
 ---
 

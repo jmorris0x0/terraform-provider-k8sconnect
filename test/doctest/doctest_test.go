@@ -25,6 +25,7 @@ func TestMarkdownDocumentation(t *testing.T) {
 	docFiles := []string{
 		"../../README.md",
 		"../../docs/index.md",
+		"../../docs/resources/helm_release.md",
 		"../../docs/resources/object.md",
 		"../../docs/resources/wait.md",
 		"../../docs/resources/patch.md",

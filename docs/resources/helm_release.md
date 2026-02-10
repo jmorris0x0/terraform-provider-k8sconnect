@@ -63,6 +63,8 @@ resource "k8sconnect_helm_release" "cilium" {
 
 ## Example Usage - Install from OCI Registry
 
+Explicit credentials (CI/CD, automation):
+
 ```terraform
 resource "k8sconnect_helm_release" "cert_manager" {
   name       = "cert-manager"
@@ -77,6 +79,26 @@ resource "k8sconnect_helm_release" "cert_manager" {
   cluster            = local.cluster_connection
   create_namespace   = true
   wait               = true
+}
+```
+
+## Example Usage - OCI with Docker Credential Helpers
+
+Zero-config authentication using the Docker credential chain (ECR, GCR, ACR, GHCR).
+When no explicit credentials are provided, Helm v4 automatically uses `~/.docker/config.json`
+and any configured credential helpers (`docker-credential-ecr-login`, `docker-credential-gcloud`, etc.):
+
+```terraform
+resource "k8sconnect_helm_release" "app" {
+  name       = "my-app"
+  namespace  = "default"
+  repository = "oci://123456.dkr.ecr.us-east-1.amazonaws.com"
+  chart      = "my-app"
+  version    = "1.0.0"
+
+  # No username/password needed - uses docker-credential-ecr-login
+  cluster          = local.cluster_connection
+  create_namespace = true
 }
 ```
 
@@ -155,15 +177,20 @@ resource "k8sconnect_helm_release" "staging" {
 - `atomic` (Boolean) If true, installation/upgrade process rolls back changes on failure. Defaults to false.
 - `create_namespace` (Boolean) Create the namespace if it does not exist. Defaults to false.
 - `dependency_update` (Boolean) Run 'helm dependency update' before installing the chart. Defaults to false.
+- `description` (String) Custom description for the release. Shown in 'helm list' and release metadata.
 - `disable_hooks` (Boolean) Disable Helm lifecycle hooks during install/upgrade/uninstall. Defaults to false.
 - `force_destroy` (Boolean) Allow deletion even if resources have finalizers or delete protection. Use with caution. Defaults to false.
+- `max_history` (Number) Maximum number of release revisions stored as Secrets. Prevents etcd bloat in long-lived clusters. Set to 0 for unlimited. Defaults to 10.
 - `namespace` (String) Namespace to install the release into. Defaults to 'default'.
+- `pass_credentials` (Boolean) Pass credentials to all domains when the repository URL redirects (common with Artifactory/Nexus proxies). Defaults to false.
+- `registry_config_path` (String) Path to Docker/OCI registry config file for credential helper authentication. When omitted, Helm uses the default Docker config (~/.docker/config.json) which supports credential helpers for ECR, GCR, ACR, etc. Only needed when your config is in a non-standard location.
 - `repository` (String) Helm repository URL (e.g., 'https://helm.cilium.io/') or OCI registry (e.g., 'oci://registry.example.com/charts'). Leave empty for local charts.
 - `repository_ca_file` (String) Path to CA bundle to verify chart repository certificates.
 - `repository_cert_file` (String) Path to certificate file for TLS client authentication to chart repository.
 - `repository_key_file` (String) Path to key file for TLS client authentication to chart repository.
 - `repository_password` (String, Sensitive) Password for chart repository authentication.
 - `repository_username` (String) Username for chart repository authentication.
+- `reuse_values` (Boolean) On upgrade, reuse the last release's values and merge in any overrides from 'values', 'set', etc. When false (default), values reset to chart defaults before applying overrides.
 - `set` (Attributes List) Set individual values. Has higher precedence than 'values' file. (see [below for nested schema](#nestedatt--set))
 - `set_list` (Attributes List) Set list values (e.g., 'ingress.hosts[0]=example.com'). (see [below for nested schema](#nestedatt--set_list))
 - `set_sensitive` (Attributes List) Set individual sensitive values (passwords, tokens, etc.). Has highest precedence. (see [below for nested schema](#nestedatt--set_sensitive))

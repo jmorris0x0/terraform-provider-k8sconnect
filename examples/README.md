@@ -46,6 +46,7 @@ Workload resources that just need readiness confirmation for sequencing:
 
 ## YAML Scoped Data Source
 - [`yaml-scoped-dependency-ordering/`](yaml-scoped-dependency-ordering/) - Automatic dependency ordering by scope (CRDs → cluster-scoped → namespaced)
+- [`flux-bootstrap/`](flux-bootstrap/) - Bootstrap Flux CD without the Flux provider using `yaml_scoped` for dependency ordering
 
 ## Resource Data Source
 - [`object-datasource-kubernetes-service/`](object-datasource-kubernetes-service/) - Read existing cluster resources and use their data
