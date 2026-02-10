@@ -43,6 +43,7 @@ func TestUpgradePatchStateV0toV2(t *testing.T) {
 						"client_key":             tftypes.String,
 						"cluster_ca_certificate": tftypes.String,
 						"token":                  tftypes.String,
+
 						"insecure":               tftypes.Bool,
 						"kubeconfig":             tftypes.String,
 						"context":                tftypes.String,
@@ -62,6 +63,7 @@ func TestUpgradePatchStateV0toV2(t *testing.T) {
 					"client_key":             tftypes.NewValue(tftypes.String, nil),
 					"cluster_ca_certificate": tftypes.NewValue(tftypes.String, nil),
 					"token":                  tftypes.NewValue(tftypes.String, "test-token"),
+
 					"insecure":               tftypes.NewValue(tftypes.Bool, nil),
 					"kubeconfig":             tftypes.NewValue(tftypes.String, nil),
 					"context":                tftypes.NewValue(tftypes.String, nil),
@@ -108,6 +110,7 @@ func TestUpgradePatchStateV0toV2(t *testing.T) {
 						"client_key":             tftypes.String,
 						"cluster_ca_certificate": tftypes.String,
 						"token":                  tftypes.String,
+
 						"insecure":               tftypes.Bool,
 						"kubeconfig":             tftypes.String,
 						"context":                tftypes.String,
@@ -127,6 +130,7 @@ func TestUpgradePatchStateV0toV2(t *testing.T) {
 					"client_key":             tftypes.NewValue(tftypes.String, nil),
 					"cluster_ca_certificate": tftypes.NewValue(tftypes.String, nil),
 					"token":                  tftypes.NewValue(tftypes.String, nil),
+
 					"insecure":               tftypes.NewValue(tftypes.Bool, nil),
 					"kubeconfig":             tftypes.NewValue(tftypes.String, nil),
 					"context":                tftypes.NewValue(tftypes.String, nil),
@@ -243,6 +247,7 @@ func TestUpgradePatchStateV1toV2(t *testing.T) {
 						"client_key":             tftypes.String,
 						"cluster_ca_certificate": tftypes.String,
 						"token":                  tftypes.String,
+
 						"insecure":               tftypes.Bool,
 						"kubeconfig":             tftypes.String,
 						"context":                tftypes.String,
@@ -262,6 +267,7 @@ func TestUpgradePatchStateV1toV2(t *testing.T) {
 					"client_key":             tftypes.NewValue(tftypes.String, nil),
 					"cluster_ca_certificate": tftypes.NewValue(tftypes.String, nil),
 					"token":                  tftypes.NewValue(tftypes.String, "test-token"),
+
 					"insecure":               tftypes.NewValue(tftypes.Bool, nil),
 					"kubeconfig":             tftypes.NewValue(tftypes.String, nil),
 					"context":                tftypes.NewValue(tftypes.String, nil),
@@ -311,6 +317,7 @@ func TestUpgradePatchStateV1toV2(t *testing.T) {
 						"client_key":             tftypes.String,
 						"cluster_ca_certificate": tftypes.String,
 						"token":                  tftypes.String,
+
 						"insecure":               tftypes.Bool,
 						"kubeconfig":             tftypes.String,
 						"context":                tftypes.String,
@@ -330,6 +337,7 @@ func TestUpgradePatchStateV1toV2(t *testing.T) {
 					"client_key":             tftypes.NewValue(tftypes.String, nil),
 					"cluster_ca_certificate": tftypes.NewValue(tftypes.String, nil),
 					"token":                  tftypes.NewValue(tftypes.String, nil),
+
 					"insecure":               tftypes.NewValue(tftypes.Bool, nil),
 					"kubeconfig":             tftypes.NewValue(tftypes.String, "~/.kube/config"),
 					"context":                tftypes.NewValue(tftypes.String, "prod"),

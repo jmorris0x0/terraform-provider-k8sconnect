@@ -38,11 +38,50 @@ func isMultiDocumentYAML(yamlStr string) bool {
 	return false
 }
 
+// validateAPIVersionFormat does a lightweight pre-parse to check apiVersion
+// format before the full Unmarshal. This catches malformed apiVersions
+// (e.g., "not/a/valid/version") that would otherwise produce misleading
+// errors from the K8s library ("Object 'Kind' is missing").
+func validateAPIVersionFormat(yamlStr string) error {
+	var raw map[string]interface{}
+	if err := sigsyaml.Unmarshal([]byte(yamlStr), &raw); err != nil {
+		// Let the main Unmarshal handle parse errors
+		return nil
+	}
+
+	apiVersion, ok := raw["apiVersion"].(string)
+	if !ok || apiVersion == "" {
+		// Will be caught by the required field check after Unmarshal
+		return nil
+	}
+
+	slashCount := strings.Count(apiVersion, "/")
+	if slashCount > 1 {
+		return fmt.Errorf("apiVersion %q is malformed: must be \"<version>\" (e.g., \"v1\") or \"<group>/<version>\" (e.g., \"apps/v1\")", apiVersion)
+	}
+	if slashCount == 1 {
+		parts := strings.SplitN(apiVersion, "/", 2)
+		if parts[0] == "" || parts[1] == "" {
+			return fmt.Errorf("apiVersion %q is malformed: group and version must both be non-empty (e.g., \"apps/v1\")", apiVersion)
+		}
+	}
+
+	return nil
+}
+
 // parseYAML converts YAML string to unstructured.Unstructured
 func (r *objectResource) parseYAML(yamlStr string) (*unstructured.Unstructured, error) {
 	// Check for multi-document YAML
 	if isMultiDocumentYAML(yamlStr) {
 		return nil, fmt.Errorf("multi-document YAML detected (contains '---' separator). Use the k8sconnect_yaml_split data source to split the documents first")
+	}
+
+	// Pre-validate apiVersion format before full Unmarshal.
+	// sigsyaml.Unmarshal into Unstructured rejects multi-slash apiVersions with
+	// the misleading error "Object 'Kind' is missing", so catch malformed
+	// apiVersions early with a clear error message.
+	if err := validateAPIVersionFormat(yamlStr); err != nil {
+		return nil, err
 	}
 
 	obj := &unstructured.Unstructured{}
@@ -55,6 +94,7 @@ func (r *objectResource) parseYAML(yamlStr string) (*unstructured.Unstructured, 
 	if obj.GetAPIVersion() == "" {
 		return nil, fmt.Errorf("apiVersion is required")
 	}
+
 	if obj.GetKind() == "" {
 		return nil, fmt.Errorf("kind is required")
 	}

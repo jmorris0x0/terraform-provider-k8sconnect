@@ -135,14 +135,26 @@ func (r *objectResource) Read(ctx context.Context, req resource.ReadRequest, res
 			return
 		}
 		resourceDesc := fmt.Sprintf("%s %s", rc.Object.GetKind(), rc.Object.GetName())
-		severity, title, detail := r.classifyK8sError(err, "Read", resourceDesc, rc.Object.GetAPIVersion())
+		severity, title, detail := r.classifyReadGetError(err, resourceDesc, rc.Object.GetAPIVersion())
 		if severity == "warning" {
 			resp.Diagnostics.AddWarning(title, detail)
+			// ADR-023 Phase 3: Set stale-read flag so ModifyPlan knows to use
+			// refreshed projection for drift detection instead of stale state projection.
+			setStaleReadFlag(ctx, resp.Private)
+			// Explicitly save state so the private state flag persists
+			diags = resp.State.Set(ctx, &data)
+			resp.Diagnostics.Append(diags...)
 		} else {
 			resp.Diagnostics.AddError(title, detail)
 		}
+		// ADR-023: For warnings (including auth failures), return prior state
+		// instead of dropping the resource. ModifyPlan will handle drift detection
+		// using the fresh token from Config.
 		return
 	}
+
+	// ADR-023 Phase 3: Clear stale-read flag since Read succeeded with fresh data
+	clearStaleReadFlag(ctx, resp.Private)
 
 	// 3a. Surface any API warnings from read operation
 	k8sclient.SurfaceK8sWarningsWithIdentity(ctx, rc.Client, rc.Object, &resp.Diagnostics)
@@ -471,6 +483,29 @@ func checkImportedWithoutAnnotationsFlag(ctx context.Context, getter interface {
 	GetKey(context.Context, string) ([]byte, diag.Diagnostics)
 }) bool {
 	data, _ := getter.GetKey(ctx, "imported_without_annotations")
+	return data != nil && string(data) == "true"
+}
+
+// setStaleReadFlag marks that Read returned stale state due to auth failure (ADR-023 Phase 3).
+// ModifyPlan checks this to decide whether to use refreshed projection for drift detection.
+func setStaleReadFlag(ctx context.Context, setter interface {
+	SetKey(context.Context, string, []byte) diag.Diagnostics
+}) {
+	setter.SetKey(ctx, "stale_read", []byte("true"))
+}
+
+// clearStaleReadFlag clears the stale-read flag after a successful Read
+func clearStaleReadFlag(ctx context.Context, setter interface {
+	SetKey(context.Context, string, []byte) diag.Diagnostics
+}) {
+	setter.SetKey(ctx, "stale_read", nil)
+}
+
+// checkStaleReadFlag checks if Read returned stale state due to auth failure (ADR-023 Phase 3)
+func checkStaleReadFlag(ctx context.Context, getter interface {
+	GetKey(context.Context, string) ([]byte, diag.Diagnostics)
+}) bool {
+	data, _ := getter.GetKey(ctx, "stale_read")
 	return data != nil && string(data) == "true"
 }
 

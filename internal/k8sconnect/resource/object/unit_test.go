@@ -184,6 +184,7 @@ func TestConvertObjectToConnectionModel(t *testing.T) {
 		"kubeconfig":             types.StringType,
 		"context":                types.StringType,
 		"token":                  types.StringType,
+
 		"client_certificate":     types.StringType,
 		"client_key":             types.StringType,
 		"insecure":               types.BoolType,
@@ -197,6 +198,7 @@ func TestConvertObjectToConnectionModel(t *testing.T) {
 		"kubeconfig":             types.StringNull(),
 		"context":                types.StringNull(),
 		"token":                  types.StringValue("test-token"),
+
 		"client_certificate":     types.StringNull(),
 		"client_key":             types.StringNull(),
 		"insecure":               types.BoolValue(false),

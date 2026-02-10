@@ -16,10 +16,10 @@ jobs:
   gosec:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       
       - name: Run Gosec Security Scanner
-        uses: securego/gosec@v2.22.10  # Pin to stable version instead of @master
+        uses: securego/gosec@v2.22.11  # Pin to stable version instead of @master
         with:
           args: '-no-fail -fmt sarif -out gosec-results.sarif ./...'
       
@@ -31,7 +31,7 @@ jobs:
   govulncheck:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       
       - uses: actions/setup-go@v6
         with:
