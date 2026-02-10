@@ -808,7 +808,9 @@ resource "k8sconnect_helm_release" "test" {
     kubeconfig = var.kubeconfig
   }
 
-  wait    = true
+  # Don't wait for pod readiness - we're testing unknown repo URL handling,
+  # not image pull speed. The install succeeding proves the OCI registry works.
+  wait    = false
   timeout = "300s"
 }
 `)

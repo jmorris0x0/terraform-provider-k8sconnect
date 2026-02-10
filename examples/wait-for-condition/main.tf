@@ -92,8 +92,3 @@ resource "k8sconnect_wait" "app" {
     timeout   = "5m"
   }
 }
-
-output "deployment_available" {
-  value       = true
-  description = "Deployment has Available=True condition (PVC was successfully bound and pod is running)"
-}

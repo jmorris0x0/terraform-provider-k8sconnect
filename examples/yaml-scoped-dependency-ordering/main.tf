@@ -38,19 +38,3 @@ resource "k8sconnect_object" "namespaced" {
     k8sconnect_object.cluster_scoped
   ]
 }
-
-# Example outputs showing what was applied in each category
-output "crd_count" {
-  value       = length(data.k8sconnect_yaml_scoped.all.crds)
-  description = "Number of CRDs applied"
-}
-
-output "cluster_scoped_count" {
-  value       = length(data.k8sconnect_yaml_scoped.all.cluster_scoped)
-  description = "Number of cluster-scoped resources applied"
-}
-
-output "namespaced_count" {
-  value       = length(data.k8sconnect_yaml_scoped.all.namespaced)
-  description = "Number of namespaced resources applied"
-}

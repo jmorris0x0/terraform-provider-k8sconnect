@@ -39,20 +39,3 @@ resource "k8sconnect_helm_release" "nginx" {
 
   depends_on = [k8sconnect_object.namespace]
 }
-
-# Output the release information
-output "helm_release_name" {
-  value = k8sconnect_helm_release.nginx.name
-}
-
-output "helm_release_namespace" {
-  value = k8sconnect_helm_release.nginx.namespace
-}
-
-output "helm_release_chart" {
-  value = k8sconnect_helm_release.nginx.chart
-}
-
-output "helm_release_version" {
-  value = k8sconnect_helm_release.nginx.version
-}

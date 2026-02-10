@@ -9,6 +9,14 @@ description: |-
 
 {{ .Description | trimspace }}
 
+## Why yaml_scoped?
+
+Terraform applies resources in parallel batches of ~10. When you apply a large manifest set with `yaml_split` and `for_each`, Terraform may try to create a Deployment before its Namespace exists, or a custom resource before its CRD is registered. Even with k8sconnect's built-in retry logic, this creates unnecessary churn and slower applies.
+
+`yaml_scoped` solves this by automatically categorizing resources into three dependency tiers: CRDs first, then cluster-scoped resources (Namespaces, ClusterRoles), then namespaced resources. With explicit `depends_on` between tiers, Terraform applies each group completely before moving to the next.
+
+Use `yaml_split` for small manifest sets where ordering doesn't matter. Use `yaml_scoped` when you have CRDs, namespaces, and workloads that must apply in order, or when your manifest set is large enough that Terraform's parallelism creates race conditions.
+
 ## Example Usage - Dependency Ordering
 
 Use this datasource to ensure proper dependency ordering when applying manifests that include CRDs and custom resources:

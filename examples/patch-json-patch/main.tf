@@ -23,9 +23,3 @@ resource "k8sconnect_patch" "kubernetes_svc_label" {
 
   cluster = local.cluster
 }
-
-# Output the patch ID
-output "patch_id" {
-  value       = k8sconnect_patch.kubernetes_svc_label.id
-  description = "Unique identifier for this patch"
-}

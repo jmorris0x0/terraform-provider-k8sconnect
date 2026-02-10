@@ -3,6 +3,7 @@ package helm_release
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,12 +24,14 @@ import (
 	"helm.sh/helm/v4/pkg/downloader"
 	"helm.sh/helm/v4/pkg/getter"
 	"helm.sh/helm/v4/pkg/registry"
+	releasecommon "helm.sh/helm/v4/pkg/release/common"
 	release "helm.sh/helm/v4/pkg/release/v1"
 	repo "helm.sh/helm/v4/pkg/repo/v1"
 	"helm.sh/helm/v4/pkg/storage/driver"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8serrors"
 )
 
 // Create installs a new Helm release
@@ -60,7 +63,31 @@ func (r *helmReleaseResource) Create(ctx context.Context, req resource.CreateReq
 		return
 	}
 
-	// 4. Create Install action
+	// 4. Check for and clean up failed releases before installing
+	get := action.NewGet(actionConfig)
+	if existingReleaser, getErr := get.Run(data.Name.ValueString()); getErr == nil {
+		if existingRel, ok := existingReleaser.(*release.Release); ok && existingRel.Info.Status == releasecommon.StatusFailed {
+			tflog.Warn(ctx, "Found existing failed release, uninstalling before fresh install", map[string]interface{}{
+				"name":      data.Name.ValueString(),
+				"namespace": data.Namespace.ValueString(),
+				"status":    existingRel.Info.Status.String(),
+			})
+			uninstall := action.NewUninstall(actionConfig)
+			uninstall.WaitStrategy = "hookOnly"
+			uninstall.DisableHooks = true
+			if _, uninstallErr := uninstall.Run(data.Name.ValueString()); uninstallErr != nil && uninstallErr != driver.ErrReleaseNotFound {
+				resp.Diagnostics.AddError(
+					"Failed to Clean Up Failed Release",
+					fmt.Sprintf("Found a failed release '%s' but could not uninstall it: %s\n\n"+
+						"Manually uninstall the release with: helm uninstall %s -n %s",
+						data.Name.ValueString(), uninstallErr.Error(), data.Name.ValueString(), data.Namespace.ValueString()),
+				)
+				return
+			}
+		}
+	}
+
+	// 5. Create Install action
 	install := action.NewInstall(actionConfig)
 	install.ReleaseName = data.Name.ValueString()
 	install.Namespace = data.Namespace.ValueString()
@@ -76,7 +103,7 @@ func (r *helmReleaseResource) Create(ctx context.Context, req resource.CreateReq
 	install.WaitForJobs = data.WaitForJobs.ValueBool()
 	install.RollbackOnFailure = data.Atomic.ValueBool()
 	install.SkipCRDs = data.SkipCRDs.ValueBool()
-	install.DisableHooks = data.DisableWebhooks.ValueBool()
+	install.DisableHooks = data.DisableHooks.ValueBool()
 
 	// Enable SSA with force conflicts (ADR-005 pattern, matches k8sconnect_object behavior)
 	install.ServerSideApply = true
@@ -172,6 +199,17 @@ func (r *helmReleaseResource) Read(ctx context.Context, req resource.ReadRequest
 	// 2. Get Helm action configuration
 	actionConfig, err := r.getActionConfig(ctx, &data)
 	if err != nil {
+		// ADR-023: Degrade auth errors to warnings, preserve prior state
+		if k8serrors.IsAuthError(err) {
+			resp.Diagnostics.AddWarning(
+				"Read: Using Prior State — Authentication Failed",
+				fmt.Sprintf("Could not connect to cluster for Helm release '%s': authentication failed. "+
+					"Using prior state. This typically means the stored token has expired "+
+					"between Terraform runs. Details: %s", data.Name.ValueString(), err.Error()),
+			)
+			resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+			return
+		}
 		resp.Diagnostics.AddError(
 			"Failed to Configure Helm Client",
 			fmt.Sprintf("Could not create Helm action configuration: %s", err.Error()),
@@ -190,6 +228,18 @@ func (r *helmReleaseResource) Read(ctx context.Context, req resource.ReadRequest
 				"namespace": data.Namespace.ValueString(),
 			})
 			resp.State.RemoveResource(ctx)
+			return
+		}
+
+		// ADR-023: Degrade auth errors to warnings, preserve prior state
+		if k8serrors.IsAuthError(err) {
+			resp.Diagnostics.AddWarning(
+				"Read: Using Prior State — Authentication Failed",
+				fmt.Sprintf("Could not read Helm release '%s' from cluster: authentication failed. "+
+					"Using prior state. This typically means the stored token has expired "+
+					"between Terraform runs. Details: %s", data.Name.ValueString(), err.Error()),
+			)
+			resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 			return
 		}
 
@@ -260,7 +310,20 @@ func (r *helmReleaseResource) Update(ctx context.Context, req resource.UpdateReq
 		return
 	}
 
-	// 3. Create Upgrade action
+	// 3. Check current release status for failed-release recovery
+	var cleanupOnFail bool
+	getAction := action.NewGet(actionConfig)
+	if currentReleaser, getErr := getAction.Run(plan.Name.ValueString()); getErr == nil {
+		if currentRel, ok := currentReleaser.(*release.Release); ok && currentRel.Info.Status == releasecommon.StatusFailed {
+			tflog.Warn(ctx, "Current release is in failed state, enabling CleanupOnFail for recovery", map[string]interface{}{
+				"name":   plan.Name.ValueString(),
+				"status": currentRel.Info.Status.String(),
+			})
+			cleanupOnFail = true
+		}
+	}
+
+	// 4. Create Upgrade action
 	upgrade := action.NewUpgrade(actionConfig)
 	upgrade.Namespace = plan.Namespace.ValueString()
 
@@ -274,8 +337,8 @@ func (r *helmReleaseResource) Update(ctx context.Context, req resource.UpdateReq
 	upgrade.WaitForJobs = plan.WaitForJobs.ValueBool()
 	upgrade.RollbackOnFailure = plan.Atomic.ValueBool()
 	upgrade.SkipCRDs = plan.SkipCRDs.ValueBool()
-	upgrade.DisableHooks = plan.DisableWebhooks.ValueBool()
-	// Note: RecreatePods is deprecated in Helm v3 and not available in action.Upgrade
+	upgrade.DisableHooks = plan.DisableHooks.ValueBool()
+	upgrade.CleanupOnFail = cleanupOnFail
 
 	// Enable SSA with force conflicts (ADR-005 pattern, matches k8sconnect_object behavior)
 	upgrade.ServerSideApply = "true" // Explicit SSA mode (not "auto")
@@ -398,7 +461,10 @@ func (r *helmReleaseResource) Delete(ctx context.Context, req resource.DeleteReq
 		uninstall.Timeout = timeout
 	}
 
-	// 4. Run uninstall
+	// 4. Apply force_destroy and disable_hooks settings
+	uninstall.DisableHooks = data.ForceDestroy.ValueBool() || data.DisableHooks.ValueBool()
+
+	// 5. Run uninstall
 	_, err = uninstall.Run(data.Name.ValueString())
 	if err != nil {
 		// If release not found, that's OK - already deleted
@@ -493,7 +559,7 @@ func (r *helmReleaseResource) ImportState(ctx context.Context, req resource.Impo
 	tempData := helmReleaseResourceModel{
 		Name:      types.StringValue(releaseName),
 		Namespace: types.StringValue(namespace),
-		Cluster:   types.ObjectNull(nil), // Will be populated below
+		Cluster:   types.ObjectNull(auth.GetConnectionAttributeTypes()), // Will be populated below
 	}
 
 	// Convert connection to object
@@ -570,7 +636,6 @@ func (r *helmReleaseResource) ImportState(ctx context.Context, req resource.Impo
 		Set:          types.ListNull(types.ObjectType{AttrTypes: map[string]attr.Type{"name": types.StringType, "value": types.StringType}}),
 		SetSensitive: types.ListNull(types.ObjectType{AttrTypes: map[string]attr.Type{"name": types.StringType, "value": types.StringType}}),
 		SetList:      types.ListNull(types.ObjectType{AttrTypes: map[string]attr.Type{"name": types.StringType, "value": types.StringType}}),
-		SetString:    types.ListNull(types.ObjectType{AttrTypes: map[string]attr.Type{"name": types.StringType, "value": types.StringType}}),
 
 		// Repository auth unknown
 		RepositoryUsername: types.StringNull(),
@@ -587,8 +652,7 @@ func (r *helmReleaseResource) ImportState(ctx context.Context, req resource.Impo
 		Wait:             types.BoolValue(true),
 		WaitForJobs:      types.BoolValue(false),
 		Timeout:          types.StringValue("300s"),
-		DisableWebhooks:  types.BoolValue(false),
-		RecreatePods:     types.BoolValue(false),
+		DisableHooks: types.BoolValue(false),
 		ForceDestroy:     types.BoolValue(false),
 	}
 
@@ -654,13 +718,6 @@ func (r *helmReleaseResource) getActionConfig(ctx context.Context, data *helmRel
 	}
 
 	return actionConfig, nil
-}
-
-// helmLogger adapts Terraform's structured logging to Helm's logger function
-func helmLogger(ctx context.Context) func(format string, v ...interface{}) {
-	return func(format string, v ...interface{}) {
-		tflog.Debug(ctx, fmt.Sprintf(format, v...))
-	}
 }
 
 func (r *helmReleaseResource) loadChart(ctx context.Context, cfg *action.Configuration, data *helmReleaseResourceModel) (*chart.Chart, error) {
@@ -778,7 +835,7 @@ func (r *helmReleaseResource) updateDependencies(ctx context.Context, chartPath 
 	// Create a dependency manager
 	settings := cli.New()
 	man := &downloader.Manager{
-		Out:              os.Stdout,
+		Out:              &tflogWriter{ctx: ctx},
 		ChartPath:        chartPath,
 		Keyring:          settings.RepositoryConfig,
 		SkipUpdate:       false,
@@ -1004,30 +1061,23 @@ func (r *helmReleaseResource) mergeValues(ctx context.Context, data *helmRelease
 			return nil, fmt.Errorf("failed to parse set_list values: %s", diags.Errors()[0].Summary())
 		}
 		for _, sv := range setListValues {
-			// set_list values are comma-separated
-			listItems := strings.Split(sv.Value.ValueString(), ",")
+			rawValue := sv.Value.ValueString()
+			var listItems []interface{}
+			// Try JSON array first (handles values with commas)
+			if err := json.Unmarshal([]byte(rawValue), &listItems); err != nil {
+				// Fall back to comma-splitting for backward compatibility
+				parts := strings.Split(rawValue, ",")
+				for _, p := range parts {
+					listItems = append(listItems, strings.TrimSpace(p))
+				}
+			}
 			if err := setNestedValue(values, sv.Name.ValueString(), listItems); err != nil {
 				return nil, fmt.Errorf("failed to set list value '%s': %w", sv.Name.ValueString(), err)
 			}
 		}
 	}
 
-	// 4. Merge set_string values (forces string type, no type inference)
-	if !data.SetString.IsNull() {
-		var setStringValues []setValueModel
-		diags := data.SetString.ElementsAs(ctx, &setStringValues, false)
-		if diags.HasError() {
-			return nil, fmt.Errorf("failed to parse set_string values: %s", diags.Errors()[0].Summary())
-		}
-		for _, sv := range setStringValues {
-			// Force as string, don't parse as number/bool
-			if err := setNestedValue(values, sv.Name.ValueString(), sv.Value.ValueString()); err != nil {
-				return nil, fmt.Errorf("failed to set string value '%s': %w", sv.Name.ValueString(), err)
-			}
-		}
-	}
-
-	// 5. Merge set_sensitive values (highest precedence)
+	// 4. Merge set_sensitive values (highest precedence)
 	if !data.SetSensitive.IsNull() {
 		var setSensitiveValues []setValueModel
 		diags := data.SetSensitive.ElementsAs(ctx, &setSensitiveValues, false)
@@ -1062,10 +1112,31 @@ func mergeMaps(dst, src map[string]interface{}) map[string]interface{} {
 	return dst
 }
 
+// splitKeyParts splits a dot-notation key respecting escaped dots (e.g., "nodeSelector.kubernetes\.io/hostname"
+// treats "\." as a literal dot, not a nesting separator), matching Helm CLI behavior.
+func splitKeyParts(key string) []string {
+	var parts []string
+	var current strings.Builder
+	for i := 0; i < len(key); i++ {
+		if key[i] == '\\' && i+1 < len(key) && key[i+1] == '.' {
+			// Escaped dot: write literal dot
+			current.WriteByte('.')
+			i++ // skip next char
+		} else if key[i] == '.' {
+			parts = append(parts, current.String())
+			current.Reset()
+		} else {
+			current.WriteByte(key[i])
+		}
+	}
+	parts = append(parts, current.String())
+	return parts
+}
+
 // setNestedValue sets a value in a nested map using dot notation (e.g., "image.tag")
 func setNestedValue(values map[string]interface{}, key string, value interface{}) error {
-	// Split key by dots to handle nesting
-	parts := strings.Split(key, ".")
+	// Split key by dots, respecting escaped dots (\.)
+	parts := splitKeyParts(key)
 	current := values
 
 	// Navigate to the parent of the final key
@@ -1200,10 +1271,19 @@ func (r *helmReleaseResource) detectDrift(ctx context.Context, state *helmReleas
 	}
 
 	// 3. Compare chart name (detects complete chart replacement)
+	// For local chart paths (./foo, ../foo, /foo), compare filepath.Base to metadata name
+	// since state stores the path but Helm stores the chart name from Chart.yaml
 	if !state.Chart.IsNull() && current.Chart != nil && current.Chart.Metadata != nil {
 		stateChart := state.Chart.ValueString()
 		currentChart := current.Chart.Metadata.Name
-		if stateChart != currentChart {
+
+		// Normalize local paths: compare base name against metadata name
+		compareChart := stateChart
+		if isLocalChart(stateChart) {
+			compareChart = filepath.Base(stateChart)
+		}
+
+		if compareChart != currentChart {
 			hasDrift = true
 			driftReasons = append(driftReasons, fmt.Sprintf(
 				"Chart name changed from %s to %s",
@@ -1248,4 +1328,18 @@ func (r *helmReleaseResource) detectDrift(ctx context.Context, state *helmReleas
 	}
 
 	return hasDrift, driftReasons
+}
+
+// tflogWriter wraps tflog.Debug so Helm dependency output goes through
+// Terraform's logging system instead of leaking to stdout.
+type tflogWriter struct {
+	ctx context.Context
+}
+
+func (w *tflogWriter) Write(p []byte) (n int, err error) {
+	msg := strings.TrimRight(string(p), "\n")
+	if msg != "" {
+		tflog.Debug(w.ctx, msg, map[string]interface{}{"source": "helm-dependency-manager"})
+	}
+	return len(p), nil
 }

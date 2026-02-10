@@ -185,7 +185,7 @@ func TestAccHelmReleaseResource_ManualRollbackDetection(t *testing.T) {
 						}
 						tmpfile.Close()
 
-						cmd := exec.Command("helm", "rollback", releaseName, "1", "-n", namespace, "--kubeconfig", tmpfile.Name())
+						cmd := exec.Command("helm", "rollback", releaseName, "1", "-n", namespace, "--kubeconfig", tmpfile.Name(), "--server-side=false")
 						if output, err := cmd.CombinedOutput(); err != nil {
 							return fmt.Errorf("helm rollback failed: %v\nOutput: %s", err, output)
 						}

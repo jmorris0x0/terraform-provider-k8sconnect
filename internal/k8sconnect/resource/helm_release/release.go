@@ -38,7 +38,6 @@ type helmReleaseResourceModel struct {
 	Set          types.List   `tfsdk:"set"`
 	SetSensitive types.List   `tfsdk:"set_sensitive"`
 	SetList      types.List   `tfsdk:"set_list"`
-	SetString    types.List   `tfsdk:"set_string"`
 
 	// Cluster configuration (THE KEY FEATURE)
 	Cluster types.Object `tfsdk:"cluster"`
@@ -58,8 +57,7 @@ type helmReleaseResourceModel struct {
 	Wait             types.Bool   `tfsdk:"wait"`
 	WaitForJobs      types.Bool   `tfsdk:"wait_for_jobs"`
 	Timeout          types.String `tfsdk:"timeout"`
-	DisableWebhooks  types.Bool   `tfsdk:"disable_webhooks"`
-	RecreatePods     types.Bool   `tfsdk:"recreate_pods"`
+	DisableHooks types.Bool `tfsdk:"disable_hooks"`
 	ForceDestroy     types.Bool   `tfsdk:"force_destroy"`
 
 	// Computed outputs
@@ -142,7 +140,6 @@ func (r *helmReleaseResource) Schema(ctx context.Context, req resource.SchemaReq
 			"values": schema.StringAttribute{
 				Optional:    true,
 				Description: "Values in YAML format to merge with chart defaults. Typically used with file() function.",
-				Sensitive:   true,
 			},
 			"set": schema.ListNestedAttribute{
 				Optional:    true,
@@ -189,22 +186,6 @@ func (r *helmReleaseResource) Schema(ctx context.Context, req resource.SchemaReq
 						"value": schema.StringAttribute{
 							Required:    true,
 							Description: "List value to set.",
-						},
-					},
-				},
-			},
-			"set_string": schema.ListNestedAttribute{
-				Optional:    true,
-				Description: "Set string values (forces value to be treated as string).",
-				NestedObject: schema.NestedAttributeObject{
-					Attributes: map[string]schema.Attribute{
-						"name": schema.StringAttribute{
-							Required:    true,
-							Description: "Value name.",
-						},
-						"value": schema.StringAttribute{
-							Required:    true,
-							Description: "String value to set.",
 						},
 					},
 				},
@@ -277,17 +258,11 @@ func (r *helmReleaseResource) Schema(ctx context.Context, req resource.SchemaReq
 				Default:     stringdefault.StaticString("300s"),
 				Description: "Time to wait for operations to complete. Format: '300s', '5m', '1h'. Defaults to '300s'.",
 			},
-			"disable_webhooks": schema.BoolAttribute{
+			"disable_hooks": schema.BoolAttribute{
 				Optional:    true,
 				Computed:    true,
 				Default:     booldefault.StaticBool(false),
-				Description: "Prevent Helm from running validation webhooks. Defaults to false.",
-			},
-			"recreate_pods": schema.BoolAttribute{
-				Optional:    true,
-				Computed:    true,
-				Default:     booldefault.StaticBool(false),
-				Description: "Perform pod restart during upgrade/rollback. Defaults to false.",
+				Description: "Disable Helm lifecycle hooks during install/upgrade/uninstall. Defaults to false.",
 			},
 			"force_destroy": schema.BoolAttribute{
 				Optional:    true,
@@ -298,7 +273,6 @@ func (r *helmReleaseResource) Schema(ctx context.Context, req resource.SchemaReq
 			"manifest": schema.StringAttribute{
 				Computed:    true,
 				Description: "Computed rendered manifest (multi-document YAML).",
-				Sensitive:   true,
 			},
 			"status": schema.StringAttribute{
 				Computed:    true,
