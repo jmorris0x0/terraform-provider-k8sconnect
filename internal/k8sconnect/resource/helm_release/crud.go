@@ -54,7 +54,7 @@ func (r *helmReleaseResource) Create(ctx context.Context, req resource.CreateReq
 	data.ID = types.StringValue(common.GenerateID())
 
 	// 3. Get Helm action configuration
-	actionConfig, err := r.getActionConfig(ctx, &data)
+	actionConfig, rcg, err := r.getActionConfig(ctx, &data)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Failed to Configure Helm Client",
@@ -104,6 +104,9 @@ func (r *helmReleaseResource) Create(ctx context.Context, req resource.CreateReq
 	install.RollbackOnFailure = data.Atomic.ValueBool()
 	install.SkipCRDs = data.SkipCRDs.ValueBool()
 	install.DisableHooks = data.DisableHooks.ValueBool()
+	if !data.Description.IsNull() {
+		install.Description = data.Description.ValueString()
+	}
 
 	// Enable SSA with force conflicts (ADR-005 pattern, matches k8sconnect_object behavior)
 	install.ServerSideApply = true
@@ -145,10 +148,8 @@ func (r *helmReleaseResource) Create(ctx context.Context, req resource.CreateReq
 	// 7. Run install
 	releaser, err := install.Run(chart, values)
 	if err != nil {
-		resp.Diagnostics.AddError(
-			"Failed to Install Helm Release",
-			fmt.Sprintf("Could not install Helm release '%s': %s", data.Name.ValueString(), err.Error()),
-		)
+		title, detail := formatHelmOperationError(ctx, "Install", data.Name.ValueString(), data.Namespace.ValueString(), install.Timeout, err, rcg)
+		resp.Diagnostics.AddError(title, detail)
 		return
 	}
 
@@ -197,7 +198,7 @@ func (r *helmReleaseResource) Read(ctx context.Context, req resource.ReadRequest
 	})
 
 	// 2. Get Helm action configuration
-	actionConfig, err := r.getActionConfig(ctx, &data)
+	actionConfig, _, err := r.getActionConfig(ctx, &data)
 	if err != nil {
 		// ADR-023: Degrade auth errors to warnings, preserve prior state
 		if k8serrors.IsAuthError(err) {
@@ -301,7 +302,7 @@ func (r *helmReleaseResource) Update(ctx context.Context, req resource.UpdateReq
 	})
 
 	// 2. Get Helm action configuration
-	actionConfig, err := r.getActionConfig(ctx, &plan)
+	actionConfig, rcg, err := r.getActionConfig(ctx, &plan)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Failed to Configure Helm Client",
@@ -339,6 +340,11 @@ func (r *helmReleaseResource) Update(ctx context.Context, req resource.UpdateReq
 	upgrade.SkipCRDs = plan.SkipCRDs.ValueBool()
 	upgrade.DisableHooks = plan.DisableHooks.ValueBool()
 	upgrade.CleanupOnFail = cleanupOnFail
+	upgrade.MaxHistory = int(plan.MaxHistory.ValueInt64())
+	upgrade.ReuseValues = plan.ReuseValues.ValueBool()
+	if !plan.Description.IsNull() {
+		upgrade.Description = plan.Description.ValueString()
+	}
 
 	// Enable SSA with force conflicts (ADR-005 pattern, matches k8sconnect_object behavior)
 	upgrade.ServerSideApply = "true" // Explicit SSA mode (not "auto")
@@ -380,10 +386,8 @@ func (r *helmReleaseResource) Update(ctx context.Context, req resource.UpdateReq
 	// 6. Run upgrade
 	releaser, err := upgrade.Run(plan.Name.ValueString(), chart, values)
 	if err != nil {
-		resp.Diagnostics.AddError(
-			"Failed to Upgrade Helm Release",
-			fmt.Sprintf("Could not upgrade Helm release '%s': %s", plan.Name.ValueString(), err.Error()),
-		)
+		title, detail := formatHelmOperationError(ctx, "Upgrade", plan.Name.ValueString(), plan.Namespace.ValueString(), upgrade.Timeout, err, rcg)
+		resp.Diagnostics.AddError(title, detail)
 		return
 	}
 
@@ -432,7 +436,7 @@ func (r *helmReleaseResource) Delete(ctx context.Context, req resource.DeleteReq
 	})
 
 	// 2. Get Helm action configuration
-	actionConfig, err := r.getActionConfig(ctx, &data)
+	actionConfig, _, err := r.getActionConfig(ctx, &data)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Failed to Configure Helm Client",
@@ -574,7 +578,7 @@ func (r *helmReleaseResource) ImportState(ctx context.Context, req resource.Impo
 	tempData.Cluster = clusterObj
 
 	// Get Helm action configuration
-	actionConfig, err := r.getActionConfig(ctx, &tempData)
+	actionConfig, _, err := r.getActionConfig(ctx, &tempData)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Import Failed: Helm Configuration Error",
@@ -643,6 +647,8 @@ func (r *helmReleaseResource) ImportState(ctx context.Context, req resource.Impo
 		RepositoryKeyFile:  types.StringNull(),
 		RepositoryCertFile: types.StringNull(),
 		RepositoryCaFile:   types.StringNull(),
+		PassCredentials:    types.BoolValue(false),
+		RegistryConfigPath: types.StringNull(),
 
 		// Options - use defaults
 		CreateNamespace:  types.BoolValue(false),
@@ -652,8 +658,11 @@ func (r *helmReleaseResource) ImportState(ctx context.Context, req resource.Impo
 		Wait:             types.BoolValue(true),
 		WaitForJobs:      types.BoolValue(false),
 		Timeout:          types.StringValue("300s"),
-		DisableHooks: types.BoolValue(false),
+		DisableHooks:     types.BoolValue(false),
 		ForceDestroy:     types.BoolValue(false),
+		MaxHistory:       types.Int64Value(10),
+		ReuseValues:      types.BoolValue(false),
+		Description:      types.StringNull(),
 	}
 
 	// Update computed fields from release
@@ -696,28 +705,28 @@ func (r *helmReleaseResource) ImportState(ctx context.Context, req resource.Impo
 
 // Helper functions that will be implemented
 
-func (r *helmReleaseResource) getActionConfig(ctx context.Context, data *helmReleaseResourceModel) (*action.Configuration, error) {
+func (r *helmReleaseResource) getActionConfig(ctx context.Context, data *helmReleaseResourceModel) (*action.Configuration, *restClientGetter, error) {
 	// Parse cluster configuration
 	var clusterModel auth.ClusterModel
 	diags := data.Cluster.As(ctx, &clusterModel, basetypes.ObjectAsOptions{})
 	if diags.HasError() {
-		return nil, fmt.Errorf("failed to parse cluster configuration: %s", diags.Errors()[0].Summary())
+		return nil, nil, fmt.Errorf("failed to parse cluster configuration: %s", diags.Errors()[0].Summary())
 	}
 
 	// Create RESTClientGetter bridge
-	restClientGetter, err := newRESTClientGetter(ctx, data.Namespace.ValueString(), clusterModel, r.clientFactory)
+	rcg, err := newRESTClientGetter(ctx, data.Namespace.ValueString(), clusterModel, r.clientFactory)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Kubernetes client: %w", err)
+		return nil, nil, fmt.Errorf("failed to create Kubernetes client: %w", err)
 	}
 
 	// Create Helm action configuration
 	actionConfig := new(action.Configuration)
 	// Helm v4: Init no longer takes logger function (logging is handled internally)
-	if err := actionConfig.Init(restClientGetter, data.Namespace.ValueString(), "secret"); err != nil {
-		return nil, fmt.Errorf("failed to initialize Helm action configuration: %w", err)
+	if err := actionConfig.Init(rcg, data.Namespace.ValueString(), "secret"); err != nil {
+		return nil, nil, fmt.Errorf("failed to initialize Helm action configuration: %w", err)
 	}
 
-	return actionConfig, nil
+	return actionConfig, rcg, nil
 }
 
 func (r *helmReleaseResource) loadChart(ctx context.Context, cfg *action.Configuration, data *helmReleaseResourceModel) (*chart.Chart, error) {
@@ -780,6 +789,13 @@ func (r *helmReleaseResource) loadChart(ctx context.Context, cfg *action.Configu
 	if !data.RepositoryCaFile.IsNull() {
 		chartPathOpts.CaFile = data.RepositoryCaFile.ValueString()
 	}
+	chartPathOpts.PassCredentialsAll = data.PassCredentials.ValueBool()
+
+	// Registry config path for credential helpers (ECR, GCR, ACR, etc.)
+	var registryConfigPath string
+	if !data.RegistryConfigPath.IsNull() {
+		registryConfigPath = data.RegistryConfigPath.ValueString()
+	}
 
 	// Handle OCI registries
 	if strings.HasPrefix(repository, "oci://") {
@@ -787,7 +803,7 @@ func (r *helmReleaseResource) loadChart(ctx context.Context, cfg *action.Configu
 			"registry": repository,
 			"chart":    chartName,
 		})
-		return r.loadOCIChart(ctx, cfg, chartName, &chartPathOpts, data.DependencyUpdate.ValueBool())
+		return r.loadOCIChart(ctx, cfg, chartName, &chartPathOpts, data.DependencyUpdate.ValueBool(), registryConfigPath)
 	}
 
 	// Handle HTTP/HTTPS repositories
@@ -795,7 +811,7 @@ func (r *helmReleaseResource) loadChart(ctx context.Context, cfg *action.Configu
 		"repository": repository,
 		"chart":      chartName,
 	})
-	return r.loadRepoChart(ctx, cfg, chartName, &chartPathOpts, data.DependencyUpdate.ValueBool())
+	return r.loadRepoChart(ctx, cfg, chartName, &chartPathOpts, data.DependencyUpdate.ValueBool(), registryConfigPath)
 }
 
 // isLocalChart checks if the chart reference is a local path
@@ -858,7 +874,7 @@ func (r *helmReleaseResource) updateDependencies(ctx context.Context, chartPath 
 	return nil
 }
 
-func (r *helmReleaseResource) loadOCIChart(ctx context.Context, cfg *action.Configuration, chartName string, opts *action.ChartPathOptions, updateDeps bool) (*chart.Chart, error) {
+func (r *helmReleaseResource) loadOCIChart(ctx context.Context, cfg *action.Configuration, chartName string, opts *action.ChartPathOptions, updateDeps bool, registryConfigPath string) (*chart.Chart, error) {
 	tflog.Debug(ctx, "Loading OCI chart", map[string]interface{}{
 		"chartName": chartName,
 		"repoURL":   opts.RepoURL,
@@ -870,13 +886,19 @@ func (r *helmReleaseResource) loadOCIChart(ctx context.Context, cfg *action.Conf
 		return nil, fmt.Errorf("version is required for OCI registry charts (repository: %s). Specify an explicit version in your Terraform configuration", opts.RepoURL)
 	}
 
-	// Setup OCI registry client
-	registryClient, err := registry.NewClient()
+	// Setup OCI registry client with credential helper support.
+	// When no registryConfigPath is set, Helm v4 reads the default Docker config
+	// (~/.docker/config.json) which supports credential helpers for ECR, GCR, ACR, etc.
+	var registryOpts []registry.ClientOption
+	if registryConfigPath != "" {
+		registryOpts = append(registryOpts, registry.ClientOptCredentialsFile(registryConfigPath))
+	}
+	registryClient, err := registry.NewClient(registryOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create registry client: %w", err)
 	}
 
-	// Configure authentication if provided
+	// Explicit username/password takes precedence over credential helpers
 	if opts.Username != "" && opts.Password != "" {
 		if err := registryClient.Login(opts.RepoURL, registry.LoginOptBasicAuth(opts.Username, opts.Password)); err != nil {
 			return nil, fmt.Errorf("failed to authenticate with OCI registry: %w", err)
@@ -950,7 +972,7 @@ func (r *helmReleaseResource) loadOCIChart(ctx context.Context, cfg *action.Conf
 	return chart, nil
 }
 
-func (r *helmReleaseResource) loadRepoChart(ctx context.Context, cfg *action.Configuration, chartName string, opts *action.ChartPathOptions, updateDeps bool) (*chart.Chart, error) {
+func (r *helmReleaseResource) loadRepoChart(ctx context.Context, cfg *action.Configuration, chartName string, opts *action.ChartPathOptions, updateDeps bool, registryConfigPath string) (*chart.Chart, error) {
 	tflog.Debug(ctx, "Loading chart from HTTP/HTTPS repository", map[string]interface{}{
 		"chartName": chartName,
 		"repoURL":   opts.RepoURL,
@@ -959,7 +981,11 @@ func (r *helmReleaseResource) loadRepoChart(ctx context.Context, cfg *action.Con
 
 	// Setup OCI registry client for hybrid repos (e.g., Bitnami moved to OCI in Nov 2024)
 	// Even if the repository uses HTTP/HTTPS index, chart downloads may require OCI
-	registryClient, err := registry.NewClient()
+	var registryOpts []registry.ClientOption
+	if registryConfigPath != "" {
+		registryOpts = append(registryOpts, registry.ClientOptCredentialsFile(registryConfigPath))
+	}
+	registryClient, err := registry.NewClient(registryOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create registry client: %w", err)
 	}

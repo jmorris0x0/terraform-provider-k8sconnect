@@ -769,158 +769,189 @@ After ANY fix:
 
 ## Phase 14: k8sconnect_helm_release Testing
 
-**Goal**: Test Helm release lifecycle, error handling, and edge cases
+**Goal**: Test Helm release lifecycle, error handling, UX quality, and edge cases.
+
+**Setup**: Add helm_release resources to `scenarios/kind-validation/`. Use `test/testdata/charts/simple-test` (good image) and `test/testdata/charts/bad-image-test` (guaranteed failure) for testing.
 
 ### Prerequisites
 - [ ] Helm CLI installed on system
-- [ ] Test chart available (use test/testdata/charts/simple-test)
-- [ ] Provider rebuilt and installed with Helm support
+- [ ] Provider rebuilt and installed: `make install`
+- [ ] kind-validation cluster running
+- [ ] Verify test charts exist in `test/testdata/charts/`
 
-### Basic Helm Release Tests
-- [ ] Create basic Helm release from local chart
-- [ ] Verify release installed: `helm list -A --kubeconfig=./kind-validation-config`
-- [ ] Verify pods deployed by release are running
-- [ ] Run `terraform apply` again - should show zero diff
-- [ ] Update release (change values, upgrade chart version if applicable)
-- [ ] Verify revision incremented
-- [ ] Destroy release - verify uninstall clean
+### 14.1 Happy Path and Lifecycle
 
-### Helm Values Testing
-- [ ] Deploy with inline `values` YAML
-- [ ] Deploy with `set` parameters
-- [ ] Deploy with `set_string` parameters
-- [ ] Deploy with combination of values + set + set_string
-- [ ] Verify precedence: set_string > set > values > chart defaults
-- [ ] Test values merging works correctly
-- [ ] Verify zero-diff with different YAML formatting styles
+Add to kind-validation:
+```hcl
+resource "k8sconnect_helm_release" "basic" {
+  cluster     = local.cluster
+  name        = "qa-basic"
+  namespace   = "qa-helm"
+  chart       = "../../test/testdata/charts/simple-test"
+  create_namespace = true
+  wait        = true
+}
+```
 
-### Helm Repository Testing
-- [ ] Install from OCI repository (e.g., public.ecr.aws)
-- [ ] Install from HTTP repository (e.g., https://charts.bitnami.com/bitnami)
-- [ ] Test invalid repository URL - check error message quality
-- [ ] Test repository requiring authentication
-- [ ] Test chart not found in repository - check error message
+- [ ] `terraform plan` shows create, plan output is readable
+- [ ] `terraform apply` succeeds
+- [ ] Verify release installed: `helm list -n qa-helm --kubeconfig=./kind-validation-config`
+- [ ] Verify pods running: `kubectl get pods -n qa-helm`
+- [ ] Check computed attributes populated: `revision`, `status`, `manifest`, `chart_name`, `chart_version`
+- [ ] `terraform plan` again shows **zero diff** (no unnecessary revision bumps)
+- [ ] Update values (add `replicaCount: 2` via `values`), apply
+- [ ] Verify revision incremented to 2
+- [ ] Verify 2 pods running
+- [ ] `terraform destroy`, verify clean uninstall
+- [ ] `helm list -n qa-helm` shows nothing
 
-### Chart Path and Source Testing
-- [ ] Install from local chart path (relative)
-- [ ] Install from local chart path (absolute)
-- [ ] Test non-existent local path - check error message
-- [ ] Test path to directory without Chart.yaml - check error
-- [ ] Test chart with dependencies - verify dependencies downloaded
-- [ ] Test chart with missing dependencies - check error
+### 14.2 Value Handling
 
-### Helm Error Scenarios
-- [ ] Invalid release name (uppercase, special chars)
-- [ ] Release name too long (>53 chars)
-- [ ] Invalid namespace
-- [ ] Non-existent namespace (without create_namespace)
-- [ ] Invalid chart version
-- [ ] Chart version not found in repository
-- [ ] Malformed values YAML
-- [ ] Invalid set parameter format
-- [ ] Conflicting values in set vs set_string
-- [ ] Install timeout (bad image that never starts)
-  - [ ] ✅ Error shows pod status and events?
-  - [ ] ✅ Error explains why pods aren't ready?
-  - [ ] ✅ Suggests kubectl commands to debug?
+**Precedence test** (values < set < set_list < set_sensitive):
+```hcl
+resource "k8sconnect_helm_release" "values_test" {
+  cluster   = local.cluster
+  name      = "qa-values"
+  namespace = "qa-helm"
+  chart     = "../../test/testdata/charts/simple-test"
+  create_namespace = true
 
-### Helm Wait and Timeout Testing
-- [ ] Deploy with `wait = true` and good image
-- [ ] Deploy with `wait = true` and bad image (should timeout)
-- [ ] Deploy with `wait = false` (should not wait for rollout)
-- [ ] Test custom timeout values (30s, 5m, 10m)
-- [ ] Test zero timeout - check error message
-- [ ] Test negative timeout - check error message
-- [ ] Test invalid timeout format - check error message
+  values = yamlencode({
+    replicaCount = 1
+    image = { tag = "from-values" }
+  })
 
-### Helm Upgrade and Rollback
-- [ ] Deploy release v1
-- [ ] Upgrade to v2 (change values)
-- [ ] Verify revision = 2
-- [ ] Upgrade to v3 (change chart version if using versioned chart)
-- [ ] Verify revision = 3
-- [ ] Check helm history shows all revisions
-- [ ] Modify Terraform to go back to v1 values
-- [ ] Verify Terraform applies changes (not manual rollback)
+  set = [{ name = "replicaCount", value = "3" }]
+}
+```
 
-### Helm Force and Replace
-- [ ] Deploy release normally
-- [ ] Deploy with `force = true` - should force update
-- [ ] Deploy with `replace = true` - should delete and recreate
-- [ ] Verify both work without errors
+- [ ] Apply. Verify replicaCount=3 (set wins over values). Check with `helm get values qa-values -n qa-helm`
+- [ ] Add `set_sensitive` with same key. Verify it wins over `set`
+- [ ] Zero-diff on re-apply
 
-### Helm Namespace Handling
-- [ ] Deploy with existing namespace
-- [ ] Deploy with `create_namespace = true` (non-existent namespace)
-- [ ] Verify namespace created
-- [ ] Destroy release - verify namespace NOT deleted (Helm behavior)
-- [ ] Deploy to kube-system namespace - should work
-- [ ] Deploy to default namespace - should work
+**set_list with JSON array**:
+```hcl
+set_list = [{ name = "tolerations", value = jsonencode(["key=node:NoSchedule"]) }]
+```
+- [ ] Apply succeeds, value parsed as array
+- [ ] Try comma-separated fallback: `value = "a,b,c"`. Does it split correctly?
 
-### Helm State and Import
-- [ ] Create Helm release manually with `helm install`
-- [ ] Import into Terraform
-- [ ] Verify Terraform adopts release
-- [ ] Modify via Terraform
-- [ ] Verify Terraform can manage imported release
-- [ ] Check managedFields ownership
+**Escaped dots in keys**:
+```hcl
+set = [{ name = "nodeSelector.kubernetes\\.io/hostname", value = "worker-1" }]
+```
+- [ ] Apply succeeds, key treated as `nodeSelector["kubernetes.io/hostname"]` not deeply nested
 
-### Helm Drift Detection
-- [ ] Deploy release via Terraform
-- [ ] Modify release with `helm upgrade` manually
-- [ ] Run `terraform plan` - should detect drift?
-- [ ] Run `terraform apply` - should correct drift?
-- [ ] Delete release with `helm uninstall`
-- [ ] Run `terraform plan` - should show recreate needed
-- [ ] Run `terraform apply` - should reinstall
+**Edge cases**:
+- [ ] Empty `values = ""`. Does it error or treat as no values?
+- [ ] Malformed YAML in `values`. Error message quality? Does it show the parse error clearly?
+- [ ] Very long values YAML (10KB+). Works without issue?
+- [ ] Values with special characters (quotes, newlines, unicode)
+- [ ] YAML anchors and aliases in values. Handled or clear error?
 
-### Helm Annotations and Labels
-- [ ] Deploy with custom annotations on release
-- [ ] Deploy with custom labels
-- [ ] Verify annotations appear in deployed resources
-- [ ] Modify annotations - verify update works
+### 14.3 Namespace Handling
 
-### Helm Multi-Cluster
-- [ ] Deploy same release to multiple clusters
-- [ ] Use different cluster configs per release
-- [ ] Verify releases isolated per cluster
-- [ ] Destroy one cluster's release - other unaffected
+- [ ] Deploy with `create_namespace = true` to non-existent namespace. Namespace created?
+- [ ] Deploy with `create_namespace = false` (default) to non-existent namespace. Error message quality? Does it say "namespace not found" clearly?
+- [ ] Deploy to `kube-system`. Works?
+- [ ] Destroy release with `create_namespace = true`. Namespace NOT deleted (Helm behavior). Is this surprising? Document UX.
 
-### Helm Sensitive Values
-- [ ] Deploy with sensitive values (passwords, tokens)
-- [ ] Verify sensitive values not shown in plan output
-- [ ] Verify sensitive values not in state (if using sensitive attribute)
-- [ ] Modify sensitive value - verify update works
+### 14.4 Wait and Timeout Behavior
 
-### Helm Large Charts
-- [ ] Deploy chart with many resources (50+)
-- [ ] Verify all resources created
-- [ ] Verify timeout sufficient for large deployments
-- [ ] Update large chart - verify performance acceptable
+**wait = true (default)**:
+- [ ] Deploy simple-test with `wait = true`. Apply waits for pods ready, then succeeds.
+- [ ] Deploy bad-image-test with `wait = true, timeout = "30s"`. Fails at ~30s.
+  - [ ] Error message quality: Shows pod status? Events? Suggests kubectl debug commands?
+  - [ ] Does the error mention the actual image pull failure?
 
-### Helm Edge Cases
-- [ ] Release name with hyphens
-- [ ] Release name with numbers
-- [ ] Chart with uppercase letters in name
-- [ ] Very long values YAML (10KB+)
-- [ ] Values with special characters (quotes, newlines)
-- [ ] Values with unicode and emoji
-- [ ] Empty values = "" vs null
+**wait = false**:
+- [ ] Deploy bad-image-test with `wait = false`. Apply succeeds immediately (doesn't wait).
+- [ ] Status in state reflects actual release status?
 
-### Helm Cleanup Testing
-- [ ] Verify `terraform destroy` cleanly uninstalls all releases
-- [ ] Check no orphaned Helm releases: `helm list -A`
-- [ ] Check no orphaned namespaces (if create_namespace used)
-- [ ] Verify clean removal even with dependencies
+**Atomic / RollbackOnFailure**:
+- [ ] Deploy bad-image-test with `atomic = true`. Fails and rolls back automatically.
+- [ ] After rollback, `helm list` shows no stuck "failed" release?
+- [ ] Terraform state reflects the failure (no phantom state)?
 
-### Helm Error Message Quality
-For EVERY error encountered:
+### 14.5 Delete Behavior
+
+- [ ] Normal destroy of healthy release. Clean uninstall.
+- [ ] Manually delete release with `helm uninstall`. Then `terraform destroy`. Handles gracefully (no error about "release not found")?
+- [ ] `force_destroy = true`. Verify hooks skipped during uninstall.
+- [ ] `disable_hooks = true`. Verify hooks skipped during uninstall.
+- [ ] Both `force_destroy` and `disable_hooks`. No double-skip issue?
+
+### 14.6 Failed Release Recovery
+
+**Critical scenario: prior failed release blocks create**:
+- [ ] Manually create a failed release: `helm install qa-fail ../../test/testdata/charts/bad-image-test -n qa-helm --wait --timeout 10s` (will fail)
+- [ ] `helm list -n qa-helm` shows "failed" release
+- [ ] Now add matching Terraform config and `terraform apply`
+- [ ] Provider should detect failed release, uninstall it, then install fresh
+- [ ] Verify success. No "release already exists" error.
+
+**Failed upgrade recovery**:
+- [ ] Deploy good release via Terraform
+- [ ] Change to bad-image-test chart, apply (will fail)
+- [ ] Change back to simple-test, apply again
+- [ ] Provider should recover (CleanupOnFail). Verify final release is healthy.
+
+### 14.7 Drift Detection
+
+- [ ] Deploy via Terraform. Manually `helm upgrade` with different values. `terraform plan` detects drift?
+- [ ] What exactly does the drift warning say? Is it actionable?
+- [ ] Deploy via Terraform. Manually `helm rollback`. `terraform plan` detects revision change?
+- [ ] Deploy via Terraform. Manually `helm uninstall`. `terraform plan` shows recreate needed?
+- [ ] Apply after external delete. Reinstalls successfully?
+
+### 14.8 ADR-023 Auth Resilience
+
+- [ ] Deploy release successfully
+- [ ] Expire/invalidate the cluster token (or use a token that will expire)
+- [ ] Run `terraform plan` with expired token
+- [ ] Should NOT hard-fail. Should show warning and preserve prior state.
+- [ ] Warning message is clear about auth failure?
+- [ ] After fixing token, `terraform plan` works normally again
+
+### 14.9 Import
+
+- [ ] Manually install: `helm install qa-import ../../test/testdata/charts/simple-test -n qa-helm`
+- [ ] Import: `terraform import k8sconnect_helm_release.test "<context>:qa-helm:qa-import"`
+- [ ] `terraform plan` shows zero diff? Or expected diff?
+- [ ] What does the import ID format look like? Is it documented?
+- [ ] Try importing non-existent release. Error message quality?
+- [ ] Try importing with wrong namespace. Error message quality?
+
+### 14.10 Chart Sources
+
+- [ ] Local chart (relative path): `chart = "../../test/testdata/charts/simple-test"`. Works.
+- [ ] Non-existent local path. Error message says what?
+- [ ] Directory without Chart.yaml. Error message?
+- [ ] OCI chart (public.ecr.aws). Works?
+- [ ] Invalid repository URL. Error message quality?
+- [ ] Chart name not found in repo. Error message quality?
+
+### 14.11 Skip CRDs and Dependency Update
+
+- [ ] `skip_crds = true`. CRDs not installed?
+- [ ] `dependency_update = true` with chart that has dependencies. Dependencies downloaded?
+- [ ] Modify chart, re-apply with `dependency_update = true`. Dependencies re-downloaded?
+
+### 14.12 Error Message Quality
+
+For EVERY error encountered during this entire phase, evaluate:
 - [ ] Error clearly states what failed?
-- [ ] Error explains why it failed?
-- [ ] Error suggests how to fix it?
-- [ ] Error includes relevant Helm/kubectl commands?
-- [ ] Error shows current state (release status, pod status)?
-- [ ] Error avoids Helm internal errors (translates to user terms)?
+- [ ] Error explains why (not just a stack trace or Helm internal error)?
+- [ ] Error suggests how to fix it or what to check?
+- [ ] Error includes relevant context (release name, namespace, chart)?
+
+**Helm-specific UX red flags to watch for**:
+- Generic "command failed" with no context
+- Raw Go error strings leaked to user
+- Helm internal errors not translated to user terms
+- Missing release name or namespace in error
+- "release already exists" with no recovery guidance
+- Timeout errors that don't mention pod status or events
 
 ---
 

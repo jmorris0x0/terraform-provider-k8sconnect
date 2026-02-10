@@ -6,6 +6,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -18,6 +19,7 @@ import (
 var _ resource.Resource = (*helmReleaseResource)(nil)
 var _ resource.ResourceWithConfigure = (*helmReleaseResource)(nil)
 var _ resource.ResourceWithImportState = (*helmReleaseResource)(nil)
+var _ resource.ResourceWithModifyPlan = (*helmReleaseResource)(nil)
 
 type helmReleaseResource struct {
 	clientFactory factory.ClientFactory
@@ -48,6 +50,8 @@ type helmReleaseResourceModel struct {
 	RepositoryKeyFile  types.String `tfsdk:"repository_key_file"`
 	RepositoryCertFile types.String `tfsdk:"repository_cert_file"`
 	RepositoryCaFile   types.String `tfsdk:"repository_ca_file"`
+	PassCredentials    types.Bool   `tfsdk:"pass_credentials"`
+	RegistryConfigPath types.String `tfsdk:"registry_config_path"`
 
 	// Helm release options
 	CreateNamespace  types.Bool   `tfsdk:"create_namespace"`
@@ -57,8 +61,11 @@ type helmReleaseResourceModel struct {
 	Wait             types.Bool   `tfsdk:"wait"`
 	WaitForJobs      types.Bool   `tfsdk:"wait_for_jobs"`
 	Timeout          types.String `tfsdk:"timeout"`
-	DisableHooks types.Bool `tfsdk:"disable_hooks"`
+	DisableHooks     types.Bool   `tfsdk:"disable_hooks"`
 	ForceDestroy     types.Bool   `tfsdk:"force_destroy"`
+	MaxHistory       types.Int64  `tfsdk:"max_history"`
+	ReuseValues      types.Bool   `tfsdk:"reuse_values"`
+	Description      types.String `tfsdk:"description"`
 
 	// Computed outputs
 	Manifest types.String `tfsdk:"manifest"`
@@ -216,6 +223,16 @@ func (r *helmReleaseResource) Schema(ctx context.Context, req resource.SchemaReq
 				Optional:    true,
 				Description: "Path to CA bundle to verify chart repository certificates.",
 			},
+			"pass_credentials": schema.BoolAttribute{
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+				Description: "Pass credentials to all domains when the repository URL redirects (common with Artifactory/Nexus proxies). Defaults to false.",
+			},
+			"registry_config_path": schema.StringAttribute{
+				Optional:    true,
+				Description: "Path to Docker/OCI registry config file for credential helper authentication. When omitted, Helm uses the default Docker config (~/.docker/config.json) which supports credential helpers for ECR, GCR, ACR, etc. Only needed when your config is in a non-standard location.",
+			},
 			"create_namespace": schema.BoolAttribute{
 				Optional:    true,
 				Computed:    true,
@@ -269,6 +286,22 @@ func (r *helmReleaseResource) Schema(ctx context.Context, req resource.SchemaReq
 				Computed:    true,
 				Default:     booldefault.StaticBool(false),
 				Description: "Allow deletion even if resources have finalizers or delete protection. Use with caution. Defaults to false.",
+			},
+			"max_history": schema.Int64Attribute{
+				Optional:    true,
+				Computed:    true,
+				Default:     int64default.StaticInt64(10),
+				Description: "Maximum number of release revisions stored as Secrets. Prevents etcd bloat in long-lived clusters. Set to 0 for unlimited. Defaults to 10.",
+			},
+			"reuse_values": schema.BoolAttribute{
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+				Description: "On upgrade, reuse the last release's values and merge in any overrides from 'values', 'set', etc. When false (default), values reset to chart defaults before applying overrides.",
+			},
+			"description": schema.StringAttribute{
+				Optional:    true,
+				Description: "Custom description for the release. Shown in 'helm list' and release metadata.",
 			},
 			"manifest": schema.StringAttribute{
 				Computed:    true,
