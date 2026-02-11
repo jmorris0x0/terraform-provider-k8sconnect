@@ -1014,11 +1014,13 @@ func (r *helmReleaseResource) loadRepoChart(ctx context.Context, cfg *action.Con
 	// Create settings with registry client support for OCI-backed repos
 	settings := cli.New()
 
-	// Use ChartPathOptions to locate and download chart
-	// Note: For OCI-backed HTTP repos (like Bitnami post-Nov 2024), LocateChart
-	// will detect the OCI reference and use the registry client from cfg
+	// Use ChartPathOptions to locate and download chart.
+	// NewInstall copies cfg.RegistryClient into the embedded ChartPathOptions,
+	// but the assignment below overwrites the entire struct (registryClient is
+	// unexported, so *opts always has it nil). Restore it with SetRegistryClient.
 	client := action.NewInstall(cfg)
 	client.ChartPathOptions = *opts
+	client.SetRegistryClient(registryClient)
 
 	tflog.Debug(ctx, "Locating chart in repository", map[string]interface{}{
 		"chartName": chartName,
