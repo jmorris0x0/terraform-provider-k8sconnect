@@ -282,6 +282,72 @@ Error says `namespaces "X" not found` but doesn't suggest `create_namespace = tr
 
 ---
 
+## Phase 14a: HashiCorp Helm Provider Issues
+
+### State Management
+
+| Issue | Result | Notes |
+|-------|--------|-------|
+| #1669: State persistence (20 applies) | **PASS** | 20/20 "No changes". Zero resources dropped from state. |
+| #472: Failed releases update state | **PASS** | Tested in 14.6. Failed install does NOT add to state. Retry works. |
+
+### Drift Detection
+
+| Issue | Result | Notes |
+|-------|--------|-------|
+| #1349: Manual rollback detection | **PASS** | `helm upgrade --force-conflicts` then `helm rollback` detected: `revision = 1 -> 4`, timestamp changed. |
+| #1307: OCI digest drift | Not tested | Would need digest-pinned OCI deploy. |
+
+### Wait Logic
+
+| Issue | Result | Notes |
+|-------|--------|-------|
+| #1364: DaemonSet wait | Not tested | Need DaemonSet chart. Covered by acceptance test. |
+| #672: First deploy timeout | **PASS** | Tested in 14.4. 30s timeout respected on first deploy. |
+| #463: Timeout respected | **PASS** | Tested in 14.4. User-specified timeout always used. |
+
+### Security
+
+| Issue | Result | Notes |
+|-------|--------|-------|
+| #1287: Sensitive values in metadata | **PASS (fixed)** | `manifest` attribute now marked `Sensitive: true`. `terraform show` displays `(sensitive value)`. set_sensitive values no longer leak. |
+| #1221: Sensitive attribute respected | **PASS** | `set_sensitive` values shown as `(sensitive value)` in plan. |
+
+### Import
+
+| Issue | Result | Notes |
+|-------|--------|-------|
+| #1613: Import existing releases | **PASS** | Tested in 14.9. Clean import with helpful guidance. |
+
+### Values Handling
+
+| Issue | Result | Notes |
+|-------|--------|-------|
+| #524: Mixed values+set changes | **PASS** | Added `set` to release with `values`. Changed only `set` value (Always->IfNotPresent). Plan detected change, apply succeeded, zero-diff after. |
+| #906: No unnecessary revisions | **PASS** | 20 applies, revision stayed at 6. No phantom upgrades. |
+
+---
+
+## Phase 14b: Bootstrap and Unknown Value Handling
+
+| Test | Result | Notes |
+|------|--------|-------|
+| Unknown cluster values (kind bootstrap) | **PASS** | 71 resources in single apply. kind_cluster creates first, helm releases use computed endpoint/certs. |
+| Unknown values in helm values | **PASS** | Values reference `local.cluster` which depends on kind_cluster output. Deferred correctly. |
+| Bootstrap workflow (cluster + 6 helm releases) | **PASS** | All 6 helm releases deployed after cluster in single `terraform apply`. |
+| Zero-diff after bootstrap | **PASS** | Immediate re-plan shows "No changes". |
+| Consistency with k8sconnect_object | **PASS** | Both resources handle unknown cluster values identically. |
+
+---
+
+## Bug Fixed During QA
+
+**Missing registry client for HTTP repos with OCI references** (commit 8f41bf2)
+
+`loadRepoChart` creates a registry client and sets it via `action.NewInstall(cfg)`, but then `client.ChartPathOptions = *opts` overwrites the embedded struct, wiping the unexported `registryClient` field. Fix: call `client.SetRegistryClient(registryClient)` after the assignment. Regression test added.
+
+---
+
 ## Summary
 
 | Section | Result | Notes |
@@ -298,16 +364,18 @@ Error says `namespaces "X" not found` but doesn't suggest `create_namespace = tr
 | 14.10 Chart Sources | **PASS** (partial) | Local path tested, OCI not tested |
 | 14.11 CRDs/Deps | Not tested | Need more complex test charts |
 | 14.12 Error Quality | Mixed | Some excellent, some need improvement |
+| **14a HashiCorp Issues** | **PASS** | All tested issues pass (sensitive leak fixed) |
+| **14b Bootstrap** | **PASS** | Single-apply bootstrap with 6 helm releases |
 
 ### Blocking Issues
 
-None. All functional tests pass.
+None. All issues resolved.
 
-### UX Issues (Fix Before Release)
+### Issues Fixed During QA
 
-1. **Timeout errors leak `context deadline exceeded`** - Replace with human-readable timeout message
-2. **Timeout errors don't show pod events/status** - Include WHY the deployment isn't ready
-3. **Namespace-not-found error missing fix suggestion** - Add `create_namespace = true` hint
+1. **Missing registry client** (commit 8f41bf2) - HTTP repos returning OCI references failed with "missing registry client". One-line fix + regression test.
+2. **Sensitive values leaked in manifest** - `manifest` attribute now marked `Sensitive: true`. Schema test added.
+3. **Timeout errors, namespace errors** - Already fixed in commit c8e63d7 (before this QA round). The QA results file was initially written against an older build. Current code has: human-readable timeout messages, pod diagnostics, and `create_namespace = true` suggestion.
 
 ### Observations
 

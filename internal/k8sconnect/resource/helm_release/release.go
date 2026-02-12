@@ -305,7 +305,8 @@ func (r *helmReleaseResource) Schema(ctx context.Context, req resource.SchemaReq
 			},
 			"manifest": schema.StringAttribute{
 				Computed:    true,
-				Description: "Computed rendered manifest (multi-document YAML).",
+				Sensitive:   true,
+				Description: "Computed rendered manifest (multi-document YAML). Marked sensitive because set_sensitive values may be rendered into the template output.",
 			},
 			"status": schema.StringAttribute{
 				Computed:    true,
