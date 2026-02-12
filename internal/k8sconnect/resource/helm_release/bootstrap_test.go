@@ -429,7 +429,7 @@ func TestAccHelmReleaseResource_UnknownChartPathError(t *testing.T) {
 					"release_name": config.StringVariable(releaseName),
 					"namespace":    config.StringVariable(namespace),
 				},
-				ExpectError: regexp.MustCompile("no such file or directory|failed to load chart"),
+				ExpectError: regexp.MustCompile("Chart Not Found|no such file or directory|failed to load chart"),
 			},
 		},
 	})
