@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-02-18
+
+### Added
+
+- **Resilient Read for expired/rotated credentials** (ADR-023)
+  - When stored credentials expire between Terraform runs, Read now degrades gracefully with a warning instead of failing
+  - Sets `stale_read` private state flag to trigger refreshed projection recovery during the next plan
+  - Prevents cascading errors when token rotation happens outside Terraform's lifecycle
+
+- **Flux CD bootstrap example** and dependency ordering guide for `yaml_scoped` data source
+
+### Fixed
+
+- **Improved error classification for auth and connection errors**
+  - Auth errors (401/403) now properly categorized and handled throughout the provider
+  - Better error extraction from deeply wrapped Kubernetes API errors
+- **Plan modifier drift detection improvements**
+  - More accurate field-level drift detection in plan phase
+  - Correct handling of auth failures during dry-run operations
+- **YAML parsing robustness**
+  - Better handling of edge cases in `yaml_body` parsing
+- **Minor fixes to `k8sconnect_patch` and `k8sconnect_wait` resources**
+
+### Security
+
+- **Updated Go runtime from 1.25.3 to 1.25.6** to address stdlib vulnerabilities
+
+### Improved
+
+- **Enhanced `yaml_scoped` documentation** with dependency ordering guidance and parallelism limit explanation
+- **Updated CI and test infrastructure**
+  - Terraform test version bumped to 1.14.5
+  - Kubernetes test version bumped to 1.35.1 (k3s)
+  - actions/checkout 5 to 6, gosec 2.22.10 to 2.23.0
+- **Dependency updates**: Multiple Go module dependency group bumps
+
 ## [0.3.6] - 2025-11-13
 
 ### Fixed

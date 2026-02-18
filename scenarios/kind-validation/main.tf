@@ -1355,3 +1355,381 @@ YAML
 
   cluster = local.cluster
 }
+
+#############################################
+# PHASE 1 ERROR TESTS (uncomment one at a time)
+# Each tests a specific error category from QA checklist
+#############################################
+
+## TEST: Invalid kind (completely made up)
+# resource "k8sconnect_object" "err_invalid_kind" {
+#   yaml_body = <<-YAML
+#     apiVersion: v1
+#     kind: Foobar
+#     metadata:
+#       name: test-invalid-kind
+#       namespace: kind-validation
+#   YAML
+#   cluster = local.cluster
+# }
+
+## TEST: Invalid API version (non-existent group)
+# resource "k8sconnect_object" "err_invalid_api" {
+#   yaml_body = <<-YAML
+#     apiVersion: fakecorp.io/v1
+#     kind: Widget
+#     metadata:
+#       name: test-invalid-api
+#       namespace: kind-validation
+#     spec:
+#       foo: bar
+#   YAML
+#   cluster = local.cluster
+# }
+
+## TEST: Malformed API version
+# resource "k8sconnect_object" "err_malformed_api" {
+#   yaml_body = <<-YAML
+#     apiVersion: not/a/valid/version
+#     kind: ConfigMap
+#     metadata:
+#       name: test-malformed
+#       namespace: kind-validation
+#   YAML
+#   cluster = local.cluster
+# }
+
+## TEST: Invalid resource name (uppercase)
+# resource "k8sconnect_object" "err_uppercase_name" {
+#   yaml_body = <<-YAML
+#     apiVersion: v1
+#     kind: ConfigMap
+#     metadata:
+#       name: INVALID-UPPERCASE
+#       namespace: kind-validation
+#     data:
+#       test: value
+#   YAML
+#   cluster = local.cluster
+#   depends_on = [k8sconnect_object.namespace]
+# }
+
+## TEST: Negative replicas
+# resource "k8sconnect_object" "err_negative_replicas" {
+#   yaml_body = <<-YAML
+#     apiVersion: apps/v1
+#     kind: Deployment
+#     metadata:
+#       name: negative-replicas
+#       namespace: kind-validation
+#     spec:
+#       replicas: -5
+#       selector:
+#         matchLabels:
+#           app: test
+#       template:
+#         metadata:
+#           labels:
+#             app: test
+#         spec:
+#           containers:
+#           - name: app
+#             image: busybox
+#             command: ["sleep", "3600"]
+#   YAML
+#   cluster = local.cluster
+#   depends_on = [k8sconnect_object.namespace]
+# }
+
+## TEST: Invalid port number (>65535)
+# resource "k8sconnect_object" "err_invalid_port" {
+#   yaml_body = <<-YAML
+#     apiVersion: v1
+#     kind: Service
+#     metadata:
+#       name: invalid-port-svc
+#       namespace: kind-validation
+#     spec:
+#       selector:
+#         app: test
+#       ports:
+#       - port: 99999
+#         targetPort: 99999
+#   YAML
+#   cluster = local.cluster
+#   depends_on = [k8sconnect_object.namespace]
+# }
+
+## TEST: Empty yaml_body
+# resource "k8sconnect_object" "err_empty_yaml" {
+#   yaml_body = ""
+#   cluster = local.cluster
+# }
+
+## TEST: yaml_body with only comments
+# resource "k8sconnect_object" "err_comments_only" {
+#   yaml_body = <<-YAML
+#     # This is just a comment
+#     # No actual resource here
+#   YAML
+#   cluster = local.cluster
+# }
+
+## TEST: Resource in non-existent namespace
+# resource "k8sconnect_object" "err_bad_namespace" {
+#   yaml_body = <<-YAML
+#     apiVersion: v1
+#     kind: ConfigMap
+#     metadata:
+#       name: orphan-config
+#       namespace: this-namespace-does-not-exist
+#     data:
+#       test: value
+#   YAML
+#   cluster = local.cluster
+# }
+
+## TEST: Deployment without required selector
+# resource "k8sconnect_object" "err_missing_selector" {
+#   yaml_body = <<-YAML
+#     apiVersion: apps/v1
+#     kind: Deployment
+#     metadata:
+#       name: no-selector
+#       namespace: kind-validation
+#     spec:
+#       replicas: 1
+#       template:
+#         metadata:
+#           labels:
+#             app: test
+#         spec:
+#           containers:
+#           - name: app
+#             image: busybox
+#   YAML
+#   cluster = local.cluster
+#   depends_on = [k8sconnect_object.namespace]
+# }
+
+#############################################
+# PHASE 2 PATCH ERROR TESTS (uncomment one at a time)
+#############################################
+
+## TEST: Patch non-existent resource
+# resource "k8sconnect_patch" "err_nonexistent" {
+#   target = {
+#     api_version = "v1"
+#     kind        = "ConfigMap"
+#     name        = "does-not-exist"
+#     namespace   = "kind-validation"
+#   }
+#   patch = jsonencode({ metadata = { labels = { test = "patch" } } })
+#   cluster = local.cluster
+# }
+
+## TEST: Patch with invalid target kind
+# resource "k8sconnect_patch" "err_invalid_kind" {
+#   target = {
+#     api_version = "v1"
+#     kind        = "Foobar"
+#     name        = "test"
+#     namespace   = "kind-validation"
+#   }
+#   patch = jsonencode({ metadata = { labels = { test = "patch" } } })
+#   cluster = local.cluster
+# }
+
+## TEST: Invalid JSON in patch
+# resource "k8sconnect_patch" "err_invalid_json" {
+#   target = {
+#     api_version = "v1"
+#     kind        = "ConfigMap"
+#     name        = "external-config"
+#     namespace   = "kind-validation"
+#   }
+#   patch = "this is not valid json {"
+#   cluster = local.cluster
+#   depends_on = [null_resource.external_configmap]
+# }
+
+## TEST: Empty patch
+# resource "k8sconnect_patch" "err_empty_patch" {
+#   target = {
+#     api_version = "v1"
+#     kind        = "ConfigMap"
+#     name        = "external-config"
+#     namespace   = "kind-validation"
+#   }
+#   patch = ""
+#   cluster = local.cluster
+#   depends_on = [null_resource.external_configmap]
+# }
+
+#############################################
+# PHASE 3 WAIT ERROR TESTS (uncomment one at a time)
+#############################################
+
+## TEST: Wait on non-existent resource
+# resource "k8sconnect_wait" "err_nonexistent" {
+#   object_ref = {
+#     api_version = "v1"
+#     kind        = "ConfigMap"
+#     name        = "does-not-exist-wait"
+#     namespace   = "kind-validation"
+#   }
+#   wait_for = {
+#     field_value = { "data.key" = "value" }
+#     timeout = "5s"
+#   }
+#   cluster = local.cluster
+# }
+
+## TEST: Wait for rollout on non-rollout resource (ConfigMap)
+# resource "k8sconnect_wait" "err_rollout_configmap" {
+#   object_ref = k8sconnect_object.formatting_test.object_ref
+#   wait_for = {
+#     rollout = true
+#     timeout = "5s"
+#   }
+#   cluster = local.cluster
+# }
+
+## TEST: Wait for impossible field value
+# resource "k8sconnect_wait" "err_impossible_value" {
+#   object_ref = k8sconnect_object.namespace.object_ref
+#   wait_for = {
+#     field_value = { "status.phase" = "ThisWillNeverHappen" }
+#     timeout = "5s"
+#   }
+#   cluster = local.cluster
+# }
+
+#############################################
+# PHASE 4 DATASOURCE ERROR TESTS
+#############################################
+
+## TEST: data.k8sconnect_object missing resource
+# data "k8sconnect_object" "err_missing" {
+#   api_version = "v1"
+#   kind        = "ConfigMap"
+#   name        = "does-not-exist-ds"
+#   namespace   = "kind-validation"
+#   cluster     = local.cluster
+#   depends_on  = [k8sconnect_object.namespace]
+# }
+
+## TEST: data.k8sconnect_yaml_split empty content
+# data "k8sconnect_yaml_split" "err_empty" {
+#   content = ""
+# }
+
+## TEST: data.k8sconnect_yaml_split invalid YAML
+# data "k8sconnect_yaml_split" "err_invalid" {
+#   content = "this: is: not: valid: yaml: [["
+# }
+
+## TEST: data.k8sconnect_yaml_scoped empty content
+# data "k8sconnect_yaml_scoped" "err_empty" {
+#   content = ""
+# }
+
+#############################################
+# PHASE 5 CONNECTION/AUTH ERROR TESTS
+#############################################
+
+## TEST: Invalid cluster host
+# # resource "k8sconnect_object" "err_bad_host" {
+#   yaml_body = <<-YAML
+#     apiVersion: v1
+#     kind: ConfigMap
+#     metadata:
+#       name: bad-host-test
+#       namespace: default
+#     data:
+#       test: value
+#   YAML
+#   cluster = {
+#     host                   = "https://127.0.0.1:99999"
+#     cluster_ca_certificate = local.cluster.cluster_ca_certificate
+#     client_certificate     = local.cluster.client_certificate
+#     client_key             = local.cluster.client_key
+#   }
+# }
+
+## TEST: Invalid token auth
+# resource "k8sconnect_object" "err_bad_token" {
+#   yaml_body = <<-YAML
+#     apiVersion: v1
+#     kind: ConfigMap
+#     metadata:
+#       name: bad-token-test
+#       namespace: default
+#     data:
+#       test: value
+#   YAML
+#   cluster = {
+#     host                   = local.cluster.host
+#     cluster_ca_certificate = local.cluster.cluster_ca_certificate
+#     token                  = "invalid-token-value"
+#   }
+# }
+
+#############################################
+# PHASE 13 IMPORT TESTS
+#############################################
+
+## TEST: Import existing resource
+# import {
+#   to = k8sconnect_object.imported_config
+#   id = "kind-kind-validation:import-test:v1/ConfigMap:import-test-config"
+# }
+#
+# resource "k8sconnect_object" "imported_config" {
+#   yaml_body = <<-YAML
+#     apiVersion: v1
+#     kind: ConfigMap
+#     metadata:
+#       name: import-test-config
+#       namespace: import-test
+#       labels:
+#         managed-by: kubectl
+#     data:
+#       database.host: "postgres.import-test.svc"
+#       database.port: "5432"
+#       log.level: "info"
+#   YAML
+#   cluster = local.cluster
+# }
+
+#############################################
+# PHASE 13.5 COLLISION & OWNERSHIP TESTS
+#############################################
+
+## TEST: CREATE collision detection (resource already exists via kubectl)
+# resource "k8sconnect_object" "collision_test" {
+#   yaml_body = <<-YAML
+#     apiVersion: v1
+#     kind: ConfigMap
+#     metadata:
+#       name: collision-test
+#       namespace: kind-validation
+#     data:
+#       key: value
+#   YAML
+#   cluster = local.cluster
+# }
+
+## TEST: Annotation loss recovery
+# resource "k8sconnect_object" "annotation_test" {
+#   yaml_body = <<-YAML
+#     apiVersion: v1
+#     kind: ConfigMap
+#     metadata:
+#       name: annotation-test
+#       namespace: kind-validation
+#     data:
+#       test: annotation-recovery
+#   YAML
+#   cluster = local.cluster
+# }

@@ -40,6 +40,12 @@ The final clean run is the one that matters for release. Intermediate runs are f
 
 One test run = one results file. This checklist is the reusable reference.
 
+**Test environment: `scenarios/kind-validation/`**
+
+All testing runs against the live Kind cluster and Terraform state in `scenarios/kind-validation/`. The `main.tf`, `edge-case-tests.tf`, and supporting YAML files in that directory are the starting point. You are encouraged to stretch and modify these files as needed to push the provider to its limits. The goal of each phase is to try as hard as you can to break the provider and validate every edge case you can find. This checklist is kept intentionally loose so that each run is slightly non-deterministic for broader coverage. When gaps are found that should become permanent parts of the manual testing procedure, edit this checklist and modify the Terraform files in the folder accordingly.
+
+Do NOT create throwaway test configs in `/tmp` or other locations. Work within the scenario directory.
+
 ---
 
 ## Phase 0: Setup and Happy Path (MUST PASS FIRST!)
