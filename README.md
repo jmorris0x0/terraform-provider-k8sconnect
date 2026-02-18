@@ -149,31 +149,62 @@ resource "k8sconnect_object" "staging_app" {
 
 ## Multi-Document YAML
 
-Split YAML files containing multiple Kubernetes manifests:
+Two data sources handle multi-document YAML. Choose based on your needs:
+
+### Simple splitting: `yaml_split`
+
+When your manifests have no ordering dependencies (or you handle ordering with `depends_on`):
 
 ```hcl
-# Split multi-document YAML
 data "k8sconnect_yaml_split" "app" {
   content = file("${path.module}/app-manifests.yaml")
   # Or: kustomize_path = "${path.module}/kustomize/overlays/prod"
   # Or: pattern = "${path.module}/manifests/*.yaml"
 }
 
-# Apply each manifest individually  
 resource "k8sconnect_object" "app" {
   for_each = data.k8sconnect_yaml_split.app.manifests
-  
   yaml_body = each.value
-  
-  cluster = {
-    kubeconfig = var.kubeconfig
-  }
+  cluster   = { kubeconfig = var.kubeconfig }
 }
 ```
 
-The `yaml_split` data source creates stable IDs like `deployment.my-app.nginx` and `service.my-app.nginx`, preventing unnecessary resource recreation when manifests are reordered.
+### Ordered by scope: `yaml_scoped`
 
-**→ [YAML split examples](examples/#yaml-split-data-source)** - Inline, file pattern globbing, templated, kustomize folders
+When you have CRDs, cluster-scoped resources, and namespaced resources that must apply in the right order. This is especially important for large manifest sets: Terraform applies resources in parallel batches of ~10, so without explicit dependency chains, a Namespace might not exist when its Deployments are applied, or a CRD might not be registered when its custom resources are created.
+
+`yaml_scoped` automatically categorizes resources into three groups: CRDs first, then cluster-scoped (Namespaces, ClusterRoles), then namespaced (Deployments, Services, custom resources).
+
+```hcl
+data "k8sconnect_yaml_scoped" "infra" {
+  content = file("${path.module}/infra-manifests.yaml")
+  # Or: kustomize_path = "${path.module}/kustomize/overlays/prod"
+}
+
+resource "k8sconnect_object" "crds" {
+  for_each  = data.k8sconnect_yaml_scoped.infra.crds
+  yaml_body = each.value
+  cluster   = local.cluster
+}
+
+resource "k8sconnect_object" "cluster_scoped" {
+  for_each   = data.k8sconnect_yaml_scoped.infra.cluster_scoped
+  yaml_body  = each.value
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.crds]
+}
+
+resource "k8sconnect_object" "namespaced" {
+  for_each   = data.k8sconnect_yaml_scoped.infra.namespaced
+  yaml_body  = each.value
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.cluster_scoped]
+}
+```
+
+Both data sources create stable IDs like `deployment.my-app.nginx`, preventing unnecessary resource recreation when manifests are reordered.
+
+**→ [YAML split examples](examples/#yaml-split-data-source)** | **[YAML scoped documentation](docs/data-sources/yaml_scoped.md)** | **[Flux bootstrap example](examples/flux-bootstrap/)** - Install Flux CD without the Flux provider
 
 ---
 
@@ -332,6 +363,7 @@ All `cluster` fields are marked sensitive and won't appear in logs or plan outpu
 
 **Data Sources:**
 - `k8sconnect_yaml_split` - Parse multi-document YAML files ([docs](docs/data-sources/yaml_split.md))
+- `k8sconnect_yaml_scoped` - Split and order resources by scope for dependency-safe applies ([docs](docs/data-sources/yaml_scoped.md))
 - `k8sconnect_object` - Read existing cluster resources ([docs](docs/data-sources/resource.md))
 
 **→ [Browse all 16 runnable examples](examples/README.md)** with test coverage

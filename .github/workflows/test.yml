@@ -45,10 +45,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        terraform: ['1.13.3']
+        terraform: ['1.14.5']
         k3s:
-            - 'rancher/k3s:v1.31.2-k3s1'   # Minimum supported
-            - 'rancher/k3s:v1.34.1-k3s1'   # Latest
+            - 'rancher/k3s:v1.35.1-k3s1'
     steps:
       - uses: actions/checkout@v6
 
@@ -151,7 +150,7 @@ jobs:
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: '1.13.3'
+          terraform_version: '1.14.5'
           terraform_wrapper: false
 
       - name: Install kubectl & k3d
@@ -162,7 +161,7 @@ jobs:
 
       - name: Run coverage
         env:
-          TF_ACC_TERRAFORM_VERSION: '1.13.3'
+          TF_ACC_TERRAFORM_VERSION: '1.14.5'
         run: make coverage
 
       - name: Remove individual coverage files before upload

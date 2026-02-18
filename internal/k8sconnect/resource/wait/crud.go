@@ -15,6 +15,7 @@ import (
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/auth"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8serrors"
 )
 
 // waitContext holds all the data needed for a wait operation
@@ -93,11 +94,28 @@ func (r *waitResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 	// Verify the resource still exists
 	_, err := wc.Client.Get(ctx, wc.GVR, wc.ObjectRef.Namespace.ValueString(), wc.ObjectRef.Name.ValueString())
 	if err != nil {
-		// Resource was deleted outside Terraform
-		tflog.Warn(ctx, "Resource no longer exists", map[string]interface{}{
-			"error": err.Error(),
-		})
-		resp.State.RemoveResource(ctx)
+		if errors.IsNotFound(err) {
+			// Resource was deleted outside Terraform
+			tflog.Warn(ctx, "Resource no longer exists", map[string]interface{}{
+				"error": err.Error(),
+			})
+			resp.State.RemoveResource(ctx)
+			return
+		}
+		// ADR-023: Degrade auth errors to warnings during Read
+		if k8serrors.IsAuthError(err) {
+			resp.Diagnostics.AddWarning(
+				"Read: Using Prior State — Authentication Failed",
+				fmt.Sprintf("Could not verify resource existence: authentication failed. "+
+					"Using prior state. This typically means the stored token has expired "+
+					"between Terraform runs. Details: %v", err),
+			)
+		} else {
+			resp.Diagnostics.AddError(
+				"Read: Failed to verify resource",
+				fmt.Sprintf("Could not read resource from cluster: %v", err),
+			)
+		}
 		return
 	}
 

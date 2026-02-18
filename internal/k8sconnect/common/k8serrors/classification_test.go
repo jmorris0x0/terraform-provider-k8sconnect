@@ -1,6 +1,7 @@
 package k8serrors
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -939,6 +940,178 @@ func TestClassifyError_InvalidAPIGroup(t *testing.T) {
 
 			if !strings.Contains(detail, tt.expectedInDetail) {
 				t.Errorf("ClassifyError() detail = %q, expected to contain %q", detail, tt.expectedInDetail)
+			}
+		})
+	}
+}
+
+// TestIsAuthError tests the IsAuthError helper function (ADR-023)
+func TestIsAuthError(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{
+			name:     "nil error",
+			err:      nil,
+			expected: false,
+		},
+		{
+			name:     "401 Unauthorized",
+			err:      errors.NewUnauthorized("token expired"),
+			expected: true,
+		},
+		{
+			name:     "403 Forbidden",
+			err:      errors.NewForbidden(schema.GroupResource{Resource: "pods"}, "test", nil),
+			expected: true,
+		},
+		{
+			name:     "404 Not Found",
+			err:      errors.NewNotFound(schema.GroupResource{Resource: "pods"}, "test"),
+			expected: false,
+		},
+		{
+			name:     "409 Conflict",
+			err:      errors.NewConflict(schema.GroupResource{Resource: "pods"}, "test", nil),
+			expected: false,
+		},
+		{
+			name: "500 Internal Server Error",
+			err: &errors.StatusError{
+				ErrStatus: metav1.Status{
+					Code:    500,
+					Message: "internal server error",
+				},
+			},
+			expected: false,
+		},
+		{
+			name:     "generic non-API error",
+			err:      fmt.Errorf("connection refused"),
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := IsAuthError(tt.err)
+			if result != tt.expected {
+				t.Errorf("IsAuthError() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestClassifyError_AuthErrors tests the classification of authentication errors (ADR-023)
+// These tests document the CURRENT behavior: auth errors produce "error" severity.
+// When Option E (resilient Read) is implemented, Read will catch auth errors
+// and return warnings instead, but the classifier itself will still return "error".
+func TestClassifyError_AuthErrors(t *testing.T) {
+	tests := []struct {
+		name             string
+		err              error
+		operation        string
+		resourceDesc     string
+		apiVersion       string
+		expectedSeverity string
+		expectedInTitle  string
+		expectedInDetail string
+	}{
+		// Scenario 1 from ADR-023: Token in state expired, terraform plan triggers Read
+		{
+			name:             "401 Unauthorized on Read - expired token",
+			err:              errors.NewUnauthorized("token expired"),
+			operation:        "Read",
+			resourceDesc:     "Deployment my-app",
+			apiVersion:       "apps/v1",
+			expectedSeverity: "error",
+			expectedInTitle:  "Authentication Failed",
+			expectedInDetail: "Authentication failed",
+		},
+		// Scenario 5 from ADR-023: Wrong token (misconfiguration) — should always be error
+		{
+			name:             "401 Unauthorized on Read - wrong token",
+			err:              errors.NewUnauthorized("invalid bearer token"),
+			operation:        "Read",
+			resourceDesc:     "ConfigMap my-config",
+			apiVersion:       "v1",
+			expectedSeverity: "error",
+			expectedInTitle:  "Authentication Failed",
+			expectedInDetail: "Authentication failed",
+		},
+		// Scenario 6 from ADR-023: 403 Forbidden (valid token, wrong RBAC) — should always be error
+		{
+			name:             "403 Forbidden on Read - RBAC misconfiguration",
+			err:              errors.NewForbidden(schema.GroupResource{Resource: "deployments"}, "my-app", nil),
+			operation:        "Read",
+			resourceDesc:     "Deployment my-app",
+			apiVersion:       "apps/v1",
+			expectedSeverity: "error",
+			expectedInTitle:  "Insufficient Permissions",
+			expectedInDetail: "RBAC permissions insufficient",
+		},
+		// Scenario 3 from ADR-023: Saved plan with expired token, apply triggers Create
+		{
+			name:             "401 Unauthorized on Create - stale plan token",
+			err:              errors.NewUnauthorized("token expired"),
+			operation:        "Create",
+			resourceDesc:     "Deployment my-app",
+			apiVersion:       "apps/v1",
+			expectedSeverity: "error",
+			expectedInTitle:  "Authentication Failed",
+			expectedInDetail: "Authentication failed",
+		},
+		// Non-auth errors should NOT be classified as auth errors
+		{
+			name:             "404 Not Found on Read - should remain warning",
+			err:              errors.NewNotFound(schema.GroupResource{Resource: "deployments"}, "my-app"),
+			operation:        "Read",
+			resourceDesc:     "Deployment my-app",
+			apiVersion:       "apps/v1",
+			expectedSeverity: "warning",
+			expectedInTitle:  "Resource Not Found",
+			expectedInDetail: "deleted outside of Terraform",
+		},
+		// Auth error wrapped in discovery message should still be classified as auth, not connection
+		{
+			name:             "401 wrapped in discovery error - should be auth not connection",
+			err:              fmt.Errorf("failed to get resource info for v1/ConfigMap: %w", errors.NewUnauthorized("Unauthorized")),
+			operation:        "Plan",
+			resourceDesc:     "ConfigMap my-config",
+			apiVersion:       "v1",
+			expectedSeverity: "error",
+			expectedInTitle:  "Authentication Failed",
+			expectedInDetail: "Authentication failed",
+		},
+		// Forbidden error wrapped in discovery message should still be classified as forbidden, not connection
+		{
+			name:             "403 wrapped in discovery error - should be permissions not connection",
+			err:              fmt.Errorf("failed to get resource info for apps/v1/Deployment: %w", errors.NewForbidden(schema.GroupResource{Resource: "deployments"}, "my-app", fmt.Errorf("forbidden"))),
+			operation:        "Plan",
+			resourceDesc:     "Deployment my-app",
+			apiVersion:       "apps/v1",
+			expectedSeverity: "error",
+			expectedInTitle:  "Insufficient Permissions",
+			expectedInDetail: "RBAC permissions insufficient",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			severity, title, detail := ClassifyError(tt.err, tt.operation, tt.resourceDesc, tt.apiVersion)
+
+			if severity != tt.expectedSeverity {
+				t.Errorf("ClassifyError() severity = %v, want %v", severity, tt.expectedSeverity)
+			}
+
+			if !strings.Contains(title, tt.expectedInTitle) {
+				t.Errorf("ClassifyError() title %q does not contain %q", title, tt.expectedInTitle)
+			}
+
+			if !strings.Contains(detail, tt.expectedInDetail) {
+				t.Errorf("ClassifyError() detail does not contain %q.\nGot: %s", tt.expectedInDetail, detail)
 			}
 		})
 	}

@@ -92,14 +92,3 @@ resource "k8sconnect_object" "service" {
   cluster    = local.cluster
   depends_on = [k8sconnect_wait.app]
 }
-
-# Output confirms deployment completed
-output "deployment_ready" {
-  value       = true
-  description = "Deployment rollout completed - all replicas are updated and ready"
-}
-
-output "deployment_name" {
-  value       = "web-app"
-  description = "Name of the deployed application"
-}

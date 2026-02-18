@@ -35,6 +35,16 @@ func isBuiltInAPIGroup(apiVersion string) bool {
 	return strings.HasSuffix(group, ".k8s.io")
 }
 
+// IsAuthError checks if an error is an authentication or authorization error (401/403).
+// Used by resilient Read (ADR-023) to degrade gracefully when stored credentials
+// have expired between Terraform runs.
+func IsAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.IsUnauthorized(err) || errors.IsForbidden(err)
+}
+
 // IsConnectionError checks if an error is a network/connection error
 // These include: DNS lookup failures, connection refused, invalid ports, timeouts
 func IsConnectionError(err error) bool {
@@ -82,7 +92,27 @@ func extractKindFromResourceDesc(resourceDesc string) string {
 // Returns (severity, title, detail) suitable for Terraform diagnostics
 func ClassifyError(err error, operation, resourceDesc, apiVersion string) (severity, title, detail string) {
 	switch {
-	// Check connection errors FIRST (Bug #4 fix)
+	// Check auth errors FIRST — they use type-based unwrapping (errors.As) which
+	// correctly detects 401/403 even when wrapped in discovery messages like
+	// "failed to get resource info for v1/ConfigMap: Unauthorized".
+	// IsConnectionError uses string matching and would incorrectly catch these.
+	case errors.IsUnauthorized(err):
+		return "error", fmt.Sprintf("%s: Authentication Failed", operation),
+			fmt.Sprintf("Authentication failed for %s %s.\n\n"+
+				"Error: %v\n\n"+
+				"This usually means:\n"+
+				"1. The authentication token has expired\n"+
+				"2. The token or credentials are invalid\n"+
+				"3. The cluster rejected the provided credentials\n\n"+
+				"Check your cluster authentication configuration.",
+				operation, resourceDesc, err)
+
+	case errors.IsForbidden(err):
+		return "error", fmt.Sprintf("%s: Insufficient Permissions", operation),
+			fmt.Sprintf("RBAC permissions insufficient to %s %s. Check that your credentials have the required permissions for this operation. Details: %v",
+				operation, resourceDesc, err)
+
+	// Check connection errors AFTER auth errors (Bug #4 fix)
 	// Connection errors were being misdiagnosed as "Resource Type Not Found"
 	case IsConnectionError(err):
 		return "error", fmt.Sprintf("%s: Cluster Connection Failed", operation),
@@ -99,11 +129,6 @@ func ClassifyError(err error, operation, resourceDesc, apiVersion string) (sever
 	case errors.IsNotFound(err):
 		return "warning", fmt.Sprintf("%s: Resource Not Found", operation),
 			fmt.Sprintf("The %s was not found in the cluster. It may have been deleted outside of Terraform.", resourceDesc)
-
-	case errors.IsForbidden(err):
-		return "error", fmt.Sprintf("%s: Insufficient Permissions", operation),
-			fmt.Sprintf("RBAC permissions insufficient to %s %s. Check that your credentials have the required permissions for this operation. Details: %v",
-				operation, resourceDesc, err)
 
 	// Note: SSA conflicts are intentionally prevented by using Force=true (ADR-005)
 	// This code path exists for defensive programming in case Force is ever disabled
@@ -131,11 +156,6 @@ func ClassifyError(err error, operation, resourceDesc, apiVersion string) (sever
 	case errors.IsTimeout(err) || errors.IsServerTimeout(err):
 		return "error", fmt.Sprintf("%s: Kubernetes API Timeout", operation),
 			fmt.Sprintf("Timeout while performing %s on %s. The cluster may be under heavy load or experiencing connectivity issues. Details: %v",
-				operation, resourceDesc, err)
-
-	case errors.IsUnauthorized(err):
-		return "error", fmt.Sprintf("%s: Authentication Failed", operation),
-			fmt.Sprintf("Authentication failed for %s %s. Check your credentials and ensure they are valid. Details: %v",
 				operation, resourceDesc, err)
 
 	// ADR-017: Field validation errors (status 400) - check BEFORE IsInvalid (status 422)

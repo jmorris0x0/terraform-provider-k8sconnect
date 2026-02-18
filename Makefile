@@ -2,7 +2,7 @@ OIDC_DIR          := $(CURDIR)/test/oidc-setup
 DEX_SSL_DIR       := $(OIDC_DIR)/ssl
 TESTBUILD_DIR     := $(CURDIR)/.testbuild
 DEX_IMAGE         := ghcr.io/dexidp/dex:v2.42.1
-TERRAFORM_VERSION := 1.13.4
+TERRAFORM_VERSION := 1.14.5
 PROVIDER_VERSION  ?= 0.1.0
 
 # Build variables for version injection
@@ -248,7 +248,7 @@ docs:
 		echo "Installing tfplugindocs..."; \
 		go install github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@latest; \
 	fi
-	tfplugindocs
+	PATH="$$(go env GOPATH)/bin:$$PATH" tfplugindocs
 
 .PHONY: lint
 lint: vet
@@ -258,7 +258,7 @@ lint: vet
 		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | \
 			sh -s -- -b $$(go env GOPATH)/bin; \
 	fi
-	golangci-lint run --timeout=5m --fix
+	PATH="$$(go env GOPATH)/bin:$$PATH" golangci-lint run --timeout=5m --fix
 
 .PHONY: security-scan
 security-scan:
@@ -271,8 +271,8 @@ security-scan:
 		echo "Installing govulncheck..."; \
 		go install golang.org/x/vuln/cmd/govulncheck@latest; \
 	fi
-	gosec -quiet ./...
-	govulncheck ./...
+	PATH="$$(go env GOPATH)/bin:$$PATH" gosec -quiet ./...
+	PATH="$$(go env GOPATH)/bin:$$PATH" govulncheck ./...
 
 .PHONY: deadcode
 deadcode: ## Find unused/dead code
@@ -286,7 +286,7 @@ release-dry-run:
 		echo "Installing goreleaser..."; \
 		go install github.com/goreleaser/goreleaser/v2@latest; \
 	fi
-	goreleaser release --snapshot --skip=publish --clean
+	PATH="$$(go env GOPATH)/bin:$$PATH" goreleaser release --snapshot --skip=publish --clean
 
 .PHONY: release-check
 release-check:
@@ -295,7 +295,7 @@ release-check:
 		echo "Installing goreleaser..."; \
 		go install github.com/goreleaser/goreleaser/v2@latest; \
 	fi
-	goreleaser check
+	PATH="$$(go env GOPATH)/bin:$$PATH" goreleaser check
 
 .PHONY: coverage
 coverage: create-cluster
@@ -341,7 +341,7 @@ coverage: create-cluster
 		echo "Installing gocovmerge..."; \
 		go install github.com/wadey/gocovmerge@latest; \
 	fi; \
-	gocovmerge coverage-unit.out coverage-acceptance.out > coverage.out; \
+	PATH="$$(go env GOPATH)/bin:$$PATH" gocovmerge coverage-unit.out coverage-acceptance.out > coverage.out; \
 	go tool cover -func=coverage.out ; \
 	go tool cover -html=coverage.out -o coverage.html ; \
 	echo "HTML report written to ./coverage.html"; \

@@ -24,9 +24,3 @@ resource "k8sconnect_patch" "kube_dns_annotation" {
 
   cluster = local.cluster
 }
-
-# Output the managed fields
-output "managed_fields" {
-  value       = k8sconnect_patch.kube_dns_annotation.managed_fields
-  description = "Managed fields metadata for this patch"
-}
