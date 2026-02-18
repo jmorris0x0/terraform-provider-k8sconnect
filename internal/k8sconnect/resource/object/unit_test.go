@@ -185,11 +185,11 @@ func TestConvertObjectToConnectionModel(t *testing.T) {
 		"context":                types.StringType,
 		"token":                  types.StringType,
 
-		"client_certificate":     types.StringType,
-		"client_key":             types.StringType,
-		"insecure":               types.BoolType,
-		"proxy_url":              types.StringType,
-		"exec":                   execType,
+		"client_certificate": types.StringType,
+		"client_key":         types.StringType,
+		"insecure":           types.BoolType,
+		"proxy_url":          types.StringType,
+		"exec":               execType,
 	}
 
 	attrs := map[string]attr.Value{
@@ -199,11 +199,11 @@ func TestConvertObjectToConnectionModel(t *testing.T) {
 		"context":                types.StringNull(),
 		"token":                  types.StringValue("test-token"),
 
-		"client_certificate":     types.StringNull(),
-		"client_key":             types.StringNull(),
-		"insecure":               types.BoolValue(false),
-		"proxy_url":              types.StringNull(),
-		"exec":                   types.ObjectNull(execType.AttrTypes),
+		"client_certificate": types.StringNull(),
+		"client_key":         types.StringNull(),
+		"insecure":           types.BoolValue(false),
+		"proxy_url":          types.StringNull(),
+		"exec":               types.ObjectNull(execType.AttrTypes),
 	}
 
 	obj := types.ObjectValueMust(attrTypes, attrs)
