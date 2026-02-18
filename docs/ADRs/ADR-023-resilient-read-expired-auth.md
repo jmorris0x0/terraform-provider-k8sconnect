@@ -84,12 +84,6 @@ ModifyPlan already calls `client.Get()` for ownership transition detection. When
 - `classification_test.go` - Auth errors wrapped in discovery messages correctly classified (bug found during QA: `IsConnectionError` string match was catching these before `errors.IsUnauthorized` type check)
 - `plan_modifier_drift_test.go` - stale_read flag gating: drift detected when set, no false positives, no regression when not set
 
-## Open Items
-
-- Ask issue #131 reporter what "runner constraints" prevent exec auth
-- Reply to discussion #146 (Flux bootstrap on EKS, same token expiry problem)
-- PR #132 (Copilot-generated write-only stub) superseded by this ADR
-
 ## References
 
 - [Terraform Ephemeral Values (1.10)](https://www.hashicorp.com/en/blog/terraform-1-10-improves-handling-secrets-in-state-with-ephemeral-values)

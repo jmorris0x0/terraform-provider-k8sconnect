@@ -18,7 +18,7 @@ terraform {
 # Create the Kind cluster
 resource "kind_cluster" "test" {
   name           = "provider-comparison"
-  node_image     = "kindest/node:v1.31.0"
+  node_image     = "kindest/node:v1.35.0"
   wait_for_ready = true
   kind_config {
     kind        = "Cluster"
