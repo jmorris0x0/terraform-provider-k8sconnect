@@ -158,7 +158,6 @@ func ClassifyError(err error, operation, resourceDesc, apiVersion string) (sever
 			fmt.Sprintf("Timeout while performing %s on %s. The cluster may be under heavy load or experiencing connectivity issues. Details: %v",
 				operation, resourceDesc, err)
 
-
 	// ADR-017: Field validation errors (status 400) - check BEFORE IsInvalid (status 422)
 	case IsFieldValidationError(err):
 		fieldDetails := ExtractFieldValidationDetails(err)

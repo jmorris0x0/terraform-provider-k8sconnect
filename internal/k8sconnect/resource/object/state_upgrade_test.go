@@ -29,10 +29,10 @@ func TestUpgradeObjectStateV0toV2(t *testing.T) {
 						"cluster_ca_certificate": tftypes.String,
 						"token":                  tftypes.String,
 
-						"insecure":               tftypes.Bool,
-						"kubeconfig":             tftypes.String,
-						"context":                tftypes.String,
-						"proxy_url":              tftypes.String,
+						"insecure":   tftypes.Bool,
+						"kubeconfig": tftypes.String,
+						"context":    tftypes.String,
+						"proxy_url":  tftypes.String,
 						"exec": tftypes.Object{
 							AttributeTypes: map[string]tftypes.Type{
 								"api_version": tftypes.String,
@@ -49,11 +49,11 @@ func TestUpgradeObjectStateV0toV2(t *testing.T) {
 					"cluster_ca_certificate": tftypes.NewValue(tftypes.String, nil),
 					"token":                  tftypes.NewValue(tftypes.String, "test-token"),
 
-					"insecure":               tftypes.NewValue(tftypes.Bool, nil),
-					"kubeconfig":             tftypes.NewValue(tftypes.String, nil),
-					"context":                tftypes.NewValue(tftypes.String, nil),
-					"proxy_url":              tftypes.NewValue(tftypes.String, nil),
-					"exec":                   tftypes.NewValue(tftypes.Object{AttributeTypes: map[string]tftypes.Type{"api_version": tftypes.String, "command": tftypes.String, "args": tftypes.List{ElementType: tftypes.String}, "env": tftypes.Map{ElementType: tftypes.String}}}, nil),
+					"insecure":   tftypes.NewValue(tftypes.Bool, nil),
+					"kubeconfig": tftypes.NewValue(tftypes.String, nil),
+					"context":    tftypes.NewValue(tftypes.String, nil),
+					"proxy_url":  tftypes.NewValue(tftypes.String, nil),
+					"exec":       tftypes.NewValue(tftypes.Object{AttributeTypes: map[string]tftypes.Type{"api_version": tftypes.String, "command": tftypes.String, "args": tftypes.List{ElementType: tftypes.String}, "env": tftypes.Map{ElementType: tftypes.String}}}, nil),
 				}),
 				"delete_protection": tftypes.NewValue(tftypes.Bool, nil),
 				"delete_timeout":    tftypes.NewValue(tftypes.String, nil),
@@ -102,10 +102,10 @@ func TestUpgradeObjectStateV0toV2(t *testing.T) {
 						"cluster_ca_certificate": tftypes.String,
 						"token":                  tftypes.String,
 
-						"insecure":               tftypes.Bool,
-						"kubeconfig":             tftypes.String,
-						"context":                tftypes.String,
-						"proxy_url":              tftypes.String,
+						"insecure":   tftypes.Bool,
+						"kubeconfig": tftypes.String,
+						"context":    tftypes.String,
+						"proxy_url":  tftypes.String,
 						"exec": tftypes.Object{
 							AttributeTypes: map[string]tftypes.Type{
 								"api_version": tftypes.String,
@@ -122,11 +122,11 @@ func TestUpgradeObjectStateV0toV2(t *testing.T) {
 					"cluster_ca_certificate": tftypes.NewValue(tftypes.String, nil),
 					"token":                  tftypes.NewValue(tftypes.String, nil),
 
-					"insecure":               tftypes.NewValue(tftypes.Bool, nil),
-					"kubeconfig":             tftypes.NewValue(tftypes.String, nil),
-					"context":                tftypes.NewValue(tftypes.String, nil),
-					"proxy_url":              tftypes.NewValue(tftypes.String, nil),
-					"exec":                   tftypes.NewValue(tftypes.Object{AttributeTypes: map[string]tftypes.Type{"api_version": tftypes.String, "command": tftypes.String, "args": tftypes.List{ElementType: tftypes.String}, "env": tftypes.Map{ElementType: tftypes.String}}}, nil),
+					"insecure":   tftypes.NewValue(tftypes.Bool, nil),
+					"kubeconfig": tftypes.NewValue(tftypes.String, nil),
+					"context":    tftypes.NewValue(tftypes.String, nil),
+					"proxy_url":  tftypes.NewValue(tftypes.String, nil),
+					"exec":       tftypes.NewValue(tftypes.Object{AttributeTypes: map[string]tftypes.Type{"api_version": tftypes.String, "command": tftypes.String, "args": tftypes.List{ElementType: tftypes.String}, "env": tftypes.Map{ElementType: tftypes.String}}}, nil),
 				}),
 				"delete_protection":        tftypes.NewValue(tftypes.Bool, nil),
 				"delete_timeout":           tftypes.NewValue(tftypes.String, nil),

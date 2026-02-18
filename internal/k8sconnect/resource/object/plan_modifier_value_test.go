@@ -31,9 +31,9 @@ func TestGetFieldValue_DottedKeys(t *testing.T) {
 				},
 			},
 			"data": map[string]interface{}{
-				"simple-key":   "value1",
-				"config.yaml":  "key: value",
-				"app.conf":     "setting=true",
+				"simple-key":     "value1",
+				"config.yaml":    "key: value",
+				"app.conf":       "setting=true",
 				"nested.dot.key": "deeply-dotted",
 			},
 		},
