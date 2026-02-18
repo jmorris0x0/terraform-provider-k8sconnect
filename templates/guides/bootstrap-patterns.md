@@ -408,6 +408,44 @@ resource "k8sconnect_object" "app" {
 }
 ```
 
+## Bootstrapping GitOps (Flux CD)
+
+The Flux Terraform provider has the same provider-level dependency problem. Skip it entirely and install Flux as Kubernetes resources via k8sconnect:
+
+```terraform
+data "http" "flux_install" {
+  url = "https://github.com/fluxcd/flux2/releases/download/v2.4.0/install.yaml"
+}
+
+data "k8sconnect_yaml_scoped" "flux" {
+  content = data.http.flux_install.response_body
+}
+
+resource "k8sconnect_object" "flux_crds" {
+  for_each  = data.k8sconnect_yaml_scoped.flux.crds
+  yaml_body = each.value
+  cluster   = local.cluster
+}
+
+resource "k8sconnect_object" "flux_cluster" {
+  for_each   = data.k8sconnect_yaml_scoped.flux.cluster_scoped
+  yaml_body  = each.value
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.flux_crds]
+}
+
+resource "k8sconnect_object" "flux_namespaced" {
+  for_each   = data.k8sconnect_yaml_scoped.flux.namespaced
+  yaml_body  = each.value
+  cluster    = local.cluster
+  depends_on = [k8sconnect_object.flux_crds, k8sconnect_object.flux_cluster]
+}
+```
+
+After the controllers are running, create the GitRepository and Kustomization resources that point Flux at your fleet repo. Terraform owns the Flux lifecycle: upgrade by bumping the version in the URL.
+
+**→ [Complete Flux bootstrap example](../examples/flux-bootstrap/)** with wait-for-readiness and sync resource creation
+
 ## Common Pitfalls
 
 ### Deploying Before Nodes Ready

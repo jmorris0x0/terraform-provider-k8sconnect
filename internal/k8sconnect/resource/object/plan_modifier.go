@@ -88,7 +88,7 @@ func (r *objectResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 	// Populate object_ref from parsed YAML (prevents "(known after apply)" noise)
 	// ONLY when connection is ready - during bootstrap we can't determine namespace defaults
 	if connectionReady {
-		if err := r.setObjectRefFromDesiredObj(ctx, desiredObj, &plannedData); err != nil {
+		if err := r.setObjectRefFromDesiredObj(ctx, desiredObj, &plannedData, plannedData.Cluster); err != nil {
 			// Check if this is a CRD-not-found error
 			if r.isCRDNotFoundError(err) {
 				// CRD doesn't exist yet - this is expected during bootstrap
@@ -119,12 +119,24 @@ func (r *objectResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 	}
 
 	// Execute dry-run and compute projection
-	if !r.executeDryRunAndProjection(ctx, req, &plannedData, desiredObj, resp) {
+	ok, refreshedProjection := r.executeDryRunAndProjection(ctx, req, &plannedData, desiredObj, resp, plannedData.Cluster)
+	if !ok {
 		return
 	}
 
+	// ADR-023 Phase 3: Only use refreshedProjection when Read returned stale state.
+	// When Read succeeds, state projection is already fresh and the normal baseline
+	// comparison works correctly. Using refreshedProjection unconditionally causes
+	// regressions during ownership transitions because dry-run paths differ from
+	// currentObj paths.
+	if refreshedProjection != nil && !checkStaleReadFlag(ctx, req.Private) {
+		tflog.Debug(ctx, "Read was not stale, discarding refreshed projection (normal operation)")
+		refreshedProjection = nil
+	}
+
 	// Check drift and preserve state if needed
-	r.checkDriftAndPreserveState(ctx, req, &plannedData, resp)
+	// ADR-023: Pass refreshedProjection for accurate drift detection when Read returned stale state
+	r.checkDriftAndPreserveState(ctx, req, &plannedData, resp, refreshedProjection)
 
 	// Save the modified plan
 	diags = resp.Plan.Set(ctx, &plannedData)
@@ -148,16 +160,30 @@ func isCreateOperation(req resource.ModifyPlanRequest) bool {
 	return req.State.Raw.IsNull()
 }
 
-// checkDriftAndPreserveState compares projections and preserves state if no changes
-func (r *objectResource) checkDriftAndPreserveState(ctx context.Context, req resource.ModifyPlanRequest, plannedData *objectResourceModel, resp *resource.ModifyPlanResponse) {
+// checkDriftAndPreserveState compares projections and preserves state if no changes.
+// refreshedProjection (ADR-023 Phase 3) is an optional fresh baseline computed from
+// ModifyPlan's client.Get(). When non-nil, it replaces the potentially stale
+// stateData.ManagedStateProjection for the drift comparison. This enables drift
+// detection even when Read returns stale state (expired token scenario).
+func (r *objectResource) checkDriftAndPreserveState(ctx context.Context, req resource.ModifyPlanRequest, plannedData *objectResourceModel, resp *resource.ModifyPlanResponse, refreshedProjection *types.Map) {
 	// Check if we have state to compare against
 	if !req.State.Raw.IsNull() {
 		var stateData objectResourceModel
 		diags := req.State.Get(ctx, &stateData)
 		resp.Diagnostics.Append(diags...)
 		if !resp.Diagnostics.HasError() && !stateData.ManagedStateProjection.IsNull() {
+			// ADR-023: Use refreshed projection as baseline when available.
+			// This handles the scenario where Read returned stale state because
+			// the stored token expired. ModifyPlan has the fresh token from
+			// Config, so its Get result reflects actual cluster state.
+			baselineProjection := stateData.ManagedStateProjection
+			if refreshedProjection != nil {
+				baselineProjection = *refreshedProjection
+				tflog.Debug(ctx, "Using refreshed projection from ModifyPlan Get for drift comparison")
+			}
+
 			// If projections match, only YAML formatting changed in Kubernetes
-			if stateData.ManagedStateProjection.Equal(plannedData.ManagedStateProjection) {
+			if baselineProjection.Equal(plannedData.ManagedStateProjection) {
 				tflog.Debug(ctx, "No Kubernetes resource changes detected, preserving YAML")
 				// Preserve the original YAML and internal fields since no actual changes will occur
 				plannedData.YAMLBody = stateData.YAMLBody
@@ -186,14 +212,16 @@ func (r *objectResource) checkDriftAndPreserveState(ctx context.Context, req res
 	}
 }
 
-// executeDryRunAndProjection performs dry-run and calculates field projection
-func (r *objectResource) executeDryRunAndProjection(ctx context.Context, req resource.ModifyPlanRequest, plannedData *objectResourceModel, desiredObj *unstructured.Unstructured, resp *resource.ModifyPlanResponse) bool {
+// executeDryRunAndProjection performs dry-run and calculates field projection.
+// Returns (ok, refreshedProjection) where refreshedProjection is non-nil for UPDATE
+// operations when the current cluster object was successfully fetched (ADR-023 Phase 3).
+func (r *objectResource) executeDryRunAndProjection(ctx context.Context, req resource.ModifyPlanRequest, plannedData *objectResourceModel, desiredObj *unstructured.Unstructured, resp *resource.ModifyPlanResponse, cluster types.Object) (bool, *types.Map) {
 	tflog.Debug(ctx, "⚠️ DEBUG: executeDryRunAndProjection - START", map[string]interface{}{
 		"object_ref": fmt.Sprintf("%s/%s %s/%s", desiredObj.GetAPIVersion(), desiredObj.GetKind(), desiredObj.GetNamespace(), desiredObj.GetName()),
 	})
 
 	// Setup client
-	client, err := r.setupDryRunClient(ctx, plannedData, resp)
+	client, err := r.setupDryRunClient(ctx, plannedData, resp, cluster)
 	if err != nil {
 		// Check if this is a CRD-not-found error during plan phase
 		if r.isCRDNotFoundError(err) {
@@ -201,9 +229,9 @@ func (r *objectResource) executeDryRunAndProjection(ctx context.Context, req res
 			// User can review yaml_body in plan output
 			r.setProjectionUnknown(ctx, plannedData, resp,
 				"CRD not found during plan: projection will be calculated during apply")
-			return true
+			return true, nil
 		}
-		return false
+		return false, nil
 	}
 
 	// Perform dry-run
@@ -215,24 +243,24 @@ func (r *objectResource) executeDryRunAndProjection(ctx context.Context, req res
 			// User can review yaml_body in plan output
 			r.setProjectionUnknown(ctx, plannedData, resp,
 				"CRD not found during dry-run: projection will be calculated during apply")
-			return true
+			return true, nil
 		}
-		return false
+		return false, nil
 	}
 
 	// If dryRunResult is nil, it means replacement was triggered (e.g., immutable field)
 	// In this case, projection is not needed
 	if dryRunResult == nil {
-		return true
+		return true, nil
 	}
 
 	// Calculate and apply projection
 	return r.calculateProjection(ctx, req, plannedData, desiredObj, dryRunResult, client, resp)
 }
 
-// setupDryRunClient creates the k8s client for dry-run
-func (r *objectResource) setupDryRunClient(ctx context.Context, plannedData *objectResourceModel, resp *resource.ModifyPlanResponse) (k8sclient.K8sClient, error) {
-	client, err := factory.SetupClient(ctx, plannedData.Cluster, r.clientGetter)
+// setupDryRunClient creates the k8s client for dry-run.
+func (r *objectResource) setupDryRunClient(ctx context.Context, plannedData *objectResourceModel, resp *resource.ModifyPlanResponse, cluster types.Object) (k8sclient.K8sClient, error) {
+	client, err := factory.SetupClient(ctx, cluster, r.clientGetter)
 	if err != nil {
 		r.setProjectionUnknown(ctx, plannedData, resp,
 			fmt.Sprintf("Skipping dry-run due to client setup error: %s", err))
@@ -242,8 +270,49 @@ func (r *objectResource) setupDryRunClient(ctx context.Context, plannedData *obj
 	return client, nil
 }
 
+// computeRefreshedProjection projects managed field values from the current cluster object.
+// ADR-023 Phase 3: When Read returns stale state (expired token scenario), ModifyPlan uses
+// this to create a fresh baseline for drift comparison. Returns nil if projection fails
+// or currentObj is nil (graceful degradation).
+func (r *objectResource) computeRefreshedProjection(ctx context.Context, currentObj, desiredObj *unstructured.Unstructured, paths []string, data *objectResourceModel) *types.Map {
+	if currentObj == nil {
+		return nil
+	}
+
+	// Apply ignore_fields filtering (must match what applyProjection does)
+	filteredPaths := make([]string, len(paths))
+	copy(filteredPaths, paths)
+	if ignoreFields := getIgnoreFields(ctx, data); ignoreFields != nil {
+		filteredPaths = filterIgnoredPaths(filteredPaths, ignoreFields, desiredObj.Object)
+	}
+
+	// Project field values from the current cluster object
+	projection, err := projectFields(currentObj.Object, filteredPaths)
+	if err != nil {
+		tflog.Debug(ctx, "Failed to compute refreshed projection from current object", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return nil
+	}
+
+	// Convert to flat map and then types.Map
+	projectionMap := flattenProjectionToMap(projection, filteredPaths)
+	mapValue, diags := types.MapValueFrom(ctx, types.StringType, projectionMap)
+	if diags.HasError() {
+		tflog.Debug(ctx, "Failed to convert refreshed projection to types.Map")
+		return nil
+	}
+
+	tflog.Debug(ctx, "Computed refreshed projection from current cluster state", map[string]interface{}{
+		"path_count": len(filteredPaths),
+		"map_size":   len(projectionMap),
+	})
+
+	return &mapValue
+}
+
 // calculateProjection determines projection strategy and calculates projection
-func (r *objectResource) calculateProjection(ctx context.Context, req resource.ModifyPlanRequest, plannedData *objectResourceModel, desiredObj, dryRunResult *unstructured.Unstructured, client k8sclient.K8sClient, resp *resource.ModifyPlanResponse) bool {
+func (r *objectResource) calculateProjection(ctx context.Context, req resource.ModifyPlanRequest, plannedData *objectResourceModel, desiredObj, dryRunResult *unstructured.Unstructured, client k8sclient.K8sClient, resp *resource.ModifyPlanResponse) (bool, *types.Map) {
 	tflog.Debug(ctx, "⚠️ DEBUG: calculateProjection - START", map[string]interface{}{
 		"object_ref": fmt.Sprintf("%s/%s %s/%s", desiredObj.GetAPIVersion(), desiredObj.GetKind(), desiredObj.GetNamespace(), desiredObj.GetName()),
 	})
@@ -270,7 +339,7 @@ func (r *objectResource) calculateProjection(ctx context.Context, req resource.M
 		}
 
 		// Project the dry-run result to show what will be created
-		return r.applyProjection(ctx, dryRunResult, paths, plannedData, isCreate, resp)
+		return r.applyProjection(ctx, dryRunResult, paths, plannedData, isCreate, resp), nil
 	}
 
 	// UPDATE operations: Check for ownership transitions BEFORE dry-run
@@ -282,6 +351,7 @@ func (r *objectResource) calculateProjection(ctx context.Context, req resource.M
 	})
 
 	// Fetch actual current state from cluster to detect ownership transitions
+	var currentObj *unstructured.Unstructured
 	gvr, err := client.DiscoverGVR(ctx, desiredObj.GetAPIVersion(), desiredObj.GetKind())
 	if err != nil {
 		tflog.Debug(ctx, "Could not discover GVR for ownership transition check", map[string]interface{}{
@@ -289,11 +359,13 @@ func (r *objectResource) calculateProjection(ctx context.Context, req resource.M
 		})
 		// Continue without ownership transition check - not critical for plan
 	} else {
-		currentObj, err := client.Get(ctx, gvr, desiredObj.GetNamespace(), desiredObj.GetName())
-		if err != nil {
+		var getErr error
+		currentObj, getErr = client.Get(ctx, gvr, desiredObj.GetNamespace(), desiredObj.GetName())
+		if getErr != nil {
 			tflog.Debug(ctx, "Could not fetch current object for ownership transition check", map[string]interface{}{
-				"error": err.Error(),
+				"error": getErr.Error(),
 			})
+			currentObj = nil
 			// Continue without ownership transition check - not critical for plan
 		} else {
 			// Extract ACTUAL current ownership from cluster for ALL managers
@@ -316,8 +388,16 @@ func (r *objectResource) calculateProjection(ctx context.Context, req resource.M
 	// Extract ownership from dry-run result (what ownership WILL BE after apply)
 	paths := extractOwnedPaths(ctx, dryRunResult.GetManagedFields(), desiredObj.Object)
 
-	// Apply projection
-	return r.applyProjection(ctx, dryRunResult, paths, plannedData, isCreate, resp)
+	// ADR-023 Phase 3: Compute refreshed projection from current cluster state
+	// This enables drift detection even when Read returns stale state (expired token scenario).
+	// Zero additional API calls — we reuse the currentObj already fetched above.
+	var refreshedProjection *types.Map
+	if currentObj != nil {
+		refreshedProjection = r.computeRefreshedProjection(ctx, currentObj, desiredObj, paths, plannedData)
+	}
+
+	// Apply projection from dry-run result
+	return r.applyProjection(ctx, dryRunResult, paths, plannedData, isCreate, resp), refreshedProjection
 }
 
 // performDryRun executes the dry-run against k8s
@@ -879,31 +959,60 @@ func stringSliceContains(slice []string, value string) bool {
 	return false
 }
 
-// getFieldValue extracts a field value from an unstructured object by JSON path
+// getFieldValue extracts a field value from an unstructured object by JSON path.
+// Handles keys that contain dots (e.g., annotation keys like "kubectl.kubernetes.io/last-applied",
+// ConfigMap data keys like "config.yaml") by using greedy path resolution: at each level,
+// try nested navigation first, then fall back to treating the remaining path as a single key.
 func getFieldValue(obj *unstructured.Unstructured, fieldPath string) interface{} {
 	if obj == nil {
 		return nil
 	}
+	return getNestedFieldValue(obj.Object, fieldPath)
+}
 
-	pathParts := strings.Split(fieldPath, ".")
-	var current interface{} = obj.Object
+// getNestedFieldValue recursively resolves a dot-separated field path against a map,
+// handling keys that themselves contain dots by trying nested navigation first
+// and falling back to exact key match.
+func getNestedFieldValue(current interface{}, path string) interface{} {
+	if path == "" {
+		return current
+	}
 
-	for _, part := range pathParts {
-		// Handle map access
-		if m, ok := current.(map[string]interface{}); ok {
-			current = m[part]
-		} else {
-			return nil
+	m, ok := current.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	// For paths without dots, simple direct lookup
+	dotIdx := strings.Index(path, ".")
+	if dotIdx < 0 {
+		return m[path]
+	}
+
+	// Path has dots: try navigating nested first (most common case)
+	key := path[:dotIdx]
+	rest := path[dotIdx+1:]
+
+	if val, exists := m[key]; exists {
+		result := getNestedFieldValue(val, rest)
+		if result != nil {
+			return result
 		}
 	}
 
-	return current
+	// Fallback: try the full remaining path as a single key
+	// This handles keys with dots like "config.yaml" or "kubectl.kubernetes.io/last-applied"
+	if val, exists := m[path]; exists {
+		return val
+	}
+
+	return nil
 }
 
 // setObjectRefFromDesiredObj populates object_ref from the parsed resource during plan phase
 // This prevents object_ref from showing as "(known after apply)" when only non-identity fields change
 // IMPORTANT: Only call this when connection is ready - we need to query cluster for namespace scoping
-func (r *objectResource) setObjectRefFromDesiredObj(ctx context.Context, obj *unstructured.Unstructured, data *objectResourceModel) error {
+func (r *objectResource) setObjectRefFromDesiredObj(ctx context.Context, obj *unstructured.Unstructured, data *objectResourceModel, cluster types.Object) error {
 	objRef := objectRefModel{
 		APIVersion: types.StringValue(obj.GetAPIVersion()),
 		Kind:       types.StringValue(obj.GetKind()),
@@ -928,7 +1037,7 @@ func (r *objectResource) setObjectRefFromDesiredObj(ctx context.Context, obj *un
 		isNamespaced = false
 	} else {
 		// Unknown resource type - query the cluster
-		conn, err := r.convertObjectToConnectionModel(ctx, data.Cluster)
+		conn, err := r.convertObjectToConnectionModel(ctx, cluster)
 		if err != nil {
 			return fmt.Errorf("failed to convert connection for namespace detection: %w", err)
 		}

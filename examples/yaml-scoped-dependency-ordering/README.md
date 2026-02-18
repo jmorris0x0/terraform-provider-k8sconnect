@@ -68,16 +68,6 @@ This ensures:
 - The Namespace exists before namespaced resources are created
 - All dependencies are satisfied automatically
 
-## Outputs
-
-After applying, you'll see:
-
-```
-crd_count = 1
-cluster_scoped_count = 2
-namespaced_count = 3
-```
-
 ## Clean Up
 
 ```bash

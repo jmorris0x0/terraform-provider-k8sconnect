@@ -136,7 +136,17 @@ func (r *patchResource) Read(ctx context.Context, req resource.ReadRequest, resp
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Read Target Resource", formatTarget(target), target.APIVersion.ValueString())
+		// ADR-023: Degrade auth errors to warnings during Read
+		if k8serrors.IsAuthError(err) {
+			resp.Diagnostics.AddWarning(
+				"Read: Using Prior State — Authentication Failed",
+				fmt.Sprintf("Could not refresh %s from cluster: authentication failed. "+
+					"Using prior state. This typically means the stored token has expired "+
+					"between Terraform runs. Details: %v", formatTarget(target), err),
+			)
+		} else {
+			k8serrors.AddClassifiedError(&resp.Diagnostics, err, "Read Target Resource", formatTarget(target), target.APIVersion.ValueString())
+		}
 		return
 	}
 

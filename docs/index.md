@@ -101,6 +101,6 @@ cluster = {
 ## Data Sources
 
 - `k8sconnect_object` - Read existing cluster resources
-- `k8sconnect_yaml_split` - Parse multi-document YAML files
-- `k8sconnect_yaml_scoped` - Filter resources by category (CRDs, cluster-scoped, namespaced)
+- `k8sconnect_yaml_split` - Parse multi-document YAML into individually-addressable resources
+- `k8sconnect_yaml_scoped` - Split and categorize resources by scope (CRDs, cluster-scoped, namespaced) for correct dependency ordering. Essential for large manifest sets where Terraform's parallelism limit (~10 concurrent operations) would otherwise cause dependency failures
 

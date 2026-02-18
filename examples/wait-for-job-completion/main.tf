@@ -71,8 +71,3 @@ resource "k8sconnect_object" "app_deployment" {
   cluster    = local.cluster
   depends_on = [k8sconnect_wait.migration_job]
 }
-
-output "job_deployed" {
-  value       = true
-  description = "Job has completed successfully (waited for status.succeeded = 1)"
-}

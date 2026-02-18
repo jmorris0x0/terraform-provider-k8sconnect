@@ -59,13 +59,3 @@ resource "k8sconnect_wait" "storage_provisioner" {
 
   cluster = local.cluster
 }
-
-# Outputs show the waits succeeded
-output "cluster_ready" {
-  value = "Cluster infrastructure is ready: metrics-server, coredns, and storage provisioner are all available"
-  depends_on = [
-    k8sconnect_wait.metrics_server,
-    k8sconnect_wait.coredns,
-    k8sconnect_wait.storage_provisioner
-  ]
-}
