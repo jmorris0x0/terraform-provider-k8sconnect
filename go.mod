@@ -1,6 +1,6 @@
 module github.com/jmorris0x0/terraform-provider-k8sconnect
 
-go 1.25.9
+go 1.26.3
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0
@@ -93,7 +93,7 @@ require (
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/crypto v0.50.0 // indirect
 	golang.org/x/mod v0.34.0 // indirect
-	golang.org/x/net v0.52.0 // indirect
+	golang.org/x/net v0.53.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect
