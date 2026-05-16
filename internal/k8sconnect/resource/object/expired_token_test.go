@@ -2,6 +2,7 @@ package object_test
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"testing"
@@ -16,8 +17,10 @@ import (
 	authv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect"
 	testhelpers "github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/test"
@@ -93,9 +96,13 @@ func TestAccObjectResource_ExpiredToken_PlanSucceeds(t *testing.T) {
 			//                ModifyPlan uses fresh token2 from Config → succeeds → plan works
 			{
 				PreConfig: func() {
-					// Delete SA1 to invalidate token1 (instant — no waiting for expiry)
+					// Delete SA1 to invalidate token1
 					deleteServiceAccount(t, k8sClient, ctx, saName1)
 					t.Log("Deleted SA1 — token1 is now invalid")
+					// Confirm token1 is actually rejected before continuing. Without this,
+					// the K8s API server may still accept token1 briefly (cached) and the
+					// auth-error path won't be exercised, defeating the test's purpose.
+					waitForTokenRejection(t, host, ca, token1)
 				},
 				Config: testAccExpiredTokenConfig(ns, cmName),
 				ConfigVariables: config.Variables{
@@ -184,6 +191,9 @@ func TestAccObjectResource_ExpiredToken_DriftDetected(t *testing.T) {
 					// Invalidate token1
 					deleteServiceAccount(t, k8sClient, ctx, saName1)
 					t.Log("Deleted SA1 — token1 is now invalid")
+					// Wait for the rejection to actually take effect (see comment in
+					// the PlanSucceeds test for why this is required).
+					waitForTokenRejection(t, host, ca, token1)
 
 					// Externally modify the ConfigMap
 					cm, err := k8sClient.CoreV1().ConfigMaps(ns).Get(ctx, cmName, metav1.GetOptions{})
@@ -287,6 +297,46 @@ func deleteServiceAccount(t *testing.T, client kubernetes.Interface, ctx context
 
 	_ = client.CoreV1().ServiceAccounts("default").Delete(ctx, saName, metav1.DeleteOptions{})
 	_ = client.RbacV1().ClusterRoleBindings().Delete(ctx, saName+"-admin", metav1.DeleteOptions{})
+}
+
+// waitForTokenRejection polls the K8s API with the given token until it is rejected
+// (401/403) or the deadline expires. This makes ADR-023 tests deterministic across
+// environments: on fast networks (CI Linux), SA-deletion propagation may lag the next
+// API call enough that the token still validates; this loop guarantees we don't proceed
+// until the token is genuinely rejected.
+func waitForTokenRejection(t *testing.T, host, caBase64, token string) {
+	t.Helper()
+
+	caBytes, err := base64.StdEncoding.DecodeString(caBase64)
+	if err != nil {
+		t.Fatalf("failed to decode CA: %v", err)
+	}
+
+	config := &rest.Config{
+		Host:        host,
+		BearerToken: token,
+		TLSClientConfig: rest.TLSClientConfig{
+			CAData: caBytes,
+		},
+	}
+	client, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		t.Fatalf("failed to build polling client: %v", err)
+	}
+
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		_, err := client.Discovery().ServerResourcesForGroupVersion("v1")
+		if err != nil {
+			if apierrors.IsUnauthorized(err) || apierrors.IsForbidden(err) {
+				t.Log("Confirmed token rejected by API server")
+				return
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	t.Fatal("Token still accepted by API server after 30s; SA deletion did not propagate. " +
+		"ADR-023 tests cannot reliably exercise the auth-error path until this resolves.")
 }
 
 func testAccExpiredTokenConfig(namespace, cmName string) string {
