@@ -14,6 +14,7 @@ import (
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8serrors"
 )
 
 func (r *objectResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -110,6 +111,28 @@ func (r *objectResource) Read(ctx context.Context, req resource.ReadRequest, res
 	// 2. Setup context
 	rc, err := r.prepareContext(ctx, &data, false, false)
 	if err != nil {
+		// ADR-023: GVR discovery during Read can fail with an auth error when the
+		// token stored in state has expired between Terraform runs. Degrade to a
+		// warning and preserve prior state; ModifyPlan will retry drift detection
+		// with the fresh token from Config.
+		if k8serrors.IsAuthError(err) {
+			resourceDesc := "resource"
+			if !data.YAMLBody.IsNull() && data.YAMLBody.ValueString() != "" {
+				if obj, parseErr := r.parseYAML(data.YAMLBody.ValueString()); parseErr == nil {
+					resourceDesc = fmt.Sprintf("%s %s", obj.GetKind(), obj.GetName())
+				}
+			}
+			resp.Diagnostics.AddWarning(
+				"Read: Using Prior State — Authentication Failed",
+				fmt.Sprintf("Could not refresh %s from cluster: discovery failed with authentication error. "+
+					"Using prior state. This typically means the stored token has expired "+
+					"between Terraform runs. Details: %v", resourceDesc, err),
+			)
+			setStaleReadFlag(ctx, resp.Private)
+			diags = resp.State.Set(ctx, &data)
+			resp.Diagnostics.Append(diags...)
+			return
+		}
 		resp.Diagnostics.AddError("Preparation Failed", err.Error())
 		return
 	}
