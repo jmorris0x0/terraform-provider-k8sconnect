@@ -3,6 +3,7 @@ package wait
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -10,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
@@ -254,34 +256,107 @@ func (r *waitResource) constructGVR(ctx context.Context, client k8sclient.K8sCli
 	return gvr, nil
 }
 
-// performWait executes the wait operation
+// performWait executes the wait operation.
+//
+// If the object doesn't exist yet, performWait polls for its creation, bounded
+// by the configured wait_for.timeout. This supports the common pattern of
+// waiting on resources that are created lazily by operators (e.g., Stackgres
+// creating Services, cert-manager creating Secrets, ALB controller creating
+// ALBs). See issue #171.
 func (r *waitResource) performWait(ctx context.Context, wc *waitContext) error {
-	// Get the current object to verify it exists
-	obj, err := wc.Client.Get(ctx, wc.GVR, wc.ObjectRef.Namespace.ValueString(), wc.ObjectRef.Name.ValueString())
+	obj, err := r.waitForExistence(ctx, wc)
 	if err != nil {
-		// Check if this is a not-found error and provide helpful context
-		if errors.IsNotFound(err) {
-			// Build resource description
-			resourceDesc := fmt.Sprintf("%s %q", wc.ObjectRef.Kind.ValueString(), wc.ObjectRef.Name.ValueString())
-			if !wc.ObjectRef.Namespace.IsNull() && wc.ObjectRef.Namespace.ValueString() != "" {
-				resourceDesc = fmt.Sprintf("%s (namespace: %q)", resourceDesc, wc.ObjectRef.Namespace.ValueString())
-			}
-
-			return fmt.Errorf("%s was not found.\n\n"+
-				"k8sconnect_wait can only wait on existing resources. The resource must be created before wait can begin.\n\n"+
-				"Possible causes:\n"+
-				"1. The resource hasn't been created yet\n"+
-				"2. There's a typo in the resource name or namespace\n"+
-				"3. Missing depends_on relationship\n\n"+
-				"If the resource is created in this same Terraform config, add a depends_on:\n"+
-				"  depends_on = [k8sconnect_object.my_resource]",
-				resourceDesc)
-		}
-		return fmt.Errorf("failed to get resource: %w", err)
+		return err
 	}
 
 	// Execute wait logic based on wait_for configuration
 	return r.waitForResource(ctx, wc.Client, wc.GVR, obj, wc.WaitConfig)
+}
+
+// waitForExistence polls for the configured object to exist, bounded by the
+// wait_for.timeout. Returns the object once it appears. Returns an error if
+// the object never appears within the timeout, or if Get returns a non-NotFound
+// error.
+func (r *waitResource) waitForExistence(ctx context.Context, wc *waitContext) (*unstructured.Unstructured, error) {
+	namespace := wc.ObjectRef.Namespace.ValueString()
+	name := wc.ObjectRef.Name.ValueString()
+
+	// Fast path: object already exists
+	obj, err := wc.Client.Get(ctx, wc.GVR, namespace, name)
+	if err == nil {
+		return obj, nil
+	}
+	if !errors.IsNotFound(err) {
+		return nil, fmt.Errorf("failed to get resource: %w", err)
+	}
+
+	// Object doesn't exist yet. Poll for its creation, bounded by the wait timeout.
+	timeout := parseTimeout(wc.WaitConfig.Timeout)
+
+	tflog.Info(ctx, "Resource not found, polling for existence", map[string]interface{}{
+		"kind":      wc.ObjectRef.Kind.ValueString(),
+		"name":      name,
+		"namespace": namespace,
+		"timeout":   timeout.String(),
+	})
+
+	pollCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	const pollInterval = 2 * time.Second
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-pollCtx.Done():
+			// Distinguish wait timeout from caller cancellation
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			resourceDesc := fmt.Sprintf("%s %q", wc.ObjectRef.Kind.ValueString(), name)
+			if namespace != "" {
+				resourceDesc = fmt.Sprintf("%s (namespace: %q)", resourceDesc, namespace)
+			}
+			return nil, fmt.Errorf("%s did not appear within %s.\n\n"+
+				"k8sconnect_wait polls for the referenced resource to be created, but it never appeared.\n\n"+
+				"Possible causes:\n"+
+				"1. The resource was never created (typo in name/namespace, or the operator that creates it never ran)\n"+
+				"2. The resource creation is slow; increase wait_for.timeout\n"+
+				"3. The cluster connection or permissions are wrong",
+				resourceDesc, timeout)
+
+		case <-ticker.C:
+			obj, err := wc.Client.Get(ctx, wc.GVR, namespace, name)
+			if err == nil {
+				tflog.Info(ctx, "Resource appeared, proceeding with wait", map[string]interface{}{
+					"kind":      wc.ObjectRef.Kind.ValueString(),
+					"name":      name,
+					"namespace": namespace,
+				})
+				return obj, nil
+			}
+			if !errors.IsNotFound(err) {
+				return nil, fmt.Errorf("failed to get resource while polling for existence: %w", err)
+			}
+			// Still not found, keep polling
+		}
+	}
+}
+
+// parseTimeout reads wait_for.timeout, falling back to 10m if unset or invalid.
+// Mirrors the parsing in waitForResource so existence polling honors the same
+// timeout the user configured for the wait condition.
+func parseTimeout(t types.String) time.Duration {
+	const defaultTimeout = 10 * time.Minute
+	if t.IsNull() || t.ValueString() == "" {
+		return defaultTimeout
+	}
+	d, err := time.ParseDuration(t.ValueString())
+	if err != nil {
+		return defaultTimeout
+	}
+	return d
 }
 
 // waitForResource is implemented in wait_logic.go
