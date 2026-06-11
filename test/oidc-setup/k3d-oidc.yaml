@@ -30,8 +30,4 @@ options:
   k3d:
     wait: true
     timeout: "120s"
-registries:
-  create:
-    name: k3d-k8sconnect-test-registry
-    host: "0.0.0.0"
 
