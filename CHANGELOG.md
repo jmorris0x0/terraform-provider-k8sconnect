@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-06-10
+
+### Fixed
+
+- **`k8sconnect_wait` polls for non-existent resources** ([#171](https://github.com/jmorris0x0/terraform-provider-k8sconnect/issues/171)). Supports waiting on resources operators create lazily; invalid kinds still fast-fail at discovery.
+- **ADR-023 GVR discovery auth handling.** Read now warns instead of erroring when the stored token expires and discovery fails, matching the behavior for `Client.Get` auth errors.
+
+### Security
+
+- Go 1.25.6 → 1.26.3
+- gRPC 1.79.1 → 1.81.1 (critical authorization bypass fix)
+- `golang.org/x/net` 0.50.0 → 0.54.0
+- `k8s.io/client-go` and `k8s.io/apimachinery` 0.35.1 → 0.36.0
+
+### Improved
+
+- **OpenTofu signature validation** ([#172](https://github.com/jmorris0x0/terraform-provider-k8sconnect/issues/172)): GPG public key uploaded to OpenTofu Registry.
+
 ## [0.3.7] - 2026-02-18
 
 ### Added
