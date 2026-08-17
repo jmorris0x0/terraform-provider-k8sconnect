@@ -1,6 +1,6 @@
 module github.com/jmorris0x0/terraform-provider-k8sconnect
 
-go 1.26.5
+go 1.26.6
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0
