@@ -86,15 +86,35 @@ func (r *waitResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 		return
 	}
 
-	// Build wait context
-	wc, diags := r.buildWaitContext(ctx, &data)
+	// Build wait context without GVR discovery, so a discovery auth error can be
+	// told apart from other failures below
+	wc, diags := r.newWaitContext(ctx, &data)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
+	gvr, err := r.constructGVR(ctx, wc.Client, wc.ObjectRef)
+	if err != nil {
+		// ADR-023: GVR discovery is the first call that uses the token stored in
+		// state, so an expired token fails here before Client.Get is reached.
+		// Degrade to a warning and keep prior state, like auth errors from Get.
+		if k8serrors.IsAuthError(err) {
+			resp.Diagnostics.AddWarning(
+				"Read: Using Prior State — Authentication Failed",
+				fmt.Sprintf("Could not verify resource existence: discovery failed with authentication error. "+
+					"Using prior state. This typically means the stored token has expired "+
+					"between Terraform runs. Details: %v", err),
+			)
+			return
+		}
+		resp.Diagnostics.Append(gvrDiscoveryError(wc.ObjectRef, err))
+		return
+	}
+	wc.GVR = gvr
+
 	// Verify the resource still exists
-	_, err := wc.Client.Get(ctx, wc.GVR, wc.ObjectRef.Namespace.ValueString(), wc.ObjectRef.Name.ValueString())
+	_, err = wc.Client.Get(ctx, wc.GVR, wc.ObjectRef.Namespace.ValueString(), wc.ObjectRef.Name.ValueString())
 	if err != nil {
 		if errors.IsNotFound(err) {
 			// Resource was deleted outside Terraform
@@ -185,6 +205,25 @@ func (r *waitResource) Update(ctx context.Context, req resource.UpdateRequest, r
 
 // buildWaitContext constructs a waitContext from the resource model
 func (r *waitResource) buildWaitContext(ctx context.Context, data *waitResourceModel) (*waitContext, diag.Diagnostics) {
+	wc, diags := r.newWaitContext(ctx, data)
+	if diags.HasError() {
+		return nil, diags
+	}
+
+	// Construct GVR from object_ref using discovery
+	gvr, err := r.constructGVR(ctx, wc.Client, wc.ObjectRef)
+	if err != nil {
+		diags.Append(gvrDiscoveryError(wc.ObjectRef, err))
+		return nil, diags
+	}
+	wc.GVR = gvr
+
+	return wc, diags
+}
+
+// newWaitContext constructs a waitContext from the resource model without
+// discovering the GVR, which needs a round-trip to the cluster
+func (r *waitResource) newWaitContext(ctx context.Context, data *waitResourceModel) (*waitContext, diag.Diagnostics) {
 	var diags diag.Diagnostics
 
 	// Parse object_ref
@@ -221,25 +260,22 @@ func (r *waitResource) buildWaitContext(ctx context.Context, data *waitResourceM
 		return nil, diags
 	}
 
-	// Construct GVR from object_ref using discovery
-	gvr, err := r.constructGVR(ctx, client, objRef)
-	if err != nil {
-		diags.AddError(
-			"Failed to Discover GVR",
-			fmt.Sprintf("Could not discover resource type for %s (apiVersion: %s): %s",
-				formatObjectRef(objRef), objRef.APIVersion.ValueString(), err.Error()),
-		)
-		return nil, diags
-	}
-
 	return &waitContext{
 		Data:       data,
 		Client:     client,
-		GVR:        gvr,
 		ObjectRef:  objRef,
 		WaitConfig: waitConfig,
 		Cluster:    connModel,
 	}, diags
+}
+
+// gvrDiscoveryError builds the diagnostic for a failed GVR discovery
+func gvrDiscoveryError(objRef objectRefModel, err error) diag.Diagnostic {
+	return diag.NewErrorDiagnostic(
+		"Failed to Discover GVR",
+		fmt.Sprintf("Could not discover resource type for %s (apiVersion: %s): %s",
+			formatObjectRef(objRef), objRef.APIVersion.ValueString(), err.Error()),
+	)
 }
 
 // constructGVR builds a GroupVersionResource from object_ref using discovery

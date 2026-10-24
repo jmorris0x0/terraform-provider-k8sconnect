@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`k8sconnect_wait` Read fails when the stored token has expired** ([#219](https://github.com/jmorris0x0/terraform-provider-k8sconnect/issues/219)). GVR discovery in Read now degrades auth errors to a warning and keeps prior state (ADR-023), matching `k8sconnect_object`. Before, every plan failed with "Failed to Discover GVR" once the token in state had expired.
+
 ## [0.3.8] - 2026-06-10
 
 ### Fixed
