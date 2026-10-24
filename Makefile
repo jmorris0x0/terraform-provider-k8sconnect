@@ -2,7 +2,8 @@ OIDC_DIR          := $(CURDIR)/test/oidc-setup
 DEX_SSL_DIR       := $(OIDC_DIR)/ssl
 TESTBUILD_DIR     := $(CURDIR)/.testbuild
 DEX_IMAGE         := ghcr.io/dexidp/dex:v2.42.1
-TERRAFORM_VERSION := 1.14.5
+TERRAFORM_VERSION := 1.17.0
+K3S_IMAGE         ?= rancher/k3s:v1.37.1-k3s1
 PROVIDER_VERSION  ?= 0.1.0
 
 # Build variables for version injection
@@ -118,6 +119,7 @@ create-cluster:
 	@echo "🚀 Creating cluster with OIDC config"
 	k3d cluster create \
 	  --config=$(OIDC_DIR)/k3d-oidc.yaml \
+	  --image $(K3S_IMAGE) \
 	  --volume $(DEX_SSL_DIR)/cert.pem:/etc/kubernetes/pki/oidc/ca.pem@server:0
 
 	@echo "🔐 Applying RBAC resources"
