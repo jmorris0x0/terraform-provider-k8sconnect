@@ -244,7 +244,7 @@ metadata:
 spec:
   containers:
   - name: test
-    image: public.ecr.aws/docker/library/busybox:latest
+    image: mirror.gcr.io/library/busybox:latest
     command: ["sleep", "3600"]
 `, podName, namespace)
 }
@@ -286,7 +286,7 @@ metadata:
 spec:
   containers:
   - name: test
-    image: public.ecr.aws/docker/library/busybox:latest
+    image: mirror.gcr.io/library/busybox:latest
     command: ["sleep", "3600"]
 YAML
 

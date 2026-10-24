@@ -213,7 +213,7 @@ metadata:
 spec:
   containers:
   - name: nginx
-    image: public.ecr.aws/nginx/nginx:1.21
+    image: mirror.gcr.io/library/nginx:1.21
 ---
 apiVersion: v1
 kind: Pod
@@ -223,7 +223,7 @@ metadata:
 spec:
   containers:
   - name: nginx
-    image: public.ecr.aws/nginx/nginx:1.21`
+    image: mirror.gcr.io/library/nginx:1.21`
 
 	docs, err := yaml_common.ParseDocuments(content, "test")
 	if err != nil {
@@ -403,7 +403,7 @@ metadata:
 spec:
   containers:
   - name: nginx
-    image: public.ecr.aws/nginx/nginx:1.21`
+    image: mirror.gcr.io/library/nginx:1.21`
 
 	d := &yamlSplitDataSource{}
 

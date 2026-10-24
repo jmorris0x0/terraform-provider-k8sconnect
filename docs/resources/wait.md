@@ -118,7 +118,7 @@ resource "k8sconnect_object" "app" {
         spec:
           containers:
           - name: nginx
-            image: nginx:1.21
+            image: mirror.gcr.io/library/nginx:1.21
             resources:
               requests:
                 cpu: 100m
@@ -188,7 +188,7 @@ resource "k8sconnect_object" "storage_app" {
         spec:
           containers:
           - name: app
-            image: public.ecr.aws/docker/library/busybox:latest
+            image: mirror.gcr.io/library/busybox:latest
             command: ["sh", "-c", "while true; do date; sleep 30; done"]
             resources:
               requests:
@@ -233,7 +233,7 @@ resource "k8sconnect_object" "migration_job" {
         spec:
           containers:
           - name: migrate
-            image: public.ecr.aws/docker/library/busybox:latest
+            image: mirror.gcr.io/library/busybox:latest
             command: ["sh", "-c", "echo 'Running migrations...' && sleep 5"]
           restartPolicy: Never
   YAML
@@ -354,7 +354,7 @@ resource "k8sconnect_object" "app" {
         spec:
           containers:
           - name: app
-            image: public.ecr.aws/docker/library/busybox:latest
+            image: mirror.gcr.io/library/busybox:latest
             command: ["sh", "-c", "while true; do date >> /data/log.txt; sleep 30; done"]
             volumeMounts:
             - name: data

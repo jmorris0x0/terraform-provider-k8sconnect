@@ -305,7 +305,7 @@ resource "k8sconnect_object" "deploy" {
         spec:
           containers:
           - name: nginx
-            image: public.ecr.aws/nginx/nginx:1.25
+            image: mirror.gcr.io/library/nginx:1.25
   YAML
   cluster = {
     kubeconfig = var.raw
@@ -373,7 +373,7 @@ resource "k8sconnect_object" "deploy" {
         spec:
           containers:
           - name: nginx
-            image: nginx:1.25
+            image: mirror.gcr.io/library/nginx:1.25
   YAML
   cluster = {
     kubeconfig = var.raw
@@ -432,7 +432,7 @@ resource "k8sconnect_object" "pod" {
     spec:
       containers:
       - name: nginx
-        image: nginx:1.25
+        image: mirror.gcr.io/library/nginx:1.25
   YAML
   cluster = {
     kubeconfig = var.raw
@@ -492,7 +492,7 @@ resource "k8sconnect_object" "pod" {
     spec:
       containers:
       - name: nginx
-        image: nginx:1.25
+        image: mirror.gcr.io/library/nginx:1.25
   YAML
   cluster = {
     kubeconfig = var.raw

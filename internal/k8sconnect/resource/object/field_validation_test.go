@@ -225,7 +225,7 @@ resource "k8sconnect_object" "deployment" {
         spec:
           containers:
           - name: nginx
-            image: nginx:1.27
+            image: mirror.gcr.io/library/nginx:1.27
   YAML
 
   cluster = {
@@ -280,7 +280,7 @@ resource "k8sconnect_object" "deployment" {
         spec:
           container:  # TYPO: should be "containers" (plural)
           - name: nginx
-            image: nginx:1.27
+            image: mirror.gcr.io/library/nginx:1.27
             imagePullPolice: Always  # TYPO: should be "imagePullPolicy"
   YAML
 
@@ -335,7 +335,7 @@ resource "k8sconnect_object" "deployment" {
         spec:
           containers:
           - name: nginx
-            image: nginx:1.27
+            image: mirror.gcr.io/library/nginx:1.27
   YAML
 
   cluster = {
@@ -390,7 +390,7 @@ resource "k8sconnect_object" "deployment" {
         spec:
           containers:
           - name: nginx
-            image: nginx:1.27
+            image: mirror.gcr.io/library/nginx:1.27
             imagePullPolice: Always  # TYPO: should be "imagePullPolicy"
   YAML
 
@@ -543,7 +543,7 @@ resource "k8sconnect_object" "deployment" {
         spec:
           containers:
           - name: nginx
-            image: nginx:1.27
+            image: mirror.gcr.io/library/nginx:1.27
             resources:
               requests:
                 cpu: "invalid-cpu-value"  # Invalid quantity format
@@ -602,7 +602,7 @@ resource "k8sconnect_object" "deployment" {
         spec:
           containers:
           - name: nginx
-            image: nginx:1.27
+            image: mirror.gcr.io/library/nginx:1.27
             imagePullPolicy: InvalidPullPolicy  # Invalid enum value
   YAML
 

@@ -84,7 +84,7 @@ resource "k8sconnect_object" "deployment" {
         spec:
           containers:
           - name: nginx
-            image: nginx:1.21
+            image: mirror.gcr.io/library/nginx:1.21
   YAML
 
   cluster = local.cluster
@@ -118,7 +118,7 @@ resource "k8sconnect_object" "app" {
         spec:
           containers:
           - name: nginx
-            image: nginx:1.21
+            image: mirror.gcr.io/library/nginx:1.21
             resources:
               requests:
                 cpu: 100m
@@ -434,7 +434,7 @@ resource "k8sconnect_object" "my_app" {
         spec:
           containers:
           - name: nginx
-            image: nginx:1.25
+            image: mirror.gcr.io/library/nginx:1.25
   YAML
 
   cluster = {
