@@ -8,6 +8,9 @@ updates:
     open-pull-requests-limit: 5
     allow:
       - dependency-type: "all"
+    ignore:
+      # Must match the version k8s.io/apimachinery requires; moves with k8s.io bumps
+      - dependency-name: "k8s.io/kube-openapi"
     groups:
       go-dependencies:
         patterns:

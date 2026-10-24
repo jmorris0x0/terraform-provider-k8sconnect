@@ -45,9 +45,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        terraform: ['1.14.5']
-        k3s:
-            - 'rancher/k3s:v1.35.1-k3s1'
+        terraform: ['1.17.0']
+        k3s: ['rancher/k3s:v1.37.1-k3s1']
+    env:
+      K3S_IMAGE: ${{ matrix.k3s }}
     steps:
       - uses: actions/checkout@v7
 
@@ -67,12 +68,6 @@ jobs:
           curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
           chmod +x kubectl && sudo mv kubectl /usr/local/bin/
           curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
-
-      - name: Create K3d cluster
-        run: |
-          k3d cluster create k8sconnect-test \
-            --image ${{ matrix.k3s }} \
-            --wait
 
       - name: Run acceptance tests
         env:
@@ -150,7 +145,7 @@ jobs:
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v4
         with:
-          terraform_version: '1.14.5'
+          terraform_version: '1.17.0'
           terraform_wrapper: false
 
       - name: Install kubectl & k3d
@@ -161,7 +156,7 @@ jobs:
 
       - name: Run coverage
         env:
-          TF_ACC_TERRAFORM_VERSION: '1.14.5'
+          TF_ACC_TERRAFORM_VERSION: '1.17.0'
         run: make coverage
 
       - name: Remove individual coverage files before upload
