@@ -68,11 +68,11 @@ func TestAccPatchResource_ArrayContainerByName(t *testing.T) {
 								"containers": []interface{}{
 									map[string]interface{}{
 										"name":  "app",
-										"image": "nginx:1.14.2",
+										"image": "mirror.gcr.io/library/nginx:1.14.2",
 									},
 									map[string]interface{}{
 										"name":  "sidecar",
-										"image": "busybox:1.28",
+										"image": "mirror.gcr.io/library/busybox:1.28",
 									},
 								},
 							},
@@ -144,7 +144,7 @@ func TestAccPatchResource_ArrayEnvVarByName(t *testing.T) {
 								"containers": []interface{}{
 									map[string]interface{}{
 										"name":  "app",
-										"image": "nginx:1.14.2",
+										"image": "mirror.gcr.io/library/nginx:1.14.2",
 										"env": []interface{}{
 											map[string]interface{}{
 												"name":  "ENV1",
@@ -346,7 +346,7 @@ func TestAccPatchResource_DeepNestedContainerEnv(t *testing.T) {
 								"containers": []interface{}{
 									map[string]interface{}{
 										"name":  "app",
-										"image": "nginx:1.14.2",
+										"image": "mirror.gcr.io/library/nginx:1.14.2",
 										"env": []interface{}{
 											map[string]interface{}{
 												"name":  "DEEP_VAR",
@@ -423,7 +423,7 @@ func TestAccPatchResource_DeepNestedFieldExtraction(t *testing.T) {
 								"containers": []interface{}{
 									map[string]interface{}{
 										"name":  "app",
-										"image": "nginx:1.14.2",
+										"image": "mirror.gcr.io/library/nginx:1.14.2",
 										"env": []interface{}{
 											map[string]interface{}{
 												"name":  "DEEP_VAR",
@@ -499,7 +499,7 @@ func TestAccPatchResource_DeepNestedOwnershipTransfer(t *testing.T) {
 								"containers": []interface{}{
 									map[string]interface{}{
 										"name":  "app",
-										"image": "nginx:1.14.2",
+										"image": "mirror.gcr.io/library/nginx:1.14.2",
 										"env": []interface{}{
 											map[string]interface{}{
 												"name":  "DEEP_VAR",
@@ -548,7 +548,7 @@ func TestAccPatchResource_DeepNestedOwnershipTransfer(t *testing.T) {
 								"containers": []interface{}{
 									map[string]interface{}{
 										"name":  "app",
-										"image": "nginx:1.14.2",
+										"image": "mirror.gcr.io/library/nginx:1.14.2",
 										"env": []interface{}{
 											map[string]interface{}{
 												"name":  "DEEP_VAR",
@@ -717,7 +717,7 @@ func TestAccPatchResource_BooleanValues(t *testing.T) {
 								"containers": []interface{}{
 									map[string]interface{}{
 										"name":  "app",
-										"image": "nginx:1.14.2",
+										"image": "mirror.gcr.io/library/nginx:1.14.2",
 									},
 								},
 							},
@@ -787,7 +787,7 @@ func TestAccPatchResource_NumericValues(t *testing.T) {
 								"containers": []interface{}{
 									map[string]interface{}{
 										"name":  "app",
-										"image": "nginx:1.14.2",
+										"image": "mirror.gcr.io/library/nginx:1.14.2",
 									},
 								},
 							},
@@ -1197,9 +1197,9 @@ spec:
     spec:
       containers:
       - name: app
-        image: nginx:1.14.2
+        image: mirror.gcr.io/library/nginx:1.14.2
       - name: sidecar
-        image: busybox:1.28
+        image: mirror.gcr.io/library/busybox:1.28
 YAML
   cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
@@ -1281,7 +1281,7 @@ spec:
     spec:
       containers:
       - name: app
-        image: nginx:1.14.2
+        image: mirror.gcr.io/library/nginx:1.14.2
         env:
         - name: ENV1
           value: "value1"
@@ -1479,7 +1479,7 @@ spec:
     spec:
       containers:
       - name: app
-        image: nginx:1.14.2
+        image: mirror.gcr.io/library/nginx:1.14.2
         env:
         - name: DEEP_VAR
           value: "original"
@@ -1555,7 +1555,7 @@ metadata:
 spec:
   containers:
   - name: app
-    image: nginx:1.14.2
+    image: mirror.gcr.io/library/nginx:1.14.2
     volumeMounts:
     - name: config
       mountPath: /etc/config
@@ -1713,7 +1713,7 @@ spec:
     spec:
       containers:
       - name: app
-        image: nginx:1.14.2
+        image: mirror.gcr.io/library/nginx:1.14.2
 YAML
   cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]
@@ -1794,7 +1794,7 @@ spec:
     spec:
       containers:
       - name: app
-        image: nginx:1.14.2
+        image: mirror.gcr.io/library/nginx:1.14.2
 YAML
   cluster = { kubeconfig = var.raw }
   depends_on = [k8sconnect_object.test_ns]

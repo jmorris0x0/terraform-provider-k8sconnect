@@ -461,7 +461,7 @@ metadata:
 spec:
   containers:
   - name: nginx
-    image: nginx:latest
+    image: mirror.gcr.io/library/nginx:latest
 YAML
   cluster = {
     kubeconfig = var.raw
@@ -1365,7 +1365,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: public.ecr.aws/nginx/nginx:1.21
+        image: mirror.gcr.io/library/nginx:1.21
         ports:
         - containerPort: 80
 YAML

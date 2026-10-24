@@ -198,7 +198,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: nginx:1.21
+        image: mirror.gcr.io/library/nginx:1.21
 YAML
 
   cluster = {
@@ -515,7 +515,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: nginx:1.21
+        image: mirror.gcr.io/library/nginx:1.21
 YAML
 
   cluster = {
@@ -709,7 +709,7 @@ metadata:
 spec:
   containers:
   - name: nginx
-    image: nginx
+    image: mirror.gcr.io/library/nginx
 status:
   phase: Running
 `),
@@ -860,7 +860,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: nginx:1.21
+        image: mirror.gcr.io/library/nginx:1.21
 YAML
 
   cluster = {
@@ -899,7 +899,7 @@ func TestAccObjectResource_UpdateWithIgnoreFieldsChange(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create deployment with ignore_fields
 			{
-				Config: testAccManifestConfigUpdateWithIgnoreFieldsChange(ns, deployName, "nginx:1.21", 3, true),
+				Config: testAccManifestConfigUpdateWithIgnoreFieldsChange(ns, deployName, "mirror.gcr.io/library/nginx:1.21", 3, true),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
@@ -920,7 +920,7 @@ func TestAccObjectResource_UpdateWithIgnoreFieldsChange(t *testing.T) {
 					}
 					t.Logf("✓ Simulated hpa-controller scaling replicas to 5")
 				},
-				Config: testAccManifestConfigUpdateWithIgnoreFieldsChange(ns, deployName, "nginx:1.21", 3, true),
+				Config: testAccManifestConfigUpdateWithIgnoreFieldsChange(ns, deployName, "mirror.gcr.io/library/nginx:1.21", 3, true),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
@@ -938,13 +938,13 @@ func TestAccObjectResource_UpdateWithIgnoreFieldsChange(t *testing.T) {
 			// Step 3: In SAME update, change image AND remove replicas from ignore_fields
 			// This is the critical test: ownership reclamation during an update
 			{
-				Config: testAccManifestConfigUpdateWithIgnoreFieldsChange(ns, deployName, "nginx:1.22", 3, false),
+				Config: testAccManifestConfigUpdateWithIgnoreFieldsChange(ns, deployName, "mirror.gcr.io/library/nginx:1.22", 3, false),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					// Verify image was updated
-					testhelpers.CheckDeploymentImage(k8sClient.(*kubernetes.Clientset), ns, deployName, "nginx:1.22"),
+					testhelpers.CheckDeploymentImage(k8sClient.(*kubernetes.Clientset), ns, deployName, "mirror.gcr.io/library/nginx:1.22"),
 					// Verify replicas was reclaimed and reset to 3
 					testhelpers.CheckDeploymentReplicaCount(k8sClient.(*kubernetes.Clientset), ns, deployName, 3),
 					// Verify ignore_fields is now empty
@@ -953,7 +953,7 @@ func TestAccObjectResource_UpdateWithIgnoreFieldsChange(t *testing.T) {
 			},
 			// Step 4: Verify no drift on next plan
 			{
-				Config: testAccManifestConfigUpdateWithIgnoreFieldsChange(ns, deployName, "nginx:1.22", 3, false),
+				Config: testAccManifestConfigUpdateWithIgnoreFieldsChange(ns, deployName, "mirror.gcr.io/library/nginx:1.22", 3, false),
 				ConfigVariables: config.Variables{
 					"raw": config.StringVariable(raw),
 				},
@@ -1214,7 +1214,7 @@ spec:
     spec:
       containers:
       - name: app
-        image: nginx:1.21
+        image: mirror.gcr.io/library/nginx:1.21
         env:
         - name: MANAGED_VAR
           value: %s

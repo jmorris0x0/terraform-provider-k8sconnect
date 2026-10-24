@@ -126,7 +126,7 @@ resource "k8sconnect_object" "setup_job" {
         spec:
           containers:
           - name: setup
-            image: public.ecr.aws/docker/library/busybox:latest
+            image: mirror.gcr.io/library/busybox:latest
             command: ["sh", "-c", "echo 'Running setup'; sleep 2; echo 'Setup complete'"]
           restartPolicy: Never
   YAML
@@ -212,7 +212,7 @@ resource "k8sconnect_object" "db" {
         spec:
           containers:
           - name: postgres
-            image: postgres:14
+            image: mirror.gcr.io/library/postgres:14
             env:
             - name: POSTGRES_PASSWORD
               value: testpass
@@ -238,7 +238,7 @@ resource "k8sconnect_object" "migration" {
         spec:
           containers:
           - name: migrate
-            image: busybox
+            image: mirror.gcr.io/library/busybox
             command: ["sh", "-c", "echo 'Running migration'; sleep 2; echo 'Migration complete'"]
           restartPolicy: Never
       backoffLimit: 1
@@ -280,7 +280,7 @@ resource "k8sconnect_object" "app" {
         spec:
           containers:
           - name: app
-            image: nginx:1.21
+            image: mirror.gcr.io/library/nginx:1.21
   YAML
   cluster = local.cluster
   depends_on = [k8sconnect_wait.migration]

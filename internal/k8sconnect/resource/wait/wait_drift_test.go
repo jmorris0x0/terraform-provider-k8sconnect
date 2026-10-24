@@ -170,7 +170,7 @@ spec:
     spec:
       containers:
       - name: test
-        image: busybox:1.28
+        image: mirror.gcr.io/library/busybox:1.28
         command: ["sh", "-c", "echo success && exit 0"]
       restartPolicy: Never
   backoffLimit: 1

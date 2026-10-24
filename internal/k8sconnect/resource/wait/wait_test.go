@@ -238,7 +238,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: public.ecr.aws/nginx/nginx:1.21
+        image: mirror.gcr.io/library/nginx:1.21
         ports:
         - containerPort: 80
 YAML
@@ -344,7 +344,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: public.ecr.aws/nginx/nginx:1.21
+        image: mirror.gcr.io/library/nginx:1.21
         ports:
         - containerPort: 80
 YAML
@@ -666,7 +666,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: public.ecr.aws/nginx/nginx:1.21
+        image: mirror.gcr.io/library/nginx:1.21
         ports:
         - containerPort: 80
 YAML
@@ -774,7 +774,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: public.ecr.aws/nginx/nginx:1.21
+        image: mirror.gcr.io/library/nginx:1.21
         ports:
         - containerPort: 80
 YAML
@@ -877,7 +877,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: public.ecr.aws/nginx/nginx:1.21
+        image: mirror.gcr.io/library/nginx:1.21
         ports:
         - containerPort: 80
 YAML

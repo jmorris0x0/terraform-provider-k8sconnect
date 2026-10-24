@@ -60,7 +60,7 @@ resource "k8sconnect_object" "app" {
         spec:
           containers:
           - name: app
-            image: public.ecr.aws/docker/library/busybox:latest
+            image: mirror.gcr.io/library/busybox:latest
             command: ["sh", "-c", "while true; do date >> /data/log.txt; sleep 30; done"]
             volumeMounts:
             - name: data

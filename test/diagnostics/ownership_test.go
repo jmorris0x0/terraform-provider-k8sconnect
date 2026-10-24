@@ -62,7 +62,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: nginx:latest
+        image: mirror.gcr.io/library/nginx:latest
 `, deploymentName, namespace)
 	CreateKubectlResource(t, deployYAML)
 
@@ -175,7 +175,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: nginx:latest
+        image: mirror.gcr.io/library/nginx:latest
 `, deploymentName, namespace)
 	CreateKubectlResource(t, deployYAML)
 

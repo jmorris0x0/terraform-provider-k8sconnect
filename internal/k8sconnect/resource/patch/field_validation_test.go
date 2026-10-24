@@ -61,7 +61,7 @@ func TestAccPatchResource_FieldValidationError(t *testing.T) {
 								"containers": []interface{}{
 									map[string]interface{}{
 										"name":  "nginx",
-										"image": "nginx:1.27",
+										"image": "mirror.gcr.io/library/nginx:1.27",
 									},
 								},
 							},
@@ -131,7 +131,7 @@ func TestAccPatchResource_FieldValidationError_Update(t *testing.T) {
 								"containers": []interface{}{
 									map[string]interface{}{
 										"name":  "nginx",
-										"image": "nginx:1.27",
+										"image": "mirror.gcr.io/library/nginx:1.27",
 									},
 								},
 							},

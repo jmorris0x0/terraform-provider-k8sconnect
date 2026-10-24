@@ -219,7 +219,7 @@ spec:
     spec:
       containers:
       - name: server
-        image: public.ecr.aws/nginx/nginx:1.21`
+        image: mirror.gcr.io/library/nginx:1.21`
 
 const testDatabaseCRManifest = `apiVersion: example.com/v1
 kind: Database
@@ -283,7 +283,7 @@ spec:
     spec:
       containers:
       - name: server
-        image: public.ecr.aws/nginx/nginx:1.21
+        image: mirror.gcr.io/library/nginx:1.21
 YAML
 }
 `
@@ -324,7 +324,7 @@ metadata:
 spec:
   containers:
   - name: nginx
-    image: public.ecr.aws/nginx/nginx:1.21
+    image: mirror.gcr.io/library/nginx:1.21
 YAML
 }
 `

@@ -28,7 +28,7 @@ resource "k8sconnect_object" "migration_job" {
         spec:
           containers:
           - name: migrate
-            image: public.ecr.aws/docker/library/busybox:latest
+            image: mirror.gcr.io/library/busybox:latest
             command:
             - sh
             - -c

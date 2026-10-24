@@ -620,7 +620,7 @@ func createDeploymentWithResources(t *testing.T, client kubernetes.Interface, na
 							"containers": []interface{}{
 								map[string]interface{}{
 									"name":  "nginx",
-									"image": "public.ecr.aws/nginx/nginx:1.21",
+									"image": "mirror.gcr.io/library/nginx:1.21",
 									"resources": map[string]interface{}{
 										"requests": resources,
 										"limits":   resources,
@@ -868,7 +868,7 @@ resource "k8sconnect_patch" "test" {
           containers = [
             {
               name  = "nginx"
-              image = "public.ecr.aws/nginx/nginx:1.21"
+              image = "mirror.gcr.io/library/nginx:1.21"
               resources = {
                 requests = {
                   memory = "128Mi"  # K8s normalizes to bytes
