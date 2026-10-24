@@ -7,9 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-10-24
+
 ### Fixed
 
-- **`k8sconnect_wait` Read fails when the stored token has expired** ([#219](https://github.com/jmorris0x0/terraform-provider-k8sconnect/issues/219)). GVR discovery in Read now degrades auth errors to a warning and keeps prior state (ADR-023), matching `k8sconnect_object`. Before, every plan failed with "Failed to Discover GVR" once the token in state had expired.
+- **`k8sconnect_wait` Read fails when the stored token has expired** ([#219](https://github.com/jmorris0x0/terraform-provider-k8sconnect/issues/219), [#220](https://github.com/jmorris0x0/terraform-provider-k8sconnect/pull/220) by [@martin31821](https://github.com/martin31821)). GVR discovery in Read now degrades auth errors to a warning and keeps prior state (ADR-023), matching `k8sconnect_object`. Before, every plan failed with "Failed to Discover GVR" once the token in state had expired.
+
+### Security
+
+- Go 1.26.4 → 1.27.3
+- gRPC 1.81.1 → 1.83.2
+- `golang.org/x/net` 0.55.0 → 0.60.0
+- `k8s.io/client-go` and `k8s.io/apimachinery` 0.36.1 → 0.37.0
+
+### Improved
+
+- **Updated CI and test infrastructure**
+  - Terraform test version bumped to 1.17.0
+  - Kubernetes test version bumped to 1.37.1 (k3s)
+  - Test images pulled from `mirror.gcr.io`
+  - gosec 2.29.0 → 2.30.0
 
 ## [0.3.8] - 2026-06-10
 
