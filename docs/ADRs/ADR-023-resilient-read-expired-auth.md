@@ -1,7 +1,7 @@
 # ADR-023: Resilient Read for Expired Cluster Auth Tokens
 
 ## Status
-Accepted (2026-02-07)
+Accepted (2026-02-07), amended (2026-10-26) with [Limitations](#limitations)
 
 **Related Issues:** [#131 - Support Ephemeral resource for cluster input](https://github.com/jmorris0x0/terraform-provider-k8sconnect/issues/131)
 
@@ -46,11 +46,11 @@ The `stale_read` flag uses private state (`resp.Private.SetKey()` / `req.Private
 
 ### Auth Error Classification
 
-We cannot distinguish "token expired" from "token was never valid" via the 401 status code. All 401/403 errors during Read are degraded to warnings. This is the right tradeoff: a hard failure on Read blocks all operations, even ones that would succeed with a fresh token. The warning surfaces the issue without blocking. Mutations (Create/Update/Delete) still hard-fail on auth errors.
+We cannot distinguish "token expired" from "token was never valid" via the 401 status code. All 401/403 errors during Read are degraded to warnings. This is the right tradeoff: a hard failure on Read blocks all operations, even ones that would succeed with a fresh token. The warning surfaces the issue without blocking. A token that is invalid in config still hard-fails in ModifyPlan's dry-run. Mutations (Create/Update/Delete) still hard-fail on auth errors.
 
 ## Alternatives Considered
 
-**Write-only `token_wo` attribute** - Deferred. Requires TF 1.11+, and write-only attributes are null in state, so Read would have *zero* auth (not just expired). Resilient Read is a prerequisite regardless. Can layer on later for the security benefit of keeping tokens out of state entirely.
+**Write-only `token_wo` attribute** - Deferred. Requires TF 1.11+, and write-only attributes are null in state, so Read and Delete would have *zero* auth (not just expired). Resilient Read is a prerequisite regardless. Can layer on later for the security benefit of keeping tokens out of state entirely.
 
 **Provider-level ephemeral resource** - Rejected. Would require adding provider-level configuration, which breaks k8sconnect's multi-cluster support (per-resource inline `cluster` blocks). Fundamental architecture change.
 
@@ -71,11 +71,29 @@ Key files:
 
 ### Phase 2: Write-only `token_wo` (Deferred)
 
-Future addition for the security benefit of keeping tokens out of state. Foundation from Phase 1 supports this without changes.
+Future addition for the security benefit of keeping tokens out of state. Phase 1 covers Read, but Delete would have no token at all (see [Delete uses the stored token](#delete-uses-the-stored-token)), so `token_wo` cannot ship until Delete has another credential source.
 
 ### Phase 3: ModifyPlan Drift Detection
 
 ModifyPlan already calls `client.Get()` for ownership transition detection. When the `stale_read` flag is set, that Get result is also used to refresh the managed state projection, replacing the stale projection from Read. No additional API calls.
+
+## Limitations
+
+### Delete uses the stored token
+
+Delete receives only prior state, so it authenticates with the token stored there. When that token has expired, Delete fails with an auth error. Create and Update are not affected because they receive the planned `cluster` block from config.
+
+- `terraform destroy`: run `terraform apply` first to write a fresh token to state, then destroy before it expires.
+- Resource removed from config: no apply can refresh its stored token. Restore the resource block, apply, then remove it and apply again within the token's lifetime.
+- `exec` auth does not have this limitation, since the exec configuration is stored and runs at Delete time.
+
+Rejected for Delete:
+- **Provider-level fallback credentials** - Same architecture change as the provider-level ephemeral resource above.
+- **Degrade the auth error and drop the resource from state** - Leaves the object in the cluster with nothing tracking it.
+
+### Token rotation shows as a plan diff
+
+`cluster` has no plan modifier, so a changed token appears as an in-place update on every resource that uses it. Suppressing the diff would keep the old token in state and make every Delete hit the limitation above.
 
 ## Test Coverage
 
